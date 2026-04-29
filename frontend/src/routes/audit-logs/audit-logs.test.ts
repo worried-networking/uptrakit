@@ -236,4 +236,47 @@ describe('Button Migrations', () => {
 		await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());
 		expect(screen.queryByText('Showing system-level audit logs.')).not.toBeInTheDocument();
 	});
+
+	it('actor column renders PillBadge with actor_type and enriched display name', async () => {
+		const entry: AuditLogEntry = {
+			...sampleEntry,
+			actor_type: 'user',
+			actor_display: 'Alice',
+			actor_id: 'u-1'
+		};
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([entry]));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+		// PillBadge renders a span[data-ui="pill-badge"] containing the actor_type text
+		const pill = screen.getByText('user', { selector: '[data-ui="pill-badge"]' });
+		expect(pill).toBeInTheDocument();
+
+		// actor_display is shown
+		expect(screen.getByText('Alice')).toBeInTheDocument();
+
+		// actor_id is not shown separately (display name takes precedence)
+		expect(screen.queryByText('u-1')).not.toBeInTheDocument();
+	});
+
+	it('actor column renders only PillBadge when actor has no display name or id', async () => {
+		const entry: AuditLogEntry = {
+			...sampleEntry,
+			actor_type: 'system',
+			actor_display: null,
+			actor_id: null
+		};
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([entry]));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByText('system', { selector: '[data-ui="pill-badge"]' })).toBeInTheDocument());
+
+		const pill = screen.getByText('system', { selector: '[data-ui="pill-badge"]' });
+		expect(pill).toBeInTheDocument();
+
+		// No additional span text in the actor cell beyond the badge
+		const actorCell = pill.closest('td');
+		expect(actorCell).toBeInTheDocument();
+		const spans = actorCell!.querySelectorAll('span:not([data-ui="pill-badge"])');
+		expect(spans.length).toBe(0);
+	});
 });

@@ -13,6 +13,7 @@
 		Callout,
 		DataTable,
 		PageShell,
+		PillBadge,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar,
@@ -180,12 +181,6 @@
 		return entry.target_type ?? entry.target_id ?? '—';
 	}
 
-	function actorLabel(entry: AuditLogEntry): string {
-		if (entry.actor_display) return entry.actor_display;
-		if (entry.actor_id) return `${entry.actor_type}:${entry.actor_id}`;
-		return entry.actor_type;
-	}
-
 	const ACTOR_TYPES = ['user', 'api_token', 'oidc', 'service', 'system'];
 	const OUTCOME_TYPES = ['success', 'denied', 'validation_failed', 'failed', 'partial'];
 	const SCOPE_TAB_ITEMS: TabStripItem[] = [
@@ -328,9 +323,16 @@
 							<td class="table-cell-pad">
 								<StatusBadge tone={outcomeTone(entry.outcome)} label={outcomeLabel(entry.outcome)} />
 							</td>
-							<td class="table-cell-pad text-table-body text-[var(--text-primary)]" title={actorLabel(entry)}
-								>{actorLabel(entry)}</td
-							>
+							<td class="table-cell-pad" title={entry.actor_display ?? entry.actor_id ?? entry.actor_type}>
+								<div class="flex items-center gap-2">
+									<PillBadge label={entry.actor_type} />
+									{#if entry.actor_display ?? entry.actor_id}
+										<span class="text-table-body text-[var(--text-primary)]"
+											>{entry.actor_display ?? entry.actor_id}</span
+										>
+									{/if}
+								</div>
+							</td>
 						</tr>
 					{/snippet}
 					{#snippet errorActions()}
