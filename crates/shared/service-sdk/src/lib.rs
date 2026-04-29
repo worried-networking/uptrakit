@@ -36,23 +36,21 @@ pub(crate) mod ws;
 /// In published builds: re-export from the inlined `generated::wire` module
 /// (no dependency on unpublished workspace crates).
 #[cfg(feature = "workspace-internal")]
-#[allow(unreachable_pub)]
 pub(crate) mod wire_api {
-    pub use uptrakit_wire::*;
+    pub(crate) use uptrakit_wire::*;
 }
 #[cfg(not(feature = "workspace-internal"))]
 pub(crate) mod wire_api {
-    pub use crate::generated::wire::*;
+    pub(crate) use crate::generated::wire::*;
 }
 
 #[cfg(feature = "workspace-internal")]
-#[allow(unreachable_pub)]
 pub(crate) mod shared_types_api {
-    pub use uptrakit_shared_types::*;
+    pub(crate) use uptrakit_shared_types::*;
 }
 #[cfg(not(feature = "workspace-internal"))]
 pub(crate) mod shared_types_api {
-    pub use crate::generated::shared_types::*;
+    pub(crate) use crate::generated::shared_types::*;
 }
 
 #[cfg(feature = "cli")]

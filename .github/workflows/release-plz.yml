@@ -102,6 +102,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Build frontend (required by uptrakit-frontend cargo package verify)
+        working-directory: frontend
+        run: npm run build
+
       - uses: release-plz/action@v0.5
         id: release-plz
         with:
