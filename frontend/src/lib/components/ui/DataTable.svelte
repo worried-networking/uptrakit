@@ -169,7 +169,9 @@
 					{@render mobileRow(rowValue)}
 				{/each}
 			{:else}
-				<div class="[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-hover)]">
+				<div
+					class="[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-hover)] divide-y divide-[var(--border-subtle)]"
+				>
 					{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
 						<div role="listitem" class="px-4 py-3">
 							{#if titleCol}
