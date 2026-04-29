@@ -177,6 +177,29 @@
 					disabled
 				/>
 			</div>
+			<div>
+				<p class="mb-1 text-xs text-[var(--text-muted)]">Grouped + disabled</p>
+				<Select
+					id="demo-grouped"
+					placeholder="Select config..."
+					options={[
+						{
+							label: 'Saved',
+							options: [
+								{ value: 'cfg:1', label: 'Production' },
+								{ value: 'cfg:2', label: 'Staging' }
+							]
+						},
+						{
+							label: 'Inline',
+							options: [
+								{ value: 'type:apt', label: 'APT (deprecated)', disabled: true },
+								{ value: 'type:docker', label: 'Docker' }
+							]
+						}
+					]}
+				/>
+			</div>
 		</div>
 	</section>
 </main>
