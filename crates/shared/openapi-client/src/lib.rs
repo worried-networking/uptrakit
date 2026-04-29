@@ -66,12 +66,11 @@ pub use uptrakit_shared_types::DeviceAuthStatus;
 /// or to the upstream workspace crate in workspace-internal builds.
 #[cfg(not(feature = "workspace-internal"))]
 pub(crate) mod types_impl {
-    pub use crate::generated::types::*;
+    pub(crate) use crate::generated::types::*;
 }
 #[cfg(feature = "workspace-internal")]
-#[allow(unreachable_pub)]
 pub(crate) mod types_impl {
-    pub use uptrakit_web_api_types::*;
+    pub(crate) use uptrakit_web_api_types::*;
 }
 
 /// Internal module alias: routes to generated shared-types in published builds,
@@ -79,12 +78,12 @@ pub(crate) mod types_impl {
 #[cfg(not(feature = "workspace-internal"))]
 pub(crate) mod shared_types_impl {
     #[allow(unused_imports)]
-    pub use crate::generated::shared_types::*;
+    pub(crate) use crate::generated::shared_types::*;
 }
 #[cfg(feature = "workspace-internal")]
-#[allow(unreachable_pub, unused_imports)]
 pub(crate) mod shared_types_impl {
-    pub use uptrakit_shared_types::*;
+    #[allow(unused_imports)]
+    pub(crate) use uptrakit_shared_types::*;
 }
 
 /// Re-export `Uuid` so that downstream crates can use the exact same type

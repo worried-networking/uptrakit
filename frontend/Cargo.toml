@@ -13,6 +13,14 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# Frontend `build/` is gitignored but required by `cargo package` verify.
+# Include it explicitly so release-plz's git_only baseline tarball compiles.
+include = [
+    "src/**/*",
+    "build/**/*",
+    "build.rs",
+    "Cargo.toml",
+]
 
 [dependencies]
 rust-embed = { workspace = true, features = ["mime-guess"] }
