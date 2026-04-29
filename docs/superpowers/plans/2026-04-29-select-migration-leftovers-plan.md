@@ -170,16 +170,11 @@ it('renders placeholder before optgroups when both are provided', () => {
 });
 ```
 
-- [ ] **Step 1.6: Write failing test for `width="auto"` and default `width="full"`**
+- [ ] **Step 1.6: Write failing test for `width="auto"`**
 
 Append:
 
 ```ts
-it('applies w-full by default', () => {
-    const { container } = render(Select, baseSelect());
-    expect(container.querySelector('select')!.className).toContain('w-full');
-});
-
 it('applies w-auto when width="auto"', () => {
     const { container } = render(Select, baseSelect({ width: 'auto' }));
     const cls = container.querySelector('select')!.className;
@@ -188,7 +183,9 @@ it('applies w-auto when width="auto"', () => {
 });
 ```
 
-(The pre-existing `'applies base class tokens'` test asserts `w-full` is present — that test still applies under default width and stays valid.)
+(Default `width="full"` is already covered by the pre-existing `'applies base class tokens'` test —
+it asserts `toContain('w-full')` and still passes after the refactor because the default `width='full'`
+keeps `w-full` in the resolved class string. No new default-width test needed.)
 
 - [ ] **Step 1.7: Write failing test for `data-ui="select"`**
 
@@ -847,13 +844,17 @@ a `SelectItem[]`, then replace both call sites with `<Select>`.
 grep -n "import.*from '\$lib/components/forms'" frontend/src/lib/components/EditHostAssignmentModal.svelte
 ```
 
-Ensure the file imports `Select`, `SelectItem`, and `SelectOption` from the barrel:
+Ensure the file imports `Select` and `SelectItem` from the barrel. Do NOT import `SelectOption` from the
+forms barrel — `EditHostAssignmentModal.svelte` already imports a different `SelectOption` from `$lib/types`
+(line 15) for `resolvedOptions(...)`. Importing the forms barrel's `SelectOption` would create a duplicate
+identifier and TS would refuse to compile.
 
 ```ts
-import { Select, type SelectItem, type SelectOption } from '$lib/components/forms';
+import { Select, type SelectItem } from '$lib/components/forms';
 ```
 
-(Combine into the existing forms import — do not add a new line.)
+(Combine into the existing forms import — do not add a new line. Leave the existing `SelectOption` import
+from `$lib/types` untouched.)
 
 - [ ] **Step 6.2: Identify `PluginConfig` and `PluginType` local types**
 
@@ -873,7 +874,10 @@ function pluginConfigItems(
     savedOpts: PluginConfigResponse[],
     typeOpts: PluginTypeInfo[]
 ): SelectItem[] {
-    const placeholder: SelectOption = { value: '', label: '— not configured —' };
+    // Inline literal — do NOT annotate with `SelectOption`. The local `SelectOption` here
+    // is the `$lib/types` one (no `disabled` field); the forms barrel `SelectOption` is
+    // structurally compatible but is intentionally not imported (duplicate identifier).
+    const placeholder = { value: '', label: '— not configured —' };
     const inlineOpts = typeOpts.map((pt) => ({
         value: `type:${pt.plugin_type}`,
         label: pt.display_name
@@ -1273,10 +1277,13 @@ with the hack it was guarding."
 - [ ] **Step 8.1: Confirm no raw `<select>` outside the primitive**
 
 ```bash
-cd frontend && grep -rEn "<select[\s>]" src --include="*.svelte" | grep -v "src/lib/components/forms/Select.svelte"
+cd frontend && grep -rn "<select" src --include="*.svelte" | grep -v "src/lib/components/forms/Select.svelte"
 ```
 
-Expected: zero matches.
+Expected: zero matches. (Plain `<select` substring match — works on BSD/GNU grep alike. The previous
+`<select[\s>]` form does NOT match `<select\n<attr>` on BSD grep because `\s` is treated as the literal
+character `s`. A bare substring match is robust enough; the only false positive would be a `<selection>`
+or similar tag, which does not exist in the Svelte source tree.)
 
 - [ ] **Step 8.2: Confirm `data-ui="select"` lands on the primitive**
 
