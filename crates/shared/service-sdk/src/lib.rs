@@ -13,7 +13,6 @@ pub mod dirs;
 pub mod discovery;
 pub mod error;
 pub mod event_loop;
-pub mod generated;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;
@@ -29,28 +28,12 @@ pub mod tls;
 pub mod tracing_init;
 pub(crate) mod ws;
 
-/// In workspace builds: re-export the upstream `uptrakit_wire` crate so that
-/// all SDK types (ServiceHandler trait signatures, ControllerConnection impls)
-/// use the same types as the rest of the workspace.
-///
-/// In published builds: re-export from the inlined `generated::wire` module
-/// (no dependency on unpublished workspace crates).
-#[cfg(feature = "workspace-internal")]
 pub(crate) mod wire_api {
     pub(crate) use uptrakit_wire::*;
 }
-#[cfg(not(feature = "workspace-internal"))]
-pub(crate) mod wire_api {
-    pub(crate) use crate::generated::wire::*;
-}
 
-#[cfg(feature = "workspace-internal")]
 pub(crate) mod shared_types_api {
     pub(crate) use uptrakit_shared_types::*;
-}
-#[cfg(not(feature = "workspace-internal"))]
-pub(crate) mod shared_types_api {
-    pub(crate) use crate::generated::shared_types::*;
 }
 
 #[cfg(feature = "cli")]
