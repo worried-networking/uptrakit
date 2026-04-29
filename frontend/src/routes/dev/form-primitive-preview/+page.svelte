@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Input, Checkbox, Textarea } from '$lib/components/forms';
+	import { Input, Checkbox, Textarea, Select } from '$lib/components/forms';
 	import type { InputType } from '$lib/components/forms';
 	import Link from '$lib/components/Link.svelte';
 	import type { LinkVariant } from '$lib/components/Link.svelte';
@@ -9,6 +9,8 @@
 
 	let checkedA = $state(false);
 	let checkedB = $state(true);
+	let selectVal = $state('b');
+	let selectValEmpty = $state('');
 </script>
 
 <main class="flex flex-col gap-6 p-6" data-testid="form-primitive-preview-root">
@@ -120,6 +122,60 @@
 			<div data-testid="textarea-cell-disabled">
 				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-disabled"> disabled </label>
 				<Textarea id="preview-ta-disabled" value="" placeholder="Disabled textarea" rows={4} disabled />
+			</div>
+		</div>
+	</section>
+
+	<section class="space-y-4 p-6">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Select — states</h2>
+		<div class="grid grid-cols-2 gap-4">
+			<div>
+				<p class="mb-1 text-xs text-[var(--text-muted)]">Default</p>
+				<Select
+					id="preview-select-default"
+					bind:value={selectVal}
+					options={[
+						{ value: 'a', label: 'Option A' },
+						{ value: 'b', label: 'Option B' },
+						{ value: 'c', label: 'Option C' }
+					]}
+				/>
+			</div>
+			<div>
+				<p class="mb-1 text-xs text-[var(--text-muted)]">With placeholder</p>
+				<Select
+					id="preview-select-placeholder"
+					bind:value={selectValEmpty}
+					options={[
+						{ value: 'x', label: 'Choice X' },
+						{ value: 'y', label: 'Choice Y' }
+					]}
+					placeholder="Select an option"
+				/>
+			</div>
+			<div>
+				<p class="mb-1 text-xs text-[var(--text-muted)]">Error</p>
+				<Select
+					id="preview-select-error"
+					bind:value={selectVal}
+					options={[
+						{ value: 'a', label: 'Option A' },
+						{ value: 'b', label: 'Option B' }
+					]}
+					error="This field is required"
+				/>
+			</div>
+			<div>
+				<p class="mb-1 text-xs text-[var(--text-muted)]">Disabled</p>
+				<Select
+					id="preview-select-disabled"
+					value="a"
+					options={[
+						{ value: 'a', label: 'Option A' },
+						{ value: 'b', label: 'Option B' }
+					]}
+					disabled
+				/>
 			</div>
 		</div>
 	</section>
