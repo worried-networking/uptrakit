@@ -70,7 +70,7 @@
 		TabStrip,
 		type TabStripItem
 	} from '$lib/components/ui';
-	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
+	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import Button from '$lib/components/Button.svelte';
 
@@ -1056,20 +1056,23 @@
 								Updates available
 							</label>
 							{#if pluginTypeOptions.length > 0}
-								<select
-									class="select text-sm w-auto"
+								<Select
+									id="software-plugin-filter"
+									width="auto"
 									bind:value={pluginTypeFilter}
+									aria-label="Filter by plugin"
+									options={[
+										{ value: '', label: 'All plugins' },
+										...pluginTypeOptions.map((opt) => ({
+											value: opt.plugin_type,
+											label: opt.display_name
+										}))
+									]}
 									onchange={() => {
 										currentPage = 1;
 										loadAll(1);
 									}}
-									aria-label="Filter by plugin"
-								>
-									<option value="">All plugins</option>
-									{#each pluginTypeOptions as opt (opt.plugin_type)}
-										<option value={opt.plugin_type}>{opt.display_name}</option>
-									{/each}
-								</select>
+								/>
 							{/if}
 						</div>
 						{#if canManage}
