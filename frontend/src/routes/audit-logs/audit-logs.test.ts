@@ -279,4 +279,25 @@ describe('Button Migrations', () => {
 		const spans = actorCell!.querySelectorAll('span:not([data-ui="pill-badge"])');
 		expect(spans.length).toBe(0);
 	});
+
+	it('actor column shows actor_id when actor_display is null', async () => {
+		const entry: AuditLogEntry = {
+			...sampleEntry,
+			actor_type: 'api_token',
+			actor_display: null,
+			actor_id: 'token-abc-123'
+		};
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([entry]));
+		render(AuditLogsPage);
+		await waitFor(() =>
+			expect(screen.getByText('api_token', { selector: '[data-ui="pill-badge"]' })).toBeInTheDocument()
+		);
+
+		// PillBadge renders with actor_type
+		const pill = screen.getByText('api_token', { selector: '[data-ui="pill-badge"]' });
+		expect(pill).toBeInTheDocument();
+
+		// actor_id is shown as fallback
+		expect(screen.getByText('token-abc-123')).toBeInTheDocument();
+	});
 });
