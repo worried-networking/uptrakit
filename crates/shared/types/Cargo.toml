@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-shared-types"
+description = "Uptrakit shared types: cross-crate enums, ids, and value objects"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

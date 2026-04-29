@@ -5,6 +5,7 @@ git_tag_enable = false
 
 [[package]]
 name = "uptrakit-frontend"
+git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-frontend-v{{ version }}"
@@ -15,6 +16,7 @@ changelog_update = false
 # No publish (path deps only); no GitHub release (internals, not end-user artifacts).
 [[package]]
 name = "uptrakit-agent-runtime"
+git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-agent-runtime-v{{ version }}"
@@ -22,6 +24,7 @@ publish = false
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
+git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-agent-ssh-runtime-v{{ version }}"
@@ -29,6 +32,7 @@ publish = false
 
 [[package]]
 name = "uptrakit-mqtt-runtime"
+git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-mqtt-runtime-v{{ version }}"
@@ -36,6 +40,7 @@ publish = false
 
 [[package]]
 name = "uptrakit-scheduler-runtime"
+git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-scheduler-runtime-v{{ version }}"
@@ -43,6 +48,7 @@ publish = false
 
 [[package]]
 name = "uptrakit-controller-runtime"
+git_only = true
 changelog_update = true
 changelog_include = [
   "uptrakit-frontend",
@@ -54,6 +60,7 @@ changelog_include = [
 
 [[package]]
 name = "uptrakit-controller"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-v{{ version }}"
@@ -63,6 +70,7 @@ changelog_update = false
 
 [[package]]
 name = "uptrakit-controller-standalone"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-standalone-v{{ version }}"
@@ -72,6 +80,7 @@ changelog_update = false
 
 [[package]]
 name = "uptrakit-agent"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-v{{ version }}"
@@ -80,6 +89,7 @@ changelog_include = ["uptrakit-agent-runtime"]
 
 [[package]]
 name = "uptrakit-agent-ssh"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-ssh-v{{ version }}"
@@ -88,6 +98,7 @@ changelog_include = ["uptrakit-agent-ssh-runtime"]
 
 [[package]]
 name = "uptrakit-mqtt"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-mqtt-v{{ version }}"
@@ -96,6 +107,7 @@ changelog_include = ["uptrakit-mqtt-runtime"]
 
 [[package]]
 name = "uptrakit-scheduler"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-scheduler-v{{ version }}"
@@ -104,6 +116,7 @@ changelog_include = ["uptrakit-scheduler-runtime"]
 
 [[package]]
 name = "uptrakit-cli"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-cli-v{{ version }}"
@@ -111,6 +124,7 @@ git_release_name = "uptrakit v{{ version }} (CLI)"
 
 [[package]]
 name = "uptrakit-openapi-client"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-openapi-client-v{{ version }}"
@@ -118,6 +132,7 @@ git_release_name = "uptrakit-openapi-client v{{ version }}"
 
 [[package]]
 name = "uptrakit-service-sdk"
+git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-service-sdk-v{{ version }}"

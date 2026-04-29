@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-directories"
+description = "Uptrakit shared directories: XDG-aware install path resolution"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish = false
 
 [dependencies]
 directories = { workspace = true }

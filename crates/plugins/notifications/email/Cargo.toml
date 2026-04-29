@@ -5,7 +5,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 description = "Email (SMTP) notification plugin for Uptrakit"
 
 [dependencies]

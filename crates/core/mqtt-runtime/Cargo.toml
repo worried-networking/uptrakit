@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-mqtt-runtime"
+description = "Uptrakit MQTT bridge runtime for Home Assistant integration"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [lib]
 doctest = false

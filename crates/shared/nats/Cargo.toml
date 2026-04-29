@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-nats"
+description = "Uptrakit shared NATS client: messaging primitives for service mesh"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 async-nats = { workspace = true }

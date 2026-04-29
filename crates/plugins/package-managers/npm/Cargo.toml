@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-package-manager-npm"
+description = "Uptrakit package-manager plugin for Node.js npm global packages"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }

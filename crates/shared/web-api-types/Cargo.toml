@@ -5,7 +5,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 description = "Shared HTTP request/response types for the Uptrakit web API"
 
 [features]

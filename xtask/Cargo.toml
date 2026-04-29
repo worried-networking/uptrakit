@@ -1,9 +1,11 @@
 [package]
 name = "xtask"
+description = "Uptrakit xtask: workspace automation scripts"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
-publish = false
+authors.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "xtask"

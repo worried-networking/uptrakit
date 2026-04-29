@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+description = "Uptrakit discovery plugin for Proxmox VE helper-scripts community catalog"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }

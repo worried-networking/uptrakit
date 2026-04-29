@@ -1,9 +1,11 @@
 [package]
 name = "uptrakit-github-client"
+description = "Uptrakit shared GitHub client: rate-limited GitHub API wrapper"
 version = "0.0.1"
 edition.workspace = true
 license.workspace = true
-publish = false
+authors.workspace = true
+repository.workspace = true
 
 [dependencies]
 http = { workspace = true }

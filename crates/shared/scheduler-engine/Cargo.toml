@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-scheduler-engine"
+description = "Uptrakit shared scheduler-engine: timer wheel and run-loop"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []
