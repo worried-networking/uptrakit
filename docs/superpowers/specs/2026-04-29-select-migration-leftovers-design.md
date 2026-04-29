@@ -1,7 +1,7 @@
 # Select Migration — Leftover `<select>` Elements
 
 **Date:** 2026-04-29
-**Status:** Draft
+**Status:** Approved
 
 ## Overview
 
