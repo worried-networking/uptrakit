@@ -441,9 +441,7 @@
 				{#snippet row(rowValue, _index)}
 					{@const host = rowValue as unknown as HostResponse}
 					{@const status = softwareStatus(host)}
-					<tr
-						class="border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-raised)] even:bg-[var(--bg-raised)]"
-					>
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage || canManageSoftware}
 							<td class="table-cell-pad text-table-body">
 								<Checkbox

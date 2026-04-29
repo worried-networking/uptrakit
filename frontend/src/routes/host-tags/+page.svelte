@@ -374,7 +374,7 @@
 				{/snippet}
 				{#snippet row(rowValue, _index)}
 					{@const tag = rowValue as unknown as HostTagResponse}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage}
 							<td class="table-cell-pad">
 								<Checkbox

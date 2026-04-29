@@ -189,7 +189,7 @@
 	{/snippet}
 	{#snippet row(rowValue, _index)}
 		{@const ignore = rowValue as unknown as SoftwareIgnoreResponse}
-		<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+		<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 			{#if canManage}
 				<td class="table-cell-pad">
 					<Checkbox
