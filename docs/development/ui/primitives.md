@@ -525,7 +525,7 @@ Visual rules:
 - Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-table-header font-semibold uppercase tracking-table-header`.
 - Body rows: `text-table-body`, bottom border except last row. Cell padding: `table-cell-pad`. Two row highlight modes are supported:
   - **Hover-only:** `hover:bg-[var(--bg-raised)]` — rows transparent at rest, highlighted on hover.
-  - **Zebra + hover:** `even:bg-[var(--bg-raised)] hover:bg-[var(--bg-raised)]` — alternating fill plus hover highlight on all rows. Preferred for high-density read-only log tables (e.g. audit logs). Odd rows go transparent → raised on hover; even rows already at raised show no additional change.
+  - **Zebra + hover:** `even:bg-[var(--bg-raised)]` fill with `hover:bg-[var(--bg-hover)]` — alternating fill plus a distinct hover highlight on all rows. Odd rows go `--bg-surface` → `--bg-hover` on hover; even rows go `--bg-raised` → `--bg-hover`. Hover is visible on all rows. Preferred for high-density read-only log tables (e.g. audit logs).
 - Container: `rounded-panel border border-[var(--border-subtle)]`.
 
 ---
