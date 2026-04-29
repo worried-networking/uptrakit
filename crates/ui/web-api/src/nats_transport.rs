@@ -220,10 +220,13 @@ impl NatsTransport {
 
             use futures_util::StreamExt;
             let mut messages = std::pin::pin!(messages);
-            while let Some(result) = messages.next().await {
-                if cancel.is_cancelled() {
-                    break;
-                }
+            loop {
+                let result = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    r = messages.next() => r,
+                };
+                let Some(result) = result else { break };
                 let msg = match result {
                     Ok(m) => m,
                     Err(e) => {
