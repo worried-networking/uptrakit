@@ -1538,7 +1538,7 @@ reason = "UI crates must not directly import the Proxmox infrastructure plugin"
 [[boundaries]]
 from = "crates/plugins/**"
 to = "crates/shared/wire/**"
-reason = "Plugins must not depend on the wire protocol — use crates/shared/extension-framework directly"
+reason = "Plugins must not depend on the wire protocol — depend on uptrakit-surfaces for surface types and uptrakit-shared-types for plugin descriptor types instead."
 
 [[boundaries]]
 from = "crates/plugins/**"
