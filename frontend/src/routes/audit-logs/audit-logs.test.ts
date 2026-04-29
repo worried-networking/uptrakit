@@ -213,4 +213,27 @@ describe('Button Migrations', () => {
 		expect(tenantTab).toBeInTheDocument();
 		expect(systemTab).toBeInTheDocument();
 	});
+
+	it('when hasBoth is true, renders TabStrip without a SectionCard wrapper', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...auditViewer,
+			permissions: [Permission.ViewAuditLogs, Permission.ViewSystemAuditLogs]
+		});
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument());
+		const tablist = screen.getByRole('tablist', { name: 'Audit log scope' });
+		expect(tablist).toBeInTheDocument();
+		// The tablist must not be inside a SectionCard element
+		expect(tablist.closest('[data-ui="section-card"]')).toBeNull();
+	});
+
+	it('when system-only user, does not render "Showing system-level audit logs." text', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...auditViewer,
+			permissions: [Permission.ViewSystemAuditLogs]
+		});
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());
+		expect(screen.queryByText('Showing system-level audit logs.')).not.toBeInTheDocument();
+	});
 });
