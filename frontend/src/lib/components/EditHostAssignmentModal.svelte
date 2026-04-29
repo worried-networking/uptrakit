@@ -3,7 +3,7 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
-	import { Input, Checkbox, Textarea, Select } from '$lib/components/forms';
+	import { Input, Checkbox, Textarea, Select, type SelectItem } from '$lib/components/forms';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -278,6 +278,34 @@
 		if (s.plugin_config_id) return `cfg:${s.plugin_config_id}`;
 		if (s.plugin_type) return `type:${s.plugin_type}`;
 		return '';
+	}
+
+	function pluginConfigItems(savedOpts: PluginConfigResponse[], typeOpts: PluginTypeInfo[]): SelectItem[] {
+		// Inline literal — do NOT annotate with `SelectOption`. The local `SelectOption` here
+		// is the `$lib/types` one (no `disabled` field); the forms barrel `SelectOption` is
+		// structurally compatible but is intentionally not imported (duplicate identifier).
+		const placeholder = { value: '', label: '— not configured —' };
+		const inlineOpts = typeOpts.map((pt) => ({
+			value: `type:${pt.plugin_type}`,
+			label: pt.display_name
+		}));
+		if (savedOpts.length === 0) {
+			return [placeholder, ...inlineOpts];
+		}
+		const items: SelectItem[] = [
+			placeholder,
+			{
+				label: 'Saved',
+				options: savedOpts.map((cfg) => ({
+					value: `cfg:${cfg.id}`,
+					label: cfg.name
+				}))
+			}
+		];
+		if (inlineOpts.length > 0) {
+			items.push({ label: 'Inline', options: inlineOpts });
+		}
+		return items;
 	}
 
 	function applySelection(
@@ -703,30 +731,12 @@
 						<!-- Plugin Config -->
 						<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 							<label class="text-sm font-medium" for="cfg-{role}">Plugin Config</label>
-							<select
+							<Select
 								id="cfg-{role}"
-								class="select text-sm"
 								value={pluginSelection(s)}
+								options={pluginConfigItems(savedRoleOpts, typeOpts)}
 								onchange={(e) => applySelection(standardStates[role], (e.target as HTMLSelectElement).value)}
-							>
-								<option value="">— not configured —</option>
-								{#if savedRoleOpts.length > 0}
-									<optgroup label="Saved">
-										{#each savedRoleOpts as cfg (cfg.id)}
-											<option value="cfg:{cfg.id}">{cfg.name}</option>
-										{/each}
-									</optgroup>
-									<optgroup label="Inline">
-										{#each typeOpts as pt (pt.plugin_type)}
-											<option value="type:{pt.plugin_type}">{pt.display_name}</option>
-										{/each}
-									</optgroup>
-								{:else}
-									{#each typeOpts as pt (pt.plugin_type)}
-										<option value="type:{pt.plugin_type}">{pt.display_name}</option>
-									{/each}
-								{/if}
-							</select>
+							/>
 						</div>
 
 						{#if s.plugin_type}
@@ -1067,30 +1077,12 @@
 										<!-- Plugin Config (saved + inline in one select) -->
 										<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
 											<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Plugin Config</label>
-											<select
+											<Select
 												id="hook-cfg-{entry.localKey}"
-												class="select text-sm"
 												value={pluginSelection(entry)}
+												options={pluginConfigItems(savedHookOpts, hookTypeOpts)}
 												onchange={(e) => applySelection(entry, (e.target as HTMLSelectElement).value)}
-											>
-												<option value="">— not configured —</option>
-												{#if savedHookOpts.length > 0}
-													<optgroup label="Saved">
-														{#each savedHookOpts as cfg (cfg.id)}
-															<option value="cfg:{cfg.id}">{cfg.name}</option>
-														{/each}
-													</optgroup>
-													<optgroup label="Inline">
-														{#each hookTypeOpts as pt (pt.plugin_type)}
-															<option value="type:{pt.plugin_type}">{pt.display_name}</option>
-														{/each}
-													</optgroup>
-												{:else}
-													{#each hookTypeOpts as pt (pt.plugin_type)}
-														<option value="type:{pt.plugin_type}">{pt.display_name}</option>
-													{/each}
-												{/if}
-											</select>
+											/>
 										</div>
 
 										{#if entry.plugin_type}
