@@ -377,7 +377,7 @@
 			{#snippet row(rowValue, _index)}
 				{@const token = rowValue as unknown as EnrollmentTokenResponse}
 				{@const status = tokenStatus(token)}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 					<td class="table-cell-pad">{token.name}</td>
 					<td class="table-cell-pad">
 						{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}

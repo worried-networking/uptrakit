@@ -232,7 +232,7 @@
 			</tr>
 		{/snippet}
 		{#snippet entityLinkRow(rowRecord: Record<string, unknown>, _index: number)}
-			<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+			<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 				{#each resolvedColumns as col (col.key)}
 					<td class="table-cell-pad text-[var(--text-primary)]">
 						{#if col.cell_type?.kind === 'entity_link'}

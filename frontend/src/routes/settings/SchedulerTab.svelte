@@ -125,7 +125,7 @@
 		>
 			{#snippet row(r, _index)}
 				{@const task = r as unknown as ScheduledTaskResponse}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 					<td class="table-cell-pad">
 						<p class="font-medium">{task.label}</p>
 						<p class="text-table-header text-[var(--text-muted)]">{task.task_type}</p>
