@@ -39,7 +39,7 @@ use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleConte
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
 #[cfg(feature = "agent-infra")]
-use uptrakit_wire::surfaces::{SurfaceActionRequest, SurfaceActionResponse};
+use uptrakit_surfaces::{SurfaceActionRequest, SurfaceActionResponse};
 
 // ── PluginMeta ──────────────────────────────────────────────────────────────
 
