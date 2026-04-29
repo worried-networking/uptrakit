@@ -1,4 +1,5 @@
 use rootcause::prelude::*;
+use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors that can occur when communicating with the Uptrakit API.
 #[derive(Debug, thiserror::Error)]
