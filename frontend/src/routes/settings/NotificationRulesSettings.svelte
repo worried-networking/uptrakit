@@ -10,7 +10,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { DataTable, SectionCard, StatusBadge, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
-	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
+	import { FormFieldRow, Checkbox, Input, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 
 	let {
@@ -234,19 +234,21 @@
 			class="space-y-4"
 		>
 			<FormFieldRow label="Channel" inputId="rule-channel-id" required>
-				<select id="rule-channel-id" bind:value={form.channel_id} required class="select">
-					{#each channels as ch (ch.id)}
-						<option value={ch.id}>{ch.name} ({ch.channel_type})</option>
-					{/each}
-				</select>
+				<Select
+					id="rule-channel-id"
+					bind:value={form.channel_id}
+					options={channels.map((ch) => ({ value: ch.id, label: `${ch.name} (${ch.channel_type})` }))}
+					required
+				/>
 			</FormFieldRow>
 
 			<FormFieldRow label="Event Type" inputId="rule-event-type" required>
-				<select id="rule-event-type" bind:value={form.event_type} required class="select">
-					{#each Object.entries(EVENT_TYPE_LABELS) as [value, label] (value)}
-						<option {value}>{label}</option>
-					{/each}
-				</select>
+				<Select
+					id="rule-event-type"
+					bind:value={form.event_type}
+					options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+					required
+				/>
 			</FormFieldRow>
 
 			<FormFieldRow label="Host ID" inputId="rule-host-id">
