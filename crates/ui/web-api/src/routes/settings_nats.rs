@@ -41,13 +41,14 @@ fn emit_nats_settings_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id, actor_display) = authenticated_user_audit_actor(user, api_token_id);
 
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
     )
     .system_scope()
     .actor(actor_type, actor_id)
+    .actor_display_opt(actor_display)
     .target(
         "global_setting",
         SettingKey::NatsUrl.as_str().to_string(),
@@ -477,6 +478,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {
@@ -543,6 +545,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest { url: None }),
@@ -594,6 +597,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(request.clone()),
@@ -611,6 +615,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(request),
@@ -660,6 +665,7 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             Some(Extension(AuthenticatedApiTokenId(token_id))),
             Validated(UpdateNatsSettingsRequest {
@@ -721,6 +727,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {
@@ -783,6 +790,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
                 jti: None,
+                actor_display: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {

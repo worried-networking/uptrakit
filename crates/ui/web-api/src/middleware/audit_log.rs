@@ -66,6 +66,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: Vec::new(),
             jti: None,
+            actor_display: None,
         });
         next.run(req).await
     }
