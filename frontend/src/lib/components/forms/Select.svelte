@@ -3,7 +3,7 @@
 
 	export type SelectProps = {
 		id: string;
-		value: string;
+		value?: string;
 		options: SelectOption[];
 		name?: string;
 		placeholder?: string;
@@ -34,7 +34,7 @@
 
 	let {
 		id,
-		value = $bindable(''),
+		value = $bindable(),
 		options,
 		name,
 		placeholder,
