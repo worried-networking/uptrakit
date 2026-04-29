@@ -5,6 +5,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version = "0.0.1"
+publish = true
 description = "Typed HTTP client for the Uptrakit web API"
 
 [features]
@@ -13,21 +14,10 @@ description = "Typed HTTP client for the Uptrakit web API"
 mock = ["dep:httpmock"]
 ## Enables `#[tracing::instrument]` spans on async methods (tracing is always available).
 tracing = []
-## Suppresses `unexpected_cfgs` lint for copied web-api-types sources that carry
-## `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]`.
-openapi = []
-## Declared to suppress `unexpected_cfgs` for copied shared-types sources.
-## sea-orm integration is not available in the published client.
-sea-orm = []
-## Declared to suppress `unexpected_cfgs` for copied shared-types sources.
-## SSRF-safe resolver is not available in the published client.
-http-ssrf = []
-## Declared to suppress `unexpected_cfgs` for copied shared-types sources.
-## Test helpers are not exposed in the published client.
-test-support = []
-## In workspace builds: use upstream workspace crate types instead of inlined generated copies.
-## This prevents type mismatch errors when workspace crates use openapi-client alongside workspace types.
-workspace-internal = ["dep:uptrakit-web-api-types", "dep:uptrakit-shared-types"]
+## Forwarding feature: enables sea-orm derives on shared-types values.
+sea-orm = ["uptrakit-shared-types/sea-orm"]
+## Forwarding feature: enables utoipa OpenAPI derives on web-api-types values.
+openapi = ["uptrakit-web-api-types/openapi"]
 
 [dependencies]
 reqwest = { workspace = true, features = ["query"] }
@@ -40,9 +30,9 @@ tokio = { workspace = true, features = ["time"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 httpmock = { workspace = true, optional = true }
-# Optional workspace crates (workspace-internal feature)
-uptrakit-web-api-types = { workspace = true, optional = true }
-uptrakit-shared-types = { workspace = true, optional = true }
+uptrakit-web-api-types = { workspace = true }
+uptrakit-shared-types = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 strum = { workspace = true }
 zeroize = { workspace = true }
 url = { workspace = true }
