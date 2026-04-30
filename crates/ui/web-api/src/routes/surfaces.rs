@@ -715,21 +715,13 @@ fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
 fn enforce_required_permission(
     required_permission: Option<&str>,
     auth_user: &AuthenticatedUser,
-    surface_id: &str,
+    _surface_id: &str,
     access_kind: &'static str,
 ) -> Option<Response> {
     let required_permission = required_permission?;
-    let Ok(permission) = required_permission.parse::<Permission>() else {
-        tracing::error!(
-            surface_id = %surface_id,
-            permission = required_permission,
-            "invalid required permission in registered surface contract"
-        );
-        return Some(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal server error",
-        ));
-    };
+    // Permission::from_str uses Infallible error; unwrap is always safe.
+    #[allow(clippy::unwrap_used)]
+    let permission = required_permission.parse::<Permission>().unwrap();
     if auth_user.has_permission(permission) {
         return None;
     }
