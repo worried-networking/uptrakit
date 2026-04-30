@@ -9031,19 +9031,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xtask"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
- "walkdir",
-]
-
-[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
