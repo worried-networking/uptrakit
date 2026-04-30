@@ -87,11 +87,11 @@ rustix = { version = "1", default-features = false }
 libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
-uptrakit-frontend = { path = "frontend", version = "0.0.1" }
+uptrakit-frontend = { path = "frontend", version = "0.0.2" }
 uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
-uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.1" }
-uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.1" }
+uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.2" }
+uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.2" }
 uptrakit-command = { path = "crates/shared/command", version = "0.0.1" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core", version = "0.0.1" }
 uptrakit-global-github-provider = { path = "crates/shared/global-github-provider", version = "0.0.1" }
@@ -101,33 +101,33 @@ uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructur
 # Internal crates (all must be referenced via workspace = true in member Cargo.toml files)
 uptrakit-agent-core = { path = "crates/shared/agent-core", version = "0.0.1" }
 uptrakit-agent-runtime = { path = "crates/core/agent-runtime", version = "0.0.1", default-features = false }
-uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.1", default-features = false }
+uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.2", default-features = false }
 uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", version = "0.0.1", default-features = false }
 uptrakit-mqtt-runtime = { path = "crates/core/mqtt-runtime", version = "0.0.1", default-features = false }
 uptrakit-controller-runtime = { path = "crates/core/controller-runtime", version = "0.0.1", default-features = false }
 uptrakit-crypto = { path = "crates/shared/crypto", version = "0.0.1" }
 uptrakit-shared-db = { path = "crates/shared/db", version = "0.0.1", default-features = false }
 uptrakit-directories = { path = "crates/shared/directories", version = "0.0.1" }
-uptrakit-web-api-types = { path = "crates/shared/web-api-types", version = "0.0.1" }
+uptrakit-web-api-types = { path = "crates/shared/web-api-types", version = "0.0.2" }
 uptrakit-nats = { path = "crates/shared/nats", version = "0.0.1" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine", version = "0.0.1" }
 uptrakit-scheduler-runtime = { path = "crates/core/scheduler-runtime", version = "0.0.1", default-features = false }
 uptrakit-tracing-init = { path = "crates/shared/tracing-init", version = "0.0.1", default-features = false }
-uptrakit-service-sdk = { path = "crates/shared/service-sdk", version = "0.0.1", default-features = false }
+uptrakit-service-sdk = { path = "crates/shared/service-sdk", version = "0.0.2", default-features = false }
 uptrakit-service-platform = { path = "crates/shared/service-platform", version = "0.0.1" }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core", version = "0.0.1" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook", version = "0.0.1" }
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram", version = "0.0.1" }
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email", version = "0.0.1" }
 uptrakit-config-merge = { path = "crates/shared/update-hooks", version = "0.0.1" }
-uptrakit-wire = { path = "crates/shared/wire", version = "0.0.1" }
+uptrakit-wire = { path = "crates/shared/wire", version = "0.0.2" }
 uptrakit-surfaces = { path = "crates/shared/surfaces", version = "0.0.1" }
 uptrakit-web-api = { path = "crates/ui/web-api", version = "0.0.1", default-features = false }
 uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", version = "0.0.1", default-features = false }
 uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", version = "0.0.1", default-features = false }
 uptrakit-audit-log = { path = "crates/shared/audit-log", version = "0.0.1", default-features = false }
 uptrakit-build-info = { path = "crates/shared/build-info", version = "0.0.1" }
-uptrakit-cli = { path = "crates/ui/cli", version = "0.0.1" }
+uptrakit-cli = { path = "crates/ui/cli", version = "0.0.2" }
 uptrakit-plugin-releases-docker = { path = "crates/plugins/releases/docker", version = "0.0.1", default-features = false }
 uptrakit-plugin-releases-github = { path = "crates/plugins/releases/github", version = "0.0.1" }
 uptrakit-plugin-releases-gitlab = { path = "crates/plugins/releases/gitlab", version = "0.0.1" }
