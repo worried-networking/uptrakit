@@ -89,6 +89,16 @@ awaiting_restart_since TIMESTAMPTZ NULL
 Both follow the existing `#[non_exhaustive]` + `FromStr`/`ParseUpdateStatusError` pattern.
 `UpdateStatus` is not a wire-received type and does not use `Other(String)`.
 
+In `crates/shared/types/src/update_status.rs` the new variant requires:
+
+```rust
+#[cfg_attr(feature = "sea-orm", sea_orm(string_value = "awaiting_restart"))]
+AwaitingRestart,
+```
+
+The `as_str()` method returns `"awaiting_restart"`, `FromStr` parses `"awaiting_restart"`, and the
+existing round-trip tests cover the new variant automatically via `strum::EnumIter`.
+
 `AwaitingRestart` is not a terminal status. It is not a failure. Batch sequencing treats it
 as active (blocks the next `Queued` item on the same host).
 
@@ -104,24 +114,16 @@ Pending
   │ (orchestrator picks up)
   ▼
 InProgress ──── UpdateResultPayload { resumable: true } received ──► AwaitingRestart
-  │                                                                        │
-  │ agent disconnects (no resumable signal received)                       │ awaiting_restart_since
-  ▼                                                              ──────────┤ + timeout exceeded
-Failed                                                           │         ▼
-                                                                 │      Failed
-                                                  AwaitingRestart│
-                                                      │          │
-                                          agent reconnects or    │
-                                          scheduler tick,        │
-                                          detect_version:        │
-                                                      │          │
-                                            not_ready │──────────┘ (stay, retry)
-                                                      │
-                                             version mismatch ──► Failed
-                                                      │
-                                             version matches
-                                                      ▼
-                                                 Completed
+  │                                                                        │      │
+  │ agent disconnects (no resumable signal received)                       │      │ awaiting_restart_since
+  ▼                                                                        │      │ + timeout exceeded
+Failed                                                           detect_version   ▼
+                                                                    result:    Failed
+                                                                       │
+                                                               not_ready ──► stay (retry next tick)
+                                                               error    ──► stay (retry next tick)
+                                                               mismatch ──► Failed
+                                                               match    ──► Completed
 ```
 
 All transitions use CAS (`rows_affected == 0` = another controller already acted, skip).
@@ -142,8 +144,15 @@ parse `resumable` as `None` (non-resumable) — backward compatible.
 
 **Controller behavior on receiving `UpdateResultPayload`:**
 
-- `status: Completed, resumable: Some(true)` → CAS `InProgress → AwaitingRestart`,
-  set `awaiting_restart_since = now`. Do not call `dispatch_next_in_batch` yet.
+`UpdateResultPayload.status` is `UpdateFinalStatus` (a separate enum from `UpdateStatus`).
+The resumable check is applied only when `status == UpdateFinalStatus::Completed`.
+
+- `status: Completed, resumable: Some(true)` → call `transition_to_awaiting_restart(db,
+  update_history_id, service_id, runtime_instance_id)` in `web-api-queries/update_dispatch.rs`.
+  This is a CAS UPDATE on the owned `InProgress` row:
+  `status = 'awaiting_restart'`, `awaiting_restart_since = now()`, preserving
+  `execution_owner_service_id`. On `rows_affected == 0` (race / already claimed), log and return.
+  Do not call `dispatch_next_in_batch` yet.
 - `status: Completed, resumable: None | Some(false)` → existing behavior (`Completed`).
 - `status: Failed` → existing behavior (`Failed`), call batch/host progression.
 
@@ -171,22 +180,76 @@ Post-hook execution moves out of `execute_update_pipeline` into the caller (`exe
 in `agent-core/src/update.rs`). The pipeline returns `PipelineResult { succeeded: bool,
 resumable: bool }` without running post-hooks.
 
-The caller branches on `resumable`:
+#### Early result channel
+
+For resumable updates the result payload must reach the controller **before** the post-update
+hook fires (that hook typically restarts the process). The existing return path — task completes,
+`client.rs` calls `send_update_result` — is too late: the hook would kill the process first.
+
+The solution is an early-result channel threaded through `execute_update`:
 
 ```rust
-let result = execute_update_pipeline(&payload, &output_tx, executor, &mut output).await;
+// New parameter on execute_update
+early_result_tx: mpsc::UnboundedSender<UpdateResultPayload>,
+```
 
-if result.resumable {
-    // Send result before post-hooks — controller transitions to AwaitingRestart.
-    send_update_result(&result_tx, resumable: true).await;
-    // Post-hooks fire-and-forget: result ignored, errors logged only.
-    tokio::spawn(run_post_hook_plugins(payload.post_update_hook_plugins, ...));
-} else {
-    // Normal path: post-hooks complete before result is sent.
-    run_post_hook_plugins(&payload.post_update_hook_plugins, ...).await;
-    send_update_result(&result_tx, resumable: false).await;
+`InFlightUpdate` in `agent-core/src/client.rs` gains:
+
+```rust
+pub early_result_rx: mpsc::UnboundedReceiver<UpdateResultPayload>,
+pub early_sent: bool,
+```
+
+The agent's main event loop selects on `early_result_rx` alongside `output_rx`. Biased
+ordering alone is not sufficient: if the JoinHandle completes between two select loop
+iterations, the next `select!` call can return the `Completed` arm before `early_result_rx`
+is polled even with `biased`. The correct pattern is to drain `early_result_rx` via
+`try_recv()` inside the JoinHandle completion arm before deciding whether to skip the send:
+
+```rust
+tokio::select! {
+    biased;
+    // Priority 1: drain early result.
+    Some(early) = update.early_result_rx.recv() => {
+        send_early_update_result(conn, early).await;
+        update.early_sent = true;
+    }
+    Some(output) = update.output_rx.recv() => { ... }
+    result = &mut update.handle => {
+        // Drain any pending early result BEFORE deciding to send.
+        while let Ok(early) = update.early_result_rx.try_recv() {
+            send_early_update_result(conn, early).await;
+            update.early_sent = true;
+        }
+        if !update.early_sent {
+            send_update_result(conn, update.update_history_id, result).await?;
+        }
+    }
 }
 ```
+
+When the join handle completes, if `early_sent == true` the result payload is discarded (not sent
+again).
+
+The caller in `execute_update` branches:
+
+```rust
+if result.resumable && succeeded {
+    // Sends early via channel — controller transitions to AwaitingRestart.
+    let _ = early_result_tx.send(early_payload_with_resumable_true);
+    // Post-hooks fire-and-forget; errors logged only.
+    tokio::spawn(run_post_hook_plugins(payload.post_update_hook_plugins, ...));
+    // Return a sentinel so client.rs knows not to double-send.
+    return UpdateExecutionResult { result: sentinel_payload, resumable: true };
+} else {
+    run_post_hook_plugins(&payload.post_update_hook_plugins, ...).await;
+    // Return normally; client.rs sends via the standard path.
+    return UpdateExecutionResult { result: normal_payload, resumable: false };
+}
+```
+
+`UpdateExecutionResult` gains `resumable: bool`. When `resumable == true`, `send_update_result`
+in `client.rs` skips the transport write (early_sent already set true by the select loop).
 
 **Why send before post-hooks for resumable updates:** the post-update hook for a resumable
 update typically triggers the restart (e.g., `systemctl restart uptrakit`,
@@ -197,6 +260,17 @@ is committed before the process exits.
 **Post-hook result ignored for resumable:** once the controller is in `AwaitingRestart`,
 the update outcome is determined by `detect_version` on reconnect — not by whether
 post-hooks succeeded. Logging hook errors is sufficient.
+
+**Timeout interaction:** the `tokio::time::timeout` wraps `execute_update_pipeline` only
+(not post-hooks). For resumable updates, post-hooks run in a detached `tokio::spawn` after
+the timeout wrapper completes — the timeout cannot cancel them. This is intentional: the
+restart hook must be allowed to fire even if the pipeline ran close to the time limit.
+
+**`handle_graceful_shutdown` awareness:** `handle_graceful_shutdown` in `client.rs` must
+check `in_flight_update.early_sent` before calling `send_update_result`. When `early_sent
+== true`, the transport write is skipped — the controller already received the early payload
+and is in `AwaitingRestart`. Sending the sentinel again would be a no-op (CAS guard drops
+it), but skipping is cleaner.
 
 #### Shell plugin `resumable` config field
 
@@ -241,11 +315,25 @@ This handler must be extended: after updating the software state for normal vers
 also look up any `AwaitingRestart` update_history records for the relevant
 `host_software_item_id` and apply the terminal-transition logic above. The correlation key
 is `VersionCheckResult.host_software_item_id` → `update_history` filtered by
-`host_software_item_id + status = AwaitingRestart`.
+`host_software_item_id + status = AwaitingRestart`. The full record (including `batch_id`)
+is loaded during the lookup so that the correct progression function can be chosen without
+an additional DB round-trip after the CAS.
+
+The version comparison uses `VersionCheckResult.installed_version` read directly from the
+incoming payload — not from `host_software_items` after the normal state-update step has
+run. This avoids a TOCTOU ambiguity where a concurrent update to `host_software_items`
+could cause a mismatch.
 
 If `host_software_item_id` is absent from the `VersionCheckResult` (old agent, partial
 payload), skip the `AwaitingRestart` correlation — do not attempt an ambiguous host-level
 scan. The scheduler will retry on the next tick.
+
+**Dispatch after terminal transition:** `handle_version_check_results` in `messages.rs`
+already receives `&Arc<AppState>`. After a `Completed` or `Failed` transition, it constructs
+a `DispatchContext` from `state` (using `state.controller_update_protection()` and
+`state.notifier()`) and calls either `dispatch_next_in_batch` (if `batch_id` is set on the
+record) or `dispatch_next_queued_for_host` (if standalone). This is the same pattern used
+in `handle_update_result` in `updates.rs`.
 
 ---
 
@@ -257,19 +345,57 @@ true }` before triggering the restart; the controller is already in `AwaitingRes
 the agent disconnects. Disconnect from `AwaitingRestart` is a no-op — the controller
 continues waiting.
 
+`mark_owned_in_progress_as_failed_on_reconnect` and `mark_all_in_progress_as_failed_for_rollout`
+filter on `status = InProgress` only. `AwaitingRestart` records are not `InProgress` and are
+unaffected by these functions — no extension required.
+
 ---
 
 ### Scheduler Changes
 
 The scheduler gains two new cross-tenant responsibilities — **not** as new `ScheduledTaskType`
-rows (which are per-tenant). These are implemented as a new executor registered once on the
-`Scheduler` (not tied to a `ScheduledTaskType` DB row), using the `SchedulerNotifier`
-already available to all executors.
+rows (which are per-tenant). The existing `Scheduler` dispatches executors keyed by
+`ScheduledTaskType` from the `scheduled_tasks` DB table. A non-DB executor does not fit this
+map. The solution is a new `TickExecutor` abstraction alongside the existing `TaskExecutor`:
+
+```rust
+// crates/shared/scheduler-engine/src/tick_executor.rs
+#[async_trait::async_trait]
+pub trait TickExecutor: Send + Sync {
+    async fn execute_tick(&self, db: &DatabaseConnection) -> error::Result<()>;
+}
+```
+
+`Scheduler` gains:
+
+```rust
+tick_executors: Vec<Arc<dyn TickExecutor>>,
+```
+
+with a `register_tick_executor(executor: Box<dyn TickExecutor>)` method. On each `poll_cycle`
+the scheduler runs all `tick_executors` concurrently in a **separate** `JoinSet` (not the
+same JoinSet used for DB-driven `TaskExecutor`s). TickExecutors are NOT subject to
+`TASK_EXECUTION_TIMEOUT` (2 hours) — they are bounded by a shorter 60-second per-tick
+timeout instead, after which the tick is abandoned and the next poll cycle retries.
+`TickExecutor`s receive the DB connection directly; they use the `SchedulerNotifier` injected
+at construction time.
+
+The `AwaitingRestartExecutor` implements `TickExecutor` and is constructed with
+`(db, notifier)` — the same dependencies as other executors (e.g., `DiscoverSoftwareExecutor`).
+It is registered once in the controller's scheduler setup, not per tenant.
 
 #### 1. Verification polling
 
 For all `AwaitingRestart` records across all tenants:
 
+- Load records with `status = 'awaiting_restart'`. For each record, use
+  `execution_owner_service_id` (already stored on the row from when the agent claimed
+  the update) as the target `service_id` for `notifier.send_to_service`. Do **not**
+  perform a fresh `service_host` join — the owner is already on the record, and a fresh
+  join could resolve a different (newer) agent connection for the same host.
+  If `execution_owner_service_id IS NULL` on an `AwaitingRestart` record (should not
+  happen given the transition invariant, but defensive programming applies), log a warning
+  and skip — the scheduler will retry on the next tick.
 - Dispatch `detect_version` via the existing plugin assignment for each record.
 - The MQTT/channel layer handles delivery: immediate if agent is connected, queued in
   the outbox if offline (delivered on next reconnect).
@@ -288,11 +414,19 @@ For all `AwaitingRestart` records across all tenants where
 - Uses `awaiting_restart_since` as the anchor; `awaiting_restart_timeout` is read from
   the linked `software_item`, falling back to the global default (600 seconds) when NULL.
 - After each terminal transition: signal the controller to trigger batch/host progression
-  for the affected host via a new `SchedulerNotifier` method (e.g.,
-  `signal_host_progression(host_id, tenant_id)`). The controller's implementation of
-  `SchedulerNotifier` calls `dispatch_next_queued_for_host` using its existing
-  `ServiceNotifier` and `DispatchContext`. This keeps `scheduler-engine` decoupled from
-  `web-api-queries`.
+  for the affected host via a new `SchedulerNotifier` method:
+
+  ```rust
+  async fn signal_host_progression(&self, host_id: Uuid, tenant_id: Uuid);
+  ```
+
+  The method is added to `SchedulerNotifier` in `notifier.rs`. The embedded-controller
+  implementation calls `dispatch_next_queued_for_host` directly (it has access to
+  `ServiceNotifier` and `DispatchContext`). The NATS-only implementation publishes a
+  `HostProgressionNeeded { host_id, tenant_id }` NATS message on the controller subject;
+  the receiving controller dispatches inline. The `NoopSchedulerNotifier` (test-only, in
+  `notifier.rs` behind `#[cfg(test)]`) also gets a no-op implementation. This keeps
+  `scheduler-engine` decoupled from `web-api-queries`.
 - Fires regardless of agent connection state.
 
 ---
@@ -340,12 +474,20 @@ queries the controller for its own metadata at discovery time. In controller-sta
 discovery plugin runs in the embedded agent — the metadata query is an in-process call, not
 an HTTP or RPC request.
 
-The controller exposes a `ServiceMetadata` structure accessible to the embedded agent via
-a shared context or trait object injected at startup. If `std::env::current_exe()` fails
-(e.g., chroot, unusual process environment), `detect_host_compatibility` returns
-`Incompatible` with an explanatory message and discovery emits no software items. Symlinks
-are resolved by the execute_update script at runtime rather than at discovery time, so
-`binary_path` may be a symlink path — this is acceptable.
+The controller exposes a `ServiceMetadata` structure to the embedded agent via a
+`ServiceMetadataProvider` trait object injected at plugin construction time through the
+existing `HostRuntime` injection path. The controller-standalone constructs the plugin with
+`Some(Arc<dyn ServiceMetadataProvider>)`. Standalone agents (no controller) construct it
+with `None`.
+
+`detect_host_compatibility` checks whether the provider is `Some` — if `None`, returns
+`Incompatible("not running as embedded agent in controller-standalone")`. This is the
+primary gating mechanism; no binary inspection is required.
+
+If `std::env::current_exe()` fails at discovery time, `discover_software` logs a warning
+and emits no software items for the affected service. Symlinks are resolved by the
+execute_update script at runtime rather than at discovery time, so `binary_path` may be a
+symlink path — this is acceptable.
 
 ```rust
 pub struct ServiceMetadata {
@@ -353,16 +495,45 @@ pub struct ServiceMetadata {
     pub binary_path: Option<PathBuf>,   // std::env::current_exe(); None if Docker
     pub version: String,                // current running version
     pub deployment_topology: DeploymentTopology,
+    pub reuseport_enabled: bool,        // whether SO_REUSEPORT takeover is active
+    pub pid: u32,                       // current process PID for --takeover-from
 }
 
 pub enum DeploymentTopology {
     StandaloneBinary,
     DockerContainer { image: String, container_name: String },
 }
+
+/// Implemented by the controller-standalone; injected into the plugin at construction.
+pub trait ServiceMetadataProvider: Send + Sync {
+    fn get_metadata(&self) -> ServiceMetadata;
+}
 ```
 
-Future services (agent, agent-ssh, mqtt, scheduler) will implement the same metadata
-interface when self-update support is extended to them.
+`ServiceMetadata`, `ServiceMetadataProvider`, and `DeploymentTopology` live in
+`crates/plugins/infrastructure/core/src/service_metadata.rs` — alongside the other
+plugin-infrastructure types (`HostRuntime`, `Discoverer`, etc.) that the discovery plugin
+already imports.
+
+```rust
+```
+
+The `HostRuntime` trait gains a default method returning `None`:
+
+```rust
+fn metadata_provider(&self) -> Option<Arc<dyn ServiceMetadataProvider>> { None }
+```
+
+The controller-standalone constructs a `MetadataAwareHostRuntime` that wraps the standard
+runtime and overrides this method. `StandardHostRuntime::new(executor, caps)` is unchanged —
+call sites that don't need the provider pass through normally. Only the self-update discovery
+plugin's `Discoverer` role construction path uses `MetadataAwareHostRuntime`.
+
+The plugin struct holds `metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>`,
+resolved from `runtime.metadata_provider()` at `new()` time.
+`detect_host_compatibility` returns `Incompatible` when `metadata_provider` is `None`.
+Future services (agent, agent-ssh, mqtt, scheduler) will implement the same provider trait
+when self-update support is extended to them.
 
 ### Plugin Assignment Matrix
 
@@ -370,25 +541,58 @@ For each discovered service, the plugin creates assignments:
 
 | Role | Plugin | Config |
 | --- | --- | --- |
-| `detect_version` | Shell | `binary_path --version` (queried at discovery time) |
-| `fetch_releases` | `releases_github` | uptrakit GitHub repo; tag filter per service |
+| `detect_version` | Shell | `version_command: "<binary_path> --version"` (binary path embedded literally at discovery time; no `{package_identifier}` substitution) |
+| `fetch_releases` | `releases_github` | uptrakit GitHub repo; `tag_strip_prefix: "v"`; tag filter per service |
 | `execute_update` | Shell (binary) or Docker plugin | `resumable: true`; binary path or container identity |
+
+`package_identifier` for self-update software items is the service name string (e.g.
+`"uptrakit-controller-standalone"`). It is used as the display identifier and for
+deduplication, not for command substitution in the detect_version shell command (the
+binary path is embedded literally in `version_command`).
 
 ### Deployment Topology Detection
 
 The discovery plugin uses `DeploymentTopology` from the metadata interface:
 
-- **`StandaloneBinary`**: execute_update = shell plugin with `resumable: true`. The script:
-  downloads the new release asset, replaces the binary at the queried path, then starts
-  the new binary with `--reuseport --takeover-from <current_pid>` using the existing
-  graceful restart mechanism (`docs/development/graceful-restart.md`). This gives
-  zero-downtime restart — the old process drains connections and exits cleanly. The agent
-  sends `UpdateResultPayload { resumable: true }` before the post-update hook fires. The
-  post-update hook (shell or systemd plugin) triggers the restart. A supervisor restart
-  (`systemctl restart`) is an acceptable fallback when `--reuseport` is not configured,
-  but requires the post-update hook to use a deferred restart (e.g.,
-  `systemd-run --on-active=10s`) so the process stays alive long enough to send the
-  `UpdateResultPayload`.
+- **`StandaloneBinary`**: execute_update = shell plugin with `resumable: true`. The update
+  script is generated at discovery time from `ServiceMetadata` and branches on
+  `reuseport_enabled`:
+
+  **`reuseport_enabled = true` (preferred, zero-downtime, no dead-control-plane risk):**
+  The script downloads the new release asset, replaces the binary at `binary_path`, then
+  executes `<binary_path> --reuseport --takeover-from <pid>` (where `pid` is captured from
+  `ServiceMetadata.pid` at discovery time and refreshed per-run via a `$UPTRAKIT_PID`
+  env var injected by the shell plugin). The new binary binds the port via `SO_REUSEPORT`
+  alongside the old process. The old process detects the takeover and drains active
+  connections before exiting. If the new binary fails to start (crash, missing dependency,
+  invalid config), it never successfully binds the port and the old process detects the
+  child exit — **the old process remains running and continues serving**. No outage occurs.
+  This is the primary dead-control-plane mitigation: the old process is the safety net and
+  only exits after the new process is confirmed running.
+
+  The `UpdateResultPayload { resumable: true }` is sent by the embedded agent before the
+  post-update hook fires. The post-update hook is the takeover command. Because the old
+  process survives a bad new binary, the controller receives the early result payload, and
+  the embedded agent in the old process handles it — even if the new binary never starts.
+  On the next scheduler tick, `detect_version` runs against whatever binary is current
+  and determines `Completed` or `Failed` accordingly.
+
+  **`reuseport_enabled = false` (fallback, requires supervisor and deferred restart):**
+  When `SO_REUSEPORT` is not configured, the update script downloads and replaces the
+  binary, then the post-update hook triggers a supervisor restart. For this path, the hook
+  **must** use a deferred restart (e.g., `systemd-run --on-active=10s`), not an immediate
+  one. The deferred gap serves two purposes: (1) the agent sends the early result payload
+  and the controller commits the `AwaitingRestart` DB write before the process exits;
+  (2) the supervisor can detect a fast-crashing new binary and restart the old one before
+  the deferred timer fires. Immediate `systemctl restart` is explicitly prohibited on the
+  fallback path — it races with the DB commit and can leave `InProgress` records that
+  resolve as `Failed`. This path has a brief connectivity gap and does not provide the
+  dead-control-plane protection that `--reuseport` does. It is supported but operators
+  are strongly encouraged to enable `SO_REUSEPORT`.
+
+  The `reuseport_enabled` flag is populated from `ServiceMetadata` at discovery time. The
+  discovery plugin generates the appropriate update script inline in the shell plugin config
+  `update_command`; no separate template files are needed.
 
 - **`DockerContainer`**: execute_update = existing Docker plugin with `resumable: true`.
   The correct operation sequence is: pull new image → stop container → remove container →
@@ -407,9 +611,11 @@ transitions to `Failed`.
 
 The `releases_github` plugin's `tag_strip_prefix` config strips the prefix from the
 fetched version before it is stored as `latest_version` and used as `to_version` at trigger
-time. Implementors must verify that the version string passed to
-`CreateUpdateRecordParams::to_version` at trigger time is the stripped form, not the raw
-tag.
+time. The `releases_github` plugin is solely responsible for normalization — it returns the
+stripped string; by the time `to_version` is written to `update_history`, the prefix is
+already gone. No normalization is needed in the trigger handler or the version comparison
+logic. Setting `tag_strip_prefix: "v"` in the self-update discovery plugin's `releases_github`
+target config is the complete fix — no additional code required.
 
 ### Discoverer Implementation
 
@@ -432,6 +638,29 @@ async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
     // Future: also Compatible when any uptrakit service is detected locally.
 }
 ```
+
+### Plugin Config
+
+The plugin has a single config field:
+
+```rust
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct UptrakitSelfUpdateConfig {
+    /// Enable self-update discovery. Defaults to false.
+    ///
+    /// Self-update auto-discovery can trigger unattended updates via
+    /// scheduled batch tasks. Opt-in required; the controller-standalone
+    /// enables it explicitly in its default plugin config for this plugin.
+    #[serde(default)]
+    pub enabled: bool,
+}
+```
+
+`discover_software` returns `Ok(vec![])` immediately when `enabled == false`.
+`detect_host_compatibility` returns `Incompatible("self-update disabled by config")` when
+`enabled == false`. This prevents spurious "plugin is compatible but produces no items"
+states in the registry and avoids running compatibility checks against hosts where the
+feature is intentionally disabled.
 
 ### MVP Scope
 
@@ -479,6 +708,42 @@ time, the entire control plane goes offline simultaneously. This is not prevente
 current design. Document as unsupported; operators must roll controllers manually in
 multi-controller deployments.
 
+**Failed self-update and the control plane:** When `SO_REUSEPORT` is enabled (preferred),
+a failed new binary never kills the old process — the old process is the safety net and
+only exits after confirming the new binary has bound the port. The dead-control-plane risk
+is eliminated for this path. When `SO_REUSEPORT` is not enabled (fallback path), the old
+process exits before the new one is confirmed running. If the new binary fails to start,
+the control plane is briefly dead until the supervisor restarts it. The self-update
+discovery plugin checks for a running supervisor (systemd unit or Docker restart policy)
+during `discover_software` and logs a warning when none is detected — this check is
+**warning-only and never blocks discovery**; the software item is always emitted regardless
+of supervisor presence. Supervisor detection is inherently unreliable (wrapper scripts, s6,
+runit, symlinks, Docker containers all produce false negatives), so blocking on it would
+silently suppress self-update in valid deployments. Operators using the fallback path are
+responsible for ensuring a supervisor is in place; operators using `--reuseport` have no
+supervisor dependency.
+
+**Natural recovery after failed self-update:** No startup flag is needed to clean up
+`AwaitingRestart` records on controller restart. The natural flow resolves them correctly:
+
+- **Self-update succeeded**: new binary starts → `AwaitingRestartExecutor` runs on first
+  scheduler tick → dispatches `detect_version` to embedded agent → returns new version →
+  matches `to_version` → transitions to `Completed`.
+- **Self-update failed, operator recovers with old binary**: old binary starts →
+  `AwaitingRestartExecutor` runs → `detect_version` returns old version → mismatch →
+  transitions to `Failed`.
+- **Self-update failed, operator recovers with fixed binary**: same as success path above.
+
+No explicit "fail all pending" flag is required and would be harmful: if applied on a normal
+post-self-update restart, it would mark the successful update `Failed` before `detect_version`
+can confirm the new version.
+
+**AwaitingRestart timeout orphaning:** When the embedded scheduler stops (controller death),
+no process enforces `AwaitingRestart` timeouts. Records stay in `AwaitingRestart` until the
+controller restarts and the `AwaitingRestartExecutor` runs. Mitigated by using a short
+`awaiting_restart_timeout` for self-update items (e.g., 120 seconds) so that on restart,
+records time out quickly via the scheduler's first tick.
+
 **`AwaitingRestart` verification polling at scale:** The cross-tenant AwaitingRestart
 executor dispatches `detect_version` every 15 seconds for all records across all
 controllers. In a multi-controller deployment with many `AwaitingRestart` hosts, each
@@ -504,11 +769,15 @@ without explicit user action. Existing automation (e.g., scheduled batch updates
 to the newly discovered items. Operators should be aware of this behavior; a future opt-in
 gate would address the surprise.
 
-**Supervisor restart race (fallback path only):** When the graceful restart mechanism is
-not available and the post-update hook uses an immediate supervisor restart, there is a
-small window where the process can be killed before `UpdateResultPayload { resumable: true }`
-reaches the controller. The update is then marked `Failed` even though it succeeded.
-Mitigated by using deferred restart (`systemd-run --on-active=10s`) in the hook.
+**Supervisor restart race (fallback path, `reuseport_enabled = false` only):** The
+`--reuseport` takeover path has no restart race — the old process remains alive throughout
+the takeover, so it can send the early result payload at any time without risk of being
+killed. For the supervisor fallback path, an immediate restart (`systemctl restart`) races
+with the controller's DB commit of `AwaitingRestart`. This is a spec constraint: the
+post-update hook on the fallback path **must** use deferred restart (`systemd-run
+--on-active=10s`) — immediate supervisor restart is not a valid configuration for resumable
+updates on the fallback path. Operators using the fallback path without deferred restart
+may observe updates incorrectly marked `Failed`.
 
 **`ServiceMetadata` extensibility:** The in-process metadata query works only for the
 embedded agent. Future support for external services (agent, mqtt, scheduler) requires a
@@ -529,9 +798,16 @@ Standard gates apply. Additionally:
   `AwaitingRestart` and does not transition to `Failed`.
 - Unit tests for agent pipeline branching: resumable path sends result before post-hooks;
   non-resumable path sends result after post-hooks.
+- Unit test for early-result channel race: simulate JoinHandle completing before
+  `early_result_rx` is polled; verify `try_recv` drain prevents double-send.
 - Unit tests for timeout enforcement (use `start_paused = true`; only for tests calling
   tokio time APIs).
+- Unit test for `transition_to_awaiting_restart` CAS: rows_affected == 0 on race.
+- Unit test for `has_active_update_for_host`: `AwaitingRestart` status blocks dispatch.
 - Unit test for batch completion check: batch with one `AwaitingRestart` item must not be
   marked complete.
+- Unit test for `AwaitingRestartExecutor` skipping records where `execution_owner_service_id IS NULL`.
+- Unit test for self-update plugin's generated `releases_github` assignment config: asserts
+  `tag_strip_prefix == "v"` is present (guards against the most common version-mismatch failure).
 - The self-update discovery plugin integration test requires a running controller-standalone
   instance; mark `#[ignore]` and document in testing.md.
