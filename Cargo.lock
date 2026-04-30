@@ -8106,6 +8106,7 @@ dependencies = [
  "rmcp",
  "rootcause",
  "rustls",
+ "schemars 1.2.1",
  "sea-orm",
  "serde",
  "serde_json",
