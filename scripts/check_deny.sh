@@ -55,16 +55,16 @@ sanity_check() {
 }
 
 # HEAD
-# --disable-fetch: advisory DB was already fetched by the pre-push full check; fetching
-# again inside a git hook context can corrupt the advisory DB cache or interfere with the
-# repo's FETCH_HEAD when git-fetch-with-cli is true and git inherits hook env vars.
-cargo deny -f json check --disable-fetch > /dev/null 2> "$DENY_HEAD_TMP" || true
+# Unset git hook env vars so git-fetch-with-cli child process doesn't inherit GIT_DIR
+# and accidentally fetch into the project repo instead of ~/.cargo/advisory-dbs.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE 2>/dev/null || true
+cargo deny -f json check > /dev/null 2> "$DENY_HEAD_TMP" || true
 sanity_check "$DENY_HEAD_TMP" "HEAD"
 
 # Base
 git worktree add "$WORKTREE" "$BASE_REF" --detach -q
-# Use the current deny.toml for the base check (same --disable-fetch rationale).
 cp deny.toml "$WORKTREE/deny.toml"
+# --disable-fetch: advisory DB was just fetched by the HEAD check above.
 (cd "$WORKTREE" && cargo deny -f json check --disable-fetch > /dev/null 2> "$DENY_BASE_TMP") || true
 sanity_check "$DENY_BASE_TMP" "$BASE_REF"
 
