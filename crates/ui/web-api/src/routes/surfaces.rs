@@ -871,7 +871,9 @@ mod tests {
             "surface",
         )
         .expect("invalid permissions must be rejected");
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Unknown permission strings map to Permission::Other — user doesn't have it → 403.
+        // (Previously panicked → 500 before Permission gained an infallible FromStr.)
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[cfg(feature = "db-sqlite")]
