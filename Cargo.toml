@@ -87,7 +87,7 @@ rustix = { version = "1", default-features = false }
 libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
-uptrakit-frontend = { path = "frontend", version = "0.0.1" }
+uptrakit-frontend = { path = "frontend", version = "0.0.2" }
 uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
 uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.1" }
@@ -101,7 +101,7 @@ uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructur
 # Internal crates (all must be referenced via workspace = true in member Cargo.toml files)
 uptrakit-agent-core = { path = "crates/shared/agent-core", version = "0.0.1" }
 uptrakit-agent-runtime = { path = "crates/core/agent-runtime", version = "0.0.1", default-features = false }
-uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.1", default-features = false }
+uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.2", default-features = false }
 uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", version = "0.0.1", default-features = false }
 uptrakit-mqtt-runtime = { path = "crates/core/mqtt-runtime", version = "0.0.1", default-features = false }
 uptrakit-controller-runtime = { path = "crates/core/controller-runtime", version = "0.0.1", default-features = false }
@@ -127,7 +127,7 @@ uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", version = "0.0.1", de
 uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", version = "0.0.1", default-features = false }
 uptrakit-audit-log = { path = "crates/shared/audit-log", version = "0.0.1", default-features = false }
 uptrakit-build-info = { path = "crates/shared/build-info", version = "0.0.1" }
-uptrakit-cli = { path = "crates/ui/cli", version = "0.0.1" }
+uptrakit-cli = { path = "crates/ui/cli", version = "0.0.2" }
 uptrakit-plugin-releases-docker = { path = "crates/plugins/releases/docker", version = "0.0.1", default-features = false }
 uptrakit-plugin-releases-github = { path = "crates/plugins/releases/github", version = "0.0.1" }
 uptrakit-plugin-releases-gitlab = { path = "crates/plugins/releases/gitlab", version = "0.0.1" }

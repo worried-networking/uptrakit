@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.1...uptrakit-mqtt-v0.0.2) - 2026-04-30
+
+### Added
+
+- *(cli)* add unified --version build metadata across binaries
+
+### Fixed
+
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+
+### Other
+
+- *(release-plz)* unblock PR creation via git_only baseline
+- release v0.0.1
+- remove remaining MySQL/MariaDB code paths and comments
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- remove CODEREVIEW.md files
+- add extensibility-focused code review for all crates
+- add code review reports for 7 shared crates
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-mqtt-v0.0.1) - 2026-04-27
 
 ### Added

@@ -7,6 +7,773 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.1...uptrakit-agent-ssh-v0.0.2) - 2026-04-30
+
+### Added
+
+- add agent-side host feature probing and expose in REST API
+- *(agent)* handle config test requests on local and SSH agents
+- *(controller)* add embedded agent with machine-id-based coexistence
+- *(agent)* execute lifecycle hook plugins in update pipeline
+- *(display-version)* surface human-readable version labels from plugins
+- *(infra-core)* add #[non_exhaustive] to public plugin structs with constructors
+- *(wire)* confirm interactive PTY flag from agent in UpdateStartedPayload
+- *(agent-core)* implement ForwardingInteractiveExecutor in execute_update_interactive
+- *(agent-ssh)* advertise InteractiveUpdates and handle UpdateStdinData
+- *(agent-core)* add interactive update execution support
+- *(wire)* add interactive updates wire protocol types
+- *(service-sdk)* add send_auto_paginate for transparent pagination
+- *(logging)* add debug/info/trace logs to scheduler, version check, and extension dispatch
+- *(agent-core)* add retry logic for transient version check errors
+- instrument new code from main (extensions, SSE, event system, agent-core)
+- *(agent-core)* add #[instrument] spans to version check and update flows
+- *(agent)* add attestation gate before plugin execute_update
+- *(security)* add per-hook timeout and audit logging (ATK-17 Phase 1)
+- *(agent-core)* handle batch host package updates
+- *(wire)* add batch host package update messages and version check routing fields
+- add UpdateCategory enum, wire protocol field, and plugin interface
+- *(agent-core)* skip discovery for incompatible plugins
+- *(agent-core)* extract start_update() from handle_execute_update()
+- *(agent-core)* add keep_alive RAII handle vec to ConnectionContext
+- *(plugins)* add host compatibility detection and lifecycle hooks
+- *(controller)* synthesize GitHub/APT configs from PHS discovery
+- *(agent-core)* add ConnectionContext for SSH Docker host injection
+- *(logging)* add verbosity flags and structured log instrumentation
+- *(autodiscovery)* implement software autodiscovery feature
+- *(agent-ssh)* implement version check and update execution over SSH
+- *(audit-log)* auto-enrich actor_display via DbActorEnricher
+- *(audit)* add semantic audit log infrastructure
+- *(audit-log)* add uptrakit-audit-log crate with core types and dispatcher
+- *(cli)* add unified --version build metadata across binaries
+- *(agent-ssh)* add interactive SSH command execution with PTY
+- *(command)* add interactive PTY-based command execution
+- *(wire,proxmox,command)* add ReportPluginConfig wire messages, RemoteExecutor trait, and PVE guest exec modules
+- *(command)* add env var support to CommandSpec
+- *(command)* add StdioTunnel trait and CommandExecutor extension
+- *(command)* add privileged flag to CommandSpec and SudoAwareCommandExecutor
+- *(crypto)* add ECIES sealed-box encryption using P-256 + AES-256-GCM
+- *(crypto)* add table-aware ColumnAadEntry for column AAD registry
+- *(crypto)* add DataKeyRing, v3 format, and DEK wrap/unwrap
+- *(crypto)* add ENC:v2 column AAD registry and EncryptedString::new_with_aad
+- *(crypto)* add ENC:v2: context-bound AAD ciphertext format
+- *(proxmox)* extend protection policy with timeout fields
+- *(db)* add EmailChangeRequest entity
+- *(db)* add email_change_requests migration
+- *(global-github-provider)* add global runtime and tiny client integration
+- *(settings)* add shared GitHub provider settings foundation
+- *(update-history)* add shared protection and recovery fields
+- *(updates)* make restart recovery owner-aware
+- *(auth)* enforce OIDC private issuer policy by tenancy mode
+- add foundation types for plugin config testing (dry-run)
+- *(controller)* persist embedded service ownership and yield state
+- *(db)* add tenant_service_config and global_service_config tables; drop mqtt tables
+- *(db)* add pagination indexes for MQTT software-states host queries
+- *(db)* add composite index for hook plugin role queries
+- *(db)* add compound index on host_software_item_plugins(software_item_id, plugin_type)
+- *(db)* add notification permissions migration
+- *(db)* add output_truncated flag and MySQL LONGTEXT migration for update_history
+- *(db)* add composite index on host_software_items for updatable filter
+- *(db)* add functional indexes for lower(name) host sorting
+- *(db)* add partial index for per-host queued update FIFO dispatch
+- *(db)* add plugin_type_settings table and update host_software_item_plugins schema
+- *(db)* add icon_url column to software_items
+- *(update-history)* persist interactive flag and broadcast UpdateStarted event
+- *(permissions)* replace 16 coarse permissions with 32 granular ones
+- *(db)* case-insensitive sort for software items list
+- *(db)* unified software tracking data model
+- add host tags database schema, entities, and API types
+- *(db)* add migration for host_software_item qualifier and surrogate PK
+- *(docker)* use image-level package_identifier with qualifier for per-container tracking
+- *(proxmox)* add DB-level pagination to host mapping queries
+- *(db)* add composite index host_software_items(software_item_id, host_id)
+- *(proxmox)* collect machine_id from QEMU guests during discovery
+- *(db)* add proxmox_host_mappings migration and entity
+- *(db,sdk)* add service_app_name to enrollment and DB entities
+- *(db)* add partial unique index for per-host update locking
+- *(db)* add discover_host_packages scheduled task type and migration
+- *(db)* add system_enrollment_tokens table and entity
+- *(auth)* add view_audit_logs and view_system_audit_logs permissions
+- *(db)* add data_encryption_keys migration and entity
+- *(db)* add audit_logs and system_audit_logs entities and migration
+- *(auth)* add view_system_services and manage_system_services permissions
+- *(db)* add system_services and system_service_certificates entities and migration
+- *(auth)* add ManageCommands permission separate from ManageSoftware
+- *(db)* add cert_lifetime_hours column to services
+- *(db)* add has_update generated column and covering indexes to host_packages
+- *(scheduler-engine,db)* add detect_version task and rename version_check to fetch_releases
+- *(db)* add host_packages, host_package_ignores, host_package_update_history entities and migration
+- *(db)* add update_batches table, BatchStatus enum, and batch_id FK on update_history
+- *(db)* add update_category column to host_software_items and update_history
+- *(db)* add crl_cache entity, migration, and CrlRenewal task type
+- *(db)* add global_settings table and migrate data
+- *(db)* add notification_channels, notification_rules, notification_log tables
+- *(db)* add discovery allowlist tables and SeaORM entities
+- *(wire)* add scheduler capabilities, ServiceCredentials, RequestCaRotation
+- *(db)* add enrollment_tokens table and SeaORM entity
+- *(api)* rename provider-configs to plugin-configs
+- *(db)* replace initiated_by with actor_type/actor_id; add HA discovery columns
+- add centralised DB-backed task scheduler with HA-safe optimistic locking
+- add mqtt client connection status
+- *(db,enrollment,cli,controller)* encrypt credentials at rest and harden TOFU
+- *(controller)* store managed CA in database
+- add cross-controller notification delivery via outbox pattern
+- *(controller)* add version-gated CRL rebuild for cross-instance revocation propagation
+- *(web-api)* add version-gated periodic settings reload for cross-instance consistency
+- *(web-api)* add unified database-backed rate limiting for auth endpoints
+- [**breaking**] support multiple MQTT clients per tenant
+- require registration token for OIDC first registration
+- add agent version tracking and version check wire protocol
+- add update_history entity with read-only REST API
+- *(shared-db)* add mqtt_lease entity
+- add available_versions entity and last_updated_at to host_software_items
+- add multi-tenancy database infrastructure and tenant-scoped queries
+- *(db)* add SoftwareItem and HostSoftwareItem SeaORM entities
+- *(db)* add provider_configs table and entity
+- add Host entity with machine_id-based identity
+- *(controller,agent,web)* implement CA key rotation with dual-CA support
+- *(notifications)* add SmtpNotConfigured error variant
+- *(notifications)* add restore_config_secrets to NotificationPlugin and NotificationOps
+- *(notifications)* add #[non_exhaustive] to DeliveryMessage/MessageAction; add Copy to filter enums
+- *(notifications)* add notification plugin crates
+- *(dashboard-icons)* add diagnostics and mocked coverage
+- implement PluginBase + NotificationTransportPlugin on notification plugins
+- implement PluginBase + subtraits on all 17 software plugins
+- *(phs)* set prefer_interactive=true on PHS Shell discovery targets
+- *(phs)* route all PHS updates through /usr/bin/update
+- *(plugins)* add NpmError and ProxmoxHelperScriptsError typed enums
+- *(sudoers)* add args_suffix to SudoCommandEntry for subcommand restrictions
+- *(plugins)* add `ConfigFormSchema` trait and implementations
+- *(plugins)* add spans to plugin detect/fetch/update methods
+- *(plugins)* add tracking_system field to DiscoveredSoftware
+- *(discovery/phs)* add Forgejo/Codeberg app detection
+- *(phs)* add DetectHostCompatibility to Proxmox Helper Scripts plugin
+- *(phs)* extend PHS discovery plugin to classify npm-managed containers
+- *(phs-plugin)* detect github.com/…/raw/… CT script URLs
+- *(plugins)* declare ConfigTest capability across all plugins
+- *(shell)* add prefer_interactive field to ShellConfig
+- *(security)* fix create-path validation gap + dangerous pattern audit (ATK-16 Phase 2)
+- *(security)* add command validation for plugin configs (ATK-16 Phase 1)
+- *(plugins)* add systemd and shell hook plugin crates
+- *(infrastructure-core)* add output_tx field to ControllerProtectionContext
+- *(proxmox)* least-privilege PVE roles with auto-provisioning on sync
+- *(proxmox)* recreate PVE API token and config on host sync
+- *(plugin-core)* add global provider lookup seam
+- *(web-api)* thread dispatch context through update lifecycle
+- *(plugin-core)* add controller update protection singleton role
+- port representative plugins to native surfaces
+- *(plugin-core)* add shared helpers and test runtime constructors
+- *(plugins)* add build_base_http_client() for shared controller HTTP client
+- *(api)* validate host compatibility at role assignment time
+- *(plugins)* add SoftwareItemLifecycle capability and plugin subtrait
+- *(plugins)* add UpdateLifecyclePlugin trait and UpdateLifecycleContext
+- *(bootstrap)* detect FQDN for Proxmox guest bootstrap
+- extend PluginOps with notification methods and PluginRegistry struct
+- add PluginBase trait hierarchy with 10 capability subtraits
+- add type_settings_form_schema to ConfigFormSchema trait and registry
+- *(plugin-infra-core)* add agent-side infrastructure extension point
+- *(types)* add AttestationStatus, extend ReleaseAsset and ReleaseInfo
+- *(plugin-infrastructure-core)* add batch_detect_installed_version and batch_fetch_releases to Plugin trait
+- *(plugin-infrastructure-core)* add BatchDetectItem/Result and BatchFetchItem/Result types
+- *(plugin-core)* add execute_batch_update() trait method and batch update types
+- *(apt)* detect security updates from apt-cache madison source URL
+- *(shared-types)* move PluginCapability to shared-types, remove all_known()
+- *(sudoers)* add SudoHelperScript for argument-validated sudo commands
+- *(proxmox)* add timeout controls to protection surfaces
+- *(proxmox)* add timeout columns to protection policy schema
+- *(update-dispatch)* add output_tx param to prepare_pre_update_protection; stream lines in Proxmox plugin
+- *(proxmox)* emit SurfaceEntityRef for matched_host with EntityLinkColumn capability
+- *(proxmox)* replace degraded boundary surface with full proxmox_hosts_surface
+- *(proxmox)* make handle_list optional on plugin_config_id, add config_name batch lookup
+- *(hosts)* sort hosts by lower(name) ascending by default
+- *(proxmox)* regenerate PVE API token when user exists but config is missing
+- implement PluginBase + infra subtraits on Proxmox agent plugin
+- *(routes)* update all route handlers to use granular permission extractors
+- *(plugin-proxmox)* implement AgentInfraPlugin and GuestExecProvider
+- *(proxmox)* add detect_pve_cluster_nodes helper
+- *(agent-ssh,proxmox)* PVE node matching by (pve_node_name, plugin_config_id)
+- *(proxmox)* add detect_pve_node_name and verify_pve_privileges
+- *(extension-framework)* add destructive action confirmation dialog
+- *(proxmox)* add list-all-unmatched action for cross-config guest discovery
+- *(wire)* add `list` flag to FieldDef for array textarea fields
+- *(proxmox)* semi-automatic host matching with inline suggestions
+- *(agent-ssh)* PVE cluster deduplication and tenant-scoped credentials
+- *(proxmox,frontend)* populate Manual Match host dropdown dynamically
+- *(proxmox)* add comprehensive debug/trace logging throughout plugin
+- *(proxmox)* use context selector and typed permissions in extension UI
+- *(proxmox)* add discovery, matching, and extension actions
+- *(proxmox)* add Plugin impl and registry registration
+- *(proxmox)* add plugin crate with config, client, and API types
+- *(plugin-registry)* add test-support mock release fetchers
+- *(registry)* add export contract re-exports and visibility tests
+- *(plugins)* register dashboard-icons in plugin registry and controller
+- *(docker)* add switch-tag extension action for per-host tag switching
+- *(registry)* register cargo plugin in plugin registry
+- *(registry)* register Snap plugin in plugin registry
+- *(registry)* register APK plugin in PluginRegistry
+- register BSD pkg plugin type and wire protocol updates
+- *(registry)* register Pacman plugin in plugin registry
+- *(plugin)* add DNF package manager plugin
+- *(registry)* make extension_prefix declarative in register_plugins! macro
+- *(plugin-infra-registry)* add agent-infra feature and registry factory
+- *(registry)* generate `config_form_schema()` dispatch in macro
+- *(extensions)* implement plugin-backed extension action dispatch
+- *(web-api)* add extension registry and proxy mechanism
+- *(mas)* include Mac App Store plugin in autodiscovery coverage
+- *(plugin)* add Mac App Store (mas) package manager plugin
+- *(registry)* register ReleasesForgejo and ReleasesGitlab plugin types
+- *(api)* add GET /api/v1/plugin-types with sample_config per type
+- *(registry)* add compatible_sudo_commands_for_host() async method
+- *(registry)* register package_manager_npm plugin in plugin registry
+- *(registry)* expose plugin capabilities via capabilities_for_str
+- *(apk)* add APK (Alpine Linux) package manager plugin
+- *(plugin-apt)* native batch_detect_installed_version and batch_fetch_releases
+- *(plugins)* implement batch updates for APT, Homebrew, and npm plugins
+- *(apt-plugin)* set DEBIAN_FRONTEND=noninteractive for apt-get commands
+- *(cargo-plugin)* add --locked flag to cargo install (default on)
+- *(cargo)* add uptrakit-plugin-package-manager-cargo crate
+- *(homebrew)* skip packages with version=latest from discovery
+- *(homebrew)* exclude auto-updating casks from discovery
+- *(plugin-homebrew)* native batch_detect_installed_version and batch_fetch_releases
+- *(npm)* add optional registry_url config field for private registries
+- *(plugin-npm)* native batch_detect_installed_version
+- *(npm)* add uptrakit-plugin-package-manager-npm crate and PluginType variant
+- *(plugin)* add Pacman package manager plugin
+- *(plugin)* add BSD pkg package manager plugin
+- add Snap package manager plugin crate and PluginType variant
+- *(docker)* strip tag from software item name during autodiscovery
+- *(docker)* extract resolve_image_info helper and populate installed_display_version during discovery
+- *(docker)* fetch and store published_at from OCI image manifests
+- *(docker)* platform-aware version detection and release fetching
+- *(docker)* add OCI manifest index types and extend LocalImageDigest with platform fields
+- *(docker)* add ANSI in-place progress bars for docker pull output
+- *(docker)* add system Docker credential store integration
+- *(docker)* add container label-based discovery filtering
+- *(docker)* add TLS support for TCP remote Docker daemon
+- *(docker)* add Podman support and rootless socket auto-detection
+- *(docker)* support per-container tracking for multiple containers with same image
+- *(agent)* add operator freeze file to halt update execution
+- *(docker-plugin)* switch to digest-based tracking with container auto-recreation
+- *(docker-plugin)* add DockerSocketProxy for Docker-over-SSH
+- *(docker)* use bollard ping for DetectHostCompatibility check
+- *(docker)* add DetectHostCompatibility using 'which docker'
+- *(releases/forgejo)* add Forgejo Releases plugin
+- *(releases-github)* add asset download and execute_update support
+- *(plugin/github)* add attestation verification in fetch_releases
+- *(releases/gitlab)* add GitLab Releases plugin
+
+### Fixed
+
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- replace #[cfg(not(feature))] with additive feature patterns
+- *(wire)* add Other(String) catch-all to UpdateFinalStatus and DisconnectReason, Other{raw} to HookCommand for rolling-upgrade safety
+- *(interactive)* stop controller from appending \n to PTY output chunks
+- *(agent)* run long operations in background to prevent WS write timeouts
+- *(errors)* remove #[from] on variants that have paired impl_report_conversion!
+- *(agent-core)* add compute-only run_* functions for background spawning
+- *(security)* disable HTTP redirect following on outbound clients (ATK-07/ATK-12)
+- *(agent-core)* warn-and-skip unknown HookCommand variant
+- *(shared-types)* add Other(String) catch-all to BatchStatus and UpdateCategory
+- *(agent-core)* send UpdateResult via send() to prevent silent drop
+- *(agent-core)* avoid double 'install command failed:' prefix in update errors
+- *(agent-core)* improve update failure logging and output capture
+- *(audit)* type runtime audit emitter actions
+- *(audit)* enforce typed semantic action producers
+- *(audit)* align action taxonomy with the semantic audit contract
+- *(ha)* revert bounded audit log channel — audit entries must never be dropped
+- *(ha)* bound audit log dispatcher channel to prevent unbounded memory growth
+- *(agent-ssh)* detect restricted sudoers with sudo -l
+- *(command)* delegate supports_interactive/execute_interactive through SudoAwareCommandExecutor
+- *(command)* replace panic in NoopCommandExecutor with proper error
+- *(command,agent-ssh)* use SETENV: + inline sudo env var forwarding
+- *(command)* redirect spawned process stdin to /dev/null
+- *(command)* replace unimplemented!() with typed error for unknown HookShell
+- *(command)* kill child process on timeout via kill_on_drop
+- frontend accessibility, security, and UX improvements with expanded tests
+- resolve top 5 code review findings across mqtt, agent-ssh, web-api-types, shared-types, and command
+- *(crypto)* convert DataKeyRing::new panic to Result
+- *(crypto)* remove needless borrows in ECIES agree calls
+- *(nats)* encrypt plugin configs in NATS-published messages (ATK-14)
+- *(crypto)* use Release/Acquire ordering for PLAINTEXT_MODE atomic
+- *(crypto)* enable plaintext mode when --allow-plaintext-secrets has no master key
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- resolve remaining codereview issues with ping interval, retry, and auto-refresh
+- resolve top 5 codereview issues across codebase
+- resolve top 5 code review findings across shared-db, directories, web-api-types, and web-api
+- resolve top 5 code review findings across directories, openapi-client, CLI, web-api-types, and shared-db
+- resolve top 5 code review findings across 12 crates and frontend
+- resolve top 5 code review findings across 6 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- *(agent-ssh)* ensure state directory exists before use
+- *(security)* resolve SEC-01, DIR-01, DB-01 from code review
+- *(directories)* use org domain for project dirs
+- quality gate fixups for profile management
+- *(update-history)* make migration sqlite-safe and refresh test fixtures
+- *(db)* restore DbBackend import in migration helpers
+- *(db)* MariaDB workarounds for indexes and table recreation
+- *(db)* change TEXT to VARCHAR for indexed columns (MariaDB compat)
+- *(db)* quote MySQL reserved word 'key' in migrations
+- *(db)* rewrite permission migrations for MariaDB compatibility
+- *(db)* MariaDB compatibility for initial migration
+- *(db)* add MariaDB migration helpers for FK-backed index drops
+- *(scheduler)* rename DiscoverHostPackages to DiscoverSoftware to match DB value
+- *(db_migrate)* update table count for host_tags tables
+- *(db)* reference correct table in hsip migration FK
+- *(db)* simplify autodiscovery ignores to tenant-wide name-based rules
+- *(hosts)* create new host record when deactivated host re-reports
+- *(db)* wrap SQLite migrations in a transaction to prevent pool race
+- *(db)* add composite index on update_history(host_id, software_item_id, status)
+- *(db)* add missing migration file for created_at format repair
+- *(db)* repair permission created_at stored in time::Display format
+- *(db)* replace PRAGMA FK disable with delete-fix-reinsert in repair migration
+- *(db)* store permission UUIDs as 16-byte BLOBs on SQLite
+- *(db)* restore idx_update_history_created_at after update_batches migration
+- *(db)* make host_packages recreation migration idempotent
+- *(db)* recreate host_packages table to add has_update generated column
+- *(shared-types,db,web-api)* move UpdateStatus to shared/types and fix in_progress status bug
+- *(web-api)* propagate token revocations via NATS and persist to DB
+- *(scheduler)* add rolling-upgrade safety to ScheduledTaskType
+- *(docker,web-api)* replace prohibited cfg(not(feature)) with additive cfg patterns
+- *(db)* remove duplicate indexes; add missing composite indexes
+- *(db)* use sqlx ErrorKind for unique constraint detection
+- *(db)* remove orphaned git conflict markers from migration mod.rs
+- *(db)* add missing indexes and remove unwrap() in Default impl
+- resolve top 5 codereview issues across codebase
+- eliminate .expect() calls and improve error chain preservation
+- resolve top 5 code review findings across 8 crates
+- address codereview high-risk issues
+- harden ws message handling
+- *(web-api,wire,types)* implement code review fix plans #9-#16
+- *(shared-db)* handle nullable encrypted strings
+- *(plugins)* replace rustls-platform-verifier with webpki-roots for HTTP clients
+- update installed_display_version: None in all DiscoveredSoftware struct literals
+- use brace-wrapped syntax in impl_plugin_base_config macro
+- *(plugins)* apply SSRF-safe DNS resolver to all HTTP clients
+- *(security)* add SSRF validation to Docker registry and strengthen GitHub component checks
+- *(command,agent-ssh)* add needs_setenv field; apply SETENV: only where needed
+- *(plugins)* replace .unwrap() with safe alternatives in parse_owner_repo and is_valid_deb_package
+- *(plugins)* add HTTP client timeouts to service-sdk, github, and phs plugins
+- *(phs)* detect npm apps when npm install is only in the install script
+- *(phs)* set TERM=xterm in update helper to prevent clear failure
+- *(phs)* add sudo and helper script for PHS update command
+- *(phs-plugin)* use check_for_gh_release key as version file basename
+- *(phs-plugin)* replace broad cat sudoers with validated helper script
+- *(phs-plugin)* read version from /root/.<slug> with sudo
+- make plugin surface API the real public boundary
+- *(plugins)* declare VersionDetection, ReleaseFetching, and UpdateExecution capabilities
+- *(shell-plugin)* remove dead ShellError/ShellResult types
+- *(plugins)* update capability count assertions for ConfigTest
+- resolve clippy collapsible-if warnings
+- *(surfaces,proxmox)* fix proxmox.hosts context selector and discovery
+- migrate SurfaceDescriptor struct literals to builder across all external crates
+- *(catalog)* gracefully skip lifecycle plugins with missing global providers
+- *(plugin-core)* align provider lookup metadata with spec
+- address task 8 follow-up verification blockers
+- *(plugin-core)* fix mismatched type in catalog test (pre-existing)
+- *(plugin-core)* ControllerRuntime embeds StandardHostRuntime with LocalCommandExecutor
+- *(plugin-core)* align batch helpers with Design Doc spec
+- add #[non_exhaustive] to PluginOpsError
+- *(extensions)* scope plugin extension actions per-extension to fix notification channel buttons
+- *(proxmox)* write pct/qm sudoers entries during host bootstrap
+- *(agent-ssh)* render sudoers command specs safely
+- *(plugin-infrastructure-core)* add #[non_exhaustive] to HostCompatibility and PluginError
+- *(proxmox)* add migration down, derive help text from constants, add item-override timeout test
+- *(proxmox)* clamp negative policy timeout values to minimum 1 second
+- *(proxmox)* split snapshot and backup protection timeouts
+- *(proxmox)* fix update protection never running in embedded builds
+- *(proxmox)* scope host mapping uniqueness to vmid, not node
+- *(proxmox,surfaces)* cap per_page at 200; omit empty required_for_interactions
+- *(proxmox)* enforce tenant isolation in load_proxmox_config
+- *(proxmox-surface)* tenant-safe config name lookup + align per_page cap to max_page_size
+- *(proxmox)* filter plugin config selector to proxmox type only
+- *(clippy)* resolve all clippy warnings surfaced by dependency bumps
+- *(proxmox)* fix bootstrap-proxmox-guest reading wrong key from list-all-unmatched
+- *(proxmox)* return options array for list-discovered-guests action
+- resolve rebase conflicts in cargo plugin and proxmox test
+- *(agent-ssh)* replace println! with structured tracing in bootstrap
+- *(proxmox)* harden controller-side http client
+- *(extension-framework)* fix PanelPosition serde and add tab_group field
+- *(proxmox)* use %status display format in tracing field
+- *(agent-ssh)* run plugin migrations at startup
+- *(proxmox)* use full paths + sudo for pct/qm; add to sudoers on PVE sync
+- *(proxmox,agent-ssh)* fix approve-match, conditional row actions, guest bootstrap UX
+- *(proxmox,frontend)* populate hidden form fields from row context in extension actions
+- *(proxmox)* cover privilege-separation token ACL assignment in help text
+- *(proxmox)* document required API token privileges in form help text
+- *(web-api)* remove direct uptrakit-notification-plugin-core dep
+- make all pre-push quality gates pass
+- update TestPluginOps mock for new 5-trait PluginOps model after rebase
+- *(plugin-registry)* suppress unused_mut lint on feature-gated notification push blocks
+- *(settings)* suppress spurious warnings for plugin-owned raw settings keys
+- *(test)* update mask_config_secrets_cargo_is_noop for use_locked default
+- address safety and correctness issues across crates
+- *(plugin-registry)* add #[must_use] to mask_config_secrets functions
+- *(agent-ssh)* graceful sudoers when no commands resolve; suppress compat check warnings
+- *(apt)* replace unreachable guard with unwrap_or for first char
+- *(apt)* change default discovery to all packages instead of manual
+- *(apt-plugin)* emit DiscoveryTarget in discover-all mode
+- *(plugins)* validate to_version parameter in npm and apt plugins
+- *(plugins)* silence spurious WARN on incompatible host during discovery
+- *(npm)* emit DiscoveryTarget in discover_software
+- *(cargo)* sort releases descending so scheduler picks newest version
+- mark cargo-discovered software items as featured
+- *(mas)* rename dead_code suppressed config field to _config
+- *(plugin-npm)* replace .unwrap() with let/else in validate_npm_name_part
+- *(npm-plugin)* add connect and request timeouts to HTTP client
+- *(docker)* prevent test mock replacement by lazy daemon upgrade
+- *(docker-plugin)* call ensure_daemon_client before all daemon operations
+- *(docker)* use platform-specific digest as installed_version during discovery
+- *(docker)* return error instead of falling back to index digest on transient platform registry failure
+- *(docker)* auto-detect display version from local image os/arch when no platform configured
+- *(docker)* return image-index digest when no platform is configured
+- *(docker)* deduplicate pull progress output by (id, status)
+- *(docker)* fall back from HEAD to GET on 403 for GHCR public packages
+- *(docker)* parse token response when both token and access_token present
+- *(docker)* allow separate auth realm host for Docker Hub fetch_releases
+- *(docker)* declare discovery capabilities unconditionally
+- *(security)* close plugin config validation gaps
+- *(docker)* add 5-second timeout to detect_host_compatibility ping
+- *(docker-proxy)* use select! to ensure clean connection close after each request
+- *(docker-plugin)* replace std::sync::Mutex with parking_lot::Mutex in RegistryAuth
+- *(docker-plugin)* emit DiscoveryTarget in discover-all mode
+- *(docker-plugin)* gate ping and HostCompatibility behind daemon feature
+- *(docker-plugin)* satisfy clippy single-pattern destructuring in auth test
+- *(docker)* validate auth realm URL against registry host to prevent SSRF
+- *(docker)* wire ssh_key_path into bollard connect_with_ssh
+- *(plugins)* implement pagination follow-through in GitHub, GitLab, Forgejo
+- *(plugins)* use StatusCode in ApiError for github, forgejo, gitlab
+- *(security)* add SsrfSafeResolver to OIDC, GitHub, and Telegram HTTP clients
+- *(github-plugin)* upload asset to remote host before installing
+- *(github-plugin)* declare all sudo commands unconditionally
+
+### Other
+
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(workspace)* rename uptrakit-internal-wire to uptrakit-wire
+- Implement Track C semantic boundary gate
+- isolate plugin boundaries in track a
+- *(agent-core)* cover public batch_check_versions factory path
+- *(agent-core)* align batch CI cache key and document test preconditions
+- *(agent-core)* add batch failure-path coverage and CI workflow
+- Add MockTransport regressions and downstream compile gate
+- replace PluginType enum with PluginTypeId newtype
+- migrate all call sites to catalog/descriptor model
+- *(types)* add foundation types for plugin framework redesign
+- *(codereview)* update shared library review findings
+- *(codereview)* refresh Rust backend review files
+- *(agent-core)* move host_info to shared agent-core crate
+- *(wire,agent-core)* introduce ServiceTransport trait for transport abstraction
+- extract helpers to reduce cyclomatic complexity (fixes 6,7,9,10)
+- *(agent-core)* extract hook execution phase helper from execute_update
+- *(agent-core)* extract batch grouping and execution from batch_check_versions
+- update registry and consumers to use PluginBase + subtrait accessors
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- remove fixed issues from all CODEREVIEW.md files
+- *(agent-core)* extract run_with_retry helper, remove retry duplication
+- update plugins, agents, scheduler for unified tracking
+- *(wire)* fix event loop starvation, unify Duration types, split wire lib.rs into modules
+- strike through fixed CODEREVIEW entries from top-5 fix session
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- update CODEREVIEW files to reflect fixed issues
+- *(agent-core)* add unit tests for batch_host_package_update_inner and run_check_versions
+- *(agent-core)* improve tracing instrumentation for updates and version checks
+- add cargo-llvm-cov test coverage analysis to CODEREVIEW.md files
+- update security architecture, AGENTS and CODEREVIEW files
+- fmt
+- remove resolved issues from CODEREVIEW.md files
+- *(agent-core)* scope RefreshPackageIndex to fetch groups only
+- *(agent-core)* use batch version check in handle_check_versions
+- *(codereview)* update backend code review findings
+- migrate internal path deps to workspace = true
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- update tests across crates for digest-based docker tracking
+- document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
+- *(types,wire,web-api-types)* add #[non_exhaustive] to public enums and update match arms
+- *(plugins)* make all plugin new() async, remove block_on() panic
+- *(agent-core)* simplify ConnectionContext after StdioTunnel
+- *(codereview)* remove fixed and accepted issues from codereview files
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- apply cargo fmt to all changed files
+- *(docker-plugin)* feature-gate bollard behind `daemon`, switch to aws-lc-rs
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- apply cargo fmt across workspace
+- *(plugins)* rename crate packages to encode category
+- *(types)* rename PluginType variants and string representations
+- *(deps)* promote plugin-core, plugin-registry, and command to workspace deps
+- *(github)* owner/repo → package_identifier; fetch_releases only
+- *(agent-core)* update version check and update to use role-based plugin assignments
+- update documentation for plugin architecture
+- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
+- rename providers to plugins throughout the codebase
+- apply cargo fmt to entire workspace
+- *(audit)* drop parse_wire helper
+- *(audit)* remove redundant audit entry builder
+- *(audit)* restore conversion-friendly action constructors
+- *(audit-log)* remove unused tracing-subscriber dependency
+- add `publish = false` to internal-only crates
+- *(shared)* add tracing to foundation crates (backoff, directories, crypto, wire)
+- *(service-sdk)* extract Backoff into new uptrakit-backoff crate
+- release v0.0.1
+- remove remaining MySQL/MariaDB code paths and comments
+- remove CODEREVIEW.md files
+- add extensibility-focused code review for all crates
+- add code review reports for 7 shared crates
+- *(command)* move shared types to break executor/interactive cycle
+- *(command)* promote build_remote_command_string to public API
+- fix top-5 code-review issues and repair reencrypt tests
+- *(codereview)* remove fixed issues, update summaries
+- *(command)* extract apply_timeout helper to eliminate duplicate logic
+- remove obsolete TESTCOV files
+- *(codereview)* resolve all remaining open code review findings
+- *(codereview)* resolve top 5 open code review findings (round 3)
+- *(codereview)* resolve top 5 open code review findings
+- rebase onto main and fix post-rebase build issues
+- replace pause() calls with start_paused = true in all time-dependent tests
+- apply next-5 code review fixes (Issues 6–10)
+- apply cargo fmt formatting across workspace
+- refresh TESTCOV.md with cargo-llvm-cov coverage data after rebase
+- add unit tests for next 10 uncovered critical paths
+- add test coverage analysis (TESTCOV.md) for 16 crates
+- cargo fmt + fix clippy await_holding_lock in shared-db test
+- update CODEREVIEW files and documentation for resolved issues
+- consolidate UpdateOutputStream into OutputStreamType and remove ShellType alias
+- add extensibility-focused code review findings
+- add code review results for shared crates
+- *(deps)* replace workspace-wide tokio full with per-crate minimal features
+- inject CommandExecutor into providers for transport-agnostic command dispatch
+- cargo fmt
+- fix top 5 code review issues (SDK-04, CMD-04, PCORE-02, DB-02, controller decomposition)
+- resolve top 5 code review issues across workspace
+- replace Result<T, String> in crypto.rs and migrate bail!() codebase-wide
+- *(agent,provider-core)* extract command execution into uptrakit-command crate
+- *(codereview)* full 14-dimension workspace review cycle
+- *(codereview)* extend backend review — 14-dimension analysis (2026-03-15)
+- *(crypto)* extract v1/v2/v3/data_key_ring/encrypted_string/tests modules
+- fmt
+- *(crypto)* remove v1 support; unify API to always require AAD
+- eliminate raw SQL from tests and migrations
+- *(crypto)* remove assertion-free test_is_plaintext_mode_default_false
+- *(crypto)* gate sea-orm impls behind optional feature
+- extract crypto module into standalone uptrakit-crypto crate
+- migrate external deps to workspace = true
+- add security-critical edge-case tests for directories crate
+- clean up workspace dependencies
+- enforce rootcause best practices and migrate errors to thiserror
+- [**breaking**] enforce rootcause Report<E> error handling across all crates
+- *(directories)* replace AppKind enum with plain &str parameter
+- [**breaking**] use cross-platform directories with config/state separation
+- *(controller-boundaries)* type plugin and web surface contracts
+- remove all MySQL/MariaDB references from documentation
+- *(db)* remove MySQL-specific migration helpers and workarounds
+- *(db)* remove MySQL/MariaDB feature flags from all crates
+- *(codereview)* update database and scheduler-engine review findings
+- *(controller)* use controller DB for embedded SSH agent
+- *(core)* remove shared MQTT-specific config ownership
+- move TenantDb to shared-db for cross-crate access
+- *(notifications)* extract raw settings store to break cross-layer dependency
+- *(shared)* tighten pub to pub(crate) in internal shared crates
+- move Proxmox controller migrations into plugin crate
+- stop auto-creating plugin_configs for package managers
+- *(settings)* rename extra_sans to sans across settings infrastructure
+- *(db)* extract shared SQLite table-recreation helpers
+- *(scheduler)* replace cron expressions with interval + jitter
+- *(db)* replace remaining raw SQL in initial migration with sea_query builders
+- *(db)* replace all avoidable raw SQL in migrations with sea_query builders
+- *(codereview)* remove fixed issues and update summaries
+- *(scheduler)* categorize tasks as internal vs external
+- *(codereview)* remove confirmed-fixed issues from all CODEREVIEW.md files
+- *(codereview)* remove fixed issues from CODEREVIEW.md files
+- *(shared-db)* remove dead code, crypto shim, and convenience re-exports
+- *(web-api)* move AuthMethod from shared-db to web-api
+- remove fixed and resolved entries from CODEREVIEW.md files
+- apply cargo fmt and prettier formatting
+- remove DB outbox, add NATS feature foundation
+- fix AGENTS.md crate layout, update dev docs, and clean up CODEREVIEW files
+- *(db)* rename oidc_providers deleted_at to deactivated_at
+- *(db)* replace service_type with capabilities column, rename target_service_type
+- *(controller)* role-based version check with controller-side fetch
+- *(web-api)* update queries for role-based plugin assignments
+- *(db)* update SeaORM entities for role-based plugin system
+- *(db)* role-based plugin assignments and per-host latest version
+- *(db)* merge all migrations into one and rename to plugin_configs
+- *(shared-db)* move controller migrations into shared-db crate
+- remove all fixed findings from CODEREVIEW.md files
+- add comprehensive code review findings
+- add comprehensive code review findings
+- *(software-items)* decouple software items from provider configs
+- *(codereview)* resolve top 5 open code review findings
+- introduce TenantDb query helpers and eliminate manual tenant_id filters
+- apply top-5 code review fixes (Issues 1–5)
+- remove upstream crate tests, add AsyncAPI spec conformance
+- *(types)* use Uuid instead of String for all entity ID fields
+- cargo fmt
+- fix top 5 code review issues (ARCH-04, ARCH-02, WAT-03, SEC-03, MQTT-04)
+- fix top 5 code review issues (DB-05, OCSP, HA-04, CLI-04, session txn)
+- mark XC-06, PREG-05, WAT-02, WAT-08, WAT-09, DB-05, SDK-03 as FIXED
+- *(shared-types,web-api)* add DeviceAuthStatus enum, replace String across DB/API/logic (WAT-02, DB-05)
+- drop hex, urlencoding and open crates
+- [**breaking**] unify agents and MQTT services into single Service entity
+- *(mqtt)* drop websocket broker transport
+- *(mqtt)* replace direct DB access with WebSocket/mTLS controller communication
+- [**breaking**] move MQTT settings to dedicated mqtt_clients table
+- add publish=false to the non-publishable crates
+- *(web)* replace in-memory auth flow stores with DB-backed storage
+- *(db)* replace expect with fallback in RoleMapping serialization
+- Merge branch 'feature/cli-basic'
+- Merge branch 'feature/ca-rotation'
+- oidc and settings
+- CRL
+- cert revokation
+- agent registration
+- auth
+- *(surfaces)* remove extension-era runtime leftovers
+- *(plugins)* add extension handlers to notification plugins
+- *(plugins)* unify plugin registries — eliminate NotificationPluginRegistry
+- *(notifications)* move extension definitions from registry to plugin crates
+- *(plugins)* rename PosixHostRuntime to StandardHostRuntime in test code
+- *(plugins)* migrate all plugins from require_posix_executor to runtime.executor()
+- *(plugins)* add declare_plugin! macro and migrate software/hook/release/infra plugins
+- *(codereview)* update plugin system review findings
+- extract constructors and shared helpers to reduce complexity
+- migrate all plugins from Plugin trait to PluginBase + subtraits
+- *(codereview)* prune resolved findings
+- remove resolved code review findings from CODEREVIEW.md files
+- *(phs)* rename Forgejo references to Codeberg in PHS discovery
+- *(phs)* remove phs_update.sh helper; use inline sudo env var forwarding
+- *(codereview)* remove fixed issues and add constant-time comparison guidance
+- *(plugin-registry)* move validate_identifier into register_plugins! macro
+- apply rustfmt after rebasing onto main
+- *(phs-plugin)* drop multi-script alt-URL tests
+- *(plugins)* move crate directories into category subdirectories
+- add missing attestation/digest fields to struct literals
+- *(types)* replace HostFeature enum with forward-compatible Cow newtype
+- *(infra-core)* replace uptrakit_wire imports with uptrakit_surfaces / uptrakit_shared_types
+- *(infra-core)* swap uptrakit-wire dep for uptrakit-surfaces
+- *(package-managers)* type validator helper contracts
+- *(agent-infra)* type guest and proxy error contracts
+- *(plugin-core)* type shared http client builder errors
+- *(controller-boundaries)* type docker and proxmox surface requests
+- *(runtime-support)* extract ssh runtime flows and reuse batch helpers
+- *(deps)* bump tokio-tungstenite 0.28 → 0.29; fix pre-existing test gaps
+- *(plugin-core)* cover controller protection singleton accessor
+- remove extension framework leftovers
+- delete extension compatibility layer
+- make plugin surface authoring fully surface-native
+- hide dead extension payload exports
+- make infra invoker responses surface-native
+- make infra fallback surface-native
+- rename extension compatibility module
+- rename extension ownership compatibility field
+- rename controller surface action internals
+- drop dead extension manifest plumbing
+- remove legacy extension framework crate
+- centralize legacy extension compatibility seam
+- collapse agent ssh extension framework edge
+- collapse proxmox extension framework edge
+- collapse notification extension framework edges
+- drop dead extension bootstrap hook
+- Keep proxmox add-config on controller-local shared-surface path
+- Enable allowlisted notification channel actions on shared surfaces
+- Port proxmox host-detail surface and harden hydration behavior
+- Filter api_submit actions from data tables
+- Make shared surfaces truthful for form actions
+- Task 6 follow-up: support controller-local sensitive fields
+- Task 6 follow-up: fix plugin surface execution and contract filtering
+- Task 6: register plugin-backed surfaces via surface registry
+- *(plugin-core)* update testing.rs to use StandardHostRuntime
+- *(plugin-core)* update doc comments for StandardHostRuntime
+- *(plugin-core)* rename PosixHostRuntime to StandardHostRuntime, add executor() to HostRuntime trait
+- enforce plugin semantic boundary
+- *(infra)* unify agent-side infrastructure through descriptor/catalog
+- *(catalog)* add PluginCatalog with unified descriptor lookup
+- *(plugins)* add foundation types for unified descriptor/catalog
+- *(plugin-core)* replace instance extension_manifests/extension_actions with static variants
+- *(plugins)* add execute_and_capture helper, migrate call sites
+- add shared test executor types to eliminate plugin test duplication
+- shared HTTP client builder, Validated<T> extractor, PackageIdentifierRules
+- remove old hook system
+- *(plugins)* add settings bag parameter to deliver()
+- *(plugins)* add raw-key settings store and extend ExtensionActionContext
+- replace AgentInfraRegistry with PluginBase subtraits in agent-ssh
+- remove old Plugin trait from infrastructure-core
+- *(codereview)* mark fixed issues as resolved in CODEREVIEW files
+- *(plugins)* change args_suffix type to Cow<'static, str>
+- *(plugins)* move PluginOps trait to infrastructure-core
+- change AgentInfraPlugin trait host_id from &str to uuid::Uuid
+- *(plugins)* replace wire dep with extension-framework in plugin crates
+- *(codereview)* remove confirmed-fixed issues from CODEREVIEW.md files
+- *(proxmox)* tighten protection surface test assertions
+- *(proxmox)* type controller compatibility dispatch
+- require labels for surface interactions
+- prune stale backup targets and enforce host match uniqueness
+- harden policy surface scope and feature gating
+- add policy surfaces for settings and software items
+- Persist failed backup audits and use async task polling sleep
+- Add Proxmox controller-side update protection policy and cache
+- drop dead plugin manifest builders
+- rename proxmox surface action wrapper
+- Fix host-info permission metadata and hydration retry behavior
+- *(proxmox)* unify ProxmoxPlugin and ProxmoxAgentPlugin into single struct
+- *(types)* accept Into<String> in SecretString and MaskedEmail constructors
+- *(proxmox)* clean up guest bootstrap and extract helpers
+- *(proxmox)* remove bootstrap-proxmox and list-pve-hosts actions
+- *(plugins)* remove thiserror Display format string tests
+- *(extensions)* separate action catalogue in registry and plugins
+- *(boundary)* eliminate plugin semantic boundary violations
+- *(deps)* bump strum 0.27 → 0.28, fix test_support descriptor
+- route ssh agent through registry boundary
+- rename notification surface action wrappers
+- drop registry extension framework edge
+- *(registry)* keep known ids owned under test-support
+- *(registry)* assert PluginOps visibility in export test
+- *(notifications)* migrate notification plugins to unified descriptor
+- *(registry)* move DashboardIconCache lifecycle into with_dashboard_icons
+- *(tests)* eliminate real network/subprocess calls in unit tests
+- *(web-api, registry)* replace _-prefix params with #[allow(unused_variables)] for feature-gated paths
+- *(registry)* extract plugin registry tests to separate module
+- remove notification_ops from AppState and unify through PluginOps
+- remove fixed issues from CODEREVIEW.md files
+- *(registry)* parallelize compatible_sudo_commands_for_host probes
+- *(codereview)* remove fixed issues from CODEREVIEW.md files; update summaries
+- *(plugin-apk)* migrate to shared helpers
+- *(plugins)* replace "requires root" phrasing in sudoers explanations
+- *(plugins)* replace named iterator-skip vars with bare _ in apk and apt parsers
+- *(plugins)* remove deprecated Option<XxxDiscoveryFilter> pattern
+- *(plugin-apt)* migrate to shared helpers
+- *(plugins)* split apt and homebrew plugin.rs into submodules
+- *(tests)* fix clippy violations in plugin test helpers
+- *(codereview)* remove fixed issues from CODEREVIEW files
+- *(plugin-cargo)* migrate to shared helpers
+- *(plugins)* split npm, cargo, snap, pacman plugin.rs into submodules
+- remove is_discover_all_mode from Cargo, Snap, Docker plugins
+- *(plugin-dnf)* migrate to shared helpers
+- *(plugin-core)* remove duplicated test runtime helpers (Phase 3)
+- *(plugin-homebrew)* migrate to shared helpers
+- *(plugin-mas)* migrate to shared helpers
+- *(plugin-npm)* migrate to shared helpers
+- *(plugin-pacman)* migrate to shared helpers
+- *(plugin-pkg)* migrate to shared helpers
+- *(plugin-snap)* migrate to shared helpers
+- *(plugins)* update capability assertions for new VersionDetection/ReleaseFetching/UpdateExecution
+- rename docker surface action wrapper
+- collapse docker extension framework edge
+- *(docker)* assert batch_fetch preserves exact per-item errors
+- *(plugin-releases-docker)* add fetch_releases error-path tests
+- *(docker)* split plugin into discovery/update/detect/fetch modules
+- update plugin docs to reflect PluginBase trait and always-emit discovery
+- *(codereview)* remove fixed issues from CODEREVIEW files
+- *(types)* consolidate is_private_host into shared network module
+- *(codereview)* add full reviews for forgejo and gitlab release plugins
+- *(github)* remove pre/post install commands in favor of hook plugins
+- remove fixed findings from CODEREVIEW files and update best-practice docs
+
+### Security
+
+- *(crypto)* EncryptedString::new requires master key, no plaintext fallback
+- *(plugins)* restrict sudo commands to specific subcommands
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-agent-ssh-v0.0.1) - 2026-04-27
 
 ### Added

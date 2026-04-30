@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.1...uptrakit-cli-v0.0.2) - 2026-04-30
+
+### Added
+
+- *(cli)* add unified --version build metadata across binaries
+- *(crypto)* add ECIES sealed-box encryption using P-256 + AES-256-GCM
+- *(crypto)* add table-aware ColumnAadEntry for column AAD registry
+- *(crypto)* add DataKeyRing, v3 format, and DEK wrap/unwrap
+- *(crypto)* add ENC:v2 column AAD registry and EncryptedString::new_with_aad
+- *(crypto)* add ENC:v2: context-bound AAD ciphertext format
+
+### Fixed
+
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- *(crypto)* convert DataKeyRing::new panic to Result
+- *(errors)* remove #[from] on variants that have paired impl_report_conversion!
+- *(crypto)* remove needless borrows in ECIES agree calls
+- *(nats)* encrypt plugin configs in NATS-published messages (ATK-14)
+- *(crypto)* use Release/Acquire ordering for PLAINTEXT_MODE atomic
+- *(crypto)* enable plaintext mode when --allow-plaintext-secrets has no master key
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- frontend accessibility, security, and UX improvements with expanded tests
+- resolve remaining codereview issues with ping interval, retry, and auto-refresh
+- resolve top 5 codereview issues across codebase
+- resolve top 5 code review findings across shared-db, directories, web-api-types, and web-api
+- resolve top 5 code review findings across directories, openapi-client, CLI, web-api-types, and shared-db
+- resolve top 5 code review findings across 12 crates and frontend
+- resolve top 5 code review findings across 6 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- *(agent-ssh)* ensure state directory exists before use
+- *(security)* resolve SEC-01, DIR-01, DB-01 from code review
+- *(directories)* use org domain for project dirs
+
+### Other
+
+- *(release-plz)* unblock PR creation via git_only baseline
+- release v0.0.1
+- remove remaining MySQL/MariaDB code paths and comments
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- remove CODEREVIEW.md files
+- add extensibility-focused code review for all crates
+- add code review reports for 7 shared crates
+- *(codereview)* update shared library review findings
+- *(codereview)* full 14-dimension workspace review cycle
+- *(codereview)* refresh Rust backend review files
+- *(codereview)* extend backend review — 14-dimension analysis (2026-03-15)
+- *(crypto)* extract v1/v2/v3/data_key_ring/encrypted_string/tests modules
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- strike through fixed CODEREVIEW entries from top-5 fix session
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- *(shared)* add tracing to foundation crates (backoff, directories, crypto, wire)
+- fmt
+- fmt
+- *(crypto)* remove v1 support; unify API to always require AAD
+- eliminate raw SQL from tests and migrations
+- *(codereview)* update backend code review findings
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- *(crypto)* remove assertion-free test_is_plaintext_mode_default_false
+- *(crypto)* gate sea-orm impls behind optional feature
+- remove obsolete TESTCOV files
+- refresh TESTCOV.md with cargo-llvm-cov coverage data after rebase
+- add unit tests for next 10 uncovered critical paths
+- extract crypto module into standalone uptrakit-crypto crate
+- migrate external deps to workspace = true
+- *(codereview)* resolve all remaining open code review findings
+- *(codereview)* resolve top 5 open code review findings
+- apply cargo fmt formatting across workspace
+- add security-critical edge-case tests for directories crate
+- add test coverage analysis (TESTCOV.md) for 16 crates
+- cargo fmt + fix clippy await_holding_lock in shared-db test
+- add code review results for shared crates
+- *(deps)* replace workspace-wide tokio full with per-crate minimal features
+- resolve top 5 code review issues across workspace
+- clean up workspace dependencies
+- enforce rootcause best practices and migrate errors to thiserror
+- [**breaking**] enforce rootcause Report<E> error handling across all crates
+- *(directories)* replace AppKind enum with plain &str parameter
+- [**breaking**] use cross-platform directories with config/state separation
+- update references after TracingBuilder relocation to uptrakit-tracing-init
+- extract TracingBuilder into uptrakit-tracing-init crate
+
+### Security
+
+- *(crypto)* EncryptedString::new requires master key, no plaintext fallback
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-cli-v0.0.1) - 2026-04-27
 
 ### Added
