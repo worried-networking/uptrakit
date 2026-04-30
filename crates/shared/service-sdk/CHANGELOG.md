@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.1...uptrakit-service-sdk-v0.0.2) - 2026-04-30
+
+### Added
+
+- *(permissions)* add AccessMcp variant and DB migration
+- *(permissions)* wire-safe Other(String) catch-all for unknown variants
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-service-sdk-v0.0.1) - 2026-04-27
 
 ### Added

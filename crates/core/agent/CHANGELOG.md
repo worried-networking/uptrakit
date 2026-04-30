@@ -7,6 +7,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.1...uptrakit-agent-v0.0.2) - 2026-04-30
+
+### Added
+
+- add agent-side host feature probing and expose in REST API
+- *(agent)* handle config test requests on local and SSH agents
+- *(controller)* add embedded agent with machine-id-based coexistence
+- *(agent)* execute lifecycle hook plugins in update pipeline
+- *(display-version)* surface human-readable version labels from plugins
+- *(infra-core)* add #[non_exhaustive] to public plugin structs with constructors
+- *(wire)* confirm interactive PTY flag from agent in UpdateStartedPayload
+- *(agent-core)* implement ForwardingInteractiveExecutor in execute_update_interactive
+- *(agent-ssh)* advertise InteractiveUpdates and handle UpdateStdinData
+- *(agent-core)* add interactive update execution support
+- *(wire)* add interactive updates wire protocol types
+- *(service-sdk)* add send_auto_paginate for transparent pagination
+- *(logging)* add debug/info/trace logs to scheduler, version check, and extension dispatch
+- *(agent-core)* add retry logic for transient version check errors
+- instrument new code from main (extensions, SSE, event system, agent-core)
+- *(agent-core)* add #[instrument] spans to version check and update flows
+- *(agent)* add attestation gate before plugin execute_update
+- *(security)* add per-hook timeout and audit logging (ATK-17 Phase 1)
+- *(agent-core)* handle batch host package updates
+- *(wire)* add batch host package update messages and version check routing fields
+- add UpdateCategory enum, wire protocol field, and plugin interface
+- *(agent-core)* skip discovery for incompatible plugins
+- *(agent-core)* extract start_update() from handle_execute_update()
+- *(agent-core)* add keep_alive RAII handle vec to ConnectionContext
+- *(plugins)* add host compatibility detection and lifecycle hooks
+- *(controller)* synthesize GitHub/APT configs from PHS discovery
+- *(agent-core)* add ConnectionContext for SSH Docker host injection
+- *(logging)* add verbosity flags and structured log instrumentation
+- *(autodiscovery)* implement software autodiscovery feature
+- *(agent-ssh)* implement version check and update execution over SSH
+
+### Fixed
+
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- replace #[cfg(not(feature))] with additive feature patterns
+- *(wire)* add Other(String) catch-all to UpdateFinalStatus and DisconnectReason, Other{raw} to HookCommand for rolling-upgrade safety
+- *(interactive)* stop controller from appending \n to PTY output chunks
+- *(agent)* run long operations in background to prevent WS write timeouts
+- *(errors)* remove #[from] on variants that have paired impl_report_conversion!
+- *(agent-core)* add compute-only run_* functions for background spawning
+- *(security)* disable HTTP redirect following on outbound clients (ATK-07/ATK-12)
+- *(agent-core)* warn-and-skip unknown HookCommand variant
+- *(shared-types)* add Other(String) catch-all to BatchStatus and UpdateCategory
+- *(agent-core)* send UpdateResult via send() to prevent silent drop
+- *(agent-core)* avoid double 'install command failed:' prefix in update errors
+- *(agent-core)* improve update failure logging and output capture
+
+### Other
+
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(workspace)* rename uptrakit-internal-wire to uptrakit-wire
+- Implement Track C semantic boundary gate
+- isolate plugin boundaries in track a
+- *(agent-core)* cover public batch_check_versions factory path
+- *(agent-core)* align batch CI cache key and document test preconditions
+- *(agent-core)* add batch failure-path coverage and CI workflow
+- Add MockTransport regressions and downstream compile gate
+- replace PluginType enum with PluginTypeId newtype
+- migrate all call sites to catalog/descriptor model
+- *(types)* add foundation types for plugin framework redesign
+- *(codereview)* update shared library review findings
+- *(codereview)* refresh Rust backend review files
+- *(agent-core)* move host_info to shared agent-core crate
+- *(wire,agent-core)* introduce ServiceTransport trait for transport abstraction
+- extract helpers to reduce cyclomatic complexity (fixes 6,7,9,10)
+- *(agent-core)* extract hook execution phase helper from execute_update
+- *(agent-core)* extract batch grouping and execution from batch_check_versions
+- update registry and consumers to use PluginBase + subtrait accessors
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- remove fixed issues from all CODEREVIEW.md files
+- *(agent-core)* extract run_with_retry helper, remove retry duplication
+- update plugins, agents, scheduler for unified tracking
+- *(wire)* fix event loop starvation, unify Duration types, split wire lib.rs into modules
+- strike through fixed CODEREVIEW entries from top-5 fix session
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- update CODEREVIEW files to reflect fixed issues
+- *(agent-core)* add unit tests for batch_host_package_update_inner and run_check_versions
+- *(agent-core)* improve tracing instrumentation for updates and version checks
+- add cargo-llvm-cov test coverage analysis to CODEREVIEW.md files
+- update security architecture, AGENTS and CODEREVIEW files
+- fmt
+- remove resolved issues from CODEREVIEW.md files
+- *(agent-core)* scope RefreshPackageIndex to fetch groups only
+- *(agent-core)* use batch version check in handle_check_versions
+- *(codereview)* update backend code review findings
+- migrate internal path deps to workspace = true
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- update tests across crates for digest-based docker tracking
+- document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
+- *(types,wire,web-api-types)* add #[non_exhaustive] to public enums and update match arms
+- *(plugins)* make all plugin new() async, remove block_on() panic
+- *(agent-core)* simplify ConnectionContext after StdioTunnel
+- *(codereview)* remove fixed and accepted issues from codereview files
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- apply cargo fmt to all changed files
+- *(docker-plugin)* feature-gate bollard behind `daemon`, switch to aws-lc-rs
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- apply cargo fmt across workspace
+- *(plugins)* rename crate packages to encode category
+- *(types)* rename PluginType variants and string representations
+- *(deps)* promote plugin-core, plugin-registry, and command to workspace deps
+- *(github)* owner/repo → package_identifier; fetch_releases only
+- *(agent-core)* update version check and update to use role-based plugin assignments
+- update documentation for plugin architecture
+- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
+- rename providers to plugins throughout the codebase
+- apply cargo fmt to entire workspace
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-agent-v0.0.1) - 2026-04-27
 
 ### Added

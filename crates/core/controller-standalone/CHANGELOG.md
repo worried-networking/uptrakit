@@ -1,4 +1,1387 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.1...uptrakit-controller-standalone-v0.0.2) - 2026-04-30
+
+### Added
+
+- *(mcp)* scaffold mcp feature flag, skeleton router, server.rs merge
+- *(audit-log)* auto-enrich actor_display via DbActorEnricher
+- rename embed-frontend to embedded-frontend and update CI for split
+- *(forms)* extend Select primitive with optgroup support, width variant, data-ui marker
+- add agent-side host feature probing and expose in REST API
+- *(agent)* handle config test requests on local and SSH agents
+- *(controller)* add embedded agent with machine-id-based coexistence
+- *(agent)* execute lifecycle hook plugins in update pipeline
+- *(display-version)* surface human-readable version labels from plugins
+- *(infra-core)* add #[non_exhaustive] to public plugin structs with constructors
+- *(wire)* confirm interactive PTY flag from agent in UpdateStartedPayload
+- *(agent-core)* implement ForwardingInteractiveExecutor in execute_update_interactive
+- *(agent-ssh)* advertise InteractiveUpdates and handle UpdateStdinData
+- *(agent-core)* add interactive update execution support
+- *(wire)* add interactive updates wire protocol types
+- *(service-sdk)* add send_auto_paginate for transparent pagination
+- *(logging)* add debug/info/trace logs to scheduler, version check, and extension dispatch
+- *(agent-core)* add retry logic for transient version check errors
+- instrument new code from main (extensions, SSE, event system, agent-core)
+- *(agent-core)* add #[instrument] spans to version check and update flows
+- *(agent)* add attestation gate before plugin execute_update
+- *(security)* add per-hook timeout and audit logging (ATK-17 Phase 1)
+- *(agent-core)* handle batch host package updates
+- *(wire)* add batch host package update messages and version check routing fields
+- add UpdateCategory enum, wire protocol field, and plugin interface
+- *(agent-core)* skip discovery for incompatible plugins
+- *(agent-core)* extract start_update() from handle_execute_update()
+- *(agent-core)* add keep_alive RAII handle vec to ConnectionContext
+- *(plugins)* add host compatibility detection and lifecycle hooks
+- *(controller)* synthesize GitHub/APT configs from PHS discovery
+- *(agent-core)* add ConnectionContext for SSH Docker host injection
+- *(logging)* add verbosity flags and structured log instrumentation
+- *(autodiscovery)* implement software autodiscovery feature
+- *(agent-ssh)* implement version check and update execution over SSH
+- *(mcp)* trigger_update tool with protection dispatch and audit emission
+- *(mcp)* list_update_history and get_update_history_detail tools
+- *(mcp)* get_current_user tool — identity for the token owner
+- *(mcp)* vt100 terminal renderer for update history output
+- *(mcp)* Tower auth layer — API token validation, AccessMcp check, audit events
+- *(interactive-ws)* allow connection during protection phase, handle AgentClaimed
+- *(service-ws)* emit AgentClaimed after update claimed or replayed
+- *(broadcaster)* add AgentClaimed event and send_agent_claimed method
+- *(proxmox)* add timeout columns to protection policy schema
+- *(web-api)* wire reconnect recovery, pending replay, and queued promotion via orchestrator
+- *(web-api)* wire orchestrator spawn at REST and WS trigger call sites
+- *(web-api)* add update_orchestrator module
+- *(web-api)* enrich entity-link cells in surface action responses
+- *(web-api)* add enrich_entity_links free function in surface_proxy/entity_enrichment
+- *(frontend)* add profile types, JWT auth_method helper, and API functions
+- *(api)* add change_password handler with session invalidation
+- *(api)* add cancel_email_change and confirm_email_change handlers
+- *(api)* add initiate_email_change handler
+- *(api)* add update_profile handler
+- *(api)* query real has_pending_email_change in me endpoint
+- *(auth)* add jti field to AuthenticatedUser
+- *(types)* add profile request types + has_pending_email_change to UserResponse
+- *(surfaces)* add #[non_exhaustive] to public surface enums + wildcard arms
+- *(web-api)* add AuditEmitterState focused sub-state
+- *(audit)* emit semantic mutation audit events
+- *(audit)* add semantic audit log infrastructure
+- *(global-github-provider)* add global runtime and tiny client integration
+- *(web-api)* add GitHub provider settings endpoints
+- *(web-api)* thread dispatch context through update lifecycle
+- replay pending embedded updates on register
+- *(service-ws)* extract reconnect replay prep
+- *(updates)* make restart recovery owner-aware
+- unify mqtt runtime for standalone and embedded hosting
+- add software item merge execution endpoints
+- add software item query filter
+- *(auth)* enforce OIDC private issuer policy by tenancy mode
+- *(web-api)* add centralised ApiError infrastructure (Phase 1/6)
+- *(api)* validate host compatibility at role assignment time
+- *(dashboard-icons)* add diagnostics and mocked coverage
+- *(web-api)* enable dashboard icons by default
+- *(api)* add config test proxy, REST endpoint, and WS handler
+- add foundation types for plugin config testing (dry-run)
+- *(api)* add dashboard-icons settings endpoints and lifecycle hooks
+- *(api)* expose embedded service state and block removal
+- *(web-api)* handle WorkloadClaim/Release in WebSocket handler
+- *(web-api)* wire WorkloadClaimRegistry into AppState, NotificationService, and event delivery
+- *(web-api)* add WorkloadClaimRegistry for exclusive tenant ownership
+- *(web-api)* add embedded message handler bridge
+- *(web-api)* implement controller-side service config handler and delivery
+- *(wire)* add tenant_id to ExtensionRequestPayload; fix system-service extension providers
+- *(web-api, scheduler)* paginated software-states push at MQTT registration
+- *(api)* add ordinal field to plugin assignments and delete endpoint
+- *(controller)* load hook plugin assignments for update dispatch
+- *(smtp)* add helo_host setting and fix EHLO hostname for RFC 5321
+- *(notifications)* add global Telegram bot token configuration
+- *(notifications)* add Send Test Email button to global SMTP settings
+- *(sse)* propagate AdminEvents across controller instances via NATS
+- *(sse)* emit UpdateTriggered from all update trigger call sites
+- *(db)* add output_truncated flag and MySQL LONGTEXT migration for update_history
+- *(web-api)* implement updatable EXISTS subquery filter for software items
+- *(web-api)* mark in-progress updates as failed on agent restart
+- *(web-api)* wire queue dispatch into route handlers
+- *(web-api)* emit UpdateCompleted and VersionCheckCompleted SSE events
+- *(reset-data)* add backend for tenant data reset endpoint
+- *(wire)* send report page limits in service settings
+- add plugin type settings REST API and OpenAPI client
+- add type_settings_form_schema to ConfigFormSchema trait and registry
+- *(db)* add plugin_type_settings table and update host_software_item_plugins schema
+- *(notifications)* add global SMTP defaults with per-tenant override
+- *(web-api)* generic notification extension data and SMTP handler
+- *(web-api)* add Notification owner variant to extension registry
+- *(api)* add host_id filter to list software items endpoint
+- *(notifications)* add #[non_exhaustive] to DeliveryMessage/MessageAction; add Copy to filter enums
+- *(update-history)* persist interactive flag and broadcast UpdateStarted event
+- *(web-api)* add user management, role, and access preset endpoints
+- *(routes)* update all route handlers to use granular permission extractors
+- *(api)* add zeroconf settings API endpoints
+- *(settings)* add zeroconf setting keys and settings infrastructure
+- *(notifications)* add StdinAttention notification event type
+- *(api)* add interactive flag to update trigger request
+- *(web-api)* add interactive WebSocket endpoint and session management
+- *(wire)* add host metadata, enriched attributes, and connectivity payloads
+- add host tags query layer, REST API, OpenAPI client, and CLI
+- *(web-api)* integrate report pagination into WebSocket handler
+- *(web-api)* add batch action HTTP endpoints for all resources
+- *(docker)* use image-level package_identifier with qualifier for per-container tracking
+- *(wire)* add agent_host_id to HostInfo; controller uses it as hosts.id
+- *(web-api)* handle ServiceMessage::ExtensionRequest in WS handler
+- *(api)* include config_form_fields in PluginTypeInfo response
+- *(api)* add POST /services/{id}/update-freeze endpoint (ATK-17)
+- *(wire)* add `tenant_id` to `ServiceSettingsPayload`
+- *(web-api,controller)* add --reject-dangerous-commands CLI flag
+- *(agent-ssh,web-api)* add PVE detection during bootstrap and ReportPluginConfig controller handler
+- *(web-api)* handle UpdateCapabilities and add UiExtensions to controller caps
+- *(wire,web-api)* add E2E encryption support for sensitive extension params
+- *(extensions)* implement plugin-backed extension action dispatch
+- *(web-api)* add security headers middleware
+- *(web-api)* add /readyz readiness probe endpoint
+- *(web-api,mqtt)* add spans to notification dispatch and MQTT handlers
+- *(web-api)* add spans to REST route handlers
+- *(web-api)* add spans to WebSocket handlers and update trigger pipeline
+- *(web-api)* add request-id middleware with x-request-id header
+- *(wire)* add TraceContext type for distributed tracing
+- *(web-api)* emit admin events from REST route handlers
+- *(web-api)* add GET /api/v1/events/stream SSE endpoint
+- *(web-api)* add EventBroadcaster for real-time admin events
+- *(web-api)* add device flow SSE broadcaster and stream endpoint
+- *(web-api)* add extension REST API endpoints and WS handler integration
+- *(web-api)* add extension registry and proxy mechanism
+- *(db,sdk)* add service_app_name to enrollment and DB entities
+- *(web-api)* handle HostUpdateInProgress in route handlers
+- *(host-packages)* add promote endpoint to create software items from packages
+- *(web-api)* route batch progress events via NATS for multi-instance
+- *(web-api)* backend-generated system enrollment tokens, remove plaintext token
+- *(audit-log)* system-route detection, query functions, and REST endpoints
+- *(auth)* add view_audit_logs and view_system_audit_logs permissions
+- *(security)* wire validation integration, sliding-window rate limiter, unknown counter (ATK-18 Phase 2)
+- *(security)* fix create-path validation gap + dangerous pattern audit (ATK-16 Phase 2)
+- *(web-api)* add audit log middleware, AppState fields, and router wiring
+- *(settings)* add AuditLogFilter and AuditLogRetentionDays setting keys
+- *(web-api)* add security audit logging for plugin config mutations (ATK-16)
+- *(controller)* defer external tasks when external scheduler connects
+- *(api)* add /api/v1/system-services REST endpoints, openapi-client, and CLI
+- *(settings)* add SystemServicesEnrollmentToken setting key and REST endpoint
+- *(auth)* add view_system_services and manage_system_services permissions
+- *(mqtt)* add security_pending_count + security_only batch filter
+- *(auth)* add ManageCommands permission separate from ManageSoftware
+- *(crypto)* add ENC:v2: context-bound AAD ciphertext format
+- *(web-api)* add per-service cert lifetime override
+- *(settings)* switch agent cert lifetime from days to hours
+- *(web-api)* handle MQTT-triggered host package batch updates
+- *(web-api)* query and push host package states to MQTT
+- *(web-api)* TTL-proportional renewal window with optional admin override
+- *(web-api,scheduler)* integrate host packages into version check flow
+- *(web-api)* add host package route handlers
+- *(web-api)* add host package query module and discovery routing
+- *(web-api-types)* add host package request/response types
+- *(plugins)* add tracking_system field to DiscoveredSoftware
+- *(batch-updates)* add batch progress broadcasting and SSE streaming
+- *(batch-updates)* add OpenAPI client methods and batch notification events
+- *(web-api)* add batch update route handlers and sequential dispatch
+- *(batch-updates)* add web API types and batch query module
+- *(db)* add update_batches table, BatchStatus enum, and batch_id FK on update_history
+- *(api)* surface update_category in API responses and CLI output
+- *(db)* add update_category column to host_software_items and update_history
+- *(web-api)* add NATS settings routes and register in router
+- *(settings)* add NatsUrl global setting key and snapshot support
+- *(web-api)* publish RequestCrlRenewal on revocation and handle via NATS consumer
+- *(notifications)* wire email channel with global SMTP settings
+- *(web-api)* add per-tenant SMTP settings
+- *(web-api)* add notification REST API routes and Telegram callback
+- *(web-api)* add notification dispatcher and event integration
+- *(web-api-types)* add ViewNotifications and ManageNotifications permissions
+- *(web-api-types)* add Validate to MQTT client request types
+- *(mqtt)* push software states after update trigger and UpdateStarted
+- *(mqtt)* populate update_in_progress in software states query
+- *(mqtt)* load and propagate release metadata in software-states queries
+- *(api)* add GET /api/v1/plugin-types with sample_config per type
+- *(web-api)* discovery allowlist REST API
+- *(web-api)* add SSE endpoint for real-time update output streaming
+- *(web-api)* add UpdateOutputBroadcaster for real-time output streaming
+- *(wire)* increase default update execution timeout to 2 hours
+- *(frontend)* add scheduler capability filter and credential security warnings
+- *(controller)* add embedded-scheduler feature, credential delivery, and service profiles
+- *(nats)* extract shared NATS crate and refactor transport
+- *(api)* add enrollment token CRUD endpoints and remove old single-token API
+- *(db)* add enrollment_tokens table and SeaORM entity
+- *(web-api)* implement NATS JetStream transport module
+- *(api)* add capabilities field to PluginConfigResponse
+- *(web-api)* run controller-side fetch_releases in manual check-versions endpoints
+- *(registry)* register Shell plugin; add GithubReleases identifier validation
+- *(web-api)* add ServiceProfile module with capability-derived behavioral profiles
+- *(api)* rename provider-configs to plugin-configs
+- *(autodiscovery)* auto-create Docker provider config for container discoveries
+- *(autodiscovery)* handle APT provider in autodiscovery results
+- *(controller)* push SoftwareStates to MQTT services; handle MqttTriggerUpdate
+- *(settings)* propagate ha_discovery/ha_discovery_prefix through MQTT client API and CLI
+- *(wire)* add SoftwareStates, MqttTriggerUpdate; extend MqttTenantConfig with HA settings
+- *(db)* replace initiated_by with actor_type/actor_id; add HA discovery columns
+- *(web-api-types)* add latest_version and update_available to software item responses
+- *(autodiscovery)* add frontend UI, discovery_state filter, and doc fixes
+- *(agent-ssh)* report enrolled SSH hosts to controller on connect
+- *(ui)* add SSH Agent service type to web UI
+- *(cli,web-api)* add service management CLI commands and GET endpoint
+- *(cli,web-api)* add CLI commands and per-item version check endpoints
+- add centralised DB-backed task scheduler with HA-safe optimistic locking
+- add SSH-backed agent skeleton with controller enrollment and local encrypted storage
+- *(db)* add `db-all` feature to enable all database backends
+- allow inline provider config creation for software registration
+- add universal software registration flow
+- add Homebrew provider with agent-side latest version checking
+- lease new mqtt clients immediately
+- add mqtt client connection status
+- add combined settings endpoint
+- *(db,enrollment,cli,controller)* encrypt credentials at rest and harden TOFU
+- *(controller)* store managed CA in database
+- add cross-controller notification delivery via outbox pattern
+- *(wire)* [**breaking**] add application-level replay protection with message sequence numbers
+- *(controller)* add version-gated CRL rebuild for cross-instance revocation propagation
+- *(web-api)* add version-gated periodic settings reload for cross-instance consistency
+- *(web-api)* add periodic settings reload for cross-instance consistency
+- *(web-api)* add unified database-backed rate limiting for auth endpoints
+- *(web-api)* add pagination to all unbounded list endpoints
+- [**breaking**] support multiple MQTT clients per tenant
+- require registration token for OIDC first registration
+- implement graceful shutdown for agent
+- *(controller)* implement zero-downtime graceful restart via SO_REUSEPORT
+- implement structured update hooks with fail-early shell execution
+- implement update communication flow between agent and controller
+- add agent version tracking and version check wire protocol
+- add update_history entity with read-only REST API
+- *(provider-docker-registry)* add Docker Registry provider for OCI container image tracking
+- *(web)* promote first OIDC user to owner role
+- [**breaking**] add owner role with ManageGlobalSettings privilege
+- add available_versions entity and last_updated_at to host_software_items
+- [**breaking**] add OCSP SHA-1 support, --pki-addr flag, and Nginx OCSP integration test
+- [**breaking**] implement CSR-based agent certificate issuance
+- add multi-tenancy database infrastructure and tenant-scoped queries
+- *(web-api)* add software items REST API endpoints
+- *(web)* add CRUD API for provider configurations
+- add Host entity with machine_id-based identity
+- *(web)* use ExternalBaseUrl for OIDC and device auth redirects
+- *(web)* support agent-id-only lookup for proxy-forwarded agents
+- *(web)* add resolve_proxy_headers middleware
+- *(web)* add forwarded client cert header settings
+- *(web)* add redirect_url to oidc auth flow
+- *(web)* add network and MQTT settings API endpoints
+- *(web)* add NetworkSettings and MqttSettings to Settings struct
+- *(web)* add device authorization flow backend
+- *(controller,agent,web)* implement CA key rotation with dual-CA support
+- *(auth)* add delete_user_sessions_except to SessionService + SessionOps
+- *(auth)* add jti_allowlist and deny_user_except to TokenDenylist
+- *(proxmox)* extend protection policy with timeout fields
+- add actor names to update history responses
+- *(web-api-queries)* add orchestrator CAS case and reconnect recovery
+- *(web-api-queries)* refactor trigger_update_for_host to return PendingProtectionWork
+- *(update-dispatch)* add output_tx param to prepare_pre_update_protection; stream lines in Proxmox plugin
+- *(web-api-queries)* add orchestrator query helpers and promote fail_before_agent_dispatch
+- *(update-history)* add shared protection and recovery fields
+- add software merge preview logic
+- *(db)* add tenant_service_config and global_service_config tables; drop mqtt tables
+- *(scheduler-engine)* paginated software-states loader + TenantDb refactor
+- inline plugin assignments without creating a shared plugin_configs row
+- *(api)* add plugin_type filter to software item list
+- *(api)* add installed_display_version and latest_release_metadata to SoftwareItemResponse
+- *(autodiscovery)* propagate installed_display_version through controller discovery handler
+- *(api)* add active_update_history_id to SoftwareItemHostSummary
+- *(hosts)* sort hosts by lower(name) ascending by default
+- *(update-queue)* queue single updates when host is busy instead of 409
+- add plugin type settings types, queries, and update triggers refactor
+- *(queries)* thread icon_url through all software item query paths
+- *(web-api-queries)* auto-set interactive=true when plugin config prefers it
+- *(db)* case-insensitive sort for software items list
+- *(wire)* add friendly_name to MqttSoftwareStateHostEntry and MqttHostPackageHostState
+- *(web-api-queries)* add batch query functions for all resources
+- *(web-api-queries)* add HostUpdateInProgress error and per-host lock check
+- *(autodiscovery)* deactivate disappeared host packages on rediscovery
+- *(controller)* propagate attestation status and require_attestation into release_info
+- *(scheduler)* expire email_change_requests in AuthCleanupExecutor
+- *(scheduler-engine)* split run() into drain + abort cancellation tokens
+- *(update-hooks)* add resolve_effective_config for 3-layer config merge
+- *(scheduler)* add #[instrument] spans to task executors
+- *(scheduler)* add DiscoverHostPackagesExecutor for periodic host-package rediscovery
+- *(scheduler)* add AuditLogCleanupExecutor for retention cleanup
+- *(scheduler-engine,db)* add detect_version task and rename version_check to fetch_releases
+- *(scheduler)* TTL-proportional service cert renewal window
+- *(scheduler-engine)* add CrlRenewalExecutor and signal_crl_renewal
+- *(mqtt)* add update_in_progress field to wire protocol
+- *(scheduler)* add per-task execution timeout and cancellation awareness
+- create uptrakit-scheduler-engine shared crate
+- *(notifications)* add SmtpNotConfigured error variant
+- *(notifications)* add restore_config_secrets to NotificationPlugin and NotificationOps
+- *(notifications)* add notification plugin crates
+- *(surfaces)* add entity-link cell type, SurfaceEntityType, SurfaceEntityRef
+- port representative plugins to native surfaces
+- implement PluginBase + NotificationTransportPlugin on notification plugins
+- *(email)* replace lettre with mail-send for SMTP delivery
+- implement PluginBase + subtraits on all 17 software plugins
+- *(phs)* set prefer_interactive=true on PHS Shell discovery targets
+- *(phs)* route all PHS updates through /usr/bin/update
+- *(plugins)* add NpmError and ProxmoxHelperScriptsError typed enums
+- *(sudoers)* add args_suffix to SudoCommandEntry for subcommand restrictions
+- *(plugins)* add `ConfigFormSchema` trait and implementations
+- *(plugins)* add spans to plugin detect/fetch/update methods
+- *(discovery/phs)* add Forgejo/Codeberg app detection
+- *(phs)* add DetectHostCompatibility to Proxmox Helper Scripts plugin
+- *(phs)* extend PHS discovery plugin to classify npm-managed containers
+- *(phs-plugin)* detect github.com/…/raw/… CT script URLs
+- *(plugins)* add dashboard-icons enhancement plugin crate
+- *(plugins)* declare ConfigTest capability across all plugins
+- *(shell)* add prefer_interactive field to ShellConfig
+- *(security)* add command validation for plugin configs (ATK-16 Phase 1)
+- *(plugins)* add systemd and shell hook plugin crates
+- *(infrastructure-core)* add output_tx field to ControllerProtectionContext
+- *(proxmox)* least-privilege PVE roles with auto-provisioning on sync
+- *(proxmox)* recreate PVE API token and config on host sync
+- *(plugin-core)* add global provider lookup seam
+- *(plugin-core)* add controller update protection singleton role
+- *(plugin-core)* add shared helpers and test runtime constructors
+- *(plugins)* add build_base_http_client() for shared controller HTTP client
+- *(plugins)* add SoftwareItemLifecycle capability and plugin subtrait
+- *(plugins)* add UpdateLifecyclePlugin trait and UpdateLifecycleContext
+- *(bootstrap)* detect FQDN for Proxmox guest bootstrap
+- extend PluginOps with notification methods and PluginRegistry struct
+- add PluginBase trait hierarchy with 10 capability subtraits
+- *(agent-ssh)* add interactive SSH command execution with PTY
+- *(plugin-infra-core)* add agent-side infrastructure extension point
+- *(types)* add AttestationStatus, extend ReleaseAsset and ReleaseInfo
+- *(plugin-infrastructure-core)* add batch_detect_installed_version and batch_fetch_releases to Plugin trait
+- *(plugin-infrastructure-core)* add BatchDetectItem/Result and BatchFetchItem/Result types
+- *(plugin-core)* add execute_batch_update() trait method and batch update types
+- *(apt)* detect security updates from apt-cache madison source URL
+- *(shared-types)* move PluginCapability to shared-types, remove all_known()
+- *(command)* add StdioTunnel trait and CommandExecutor extension
+- *(sudoers)* add SudoHelperScript for argument-validated sudo commands
+- *(proxmox)* add timeout controls to protection surfaces
+- *(proxmox)* emit SurfaceEntityRef for matched_host with EntityLinkColumn capability
+- *(proxmox)* replace degraded boundary surface with full proxmox_hosts_surface
+- *(proxmox)* make handle_list optional on plugin_config_id, add config_name batch lookup
+- *(db)* add functional indexes for lower(name) host sorting
+- *(proxmox)* regenerate PVE API token when user exists but config is missing
+- implement PluginBase + infra subtraits on Proxmox agent plugin
+- *(proxmox)* add DB-level pagination to host mapping queries
+- *(plugin-proxmox)* implement AgentInfraPlugin and GuestExecProvider
+- *(proxmox)* add detect_pve_cluster_nodes helper
+- *(agent-ssh,proxmox)* PVE node matching by (pve_node_name, plugin_config_id)
+- *(proxmox)* add detect_pve_node_name and verify_pve_privileges
+- *(extension-framework)* add destructive action confirmation dialog
+- *(proxmox)* add list-all-unmatched action for cross-config guest discovery
+- *(wire)* add `list` flag to FieldDef for array textarea fields
+- *(proxmox)* semi-automatic host matching with inline suggestions
+- *(proxmox)* collect machine_id from QEMU guests during discovery
+- *(agent-ssh)* PVE cluster deduplication and tenant-scoped credentials
+- *(wire,proxmox,command)* add ReportPluginConfig wire messages, RemoteExecutor trait, and PVE guest exec modules
+- *(proxmox,frontend)* populate Manual Match host dropdown dynamically
+- *(proxmox)* add comprehensive debug/trace logging throughout plugin
+- *(proxmox)* use context selector and typed permissions in extension UI
+- *(proxmox)* add discovery, matching, and extension actions
+- *(proxmox)* add Plugin impl and registry registration
+- *(proxmox)* add plugin crate with config, client, and API types
+- *(plugin-registry)* add test-support mock release fetchers
+- *(registry)* add export contract re-exports and visibility tests
+- *(plugins)* register dashboard-icons in plugin registry and controller
+- *(docker)* add switch-tag extension action for per-host tag switching
+- *(registry)* register cargo plugin in plugin registry
+- *(registry)* register Snap plugin in plugin registry
+- *(registry)* register APK plugin in PluginRegistry
+- register BSD pkg plugin type and wire protocol updates
+- *(registry)* register Pacman plugin in plugin registry
+- *(plugin)* add DNF package manager plugin
+- *(registry)* make extension_prefix declarative in register_plugins! macro
+- *(plugin-infra-registry)* add agent-infra feature and registry factory
+- *(registry)* generate `config_form_schema()` dispatch in macro
+- *(mas)* include Mac App Store plugin in autodiscovery coverage
+- *(plugin)* add Mac App Store (mas) package manager plugin
+- *(registry)* register ReleasesForgejo and ReleasesGitlab plugin types
+- *(registry)* add compatible_sudo_commands_for_host() async method
+- *(registry)* register package_manager_npm plugin in plugin registry
+- *(registry)* expose plugin capabilities via capabilities_for_str
+- *(apk)* add APK (Alpine Linux) package manager plugin
+- *(plugin-apt)* native batch_detect_installed_version and batch_fetch_releases
+- *(plugins)* implement batch updates for APT, Homebrew, and npm plugins
+- *(apt-plugin)* set DEBIAN_FRONTEND=noninteractive for apt-get commands
+- *(cargo-plugin)* add --locked flag to cargo install (default on)
+- *(cargo)* add uptrakit-plugin-package-manager-cargo crate
+- *(homebrew)* skip packages with version=latest from discovery
+- *(homebrew)* exclude auto-updating casks from discovery
+- *(plugin-homebrew)* native batch_detect_installed_version and batch_fetch_releases
+- *(npm)* add optional registry_url config field for private registries
+- *(plugin-npm)* native batch_detect_installed_version
+- *(npm)* add uptrakit-plugin-package-manager-npm crate and PluginType variant
+- *(plugin)* add Pacman package manager plugin
+- *(plugin)* add BSD pkg package manager plugin
+- add Snap package manager plugin crate and PluginType variant
+- *(docker)* strip tag from software item name during autodiscovery
+- *(docker)* extract resolve_image_info helper and populate installed_display_version during discovery
+- *(docker)* fetch and store published_at from OCI image manifests
+- *(docker)* platform-aware version detection and release fetching
+- *(docker)* add OCI manifest index types and extend LocalImageDigest with platform fields
+- *(docker)* add ANSI in-place progress bars for docker pull output
+- *(docker)* add system Docker credential store integration
+- *(docker)* add container label-based discovery filtering
+- *(docker)* add TLS support for TCP remote Docker daemon
+- *(docker)* add Podman support and rootless socket auto-detection
+- *(docker)* support per-container tracking for multiple containers with same image
+- *(agent)* add operator freeze file to halt update execution
+- *(docker-plugin)* switch to digest-based tracking with container auto-recreation
+- *(docker-plugin)* add DockerSocketProxy for Docker-over-SSH
+- *(docker)* use bollard ping for DetectHostCompatibility check
+- *(docker)* add DetectHostCompatibility using 'which docker'
+- *(releases/forgejo)* add Forgejo Releases plugin
+- *(releases-github)* add asset download and execute_update support
+- *(plugin/github)* add attestation verification in fetch_releases
+- *(releases/gitlab)* add GitLab Releases plugin
+
+### Fixed
+
+- update Dockerfile.test and tracing filter for controller split
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- replace #[cfg(not(feature))] with additive feature patterns
+- *(wire)* add Other(String) catch-all to UpdateFinalStatus and DisconnectReason, Other{raw} to HookCommand for rolling-upgrade safety
+- *(interactive)* stop controller from appending \n to PTY output chunks
+- *(agent)* run long operations in background to prevent WS write timeouts
+- *(errors)* remove #[from] on variants that have paired impl_report_conversion!
+- *(agent-core)* add compute-only run_* functions for background spawning
+- *(security)* disable HTTP redirect following on outbound clients (ATK-07/ATK-12)
+- *(agent-core)* warn-and-skip unknown HookCommand variant
+- *(shared-types)* add Other(String) catch-all to BatchStatus and UpdateCategory
+- *(agent-core)* send UpdateResult via send() to prevent silent drop
+- *(agent-core)* avoid double 'install command failed:' prefix in update errors
+- *(agent-core)* improve update failure logging and output capture
+- *(test)* update surfaces permission test to expect 403 not 500
+- *(nats)* cancel message drain loop on shutdown
+- *(audit-logs)* populate actor_display for user and api_token actors
+- *(test)* pause tokio time after DB setup to fix flaky cooldown test
+- *(ci)* drop plugin_ids reference in audit fallback, return early on missing plugin_type
+- *(ci)* replace hardcoded proxmox plugin-type fallback with plugin_ids constant
+- *(ci)* register new handlers in db_access_policy, drop security_audit target
+- *(update-history)* update stale placeholder comment for AgentClaimed SSE arm
+- *(interactive-ws)* collapse nested ifs for clippy compliance
+- *(orchestrator)* close broadcaster channel on all three failure paths
+- revert out-of-scope update_history changes, add temporary AgentClaimed arm
+- log rotate_refresh_token failures and reclassify InvalidSession as 401
+- *(web-api)* call fail_before_agent_dispatch on orchestrator protection error; clarify double-spawn safety
+- *(web-api)* remove direct uptrakit-notification-plugin-core dep
+- *(web-api)* collapse nested if-let in enrichment call (clippy)
+- *(api)* propagate token revocation cross-instance and add password change audit log
+- *(api)* remove redundant borrow on format! in update_profile
+- *(proxmox)* enforce tenant isolation in load_proxmox_config
+- migrate SurfaceDescriptor struct literals to builder across all external crates
+- *(surface-proxy)* eliminate plugin-type semantic boundary violations
+- make all pre-push quality gates pass
+- *(web-api)* fix clippy errors introduced by AuditEmitterState migration
+- *(boundary)* register unlisted async helpers in db_access_policy.toml
+- *(web-api)* remove duplicate AuditEmitterState after rebase onto main
+- *(web-api)* replace State<Arc<AppState>> with AuditEmitterState in api_tokens routes
+- *(routes)* enforce route boundary for audit-emitter handlers
+- *(docker)* prevent test mock replacement by lazy daemon upgrade
+- *(proxmox)* filter plugin config selector to proxmox type only
+- *(audit)* enforce typed semantic action producers
+- *(audit)* align action taxonomy with the semantic audit contract
+- *(clippy)* resolve all clippy warnings surfaced by dependency bumps
+- *(dispatch)* apply GitHub provider defaults across runtime paths
+- *(web-api)* honor protection in replay successors and failed batch statuses
+- *(surfaces)* harden provider availability and form handling
+- *(service-hosts)* block deactivated host links from background flows
+- *(web-api)* prefer active agents for host-scoped actions
+- *(web-api)* use execution_owner_service_id in interactive WS lookup
+- *(web-api)* fail pending unowned updates on pre-start agent failure
+- *(web-api)* preserve UTF-8 boundaries in update output truncation
+- *(web-api)* recover replay failures and truncate oversized output
+- *(web-api)* abort authenticated replay handoff on send failure
+- *(web-api)* guard connection cleanup against replacement race
+- *(web-api)* close stale update output race
+- *(web-api)* avoid duplicate reconnect successor dispatch
+- *(web-api)* preserve replay retry after prep failure
+- *(web-api)* prevent replay retry after partial handoff
+- *(reconnect)* refresh embedded capabilities and retry partial replays
+- preserve embedded cleanup state across downgrades
+- scope embedded replay to runtime and refresh live flags
+- *(service-ws)* reuse replay prep in delivery
+- *(web-api)* keep embedded agents out of yield notifications
+- release embedded mqtt claims on yield
+- *(controller)* wire machine id yield reevaluation
+- require delete permission for merge execution
+- reconcile duplicate merge link plugins
+- align merge preview active links
+- restore paginated software item query path
+- make software item query Unicode-aware
+- escape software item query filters
+- finish notification access migration
+- narrow notification mutation context visibility
+- *(web-api/ci)* reclassify hosts/host_tags mutation handlers as full-state in db_access_policy
+- update TestPluginOps mock for new 5-trait PluginOps model after rebase
+- *(web-api)* handle Register and Disconnecting in embedded message handler
+- add missing `is_embedded` fields to test fixtures and fix clippy
+- *(web-api)* replace stale is_mqtt field with has_update_tracking/has_workload_claims in embedded handler
+- *(service-ws)* notify embedded services on force-disconnect (defect #3)
+- *(wire)* restore generic Register message for capability negotiation on first connect
+- *(wire)* remove obsolete Register sends from agent, agent-ssh, scheduler
+- *(web-api)* remove dead negotiate_mqtt_handshake function
+- *(wire)* detect MQTT service type from wire on reconnect, not DB capabilities
+- post-rebase import fixes after merge with main
+- add missing plugin_type field in openapi-client test, move Validated<T> before test module
+- merge_service txn consistency, openapi-client plugin_type field, clippy collapsible-if
+- interactive_ws comment, deliver_pending_updates interactive flag, OidcHttpClient fallibility, login user enumeration
+- *(security)* enforce tenant isolation for all service_host queries
+- *(security)* enforce extension action permissions in invoke_action handler
+- migrate RwLock from tokio to parking_lot in event_broadcaster, service_connections, and batch_progress_broadcaster
+- *(settings)* suppress spurious warnings for plugin-owned raw settings keys
+- address clippy warnings from complexity refactoring
+- *(security)* add SsrfSafeResolver to OIDC, GitHub, and Telegram HTTP clients
+- *(smtp)* restrict helo_host to global settings only
+- *(smtp)* use caller's profile email for test email; fix web-api-auth tests
+- *(notifications)* surface SMTP test delivery errors as HTTP 422
+- *(extensions)* scope plugin extension actions per-extension to fix notification channel buttons
+- *(sse)* fix SSE data serialisation + add UpdateTriggered event
+- *(web-api)* use targeted single-row update in handle_version_check_results
+- *(scheduler/web-api)* always populate host_software_item_id in version check assignments
+- *(web-api)* raise WS message rate limit to 200 msg/sec
+- *(web-api)* enable notifications feature on plugin-infrastructure-registry
+- handle NULL plugin_config_id in display, version check, and update paths
+- *(auth)* move oidc link tokens to fragment redirects
+- *(mqtt)* push connectivity state for already-connected agents on MQTT connect
+- *(check-versions)* use update_many instead of ActiveModel::update for host_software_item
+- *(docker)* parse token response when both token and access_token present
+- *(web-api)* bound notification dispatcher channel to prevent OOM under bulk updates
+- *(interactive)* replay buffered output on WS connect and fix PTY newlines
+- resolve clippy warnings and cargo-deny duplicates
+- *(api)* update autodiscovery ignore handlers for name-based rules
+- address safety and correctness issues across crates
+- *(update-triggers)* reconstruct release_info from DB metadata when absent
+- *(shutdown)* eliminate ~10s graceful shutdown delay
+- *(web-api)* exclude deactivated hosts from software item host counts
+- *(hosts)* create new host record when deactivated host re-reports
+- *(security)* eliminate TOCTOU in stream_update_output SSE handler
+- *(web-api)* replace fixed NATS consumer retry delay with exponential backoff
+- *(security)* force-disconnect WebSocket sessions on service deactivation/rejection
+- *(web-api)* replace span.enter() with .instrument() in request_id middleware
+- *(extensions)* pass tenant context to plugin-backed extension actions
+- *(extensions)* include context_selector.add_action in action lookup
+- *(web-api)* narrow CSP header to frame-ancestors only to unblock SvelteKit
+- *(web-api)* resolve clippy let-and-return in request_id test helper
+- *(service-sdk,web-api)* add timeout guards to prevent shutdown hangs
+- *(clippy)* resolve pre-existing lint warnings in agent and dispatcher
+- *(cli)* rename NatsCommands::Get to NatsCommands::Show
+- migrate all call sites to ColumnAadEntry, fix managed_ca_rotation test
+- *(notifications)* support clearing scope filters in UpdateNotificationRuleRequest
+- *(oidc)* validate registration token before consuming one-time-use code
+- *(controller)* request_log middleware covers all routes including SPA fallback
+- *(web-api)* replace useless vec! with array literals in tests
+- *(nats)* propagate inner error strings through NatsError and NatsTransportError
+- *(nats)* encrypt plugin configs in NATS-published messages (ATK-14)
+- *(web-api)* handle unique constraint violations in discovery allowlist inserts
+- *(web-api)* replace expect() panic in create_enrollment_token with error propagation
+- *(web-api)* add missing tenant filter to trigger_scheduled_task update_many
+- *(web-api)* add external_scheduler_connected to test AppState literals
+- use RequestCrlRenewalPayload::default() and fix broken doc anchor
+- *(notifications)* escape HTML in notification message bodies
+- *(notifications)* add configurable private-host validation and header blocklist to webhook
+- *(web-api/queries)* replace unreachable!() with typed Internal error in plugin_configs
+- *(wire)* add Other(String) catch-all to ErrorCode/EnrollmentStatus, mark payload structs #[non_exhaustive]
+- *(web-api)* move has_update filter to SQL in list_host_packages
+- *(autodiscovery)* route HostManaged items via targets when no plugin config ID
+- *(web-api,controller)* add shutdown CancellationToken to AppState for SSE streams
+- *(web-api)* wrap maybe_complete_batch in a DB transaction
+- *(web-api)* wrap create_batch batch+history inserts in a DB transaction
+- *(web-api)* return HTTP 204 from revoke_enrollment_token; add non-exhaustive wildcard arms
+- *(shared-types,db,web-api)* move UpdateStatus to shared/types and fix in_progress status bug
+- *(web-api)* constant-time Telegram webhook secret comparison
+- *(web-api)* batch-load items and plugins to eliminate N+1 in batch-update queries
+- *(web-api)* resolve clippy too_many_arguments in deliver_event
+- *(web-api)* propagate token revocations via NATS and persist to DB
+- *(oidc)* move registration code from query param to hash fragment
+- *(web-api)* add thiserror derives and Report<T> wrappers to query error types
+- *(web-api)* remove dead JwtManager::load_or_generate
+- *(service-sdk,web-api)* enforce service_id filter on bearer-token WS lookup
+- *(wire)* add Unknown catch-all variant for forward-compatible message deserialization
+- *(web-api)* replace generate_secure_token UUID fallback with proper error handling
+- *(web-api)* propagate DB errors from find_raw_active_config instead of silencing them
+- *(web-api)* delete plaintext JWT key file after migration to encrypted DB
+- *(web-api)* await scatter notification futures instead of fire-and-forget spawns
+- *(web-api)* add injectable clock to RateLimitStore for deterministic tests
+- *(web-api)* batch-load update_output_lines in list_update_history
+- *(web-api)* fix broken TOCTOU suppression in autodiscovery ignore rule creation
+- *(wire,nats)* add is_nats_publishable() guard to prevent credential leakage
+- *(wire)* add required protocol_version field to wire envelopes
+- *(web-api)* register service before MQTT lease assignment
+- *(web-api-types)* add Validate implementations for request types missing input validation
+- *(web-api)* parallelize service broadcast with per-send timeout
+- *(web-api)* use parking_lot mutex and amortize cleanup in fallback rate limiter
+- *(web-api,cli)* use correct http status codes for delete and idempotent create endpoints
+- *(web-api)* use report! macro instead of Report::new() in NoopCertSigner impls
+- *(software-items)* propagate db errors in count_linked_hosts instead of swallowing
+- *(oidc)* propagate db errors in oidc registration instead of swallowing with unwrap_or(1)
+- *(web-api)* use typed Uuid query parameters for plugin_config_id filters
+- *(docker,web-api)* replace prohibited cfg(not(feature)) with additive cfg patterns
+- *(web-api)* propagate DB error on OIDC user-count check instead of defaulting to 0
+- *(db)* use sqlx ErrorKind for unique constraint detection
+- *(config)* replace non-additive cfg(not) feature flags with cfg!() expressions
+- *(auth)* propagate DB errors instead of swallowing with unwrap_or_default
+- *(db)* add missing indexes and remove unwrap() in Default impl
+- *(web-api)* add aud and iss JWT validation to prevent cross-deployment replay
+- *(web-api)* add x-required-permission annotation to self-auth endpoints
+- *(web-api)* initialize master key in oidc_state test helper
+- *(web-api)* guard MQTT lease takeover with heartbeat staleness check
+- *(web-api)* wrap deactivate_service mutations in a DB transaction
+- *(web-api)* preserve streaming output on update timeout
+- resolve clippy collapsible-if and missing test field
+- *(autodiscovery)* update auto-generated plugin configs in-place on name match
+- *(web-api)* handle name collision in PHS two-target discovery
+- *(web-api)* correct token denylist cutoff so re-login tokens are not revoked
+- *(web-api)* adapt WS handlers to plugin refactoring from main
+- *(autodiscovery)* re-discover packages after pending items are discarded
+- *(clippy)* collapse nested if-let into let-chain in agent_ws handler
+- *(web-api)* batch-update last_checked_at on version check results
+- resolve top-5 code-review issues (PKI, cross-tenant, N+1, provider)
+- resolve top-5 code-review issues (N+1, wildcards, discovery, OIDC)
+- *(web-api)* move oidc-providers routes inside authenticated router
+- *(web-api)* cfg-gate tenant db in auth settings route
+- remove tokio::time::pause() from DB-backed notification_service tests
+- frontend accessibility, security, and UX improvements with expanded tests
+- resolve remaining codereview issues with ping interval, retry, and auto-refresh
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- replace empty-string timestamp fallbacks with informative to_string fallback
+- resolve top 5 code review findings across shared-db, directories, web-api-types, and web-api
+- resolve top 5 code review findings across directories, openapi-client, CLI, web-api-types, and shared-db
+- resolve top 5 code review findings across 12 crates and frontend
+- resolve top 5 code review findings across 8 crates
+- eliminate .expect() calls and improve error chain preservation
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- *(web-api)* make rate-limit path test feature-aware
+- *(controller)* resolve rebase and fix reverse-proxy test AppState init
+- *(security)* resolve SEC-01, DIR-01, DB-01 from code review
+- *(web-api)* unify service ip and last-seen tracking
+- resolve additional codereview findings
+- address codereview high-risk issues
+- address top codereview issues
+- harden ws message handling
+- *(controller)* add event poller startup margin
+- *(wire)* add protocol version fields
+- *(controller)* harden outbox replay and mqtt leases
+- *(web-api)* resolve rebase conflicts with main branch
+- *(web-api)* implement code review fix plans H2, H3, H8, H9
+- *(web-api)* implement code review fix plans C4, C7, H4, H5, H6
+- *(web-api,wire,types)* implement code review fix plans #9-#16
+- *(agent,enrollment,wire)* implement code review fix plans #14-#18
+- make agent cert signing async
+- *(web-api,wire,agent)* eliminate command injection in update hooks
+- *(web-api)* atomic first-user registration to prevent owner role race
+- implement frontend code review fix plans #1-#5
+- implement code review fix plans FP-1 through FP-5
+- *(security)* implement fix plans #1-#3 from code review
+- *(web-api)* add approval polling to enrolled agent loop
+- *(web-api)* stop leaking serde errors to anonymous WebSocket clients
+- *(web)* allow OIDC registration token retry on incorrect input
+- *(web)* add IP detection and request logging to PKI HTTP server
+- *(middleware)* set ProxyIp for all trusted peers regardless of forwarding headers
+- *(middleware)* restructure proxy header parsing for broader proxy support
+- *(web)* use configured lifetime for agent certificates
+- *(web)* update test NoopCertSigner impls and device flow test
+- *(web)* handle DB error in user count check
+- *(web)* handle exchange_code error in OIDC callback
+- fix cert renewal
+- *(security)* treat OIDC email_verified=None as unverified (ATK-10)
+- *(web-api)* sync failed trigger statuses in batch response and software UI
+- *(update-history)* make migration sqlite-safe and refresh test fixtures
+- *(web-api-queries)* unblock queued dispatch after successor load failure
+- *(web-api)* preserve queued update history status
+- filter merge preview plugins by active links
+- *(web-api-queries)* prefer active ssh agent links for updates
+- resolve clippy collapsible-if warnings
+- *(update-batches)* move busy-host check before db.begin() to prevent pool deadlock
+- *(mqtt)* unify MQTT software states query path to fix incorrect version state
+- *(web-api-queries)* read plugin_type directly from host_software_item_plugins
+- *(autodiscovery)* preserve featured flag on discovered items
+- *(frontend)* display installed_version in host details assigned software list
+- *(db_migrate)* update table count for host_tags tables
+- *(autodiscovery)* skip installed_version update for approved/manual items
+- *(frontend)* fix duplicate key crash on software detail page for multi-link hosts
+- *(security)* enforce tenant isolation for service_host batch load in list_hosts
+- *(web-api-queries)* introduce typed error for system_enrollment_tokens queries
+- *(web-api-queries)* fix batch sequential dispatch with Queued status and CAS
+- *(update-history)* populate from_version at trigger time
+- *(security)* close plugin config validation gaps
+- *(scheduler)* group Phase A fetch_releases by (plugin_config_id, assignment_config)
+- *(scheduler)* fix fetch_releases skipping package managers with null plugin_config_id
+- *(mqtt)* filter non-featured items from individual MQTT entities in scheduler-engine
+- *(scheduler)* increase stale lease cleanup threshold to 5 minutes
+- *(scheduler)* rename DiscoverHostPackages to DiscoverSoftware to match DB value
+- *(scheduler-engine)* populate host_packages.latest_version via fetch_releases Phase B
+- *(scheduler-engine)* detect double executor registration with debug_assert
+- *(scheduler)* add rolling-upgrade safety to ScheduledTaskType
+- *(scheduler)* release task claim before breaking on cancellation
+- *(scheduler-engine)* remove real sleep from scheduler cancellation test
+- make plugin surface API the real public boundary
+- *(security)* mask SMTP password in SmtpSettingsSnapshot using SecretString
+- *(email)* use structured From header API and add debug logging
+- *(deps)* use workspace = true for notification plugin crate dependencies
+- *(plugins)* replace rustls-platform-verifier with webpki-roots for HTTP clients
+- update installed_display_version: None in all DiscoveredSoftware struct literals
+- use brace-wrapped syntax in impl_plugin_base_config macro
+- *(plugins)* apply SSRF-safe DNS resolver to all HTTP clients
+- *(security)* add SSRF validation to Docker registry and strengthen GitHub component checks
+- *(command,agent-ssh)* add needs_setenv field; apply SETENV: only where needed
+- *(plugins)* replace .unwrap() with safe alternatives in parse_owner_repo and is_valid_deb_package
+- *(plugins)* add HTTP client timeouts to service-sdk, github, and phs plugins
+- *(phs)* detect npm apps when npm install is only in the install script
+- *(phs)* set TERM=xterm in update helper to prevent clear failure
+- *(phs)* add sudo and helper script for PHS update command
+- *(phs-plugin)* use check_for_gh_release key as version file basename
+- *(phs-plugin)* replace broad cat sudoers with validated helper script
+- *(phs-plugin)* read version from /root/.<slug> with sudo
+- *(dashboard-icons)* index all icon variants
+- *(plugins)* declare VersionDetection, ReleaseFetching, and UpdateExecution capabilities
+- *(shell-plugin)* remove dead ShellError/ShellResult types
+- *(plugins)* update capability count assertions for ConfigTest
+- *(surfaces,proxmox)* fix proxmox.hosts context selector and discovery
+- *(catalog)* gracefully skip lifecycle plugins with missing global providers
+- *(plugin-core)* align provider lookup metadata with spec
+- address task 8 follow-up verification blockers
+- *(plugin-core)* fix mismatched type in catalog test (pre-existing)
+- *(plugin-core)* ControllerRuntime embeds StandardHostRuntime with LocalCommandExecutor
+- *(plugin-core)* align batch helpers with Design Doc spec
+- add #[non_exhaustive] to PluginOpsError
+- *(proxmox)* write pct/qm sudoers entries during host bootstrap
+- *(agent-ssh)* render sudoers command specs safely
+- *(plugin-infrastructure-core)* add #[non_exhaustive] to HostCompatibility and PluginError
+- *(proxmox)* add migration down, derive help text from constants, add item-override timeout test
+- *(proxmox)* clamp negative policy timeout values to minimum 1 second
+- *(proxmox)* split snapshot and backup protection timeouts
+- *(proxmox)* fix update protection never running in embedded builds
+- *(proxmox)* scope host mapping uniqueness to vmid, not node
+- *(proxmox,surfaces)* cap per_page at 200; omit empty required_for_interactions
+- *(proxmox-surface)* tenant-safe config name lookup + align per_page cap to max_page_size
+- *(proxmox)* fix bootstrap-proxmox-guest reading wrong key from list-all-unmatched
+- *(proxmox)* return options array for list-discovered-guests action
+- resolve rebase conflicts in cargo plugin and proxmox test
+- *(agent-ssh)* replace println! with structured tracing in bootstrap
+- *(proxmox)* harden controller-side http client
+- *(extension-framework)* fix PanelPosition serde and add tab_group field
+- *(proxmox)* use %status display format in tracing field
+- *(agent-ssh)* run plugin migrations at startup
+- *(proxmox)* use full paths + sudo for pct/qm; add to sudoers on PVE sync
+- *(proxmox,agent-ssh)* fix approve-match, conditional row actions, guest bootstrap UX
+- *(proxmox,frontend)* populate hidden form fields from row context in extension actions
+- *(proxmox)* cover privilege-separation token ACL assignment in help text
+- *(proxmox)* document required API token privileges in form help text
+- *(plugin-registry)* suppress unused_mut lint on feature-gated notification push blocks
+- *(test)* update mask_config_secrets_cargo_is_noop for use_locked default
+- *(plugin-registry)* add #[must_use] to mask_config_secrets functions
+- *(agent-ssh)* graceful sudoers when no commands resolve; suppress compat check warnings
+- *(apt)* replace unreachable guard with unwrap_or for first char
+- *(apt)* change default discovery to all packages instead of manual
+- *(apt-plugin)* emit DiscoveryTarget in discover-all mode
+- *(plugins)* validate to_version parameter in npm and apt plugins
+- *(plugins)* silence spurious WARN on incompatible host during discovery
+- *(npm)* emit DiscoveryTarget in discover_software
+- *(cargo)* sort releases descending so scheduler picks newest version
+- mark cargo-discovered software items as featured
+- *(mas)* rename dead_code suppressed config field to _config
+- *(plugin-npm)* replace .unwrap() with let/else in validate_npm_name_part
+- *(npm-plugin)* add connect and request timeouts to HTTP client
+- *(docker-plugin)* call ensure_daemon_client before all daemon operations
+- *(docker)* use platform-specific digest as installed_version during discovery
+- *(docker)* return error instead of falling back to index digest on transient platform registry failure
+- *(docker)* auto-detect display version from local image os/arch when no platform configured
+- *(docker)* return image-index digest when no platform is configured
+- *(docker)* deduplicate pull progress output by (id, status)
+- *(docker)* fall back from HEAD to GET on 403 for GHCR public packages
+- *(docker)* allow separate auth realm host for Docker Hub fetch_releases
+- *(docker)* declare discovery capabilities unconditionally
+- *(docker)* add 5-second timeout to detect_host_compatibility ping
+- *(docker-proxy)* use select! to ensure clean connection close after each request
+- *(docker-plugin)* replace std::sync::Mutex with parking_lot::Mutex in RegistryAuth
+- *(docker-plugin)* emit DiscoveryTarget in discover-all mode
+- *(docker-plugin)* gate ping and HostCompatibility behind daemon feature
+- *(docker-plugin)* satisfy clippy single-pattern destructuring in auth test
+- *(docker)* validate auth realm URL against registry host to prevent SSRF
+- *(docker)* wire ssh_key_path into bollard connect_with_ssh
+- *(plugins)* implement pagination follow-through in GitHub, GitLab, Forgejo
+- *(plugins)* use StatusCode in ApiError for github, forgejo, gitlab
+- *(github-plugin)* upload asset to remote host before installing
+- *(github-plugin)* declare all sudo commands unconditionally
+
+### Other
+
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(workspace)* rename uptrakit-internal-wire to uptrakit-wire
+- convert controller-runtime to lib crate with pub fn run()
+- rename controller/ to controller-runtime/ (step 1 of split)
+- *(provider-selector)* migrate to Select primitive and drop dead code
+- *(edit-assignment)* migrate plugin-config pickers to Select primitive
+- *(assign-modal)* migrate execution-site dropdown to Select primitive
+- *(software)* migrate plugin-type filter to Select primitive
+- *(services)* migrate merge-target dropdown to Select primitive
+- *(schema-form)* replace stale regression-guard with positive primitive check
+- Implement Track C semantic boundary gate
+- isolate plugin boundaries in track a
+- *(agent-core)* cover public batch_check_versions factory path
+- *(agent-core)* align batch CI cache key and document test preconditions
+- *(agent-core)* add batch failure-path coverage and CI workflow
+- Add MockTransport regressions and downstream compile gate
+- replace PluginType enum with PluginTypeId newtype
+- migrate all call sites to catalog/descriptor model
+- *(types)* add foundation types for plugin framework redesign
+- *(codereview)* update shared library review findings
+- *(codereview)* refresh Rust backend review files
+- *(agent-core)* move host_info to shared agent-core crate
+- *(wire,agent-core)* introduce ServiceTransport trait for transport abstraction
+- extract helpers to reduce cyclomatic complexity (fixes 6,7,9,10)
+- *(agent-core)* extract hook execution phase helper from execute_update
+- *(agent-core)* extract batch grouping and execution from batch_check_versions
+- update registry and consumers to use PluginBase + subtrait accessors
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- remove fixed issues from all CODEREVIEW.md files
+- *(agent-core)* extract run_with_retry helper, remove retry duplication
+- update plugins, agents, scheduler for unified tracking
+- *(wire)* fix event loop starvation, unify Duration types, split wire lib.rs into modules
+- strike through fixed CODEREVIEW entries from top-5 fix session
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- update CODEREVIEW files to reflect fixed issues
+- *(agent-core)* add unit tests for batch_host_package_update_inner and run_check_versions
+- *(agent-core)* improve tracing instrumentation for updates and version checks
+- add cargo-llvm-cov test coverage analysis to CODEREVIEW.md files
+- update security architecture, AGENTS and CODEREVIEW files
+- fmt
+- remove resolved issues from CODEREVIEW.md files
+- *(agent-core)* scope RefreshPackageIndex to fetch groups only
+- *(agent-core)* use batch version check in handle_check_versions
+- *(codereview)* update backend code review findings
+- migrate internal path deps to workspace = true
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- update tests across crates for digest-based docker tracking
+- document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
+- *(types,wire,web-api-types)* add #[non_exhaustive] to public enums and update match arms
+- *(plugins)* make all plugin new() async, remove block_on() panic
+- *(agent-core)* simplify ConnectionContext after StdioTunnel
+- *(codereview)* remove fixed and accepted issues from codereview files
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- apply cargo fmt to all changed files
+- *(docker-plugin)* feature-gate bollard behind `daemon`, switch to aws-lc-rs
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- apply cargo fmt across workspace
+- *(plugins)* rename crate packages to encode category
+- *(types)* rename PluginType variants and string representations
+- *(deps)* promote plugin-core, plugin-registry, and command to workspace deps
+- *(github)* owner/repo → package_identifier; fetch_releases only
+- *(agent-core)* update version check and update to use role-based plugin assignments
+- update documentation for plugin architecture
+- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
+- rename providers to plugins throughout the codebase
+- apply cargo fmt to entire workspace
+- *(web-api)* tighten replay successor assertion to assert_eq Pending
+- *(web-api)* add ModalTrigger and WorkflowTrigger traversal coverage
+- *(surface-proxy)* add mandatory explanatory comments to lint suppressions
+- *(plugin-core)* type shared http client builder errors
+- *(controller-boundaries)* type docker and proxmox surface requests
+- *(web-api)* split surface proxy controller-local flow
+- *(controller-boundaries)* type plugin and web surface contracts
+- *(boundary)* narrow AppState to AuditEmitterState in tenant-scoped handlers
+- *(boundary)* migrate plugin-config and plugin-type-settings handlers to AuditEmitterState
+- *(boundary)* migrate oidc-providers handlers to AuditEmitterState
+- *(boundary)* migrate enrollment-token and notification handlers to AuditEmitterState
+- *(boundary)* migrate system-enrollment-token handlers to focused sub-states
+- *(boundary)* eliminate plugin semantic boundary violations
+- *(audit)* add audit_classification() methods to error types
+- remove surface rollout gate
+- require labels for surface interactions
+- *(audit)* restore conversion-friendly action constructors
+- *(deps)* bump tokio-tungstenite 0.28 → 0.29; fix pre-existing test gaps
+- Add software item tab slot to software detail route
+- *(surfaces)* remove extension-era runtime leftovers
+- Merge branch 'codex/shared-surface-model'
+- *(web-api)* stabilize replay setup abort coverage
+- *(web-api)* drop unused reconnect cleanup wrapper
+- *(web-api)* cover batch reconnect replay successors
+- route websocket reconnect through shared prep
+- enforce plugin semantic boundary
+- finalize merge verification wiring
+- Validate moved duplicate-link merge assignments
+- Reject host-wide duplicate-link merge conflicts
+- Reject conflicting duplicate-link merge assignments
+- unify notification handle access
+- add notification sub-state
+- pin notification sub-state extraction
+- *(web-api)* cover mixed targeted version-check outcomes
+- encode version-check skip-on-error contract
+- *(web-api/actions)* add Tier 1 unit tests for all 7 action domains
+- *(web-api)* extract settings mutation action
+- *(web-api)* extract update_batches mutation actions
+- *(web-api)* extract software_items mutation actions
+- *(web-api)* extract host_tags mutation actions
+- *(web-api)* extract hosts mutation actions
+- *(web-api)* extract system_services mutation actions
+- *(web-api)* extract services mutation actions
+- *(web-api)* scaffold MutationContext action boundary
+- *(web-api)* migrate rate_limit_auth middleware to State<AuthState>
+- *(web-api)* migrate Group B route handlers to focused sub-states
+- *(web-api)* inject SessionSvc/ApiTokenSvc in auth route handlers
+- *(web-api)* migrate api_tokens routes to ApiTokenSvc extractor
+- *(web-api)* add handler state contract and DB access policy hard-gate scripts
+- *(web-api-auth)* add SessionOps/ApiTokenOps traits and SessionSvc/ApiTokenSvc extractors
+- *(web-api)* introduce DbState newtype and FromRef sub-state impls
+- convert inline-format error! calls to structured fields
+- migrate security_audit message prefixes to target: "security_audit"
+- *(web-api)* activate hard-fail CI gate, complete migration (Phase 6)
+- *(web-api)* migrate remaining handlers to ApiError (Phase 5)
+- *(web-api)* migrate plugin_configs, discovery_allowlist, software_items, update_batches to ApiError (Phase 4)
+- *(web-api)* migrate device_auth.rs + notifications.rs to ApiError (Phase 3)
+- *(web-api)* migrate services.rs + system_services.rs to ApiError (Phase 2)
+- *(db)* remove MySQL/MariaDB feature flags from all crates
+- *(codereview)* update web-api, auth, and query layer review findings
+- *(codereview)* full 14-dimension workspace review cycle
+- *(api)* add integration tests for embedded service deactivation guard
+- *(web-api)* record service app names in update history
+- *(core)* remove shared MQTT-specific config ownership
+- *(embedded)* revive CoexistencePolicy with YieldOnSameAppName default
+- *(web-api,wire)* rename MQTT-specific identifiers to generic names
+- *(wire,sdk)* remove UpdateCapabilities in favour of Register
+- *(web-api-types,cli,openapi-client,frontend)* remove MQTT settings API surface
+- *(web-api)* remove controller-side MQTT settings infrastructure
+- *(web-api)* replace external_scheduler_connected with EmbeddedServiceNotifier trait
+- *(wire)* unify Register message across all services; all services declare capabilities on connect
+- update documentation for MQTT decoupling refactor
+- *(wire)* rename MqttTriggerUpdate to ServiceTriggerUpdate
+- *(wire)* rename MqttBridge capability to UpdateTracking
+- move TenantDb to shared-db for cross-crate access
+- *(web-api)* decompose check_versions_host and deliver_pending_updates
+- *(web-api)* split service_ws handler/mod.rs into submodules
+- decompose AppState into CertState, AuthState, BroadcastState, OidcState substates
+- split oidc_auth.rs into protocol + DB (oidc_sync) layers
+- decompose setup_authenticated_session into focused stage functions
+- extract controller-fetch and version-check dispatch from routes/software_items.rs
+- shared HTTP client builder, Validated<T> extractor, PackageIdentifierRules
+- remove fixed entries from CODEREVIEW.md files
+- remove old hook system
+- extract helpers to reduce cyclomatic complexity (fixes 1,3)
+- *(web-api)* move get_user_permissions to break auth/require_auth cycle
+- *(ws-handler)* extract shared types to break messages/updates cycle
+- *(web-api)* remove backward-compat re-exports from update_triggers
+- *(web-api)* extract agent operations into neutral module
+- extract helpers from ws handler loop and bootstrap connect
+- *(updates)* extract helpers from handle_update_result and batch handler
+- *(software-items-routes)* split check_versions into phases and extract error helper
+- *(ws-handler)* group dispatch match arms into capability helpers
+- *(ws-handler)* extract notify_failed_reconnect_update and handle_batch_completion
+- *(types)* accept Into<String> in SecretString and MaskedEmail constructors
+- *(notifications)* remove dead notification-specific code
+- *(notifications)* generic callback route for all channel types
+- *(web-api)* make notification dispatcher and routes generic
+- *(plugins)* add settings bag parameter to deliver()
+- *(plugins)* add raw-key settings store and extend ExtensionActionContext
+- *(web-api, registry)* replace _-prefix params with #[allow(unused_variables)] for feature-gated paths
+- *(codereview)* extend backend review — 14-dimension analysis (2026-03-15)
+- *(oidc)* extract OIDC resolution logic from transaction wrapper
+- *(ws-handler)* extract WS write helper and credential delivery
+- *(ws-connection)* extract setup phases from handle_authenticated
+- *(batches)* extract helpers from stream_batch_progress
+- *(oidc)* extract match arms from resolve_or_create_oidc_user
+- *(ws-handler)* reduce cyclomatic complexity in dispatch and enrolled loop
+- *(web-api)* reduce network settings handler repetition
+- *(web-api)* extract OIDC callback stages into helpers
+- *(web-api)* extract setup/cleanup from WS handler loops
+- *(plugins)* unify plugin registries — eliminate NotificationPluginRegistry
+- *(ui)* tighten pub to pub(crate) in internal UI crates
+- *(web-api)* add list_with_updatable_filter integration test
+- *(web-api)* background message processor for service WS connections
+- Merge branch 'worktree-refactor/plugin'
+- stop auto-creating plugin_configs for package managers
+- *(settings)* rename extra_sans to sans across settings infrastructure
+- *(pki)* split collect_sans into auto_detect_sans and parse_san_list
+- *(codereview)* mark fixed issues as resolved in CODEREVIEW files
+- *(plugins)* move PluginOps trait to infrastructure-core
+- *(web-api)* update routes and handlers for unified tracking
+- *(notifications)* migrate web-api to notification plugin registry
+- *(api)* update scheduler API to use interval + jitter fields
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- *(web-api)* add integration tests for software_items HTTP edge cases
+- *(web-api,update-hooks)* improve tracing in NATS transport, notifications, and hooks
+- *(web-api)* add tracing instrumentation to MQTT lease coordinator
+- *(web-api)* add tracing instrumentation to WebSocket handlers and notification service
+- *(web-api,cli)* resolve actions from shared catalogue
+- *(extensions)* separate action catalogue in registry and plugins
+- *(deps)* eliminate reqwest 0.12 by implementing custom OIDC HTTP client adapter
+- *(web-api)* add notification dispatcher unit tests
+- *(web-api)* add oidc_callback error-path integration tests
+- add missing attestation/digest fields to struct literals
+- apply cargo fmt after rebase onto main
+- *(web-api)* extract uptrakit-web-api-auth crate
+- *(web-api)* extract uptrakit-web-api-queries crate
+- *(web-api)* add REST API and WebSocket integration tests
+- *(web-api)* add shared integration test harness
+- *(settings)* move global settings to /api/v1/global-settings/
+- *(codereview)* mark fixed issues in CODEREVIEW.md files
+- *(update-pipeline)* add tests for validate_update_preconditions and find_outdated_*
+- update all callers to 2-arg encrypt_str/decrypt_str/EncryptedString::new
+- *(codereview)* remove fixed issues and update summaries
+- *(web-api)* document cross-tenant design of find_log_by_action_token
+- *(ws)* route system services to system_services table
+- document wire-safe enum patterns, non_exhaustive structs, and typed enum parameters; clean CODEREVIEW files
+- *(web-api)* replace bare actor/batch type strings with typed enums; fix SSE replay error swallowing
+- eliminate raw SQL from tests and migrations
+- fix top-5 code-review issues and repair reencrypt tests
+- fix slow broadcast and SMTP tests
+- *(codereview)* remove confirmed-fixed issues from CODEREVIEW.md files
+- *(codereview)* remove confirmed-fixed issues from all CODEREVIEW.md files
+- *(codereview)* remove fixed issues and add constant-time comparison guidance
+- *(update-triggers)* split trigger_update_for_host into three composable layers
+- migrate external deps to workspace = true
+- *(codereview)* remove fixed issues, update summaries
+- *(web-api)* update route handlers for global settings
+- *(web-api)* add global settings store and dual-table loading
+- *(codereview)* remove already-fixed and false-positive items
+- *(scheduler-engine)* remove db from SchedulerNotifier::push_software_states_for_tenant
+- *(codereview)* remove fixed issues from CODEREVIEW.md files; update summaries
+- *(codereview)* remove fixed issues from CODEREVIEW.md files
+- *(codereview)* remove fixed issues from all CODEREVIEW.md files
+- remove fixed issues from CODEREVIEW.md files
+- *(codereview)* remove fixed issues from CODEREVIEW files
+- *(codereview)* remove fixed issues from CODEREVIEW files
+- *(codereview)* add critical findings and workspace index
+- *(codereview)* remove fixed issues from CODEREVIEW.md files
+- remove fixed and false-positive entries from CODEREVIEW files
+- *(web-api)* decompose oidc_callback and eliminate duplications
+- *(web-api)* batch DB queries in deliver_pending_updates
+- *(web-api)* split lib.rs into app_state, ca_snapshot, and router modules
+- extract update_hooks to new uptrakit-update-hooks crate
+- *(wire)* move service_profile from web-api to internal-wire
+- *(shared-db)* remove dead code, crypto shim, and convenience re-exports
+- *(web-api)* move AuthMethod from shared-db to web-api
+- remove fixed and resolved entries from CODEREVIEW.md files
+- apply cargo fmt and prettier formatting
+- *(api)* rewrite enrollment validation to use multi-token system
+- add unit and integration tests for NATS transport and notifications
+- remove DB outbox, add NATS feature foundation
+- *(web-api)* extract shared delivery routing into event_delivery.rs
+- apply rustfmt after rebasing onto main
+- fix AGENTS.md crate layout, update dev docs, and clean up CODEREVIEW files
+- *(web-api)* replace Path<String> with typed Path<Uuid> extractors
+- *(db)* rename oidc_providers deleted_at to deactivated_at
+- *(web-api)* generic target-based autodiscovery processing
+- update all references from old service_ws/service_handler files
+- *(web-api)* extract message handlers + thin authenticated loop
+- *(web-api)* extract handler leaf modules (renewal, discovery, updates, mqtt)
+- *(web-api)* move service_handler.rs into service_ws/handler/
+- *(web-api)* extract connection.rs from service_ws/mod.rs
+- *(web-api)* convert service_ws.rs to directory module + extract protocol.rs
+- update references from deleted handler files to service_handler
+- *(web-api)* unify WS handlers into single service_handler module
+- update all documentation for capability-based service identity
+- *(web-api)* update WebSocket handlers for capability-based routing
+- *(api-types)* replace ServiceType with capabilities and service_label in REST API
+- *(web-api)* switch notification service and event poller to capability-based routing
+- *(web-api)* unify service connection registry to capability-based
+- *(web-api)* unify enrollment tokens and remove ServiceType from settings
+- *(web-api)* update routes for role-based plugin assignments
+- *(web-api)* update queries for role-based plugin assignments
+- *(db)* merge all migrations into one and rename to plugin_configs
+- *(web-api)* replace manual table creation in tests with migration-based setup
+- *(provider/docker)* rename crate, extract ImageRef, extend DockerClient
+- remove all fixed findings from CODEREVIEW.md files
+- *(web-api)* gate SQLite-backed query tests behind db-sqlite feature
+- add comprehensive code review findings
+- add comprehensive code review findings
+- *(software-items)* decouple software items from provider configs
+- *(wire)* replace protocol_version with capability-based negotiation
+- remove obsolete TESTCOV files
+- *(codereview)* resolve all remaining open code review findings
+- *(codereview)* resolve top 5 open code review findings
+- *(codereview)* resolve top 5 open code review findings
+- *(web-api)* replace inline permission checks with typed Axum extractors
+- rebase onto main and fix post-rebase build issues
+- introduce TenantDb query helpers and eliminate manual tenant_id filters
+- apply top-5 code review fixes (Issues 1–5)
+- remove upstream crate tests, add AsyncAPI spec conformance
+- apply cargo fmt formatting across workspace
+- extract error handling into dedicated doc and fix Report imports
+- markdownlint
+- refresh TESTCOV.md with cargo-llvm-cov coverage data after rebase
+- add unit tests for top 10 uncovered critical paths
+- add test coverage analysis (TESTCOV.md) for 16 crates
+- cargo fmt + fix clippy await_holding_lock in shared-db test
+- update CODEREVIEW files and documentation for resolved issues
+- consolidate duplicate default_enabled and message response types in web-api-types
+- replace numeric HTTP status codes with StatusCode enum variants
+- add extensibility-focused code review findings
+- *(codereview)* add code review for controller, web-api, and openapi-client
+- *(deps)* minimise unnecessary dependencies and feature-gate OIDC
+- *(deps)* replace workspace-wide tokio full with per-crate minimal features
+- cargo fmt
+- remove CODEREVIEW.md files
+- *(types)* use Uuid instead of String for all entity ID fields
+- replace Result<T, String> with typed error enums across codebase
+- cargo fmt
+- fix top 5 code review issues (SDK-04, CMD-04, PCORE-02, DB-02, controller decomposition)
+- *(wire)* replace close reason string constants with CloseReason enum
+- cargo fmt
+- *(types)* replace ad-hoc string parsers with FromStr
+- fix top 5 code review issues (ARCH-04, ARCH-02, WAT-03, SEC-03, MQTT-04)
+- fix top 5 code review issues (DB-05, OCSP, HA-04, CLI-04, session txn)
+- *(shared-types,web-api)* add DeviceAuthStatus enum, replace String across DB/API/logic (WAT-02, DB-05)
+- *(web-api-types)* replace String fields with typed enums (WAT-08, WAT-09)
+- add #[non_exhaustive] to public enums (XC-06, WIRE-05, TYP-03)
+- resolve top 5 code review issues across workspace
+- *(wire,web-api-types)* replace ad-hoc parse() methods with FromStr
+- *(wire)* decouple host info from enrollment, rename ReportHostInfo to ReportHosts
+- add extensibility-focused code review for all crates
+- add code review results for controller and web-api crates
+- move ProviderType, ReleaseAsset, ReleaseInfo to shared-types
+- replace Result<T, String> in crypto.rs and migrate bail!() codebase-wide
+- *(CODEREVIEW)* remove obsolete codereview files
+- *(provider-registry)* replace secrets module with typed config dispatching
+- drop hex, urlencoding and open crates
+- clean up workspace dependencies
+- remove resolved findings and fix plans from CODEREVIEW.md files
+- update CODEREVIEW.md files with verified fix statuses, merge FIX_PLANS.md
+- *(web-api)* mark fix plans #1-#3 as fixed in CODEREVIEW.md
+- *(web-api)* add fix plans for L6-L10, completing all 45 findings
+- *(web-api)* add fix plans for M13-M17, L1-L5
+- *(web-api)* add fix plans for M3-M12
+- *(web-api)* add fix plans for H9, H10, H11, M1, M2
+- *(web-api)* add fix plans for H2, H3, H6, H7, H8
+- *(web-api)* add fix plans for C6, C7, H1, H4, H5
+- *(web-api)* add code review findings and fix plans
+- *(wire)* remove duplicate ReleaseAssetInfo, re-export ReleaseAsset from provider-core
+- *(wire)* rename agent_ts to service_ts in Ping/Pong payloads
+- *(wire)* replace ErrorPayload.code String with typed ErrorCode enum
+- *(wire)* replace MqttTenantConfig.transport String with typed MqttTransport enum
+- Revert "feat(web-api): add periodic settings reload for cross-instance consistency"
+- *(web-api)* standardize all API error responses to JSON
+- *(web-api)* extract shared `send_pong` helper for Ping/Pong handling
+- *(wire)* replace untyped String fields with typed enums
+- *(wire)* change ID fields from String to uuid::Uuid
+- add impl_report_conversion! macro and replace verbose ReportConversion impls
+- enforce rootcause best practices and migrate errors to thiserror
+- update AGENTS.md to remove approved allow exceptions
+- *(web)* introduce MQTT client param structs to reduce function arguments
+- *(web)* introduce OidcUserParams and EnrollParams to reduce function arguments
+- implement FromStr trait on status enums
+- *(web)* remove dead code from agents routes and unused mqtt modules
+- [**breaking**] replace MQTT Heartbeat message with Ping/Pong
+- [**breaking**] unify enrollment, TLS, CA, and CLI into shared enrollment crate
+- [**breaking**] enforce rootcause Report<E> error handling across all crates
+- update all dependencies to latest versions
+- [**breaking**] unify agents and MQTT services into single Service entity
+- *(mqtt)* drop websocket broker transport
+- *(mqtt)* replace direct DB access with WebSocket/mTLS controller communication
+- move UUIDv7 generation from agent to controller
+- extract provider matching into registry crate
+- [**breaking**] move MQTT settings to dedicated mqtt_clients table
+- *(web)* make assign_owner_role public
+- *(web)* replace manual Permission::all() with strum EnumIter
+- *(web)* replace manual SettingKey::ALL with strum EnumIter
+- extract HTTP request/response types into shared web-api-types crate
+- Merge branch 'features/ca-improvements'
+- apply clippy and fmt fixes to existing code
+- Merge branch 'feature/reverse-proxy'
+- *(reverse-proxy)* add deployment guides and fix clippy warnings
+- *(web)* extract agent identity parsing into shared utility
+- *(web)* replace setting key constants with SettingKey enum
+- clean up workspace dependency placement
+- [**breaking**] remove HTTP server, rework agent bootstrap, add CRL endpoint
+- Merge branch 'refactor/app_state'
+- *(web)* bulk-load settings and warn on unrecognised keys
+- *(web)* read proxy and SAN settings from Settings struct
+- *(web)* remove CLI-derived fields from AppState
+- *(web)* extract shared PKI utilities into pki_utils module
+- *(web)* replace in-memory auth flow stores with DB-backed storage
+- apply cargo fmt
+- apply cargo fmt
+- *(web)* wrap revoke_certificate return in Report
+- *(web)* convert agent route helpers to rootcause Report
+- *(web)* convert DeviceFlowStore to rootcause Report
+- *(web)* convert JwtManager::load_or_generate to Report<AuthError>
+- *(web)* introduce CertSignerError for AgentCertSigner trait
+- *(web)* use if-let pattern for existing user check in register
+- *(web)* recover from mutex poisoning in OIDC state stores
+- *(web)* replace serde_json unwrap calls with serialize_msg helper in agent_ws
+- Merge branch 'feature/web-ui-agent-info'
+- Merge branch 'feature/cli-basic'
+- Merge branch 'feature/ca-rotation'
+- oidc and settings
+- CRL
+- agents cert renewal
+- cert revokation
+- agent WS enrollment
+- add mTLS auth
+- agent registration
+- real ip
+- basic web
+- remove remaining MySQL/MariaDB code paths and comments
+- *(notifications)* extract raw settings store to break cross-layer dependency
+- add #[non_exhaustive] to update history response types
+- align built-in pages with ui design spec
+- *(scheduler)* replace push_software_states with signal_software_states_changed
+- consolidate load_software_states_for_tenant into scheduler-engine
+- split web-api-queries/software_items.rs into crud/host_assignments/plugin_assignments
+- *(web-api-queries)* extract update dispatch into neutral module
+- *(software-items-queries)* split list/load/assign into focused helpers
+- *(update-triggers)* extract build_record closure in trigger_update_for_host
+- *(batches)* split update_batches into candidates/dispatch/queries modules
+- *(autodiscovery)* split into ignore_rules/default_configs/discovery_items modules
+- update documentation for unified plugin registry
+- *(web-api-queries)* remove unnecessary openapi feature flags
+- *(queries)* rewrite query layer for unified tracking model
+- *(web-api-queries)* add unit tests for system_enrollment_tokens and system_services
+- *(web-api-queries)* add tracing instrumentation to all query modules
+- *(scheduler-engine)* cover controller-side mock fetch failures
+- *(codereview)* update database and scheduler-engine review findings
+- add embedded services architecture documentation
+- *(scheduler-engine)* replace AtomicBool with closure for yield logic
+- *(scheduler)* replace cron expressions with interval + jitter
+- remove fixed issues from CODEREVIEW.md files
+- *(scheduler-engine)* improve Duration consistency and doc comments
+- *(scheduler-engine)* make scheduler tenant-agnostic
+- *(scheduler)* categorize tasks as internal vs external
+- *(scheduler-engine)* use batch_fetch_releases in Phase A version check
+- *(scheduler-engine)* parallelize fetch_releases phase A and run phases concurrently
+- *(scheduler-engine)* extract shared agent-assignment query helpers
+- *(scheduler-engine)* parallelize poll_cycle task execution with JoinSet
+- *(codereview)* add missing per-crate CODEREVIEW.md files
+- *(plugins)* add extension handlers to notification plugins
+- *(notifications)* move extension definitions from registry to plugin crates
+- *(notifications-email)* type surface action params
+- *(deps)* bump mail-send 0.5 → 0.6
+- remove extension framework leftovers
+- rename extension ownership compatibility field
+- rename notification surface action wrappers
+- drop dead extension manifest plumbing
+- collapse notification extension framework edges
+- Enable shared-surface execution for email SMTP overrides
+- Task 6 follow-up: support controller-local sensitive fields
+- Task 6 follow-up: fix plugin surface execution and contract filtering
+- Task 6: register plugin-backed surfaces via surface registry
+- *(catalog)* add PluginCatalog with unified descriptor lookup
+- *(notifications)* migrate notification plugins to unified descriptor
+- *(plugin-core)* replace instance extension_manifests/extension_actions with static variants
+- *(email)* rewrite SMTP delivery using mail-send API
+- *(plugins)* rename PosixHostRuntime to StandardHostRuntime in test code
+- *(plugins)* migrate all plugins from require_posix_executor to runtime.executor()
+- *(plugins)* add declare_plugin! macro and migrate software/hook/release/infra plugins
+- *(codereview)* update plugin system review findings
+- extract constructors and shared helpers to reduce complexity
+- migrate all plugins from Plugin trait to PluginBase + subtraits
+- *(codereview)* prune resolved findings
+- remove resolved code review findings from CODEREVIEW.md files
+- *(phs)* rename Forgejo references to Codeberg in PHS discovery
+- *(phs)* remove phs_update.sh helper; use inline sudo env var forwarding
+- *(plugin-registry)* move validate_identifier into register_plugins! macro
+- *(phs-plugin)* drop multi-script alt-URL tests
+- *(plugins)* move crate directories into category subdirectories
+- *(enhancements)* migrate dashboard-icons to unified descriptor
+- *(types)* replace HostFeature enum with forward-compatible Cow newtype
+- *(infra-core)* replace uptrakit_wire imports with uptrakit_surfaces / uptrakit_shared_types
+- *(infra-core)* swap uptrakit-wire dep for uptrakit-surfaces
+- *(package-managers)* type validator helper contracts
+- *(agent-infra)* type guest and proxy error contracts
+- *(runtime-support)* extract ssh runtime flows and reuse batch helpers
+- *(plugin-core)* cover controller protection singleton accessor
+- delete extension compatibility layer
+- make plugin surface authoring fully surface-native
+- hide dead extension payload exports
+- make infra invoker responses surface-native
+- make infra fallback surface-native
+- rename extension compatibility module
+- rename controller surface action internals
+- remove legacy extension framework crate
+- centralize legacy extension compatibility seam
+- collapse agent ssh extension framework edge
+- collapse proxmox extension framework edge
+- drop dead extension bootstrap hook
+- Keep proxmox add-config on controller-local shared-surface path
+- Enable allowlisted notification channel actions on shared surfaces
+- Port proxmox host-detail surface and harden hydration behavior
+- Filter api_submit actions from data tables
+- Make shared surfaces truthful for form actions
+- *(plugin-core)* update testing.rs to use StandardHostRuntime
+- *(plugin-core)* update doc comments for StandardHostRuntime
+- *(plugin-core)* rename PosixHostRuntime to StandardHostRuntime, add executor() to HostRuntime trait
+- *(infra)* unify agent-side infrastructure through descriptor/catalog
+- *(plugins)* add foundation types for unified descriptor/catalog
+- *(plugins)* add execute_and_capture helper, migrate call sites
+- add shared test executor types to eliminate plugin test duplication
+- replace AgentInfraRegistry with PluginBase subtraits in agent-ssh
+- remove old Plugin trait from infrastructure-core
+- *(plugins)* change args_suffix type to Cow<'static, str>
+- change AgentInfraPlugin trait host_id from &str to uuid::Uuid
+- *(plugins)* replace wire dep with extension-framework in plugin crates
+- *(proxmox)* tighten protection surface test assertions
+- *(proxmox)* type controller compatibility dispatch
+- prune stale backup targets and enforce host match uniqueness
+- harden policy surface scope and feature gating
+- add policy surfaces for settings and software items
+- Persist failed backup audits and use async task polling sleep
+- Add Proxmox controller-side update protection policy and cache
+- drop dead plugin manifest builders
+- rename proxmox surface action wrapper
+- Fix host-info permission metadata and hydration retry behavior
+- *(proxmox)* unify ProxmoxPlugin and ProxmoxAgentPlugin into single struct
+- *(proxmox)* clean up guest bootstrap and extract helpers
+- *(proxmox)* remove bootstrap-proxmox and list-pve-hosts actions
+- move Proxmox controller migrations into plugin crate
+- *(plugins)* remove thiserror Display format string tests
+- *(deps)* bump strum 0.27 → 0.28, fix test_support descriptor
+- route ssh agent through registry boundary
+- drop registry extension framework edge
+- *(registry)* keep known ids owned under test-support
+- *(registry)* assert PluginOps visibility in export test
+- *(registry)* move DashboardIconCache lifecycle into with_dashboard_icons
+- *(tests)* eliminate real network/subprocess calls in unit tests
+- *(registry)* extract plugin registry tests to separate module
+- remove notification_ops from AppState and unify through PluginOps
+- *(registry)* parallelize compatible_sudo_commands_for_host probes
+- *(plugin-apk)* migrate to shared helpers
+- *(plugins)* replace "requires root" phrasing in sudoers explanations
+- *(plugins)* replace named iterator-skip vars with bare _ in apk and apt parsers
+- *(plugins)* remove deprecated Option<XxxDiscoveryFilter> pattern
+- *(plugin-apt)* migrate to shared helpers
+- *(plugins)* split apt and homebrew plugin.rs into submodules
+- *(tests)* fix clippy violations in plugin test helpers
+- *(plugin-cargo)* migrate to shared helpers
+- *(plugins)* split npm, cargo, snap, pacman plugin.rs into submodules
+- remove is_discover_all_mode from Cargo, Snap, Docker plugins
+- *(plugin-dnf)* migrate to shared helpers
+- *(plugin-core)* remove duplicated test runtime helpers (Phase 3)
+- *(plugin-homebrew)* migrate to shared helpers
+- *(plugin-mas)* migrate to shared helpers
+- *(plugin-npm)* migrate to shared helpers
+- *(plugin-pacman)* migrate to shared helpers
+- *(plugin-pkg)* migrate to shared helpers
+- *(plugin-snap)* migrate to shared helpers
+- *(plugins)* update capability assertions for new VersionDetection/ReleaseFetching/UpdateExecution
+- rename docker surface action wrapper
+- collapse docker extension framework edge
+- *(docker)* assert batch_fetch preserves exact per-item errors
+- *(plugin-releases-docker)* add fetch_releases error-path tests
+- *(docker)* split plugin into discovery/update/detect/fetch modules
+- update plugin docs to reflect PluginBase trait and always-emit discovery
+- *(types)* consolidate is_private_host into shared network module
+- *(codereview)* add full reviews for forgejo and gitlab release plugins
+- *(github)* remove pre/post install commands in favor of hook plugins
+- remove fixed findings from CODEREVIEW files and update best-practice docs
+
+### Security
+
+- *(plugins)* default dangerous command rejection to ON (ATK-16)
+- *(web-api)* encrypt JWT signing key at rest
+- *(crypto)* EncryptedString::new requires master key, no plaintext fallback
+- *(plugins)* restrict sudo commands to specific subcommands
+# Changelog
+
 See [controller-runtime/CHANGELOG.md](../controller-runtime/CHANGELOG.md)
 for the full release history.

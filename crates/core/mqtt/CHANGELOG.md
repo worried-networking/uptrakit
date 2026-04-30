@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.1...uptrakit-mqtt-v0.0.2) - 2026-04-30
+
+### Other
+
+- updated the following local packages: uptrakit-service-sdk, uptrakit-wire, uptrakit-mqtt-runtime
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-mqtt-v0.0.1) - 2026-04-27
 
 ### Added
