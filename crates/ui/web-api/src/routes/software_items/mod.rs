@@ -114,7 +114,7 @@ fn emit_software_item_mutation_audit(
     }
 }
 
-fn emit_software_update_audit(
+pub(crate) fn emit_software_update_audit(
     state: &AppState,
     tenant_id: Uuid,
     user: &AuthenticatedUser,
