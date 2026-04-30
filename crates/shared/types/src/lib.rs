@@ -42,7 +42,7 @@ pub use host_feature::{HostFeature, PROBEABLE_FEATURES, host_features};
 pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
 pub use os_family::OsFamily;
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
-pub use permissions::{ParsePermissionError, Permission};
+pub use permissions::Permission;
 pub use plugin_capability::PluginCapability;
 pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_type_id::{PluginTypeId, plugin_ids};

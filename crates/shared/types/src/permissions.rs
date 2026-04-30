@@ -2,19 +2,18 @@
 
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
-
 /// An authorization permission.
 ///
 /// Used in shared surface action descriptors (`SurfaceActionDescriptor.permission`) and
 /// web API auth middleware to gate access to actions and endpoints.
 ///
 /// All variants serialize to / deserialize from `snake_case` strings.
+/// Unknown strings received on the wire are preserved as [`Permission::Other`] so that
+/// old binaries do not silently lose permissions added by newer builds.
 ///
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::EnumIter)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
 pub enum Permission {
     // ── Services ─────────────────────────────────────────────────────────
     /// View tenant services and their status.
@@ -107,6 +106,13 @@ pub enum Permission {
     // ── Plugin config testing ─────────────────────────────────────────
     /// Test plugin configurations against hosts (dry-run validation).
     TestPluginConfigs,
+
+    /// An unknown permission received from a newer build.
+    ///
+    /// Preserved on the wire instead of being dropped, so old binaries
+    /// never silently lose permissions added in newer builds.
+    #[strum(disabled)]
+    Other(String),
 }
 
 impl Permission {
@@ -117,7 +123,7 @@ impl Permission {
     }
 
     /// Returns the canonical `snake_case` string representation.
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Permission::ViewServices => "view_services",
             Permission::ApproveServices => "approve_services",
@@ -152,11 +158,12 @@ impl Permission {
             Permission::ManageUsers => "manage_users",
             Permission::ManageIgnores => "manage_ignores",
             Permission::TestPluginConfigs => "test_plugin_configs",
+            Permission::Other(s) => s.as_str(),
         }
     }
 
     /// Returns a human-readable description of the permission.
-    pub fn description(&self) -> &'static str {
+    pub fn description(&self) -> &str {
         match self {
             Permission::ViewServices => "View tenant services and their status",
             Permission::ApproveServices => "Approve pending service enrollments",
@@ -197,6 +204,7 @@ impl Permission {
             Permission::ManageUsers => "Manage user roles and access",
             Permission::ManageIgnores => "Manage autodiscovery ignore rules",
             Permission::TestPluginConfigs => "Test plugin configurations against hosts",
+            Permission::Other(_) => "(unknown permission)",
         }
     }
 }
@@ -213,50 +221,63 @@ impl From<Permission> for String {
     }
 }
 
-/// Error returned when parsing an invalid [`Permission`] string.
-#[derive(Debug, thiserror::Error)]
-#[error("invalid permission value")]
-pub struct ParsePermissionError;
+impl From<String> for Permission {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "view_services" => Self::ViewServices,
+            "approve_services" => Self::ApproveServices,
+            "reject_services" => Self::RejectServices,
+            "remove_services" => Self::RemoveServices,
+            "update_services" => Self::UpdateServices,
+            "view_system_services" => Self::ViewSystemServices,
+            "approve_system_services" => Self::ApproveSystemServices,
+            "reject_system_services" => Self::RejectSystemServices,
+            "remove_system_services" => Self::RemoveSystemServices,
+            "update_system_services" => Self::UpdateSystemServices,
+            "view_software" => Self::ViewSoftware,
+            "create_software" => Self::CreateSoftware,
+            "update_software" => Self::UpdateSoftware,
+            "delete_software" => Self::DeleteSoftware,
+            "trigger_checks" => Self::TriggerChecks,
+            "trigger_updates" => Self::TriggerUpdates,
+            "manage_scheduler" => Self::ManageScheduler,
+            "view_hosts" => Self::ViewHosts,
+            "update_hosts" => Self::UpdateHosts,
+            "deactivate_hosts" => Self::DeactivateHosts,
+            "view_settings" => Self::ViewSettings,
+            "manage_auth_settings" => Self::ManageAuthSettings,
+            "manage_enrollment_tokens" => Self::ManageEnrollmentTokens,
+            "manage_agent_certs" => Self::ManageAgentCerts,
+            "manage_global_settings" => Self::ManageGlobalSettings,
+            "manage_commands" => Self::ManageCommands,
+            "view_notifications" => Self::ViewNotifications,
+            "manage_notifications" => Self::ManageNotifications,
+            "view_audit_logs" => Self::ViewAuditLogs,
+            "view_system_audit_logs" => Self::ViewSystemAuditLogs,
+            "manage_users" => Self::ManageUsers,
+            "manage_ignores" => Self::ManageIgnores,
+            "test_plugin_configs" => Self::TestPluginConfigs,
+            _ => Self::Other(s),
+        }
+    }
+}
 
 impl FromStr for Permission {
-    type Err = ParsePermissionError;
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "view_services" => Ok(Self::ViewServices),
-            "approve_services" => Ok(Self::ApproveServices),
-            "reject_services" => Ok(Self::RejectServices),
-            "remove_services" => Ok(Self::RemoveServices),
-            "update_services" => Ok(Self::UpdateServices),
-            "view_system_services" => Ok(Self::ViewSystemServices),
-            "approve_system_services" => Ok(Self::ApproveSystemServices),
-            "reject_system_services" => Ok(Self::RejectSystemServices),
-            "remove_system_services" => Ok(Self::RemoveSystemServices),
-            "update_system_services" => Ok(Self::UpdateSystemServices),
-            "view_software" => Ok(Self::ViewSoftware),
-            "create_software" => Ok(Self::CreateSoftware),
-            "update_software" => Ok(Self::UpdateSoftware),
-            "delete_software" => Ok(Self::DeleteSoftware),
-            "trigger_checks" => Ok(Self::TriggerChecks),
-            "trigger_updates" => Ok(Self::TriggerUpdates),
-            "manage_scheduler" => Ok(Self::ManageScheduler),
-            "view_hosts" => Ok(Self::ViewHosts),
-            "update_hosts" => Ok(Self::UpdateHosts),
-            "deactivate_hosts" => Ok(Self::DeactivateHosts),
-            "view_settings" => Ok(Self::ViewSettings),
-            "manage_auth_settings" => Ok(Self::ManageAuthSettings),
-            "manage_enrollment_tokens" => Ok(Self::ManageEnrollmentTokens),
-            "manage_agent_certs" => Ok(Self::ManageAgentCerts),
-            "manage_global_settings" => Ok(Self::ManageGlobalSettings),
-            "manage_commands" => Ok(Self::ManageCommands),
-            "view_notifications" => Ok(Self::ViewNotifications),
-            "manage_notifications" => Ok(Self::ManageNotifications),
-            "view_audit_logs" => Ok(Self::ViewAuditLogs),
-            "view_system_audit_logs" => Ok(Self::ViewSystemAuditLogs),
-            "manage_users" => Ok(Self::ManageUsers),
-            "manage_ignores" => Ok(Self::ManageIgnores),
-            "test_plugin_configs" => Ok(Self::TestPluginConfigs),
-            _ => Err(ParsePermissionError),
-        }
+        Ok(Self::from(s.to_string()))
+    }
+}
+
+impl serde::Serialize for Permission {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Permission {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Permission::from)
     }
 }
