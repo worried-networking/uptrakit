@@ -259,11 +259,7 @@ changelog_include = [
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
-  "uptrakit-web-api-types",
   "uptrakit-scheduler-engine",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
   "uptrakit-notification-plugin-core",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
@@ -313,11 +309,7 @@ changelog_include = [
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
-  "uptrakit-web-api-types",
   "uptrakit-scheduler-engine",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
   "uptrakit-notification-plugin-core",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
@@ -359,9 +351,6 @@ changelog_update = true
 changelog_include = [
   "uptrakit-agent-runtime",
   "uptrakit-agent-core",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
 ]
 
 [[package]]
@@ -375,9 +364,6 @@ changelog_update = true
 changelog_include = [
   "uptrakit-agent-ssh-runtime",
   "uptrakit-agent-core",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
 ]
 
 [[package]]
@@ -390,9 +376,6 @@ git_release_name = "uptrakit-mqtt v{{ version }}"
 changelog_update = true
 changelog_include = [
   "uptrakit-mqtt-runtime",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
 ]
 
 [[package]]
@@ -406,9 +389,6 @@ changelog_update = true
 changelog_include = [
   "uptrakit-scheduler-engine",
   "uptrakit-scheduler-runtime",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-wire",
 ]
 
 [[package]]
@@ -419,13 +399,6 @@ git_tag_enable = true
 git_tag_name = "uptrakit-cli-v{{ version }}"
 git_release_name = "uptrakit v{{ version }} (CLI)"
 changelog_update = true
-changelog_include = [
-  "uptrakit-openapi-client",
-  "uptrakit-shared-types",
-  "uptrakit-surfaces",
-  "uptrakit-web-api-types",
-  "uptrakit-wire",
-]
 
 # ===== Standalone consumable libraries: keep own tag/release/changelog =====
 # These two crates are the public-facing API surface for external code.
