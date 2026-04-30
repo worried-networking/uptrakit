@@ -63,7 +63,13 @@ async fn create_listener(
 
 /// Run the HTTPS server.
 pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
-    let mut router = uptrakit_web_api::build_router(cfg.app_state);
+    let mut router = uptrakit_web_api::build_router(Arc::clone(&cfg.app_state));
+    #[cfg(feature = "mcp")]
+    {
+        router = router.merge(uptrakit_web_api::build_mcp_router(Arc::clone(
+            &cfg.app_state,
+        )));
+    }
     if let Some(ref dir) = cfg.static_dir {
         let index_for_fallback = dir.join("index.html");
         let not_found = Router::new()

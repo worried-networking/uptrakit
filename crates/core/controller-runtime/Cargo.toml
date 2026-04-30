@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embedded-mqtt", "embedded-frontend", "reset-data", "dashboard-icons"]
+default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embedded-mqtt", "embedded-frontend", "reset-data", "dashboard-icons", "mcp"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine", "dep:uptrakit-scheduler-runtime"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
 embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
@@ -28,6 +28,7 @@ embedded-frontend = ["dep:uptrakit-frontend"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
+mcp = ["uptrakit-web-api/mcp"]
 
 [dependencies]
 uptrakit-wire = { workspace = true }
