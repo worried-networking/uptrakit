@@ -110,87 +110,115 @@ name = "uptrakit-web-api-auth"
 name = "uptrakit-web-api-queries"
 
 # ===== Plugin crates =====
-# Analyzed for commits. Per user direction, plugin commits roll up only
-# into the controller (lean + standalone) changelogs — not into agent,
-# agent-ssh, mqtt, scheduler, or cli — even though some of those binaries
-# transitively link a subset of plugins.
+# Excluded from analysis. Plugin internals are runtime-loaded and don't
+# carry user-visible semver. release-plz still listed them in the PR
+# body even with all release flags off because they were analyzed; the
+# only suppression flag is release = false. As a side-effect, plugin
+# commits no longer roll up into the controller changelog — acceptable
+# per the original "at best" framing.
 [[package]]
 name = "uptrakit-notification-plugin-core"
+release = false
 
 [[package]]
 name = "uptrakit-notification-plugin-email"
+release = false
 
 [[package]]
 name = "uptrakit-notification-plugin-telegram"
+release = false
 
 [[package]]
 name = "uptrakit-notification-plugin-webhook"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-generic-shell"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-hook-shell"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-hook-systemd"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-core"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-proxmox"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-registry"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apk"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apt"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-cargo"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-dnf"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-homebrew"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-mas"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-npm"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pacman"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pkg"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-snap"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-releases-docker"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-releases-forgejo"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-releases-github"
+release = false
 
 [[package]]
 name = "uptrakit-plugin-releases-gitlab"
+release = false
 
 # ===== Runtime crates: tagged so binary dep-bumps propagate; no own
 # changelog (rolled into the binaries that depend on them) =====
@@ -242,9 +270,10 @@ name = "uptrakit-controller-runtime"
 git_only = true
 
 # ===== Binary crates =====
-# Lean controller: web-api + frontend + plugins + public libs.
+# Lean controller: web-api + frontend + public libs.
 # Excludes embedded service runtimes (agent-runtime, agent-ssh-runtime,
 # mqtt-runtime, scheduler-runtime) — those ship only via standalone.
+# Plugin crates are release = false and intentionally not listed here.
 [[package]]
 name = "uptrakit-controller"
 git_only = true
@@ -264,32 +293,6 @@ changelog_include = [
   "uptrakit-shared-types",
   "uptrakit-surfaces",
   "uptrakit-wire",
-  "uptrakit-notification-plugin-core",
-  "uptrakit-notification-plugin-email",
-  "uptrakit-notification-plugin-telegram",
-  "uptrakit-notification-plugin-webhook",
-  "uptrakit-plugin-discovery-proxmox-helper-scripts",
-  "uptrakit-plugin-enhancement-dashboard-icons",
-  "uptrakit-plugin-generic-shell",
-  "uptrakit-plugin-hook-shell",
-  "uptrakit-plugin-hook-systemd",
-  "uptrakit-plugin-infrastructure-core",
-  "uptrakit-plugin-infrastructure-proxmox",
-  "uptrakit-plugin-infrastructure-registry",
-  "uptrakit-plugin-package-manager-apk",
-  "uptrakit-plugin-package-manager-apt",
-  "uptrakit-plugin-package-manager-cargo",
-  "uptrakit-plugin-package-manager-dnf",
-  "uptrakit-plugin-package-manager-homebrew",
-  "uptrakit-plugin-package-manager-mas",
-  "uptrakit-plugin-package-manager-npm",
-  "uptrakit-plugin-package-manager-pacman",
-  "uptrakit-plugin-package-manager-pkg",
-  "uptrakit-plugin-package-manager-snap",
-  "uptrakit-plugin-releases-docker",
-  "uptrakit-plugin-releases-forgejo",
-  "uptrakit-plugin-releases-github",
-  "uptrakit-plugin-releases-gitlab",
 ]
 
 # All-in-one controller: lean controller + embedded service runtimes
@@ -318,32 +321,6 @@ changelog_include = [
   "uptrakit-shared-types",
   "uptrakit-surfaces",
   "uptrakit-wire",
-  "uptrakit-notification-plugin-core",
-  "uptrakit-notification-plugin-email",
-  "uptrakit-notification-plugin-telegram",
-  "uptrakit-notification-plugin-webhook",
-  "uptrakit-plugin-discovery-proxmox-helper-scripts",
-  "uptrakit-plugin-enhancement-dashboard-icons",
-  "uptrakit-plugin-generic-shell",
-  "uptrakit-plugin-hook-shell",
-  "uptrakit-plugin-hook-systemd",
-  "uptrakit-plugin-infrastructure-core",
-  "uptrakit-plugin-infrastructure-proxmox",
-  "uptrakit-plugin-infrastructure-registry",
-  "uptrakit-plugin-package-manager-apk",
-  "uptrakit-plugin-package-manager-apt",
-  "uptrakit-plugin-package-manager-cargo",
-  "uptrakit-plugin-package-manager-dnf",
-  "uptrakit-plugin-package-manager-homebrew",
-  "uptrakit-plugin-package-manager-mas",
-  "uptrakit-plugin-package-manager-npm",
-  "uptrakit-plugin-package-manager-pacman",
-  "uptrakit-plugin-package-manager-pkg",
-  "uptrakit-plugin-package-manager-snap",
-  "uptrakit-plugin-releases-docker",
-  "uptrakit-plugin-releases-forgejo",
-  "uptrakit-plugin-releases-github",
-  "uptrakit-plugin-releases-gitlab",
 ]
 
 # Service binaries: only their runtime + public-API crates roll up.
