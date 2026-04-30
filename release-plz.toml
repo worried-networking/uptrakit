@@ -2,6 +2,12 @@
 publish = false
 git_release_enable = false
 git_tag_enable = false
+# All crates have publish = false (path deps only). cargo-semver-checks
+# would spawn cargo doc/build on baseline+current per library crate,
+# duplicating the disk pressure the CI cargo wrapper aims to eliminate.
+# With nothing publishable to crates.io, semver discipline is enforced
+# by code review and the binary CI pipeline, not release-plz.
+semver_check = false
 
 [[package]]
 name = "uptrakit-shared-macros"
