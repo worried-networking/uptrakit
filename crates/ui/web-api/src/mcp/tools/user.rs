@@ -78,8 +78,8 @@ mod tests {
 
     #[test]
     fn permissions_convert_to_strings() {
-        let perms = vec![Permission::AccessMcp, Permission::ViewServices];
+        let perms = [Permission::AccessMcp, Permission::ViewServices];
         let strings: Vec<String> = perms.iter().map(|p| p.as_str().to_owned()).collect();
-        assert_eq!(strings, vec!["access_mcp", "view_services"]);
+        assert_eq!(strings, ["access_mcp", "view_services"]);
     }
 }

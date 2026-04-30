@@ -17,6 +17,7 @@ pub mod user;
 
 use history::{GetUpdateHistoryDetailInput, ListUpdateHistoryInput};
 use history::{ListUpdateHistoryResult, UpdateHistoryDetailResult};
+use update::{TriggerUpdateInput, TriggerUpdateResult};
 use user::GetCurrentUserResult;
 
 /// Build an `rmcp::ErrorData` with the `internal_error` code.
@@ -88,6 +89,24 @@ impl McpHandler {
         Parameters(input): Parameters<GetUpdateHistoryDetailInput>,
     ) -> Result<Json<UpdateHistoryDetailResult>, ErrorData> {
         self.get_update_history_detail_impl(ctx, input).await
+    }
+
+    /// Trigger a software update for a specific host.
+    ///
+    /// Requires the `TriggerUpdates` permission. The `interactive` flag is
+    /// always `false` — AI agents cannot interact with a PTY.
+    #[tool(
+        name = "trigger_update",
+        description = "Trigger a software update for a specific host. \
+                       Requires TriggerUpdates permission. interactive is always \
+                       false — AI agents cannot interact with a PTY."
+    )]
+    pub async fn trigger_update(
+        &self,
+        Extension(ctx): Extension<McpRequestContext>,
+        Parameters(input): Parameters<TriggerUpdateInput>,
+    ) -> Result<Json<TriggerUpdateResult>, ErrorData> {
+        self.trigger_update_impl(ctx, input).await
     }
 }
 
