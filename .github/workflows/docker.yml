@@ -166,7 +166,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
-          name: digests-${{ matrix.name }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: digests-${{ matrix.name }}.${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -245,7 +245,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-${{ matrix.name }}-*
+          pattern: digests-${{ matrix.name }}.*
           merge-multiple: true
 
       - uses: docker/setup-buildx-action@v4
