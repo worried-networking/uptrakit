@@ -33,28 +33,26 @@ Two related gaps:
 
 ### Concept
 
-A **resumable** update is one where agent disconnect is an expected part of the update
-procedure (e.g., the update script replaces the running binary and triggers a restart).
-Instead of transitioning `InProgress → Failed` on disconnect, the controller transitions to
-a new `AwaitingRestart` status and waits for the agent to reconnect and confirm the new
-version is running.
+A **resumable** update is one where the execute_update plugin explicitly signals that a
+restart is required for verification. The plugin returns `resumable: true` in its
+`UpdateResultPayload` after completing the update work (binary replacement, package
+install, etc.). The controller transitions `InProgress → AwaitingRestart` on receiving
+this signal and waits for the agent to reconnect and confirm the new version is running.
 
-Resumability is a property of the execute_update plugin assignment, set by discovery plugins
-at assignment time. It is not user-configurable and not visible in the UI.
+Resumability is a runtime signal from the execute_update plugin — not a pre-configured
+DB flag. Plugins determine resumability based on what actually happened:
+
+- **Shell plugin (self-update)**: config includes `resumable: true`; always signals it.
+- **APT/RPM plugin**: runs `needrestart -b` or `needs-restarting` after the package
+  manager finishes; signals `resumable: true` only when a restart is actually needed.
+- **Other plugins**: default to `resumable: false`.
+
+Agent disconnect from `InProgress` without a prior `resumable: true` signal always
+transitions to `Failed` — unchanged from current behavior.
 
 ---
 
 ### Data Model
-
-#### `host_software_item_plugin` — new column
-
-```sql
-resumable BOOL NOT NULL DEFAULT FALSE
-```
-
-- Meaningful only on rows where `role = 'execute_update'`.
-- Set by discovery plugins when creating assignments; never written by user-facing routes.
-- Read by the reconnect handler and dispatch layer.
 
 #### `software_item` — new column
 
@@ -77,8 +75,7 @@ awaiting_restart_since TIMESTAMPTZ NULL
 - Set to the current timestamp when the record transitions to `AwaitingRestart`.
 - Used as the timeout anchor for `awaiting_restart_timeout` enforcement.
 - NULL for all non-resumable updates and all updates that never reach `AwaitingRestart`.
-- Not reset by other update_history writes; dedicated field prevents fragile `updated_at`
-  dependencies (update_history has no `updated_at` column).
+- Dedicated field; not derived from `updated_at` (update_history has no `updated_at`).
 
 ---
 
@@ -106,26 +103,113 @@ Queued
 Pending
   │ (orchestrator picks up)
   ▼
-InProgress ──── agent disconnects, resumable=false ──► Failed
-  │
-  │ agent disconnects, resumable=true
-  ▼
-AwaitingRestart ──── awaiting_restart_since + timeout exceeded ──► Failed
-  │                                                                  ▲
-  │ agent reconnects or scheduler ticks,                             │
-  │ detect_version returns "not ready"                               │
-  │  └─► stay AwaitingRestart, retry on next tick/reconnect         │
-  │                                                                  │
-  │ agent reconnects or scheduler ticks,                             │
-  │ detect_version returns version mismatch ────────────────────────┘
-  │
-  │ agent reconnects or scheduler ticks,
-  │ detect_version matches to_version
-  ▼
-Completed
+InProgress ──── UpdateResultPayload { resumable: true } received ──► AwaitingRestart
+  │                                                                        │
+  │ agent disconnects (no resumable signal received)                       │ awaiting_restart_since
+  ▼                                                              ──────────┤ + timeout exceeded
+Failed                                                           │         ▼
+                                                                 │      Failed
+                                                  AwaitingRestart│
+                                                      │          │
+                                          agent reconnects or    │
+                                          scheduler tick,        │
+                                          detect_version:        │
+                                                      │          │
+                                            not_ready │──────────┘ (stay, retry)
+                                                      │
+                                             version mismatch ──► Failed
+                                                      │
+                                             version matches
+                                                      ▼
+                                                 Completed
 ```
 
 All transitions use CAS (`rows_affected == 0` = another controller already acted, skip).
+
+---
+
+### `execute_update` Protocol Extension
+
+`UpdateResultPayload` in `crates/shared/wire/src/payloads.rs` gains a new optional field:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub resumable: Option<bool>,
+```
+
+`#[serde(default)]` ensures older controllers that receive this payload from a new agent
+parse `resumable` as `None` (non-resumable) — backward compatible.
+
+**Controller behavior on receiving `UpdateResultPayload`:**
+
+- `status: Completed, resumable: Some(true)` → CAS `InProgress → AwaitingRestart`,
+  set `awaiting_restart_since = now`. Do not call `dispatch_next_in_batch` yet.
+- `status: Completed, resumable: None | Some(false)` → existing behavior (`Completed`).
+- `status: Failed` → existing behavior (`Failed`), call batch/host progression.
+
+---
+
+### Agent Pipeline Changes
+
+#### Plugin trait
+
+`execute_update()` in the plugin trait returns a new result struct instead of `String`:
+
+```rust
+pub struct ExecuteUpdateResult {
+    pub output: String,
+    pub resumable: bool,
+}
+```
+
+Existing plugins return `resumable: false` by default (zero breaking change for existing
+implementations).
+
+#### `execute_update_pipeline` refactor
+
+Post-hook execution moves out of `execute_update_pipeline` into the caller (`execute_update`
+in `agent-core/src/update.rs`). The pipeline returns `PipelineResult { succeeded: bool,
+resumable: bool }` without running post-hooks.
+
+The caller branches on `resumable`:
+
+```rust
+let result = execute_update_pipeline(&payload, &output_tx, executor, &mut output).await;
+
+if result.resumable {
+    // Send result before post-hooks — controller transitions to AwaitingRestart.
+    send_update_result(&result_tx, resumable: true).await;
+    // Post-hooks fire-and-forget: result ignored, errors logged only.
+    tokio::spawn(run_post_hook_plugins(payload.post_update_hook_plugins, ...));
+} else {
+    // Normal path: post-hooks complete before result is sent.
+    run_post_hook_plugins(&payload.post_update_hook_plugins, ...).await;
+    send_update_result(&result_tx, resumable: false).await;
+}
+```
+
+**Why send before post-hooks for resumable updates:** the post-update hook for a resumable
+update typically triggers the restart (e.g., `systemctl restart uptrakit`,
+`shutdown -r now`). If the result were sent after the hook, the process would be dead before
+the payload reaches the controller. Sending first ensures `InProgress → AwaitingRestart`
+is committed before the process exits.
+
+**Post-hook result ignored for resumable:** once the controller is in `AwaitingRestart`,
+the update outcome is determined by `detect_version` on reconnect — not by whether
+post-hooks succeeded. Logging hook errors is sufficient.
+
+#### Shell plugin `resumable` config field
+
+The shell execute_update plugin gains an optional boolean config field:
+
+```rust
+#[serde(default)]
+pub resumable: bool,
+```
+
+When `true`, the plugin always returns `ExecuteUpdateResult { resumable: true }` regardless
+of script output. The self-update discovery plugin sets this field `true` in the shell
+plugin config it creates. Other users of the shell plugin are unaffected (default `false`).
 
 ---
 
@@ -137,9 +221,6 @@ All transitions use CAS (`rows_affected == 0` = another controller already acted
 #[serde(default, skip_serializing_if = "Option::is_none")]
 pub not_ready: Option<bool>,
 ```
-
-`#[serde(default)]` is required for backward compatibility: older controllers that receive
-a `VersionCheckResult` from a new agent without this field parse it as `None`.
 
 Semantics:
 
@@ -163,48 +244,18 @@ is `VersionCheckResult.host_software_item_id` → `update_history` filtered by
 `host_software_item_id + status = AwaitingRestart`.
 
 If `host_software_item_id` is absent from the `VersionCheckResult` (old agent, partial
-payload), skip the `AwaitingRestart` correlation entirely for that result — do not attempt
-an ambiguous host-level scan. The scheduler will retry on the next tick.
+payload), skip the `AwaitingRestart` correlation — do not attempt an ambiguous host-level
+scan. The scheduler will retry on the next tick.
 
 ---
 
-### Reconnect Handler Changes
+### Reconnect Handler
 
-**Location:** `service_ws/handler/updates.rs` → calls into
-`update_batches/dispatch.rs::mark_owned_in_progress_as_failed_on_reconnect`
-
-**Current behavior:** loads all `InProgress` records owned by
-`(execution_owner_service_id, execution_owner_instance_id)` from the previous runtime
-instance of the reconnecting service, marks them `Failed`.
-
-**New behavior** — before the per-record fail loop, branch on `resumable`:
-
-1. Load all `InProgress` candidates via the existing `load_owned_reconnect_candidates`
-   function (scoped by `service_id` + `runtime_instance_id` pair, matching records owned
-   by a previous instance).
-2. For each candidate, join through `host_software_item_id → host_software_item →
-   host_software_item_plugin` (role = `execute_update`) to read `resumable`.
-3. If `resumable = true`: CAS transition `InProgress → AwaitingRestart`, set
-   `awaiting_restart_since = now`.
-4. If `resumable = false`: transition to `Failed` (unchanged).
-5. After branching: dispatch `detect_version` for all `AwaitingRestart` records associated
-   with the reconnecting service's hosts (including newly transitioned ones).
-
-**Standalone self-update hole:** `load_owned_reconnect_candidates` filters by
-`execution_owner_service_id = reconnecting_service_id` AND
-`execution_owner_instance_id != current_runtime_instance_id` (or IS NULL). This finds
-`InProgress` records owned by *previous instances* of the same service — i.e., records
-left by the old binary before it exited. When controller-standalone restarts, the embedded
-agent reconnects with the same `service_id` but a new `runtime_instance_id`. The function
-finds the stale `InProgress` record, and the resumable branch transitions it to
-`AwaitingRestart`. No separate startup scan is needed.
-
-This relies on the embedded agent's `service_id` being stable across restarts. The existing
-provisioning path (`provision.rs`) looks up the service by `app_name + EmbeddedOwnerKey`
-and reuses the persisted UUID, so stability holds under normal conditions. If the lookup
-fails (e.g., DB corruption on first boot), a new UUID is allocated and the stale `InProgress`
-record would be missed — it would time out via `awaiting_restart_timeout` and be marked
-`Failed` by the scheduler, which is the correct safe fallback.
+**No changes required.** Agent disconnect from `InProgress` → `Failed` (existing behavior,
+unchanged). When an update is resumable, the agent sends `UpdateResultPayload { resumable:
+true }` before triggering the restart; the controller is already in `AwaitingRestart` when
+the agent disconnects. Disconnect from `AwaitingRestart` is a no-op — the controller
+continues waiting.
 
 ---
 
@@ -213,8 +264,7 @@ record would be missed — it would time out via `awaiting_restart_timeout` and 
 The scheduler gains two new cross-tenant responsibilities — **not** as new `ScheduledTaskType`
 rows (which are per-tenant). These are implemented as a new executor registered once on the
 `Scheduler` (not tied to a `ScheduledTaskType` DB row), using the `SchedulerNotifier`
-already available to all executors. The existing `DetectVersionExecutor` is per-tenant and
-cannot be reused here.
+already available to all executors.
 
 #### 1. Verification polling
 
@@ -225,9 +275,8 @@ For all `AwaitingRestart` records across all tenants:
   the outbox if offline (delivered on next reconnect).
 - Handles the case where the agent stays connected after restart but returns `not_ready`
   repeatedly — re-dispatches on each scheduler tick without waiting for a reconnect event.
-- If both the reconnect handler and the scheduler dispatch `detect_version` simultaneously,
-  the controller handles both responses idempotently via CAS on the `AwaitingRestart →
-  Completed/Failed` transition.
+- If both a reconnect-triggered dispatch and a scheduler tick dispatch `detect_version`
+  simultaneously, the controller handles both responses idempotently via CAS.
 - Tick interval: same as existing scheduler poll interval (default 15 seconds).
 
 #### 2. Timeout enforcement
@@ -263,8 +312,7 @@ For all `AwaitingRestart` records across all tenants where
    sequential dispatch.
 
 3. **`dispatch_next_in_batch` must not fire on `InProgress → AwaitingRestart`** — this
-   transition does not complete an update. `dispatch_next_in_batch` is only called on
-   terminal transitions (`Completed`, `Failed`). The `AwaitingRestart → Completed/Failed`
+   transition does not complete an update. The `AwaitingRestart → Completed/Failed`
    transitions in the `VersionCheckResult` handler and the scheduler timeout enforcer must
    trigger host/batch progression:
    - Batch items: call `dispatch_next_in_batch`.
@@ -281,8 +329,9 @@ For all `AwaitingRestart` records across all tenants where
 
 A new discovery plugin (`crates/plugins/discovery/uptrakit-self-update/`) implements the
 `Discoverer` trait. It auto-discovers uptrakit services running on the current host and
-creates software items with pre-wired plugin assignments, including `resumable = true` on
-the execute_update assignment. No manual configuration required.
+creates software items with pre-wired plugin assignments. The shell execute_update plugin
+assignment is configured with `resumable: true` so the plugin signals resumability at
+runtime. No manual configuration required.
 
 ### Service Metadata Interface
 
@@ -312,10 +361,6 @@ pub enum DeploymentTopology {
 }
 ```
 
-The discovery plugin calls this interface to build plugin configs dynamically. The
-`detect_version` shell command uses the queried `binary_path`. The execute_update config
-uses `binary_path` (binary topology) or container identity (Docker topology).
-
 Future services (agent, agent-ssh, mqtt, scheduler) will implement the same metadata
 interface when self-update support is extended to them.
 
@@ -323,33 +368,34 @@ interface when self-update support is extended to them.
 
 For each discovered service, the plugin creates assignments:
 
-| Role | Plugin | Config source |
+| Role | Plugin | Config |
 | --- | --- | --- |
 | `detect_version` | Shell | `binary_path --version` (queried at discovery time) |
 | `fetch_releases` | `releases_github` | uptrakit GitHub repo; tag filter per service |
-| `execute_update` | Shell (binary) or Docker plugin | binary path or container identity |
-
-The execute_update assignment is created with `resumable = true`.
+| `execute_update` | Shell (binary) or Docker plugin | `resumable: true`; binary path or container identity |
 
 ### Deployment Topology Detection
 
 The discovery plugin uses `DeploymentTopology` from the metadata interface:
 
-- **`StandaloneBinary`**: execute_update = shell plugin. The script: downloads the new
-  release asset, replaces the binary at the queried path, then starts the new binary with
-  `--reuseport --takeover-from <current_pid>` using the existing graceful restart mechanism
-  (`docs/development/graceful-restart.md`). This gives zero-downtime restart — the old
-  process drains connections and exits cleanly without dropping agent WebSocket sessions.
-  A supervisor restart (`systemctl restart`) is an acceptable fallback when `--reuseport`
-  is not configured, but incurs a full reconnect storm; the script template should prefer
-  the graceful path when available.
+- **`StandaloneBinary`**: execute_update = shell plugin with `resumable: true`. The script:
+  downloads the new release asset, replaces the binary at the queried path, then starts
+  the new binary with `--reuseport --takeover-from <current_pid>` using the existing
+  graceful restart mechanism (`docs/development/graceful-restart.md`). This gives
+  zero-downtime restart — the old process drains connections and exits cleanly. The agent
+  sends `UpdateResultPayload { resumable: true }` before the post-update hook fires. The
+  post-update hook (shell or systemd plugin) triggers the restart. A supervisor restart
+  (`systemctl restart`) is an acceptable fallback when `--reuseport` is not configured,
+  but requires the post-update hook to use a deferred restart (e.g.,
+  `systemd-run --on-active=10s`) so the process stays alive long enough to send the
+  `UpdateResultPayload`.
 
-- **`DockerContainer`**: execute_update = existing Docker plugin. The correct operation
-  sequence is: pull new image → stop container → remove container → start new container
-  with the new image tag. `docker restart` alone does not change the image and must not
-  be used, as it would cause `detect_version` to return the old version and transition
-  the update to `Failed`. The container name and image repository are sourced from
-  `ServiceMetadata`.
+- **`DockerContainer`**: execute_update = existing Docker plugin with `resumable: true`.
+  The correct operation sequence is: pull new image → stop container → remove container →
+  start new container with the new image tag. `docker restart` alone does not change the
+  image and must not be used — it causes `detect_version` to return the old version and
+  transition the update to `Failed`. The container name and image repository are sourced
+  from `ServiceMetadata`.
 
 ### Version Normalization
 
@@ -361,9 +407,9 @@ transitions to `Failed`.
 
 The `releases_github` plugin's `tag_strip_prefix` config strips the prefix from the
 fetched version before it is stored as `latest_version` and used as `to_version` at trigger
-time. This must be confirmed to work end-to-end for the self-update case. Implementors
-must verify that the version string passed to `CreateUpdateRecordParams::to_version` at
-trigger time is the stripped form, not the raw tag.
+time. Implementors must verify that the version string passed to
+`CreateUpdateRecordParams::to_version` at trigger time is the stripped form, not the raw
+tag.
 
 ### Discoverer Implementation
 
@@ -402,12 +448,11 @@ Future iterations (not in this spec):
 
 ## Migration
 
-Four migrations required:
+Three migrations required:
 
-1. Add `resumable BOOL NOT NULL DEFAULT FALSE` to `host_software_item_plugin`.
-2. Add `awaiting_restart_timeout INTEGER NULL` to `software_item`.
-3. Add `awaiting_restart_since TIMESTAMPTZ NULL` to `update_history`.
-4. Recreate the `uix_update_history_host_active` partial unique index to include
+1. Add `awaiting_restart_timeout INTEGER NULL` to `software_item`.
+2. Add `awaiting_restart_since TIMESTAMPTZ NULL` to `update_history`.
+3. Recreate the `uix_update_history_host_active` partial unique index to include
    `'awaiting_restart'` in its filter:
 
    ```sql
@@ -420,7 +465,7 @@ Four migrations required:
    code-level `has_active_update_for_host` check fails (race between read and insert in
    multi-controller deployments). This is a safety migration, not a schema addition.
 
-Migrations 1–3 are additive, backward-compatible, non-destructive. Migration 4 drops and
+Migrations 1–2 are additive, backward-compatible, non-destructive. Migration 3 drops and
 recreates an existing index.
 
 ---
@@ -449,16 +494,21 @@ connection.
 retry count. A future iteration can add `not_ready_count` to `update_history` and fail
 early after a configurable threshold.
 
-**Batch blocking for large rollouts:** A multi-host batch where all hosts are
-simultaneously in `AwaitingRestart` (e.g., 500-host kernel update) holds the batch in a
-non-terminal state for the duration of all reboot windows. Users see the batch as perpetually
-in-progress. Future work: introduce a batch "dispatched" phase that separates update
-execution from restart verification, so the UI can show "all dispatched, N awaiting restart."
+**Batch blocking for large rollouts:** A multi-host batch where all hosts are simultaneously
+in `AwaitingRestart` (e.g., 500-host kernel update) holds the batch in a non-terminal state
+for the duration of all reboot windows. Future work: introduce a batch "dispatched" phase
+that separates update execution from restart verification.
 
 **Zero-config auto-discovery surprise:** The self-update plugin auto-creates software items
 without explicit user action. Existing automation (e.g., scheduled batch updates) will apply
-to the newly discovered items. Operators should be aware of this behavior; a future
-opt-in gate (requiring explicit plugin activation) would address the surprise.
+to the newly discovered items. Operators should be aware of this behavior; a future opt-in
+gate would address the surprise.
+
+**Supervisor restart race (fallback path only):** When the graceful restart mechanism is
+not available and the post-update hook uses an immediate supervisor restart, there is a
+small window where the process can be killed before `UpdateResultPayload { resumable: true }`
+reaches the controller. The update is then marked `Failed` even though it succeeded.
+Mitigated by using deferred restart (`systemd-run --on-active=10s`) in the hook.
 
 **`ServiceMetadata` extensibility:** The in-process metadata query works only for the
 embedded agent. Future support for external services (agent, mqtt, scheduler) requires a
@@ -471,10 +521,14 @@ will need to be revisited at that point.
 
 Standard gates apply. Additionally:
 
-- Unit tests for reconnect handler branching (resumable vs non-resumable InProgress records).
-- Unit tests for `AwaitingRestart` → `Completed` and `AwaitingRestart` → `Failed` transitions.
-- Unit tests for `detect_version` "not ready" handling — verifies controller stays in
+- Unit tests for `UpdateResultPayload { resumable: true }` → `InProgress → AwaitingRestart`
+  transition on the controller side.
+- Unit tests for `AwaitingRestart` → `Completed` and `AwaitingRestart` → `Failed`
+  transitions via `detect_version` responses.
+- Unit tests for `detect_version` `not_ready` handling — verifies controller stays in
   `AwaitingRestart` and does not transition to `Failed`.
+- Unit tests for agent pipeline branching: resumable path sends result before post-hooks;
+  non-resumable path sends result after post-hooks.
 - Unit tests for timeout enforcement (use `start_paused = true`; only for tests calling
   tokio time APIs).
 - Unit test for batch completion check: batch with one `AwaitingRestart` item must not be
