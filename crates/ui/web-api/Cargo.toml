@@ -9,7 +9,7 @@ version.workspace = true
 
 [features]
 default = ["oidc", "mcp"]
-mcp = ["dep:rmcp", "dep:vt100"]
+mcp = ["dep:rmcp", "dep:vt100", "dep:schemars"]
 oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
@@ -67,6 +67,7 @@ rcgen = { workspace = true }
 rustls = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"], optional = true }
 rmcp = { version = "1.5", features = ["transport-streamable-http-server"], optional = true }
+schemars = { version = "1", optional = true }
 vt100 = { version = "0.16", optional = true }
 x509-ocsp = { workspace = true }
 der = { workspace = true }
