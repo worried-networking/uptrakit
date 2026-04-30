@@ -8,15 +8,29 @@ git_tag_enable = false
 # With nothing publishable to crates.io, semver discipline is enforced
 # by code review and the binary CI pipeline, not release-plz.
 semver_check = false
+# Default for non-binary crates: do not write per-crate CHANGELOG.md.
+# Library/plugin/runtime commits flow into binary changelogs via the
+# changelog_include arrays below. Binary [[package]] entries override
+# this with changelog_update = true.
+changelog_update = false
 
+# ===== Excluded =====
+# Integration tests are runtime-only verification; their commits should
+# not appear in user-facing binary changelogs.
+[[package]]
+name = "uptrakit-integration-tests"
+release = false
+
+# ===== Shared library crates (analyzed for commits, no own changelog,
+# no tag/release; commits flow into binary changelogs via include) =====
 [[package]]
 name = "uptrakit-shared-macros"
 
 [[package]]
-name = "uptrakit-surfaces"
+name = "uptrakit-shared-types"
 
 [[package]]
-name = "uptrakit-shared-types"
+name = "uptrakit-surfaces"
 
 [[package]]
 name = "uptrakit-wire"
@@ -25,16 +39,148 @@ name = "uptrakit-wire"
 name = "uptrakit-web-api-types"
 
 [[package]]
+name = "uptrakit-backoff"
+
+[[package]]
+name = "uptrakit-command"
+
+[[package]]
+name = "uptrakit-crypto"
+
+[[package]]
+name = "uptrakit-shared-db"
+
+[[package]]
+name = "uptrakit-directories"
+
+[[package]]
+name = "uptrakit-github-client"
+
+[[package]]
+name = "uptrakit-global-github-provider"
+
+[[package]]
+name = "uptrakit-agent-core"
+
+[[package]]
+name = "uptrakit-audit-log"
+
+[[package]]
+name = "uptrakit-build-info"
+
+[[package]]
+name = "uptrakit-config-merge"
+
+[[package]]
+name = "uptrakit-nats"
+
+[[package]]
+name = "uptrakit-scheduler-engine"
+
+[[package]]
+name = "uptrakit-service-platform"
+
+[[package]]
+name = "uptrakit-tracing-init"
+
+[[package]]
+name = "uptrakit-web-api"
+
+[[package]]
+name = "uptrakit-web-api-auth"
+
+[[package]]
+name = "uptrakit-web-api-queries"
+
+# ===== Plugin crates =====
+[[package]]
+name = "uptrakit-notification-plugin-core"
+
+[[package]]
+name = "uptrakit-notification-plugin-email"
+
+[[package]]
+name = "uptrakit-notification-plugin-telegram"
+
+[[package]]
+name = "uptrakit-notification-plugin-webhook"
+
+[[package]]
+name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+
+[[package]]
+name = "uptrakit-plugin-enhancement-dashboard-icons"
+
+[[package]]
+name = "uptrakit-plugin-generic-shell"
+
+[[package]]
+name = "uptrakit-plugin-hook-shell"
+
+[[package]]
+name = "uptrakit-plugin-hook-systemd"
+
+[[package]]
+name = "uptrakit-plugin-infrastructure-core"
+
+[[package]]
+name = "uptrakit-plugin-infrastructure-proxmox"
+
+[[package]]
+name = "uptrakit-plugin-infrastructure-registry"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-apk"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-apt"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-cargo"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-dnf"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-homebrew"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-mas"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-npm"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-pacman"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-pkg"
+
+[[package]]
+name = "uptrakit-plugin-package-manager-snap"
+
+[[package]]
+name = "uptrakit-plugin-releases-docker"
+
+[[package]]
+name = "uptrakit-plugin-releases-forgejo"
+
+[[package]]
+name = "uptrakit-plugin-releases-github"
+
+[[package]]
+name = "uptrakit-plugin-releases-gitlab"
+
+# ===== Runtime crates: tagged so binary dep-bumps propagate; no own
+# changelog (rolled into the binaries that depend on them) =====
+[[package]]
 name = "uptrakit-frontend"
 git_only = true
 git_tag_enable = true
 git_release_enable = false
 git_tag_name = "uptrakit-frontend-v{{ version }}"
 publish = false
-changelog_update = false
 
-# Runtime crates: versioned + tagged so binary packages pick up dep-propagated bumps.
-# No publish (path deps only); no GitHub release (internals, not end-user artifacts).
 [[package]]
 name = "uptrakit-agent-runtime"
 git_only = true
@@ -67,6 +213,10 @@ git_release_enable = false
 git_tag_name = "uptrakit-scheduler-runtime-v{{ version }}"
 publish = false
 
+# controller-runtime owns the changelog file referenced by the
+# controller and controller-standalone binaries. changelog_include here
+# drives the rollup: its dep tree spans the entire controller surface
+# (web-api, frontend, embedded runtimes, all plugins, shared libs).
 [[package]]
 name = "uptrakit-controller-runtime"
 git_only = true
@@ -74,11 +224,63 @@ changelog_update = true
 changelog_include = [
   "uptrakit-frontend",
   "uptrakit-agent-runtime",
+  "uptrakit-agent-ssh",
   "uptrakit-agent-ssh-runtime",
   "uptrakit-mqtt-runtime",
   "uptrakit-scheduler-runtime",
+  "uptrakit-web-api",
+  "uptrakit-web-api-auth",
+  "uptrakit-web-api-queries",
+  "uptrakit-web-api-types",
+  "uptrakit-agent-core",
+  "uptrakit-audit-log",
+  "uptrakit-backoff",
+  "uptrakit-build-info",
+  "uptrakit-command",
+  "uptrakit-config-merge",
+  "uptrakit-crypto",
+  "uptrakit-directories",
+  "uptrakit-github-client",
+  "uptrakit-global-github-provider",
+  "uptrakit-nats",
+  "uptrakit-scheduler-engine",
+  "uptrakit-service-platform",
+  "uptrakit-service-sdk",
+  "uptrakit-shared-db",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-tracing-init",
+  "uptrakit-wire",
+  "uptrakit-notification-plugin-core",
+  "uptrakit-notification-plugin-email",
+  "uptrakit-notification-plugin-telegram",
+  "uptrakit-notification-plugin-webhook",
+  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-enhancement-dashboard-icons",
+  "uptrakit-plugin-generic-shell",
+  "uptrakit-plugin-hook-shell",
+  "uptrakit-plugin-hook-systemd",
+  "uptrakit-plugin-infrastructure-core",
+  "uptrakit-plugin-infrastructure-proxmox",
+  "uptrakit-plugin-infrastructure-registry",
+  "uptrakit-plugin-package-manager-apk",
+  "uptrakit-plugin-package-manager-apt",
+  "uptrakit-plugin-package-manager-cargo",
+  "uptrakit-plugin-package-manager-dnf",
+  "uptrakit-plugin-package-manager-homebrew",
+  "uptrakit-plugin-package-manager-mas",
+  "uptrakit-plugin-package-manager-npm",
+  "uptrakit-plugin-package-manager-pacman",
+  "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-releases-docker",
+  "uptrakit-plugin-releases-forgejo",
+  "uptrakit-plugin-releases-github",
+  "uptrakit-plugin-releases-gitlab",
 ]
 
+# ===== Binary crates =====
 [[package]]
 name = "uptrakit-controller"
 git_only = true
@@ -106,7 +308,45 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-v{{ version }}"
 git_release_name = "uptrakit-agent v{{ version }}"
-changelog_include = ["uptrakit-agent-runtime"]
+changelog_update = true
+changelog_include = [
+  "uptrakit-agent-runtime",
+  "uptrakit-agent-core",
+  "uptrakit-audit-log",
+  "uptrakit-backoff",
+  "uptrakit-build-info",
+  "uptrakit-command",
+  "uptrakit-crypto",
+  "uptrakit-directories",
+  "uptrakit-service-sdk",
+  "uptrakit-shared-db",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-wire",
+  "uptrakit-notification-plugin-core",
+  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-generic-shell",
+  "uptrakit-plugin-hook-shell",
+  "uptrakit-plugin-hook-systemd",
+  "uptrakit-plugin-infrastructure-core",
+  "uptrakit-plugin-infrastructure-proxmox",
+  "uptrakit-plugin-infrastructure-registry",
+  "uptrakit-plugin-package-manager-apk",
+  "uptrakit-plugin-package-manager-apt",
+  "uptrakit-plugin-package-manager-cargo",
+  "uptrakit-plugin-package-manager-dnf",
+  "uptrakit-plugin-package-manager-homebrew",
+  "uptrakit-plugin-package-manager-mas",
+  "uptrakit-plugin-package-manager-npm",
+  "uptrakit-plugin-package-manager-pacman",
+  "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-releases-docker",
+  "uptrakit-plugin-releases-forgejo",
+  "uptrakit-plugin-releases-github",
+  "uptrakit-plugin-releases-gitlab",
+]
 
 [[package]]
 name = "uptrakit-agent-ssh"
@@ -115,7 +355,45 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-ssh-v{{ version }}"
 git_release_name = "uptrakit-agent-ssh v{{ version }}"
-changelog_include = ["uptrakit-agent-ssh-runtime"]
+changelog_update = true
+changelog_include = [
+  "uptrakit-agent-ssh-runtime",
+  "uptrakit-agent-core",
+  "uptrakit-audit-log",
+  "uptrakit-backoff",
+  "uptrakit-build-info",
+  "uptrakit-command",
+  "uptrakit-crypto",
+  "uptrakit-directories",
+  "uptrakit-service-sdk",
+  "uptrakit-shared-db",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-wire",
+  "uptrakit-notification-plugin-core",
+  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-generic-shell",
+  "uptrakit-plugin-hook-shell",
+  "uptrakit-plugin-hook-systemd",
+  "uptrakit-plugin-infrastructure-core",
+  "uptrakit-plugin-infrastructure-proxmox",
+  "uptrakit-plugin-infrastructure-registry",
+  "uptrakit-plugin-package-manager-apk",
+  "uptrakit-plugin-package-manager-apt",
+  "uptrakit-plugin-package-manager-cargo",
+  "uptrakit-plugin-package-manager-dnf",
+  "uptrakit-plugin-package-manager-homebrew",
+  "uptrakit-plugin-package-manager-mas",
+  "uptrakit-plugin-package-manager-npm",
+  "uptrakit-plugin-package-manager-pacman",
+  "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-releases-docker",
+  "uptrakit-plugin-releases-forgejo",
+  "uptrakit-plugin-releases-github",
+  "uptrakit-plugin-releases-gitlab",
+]
 
 [[package]]
 name = "uptrakit-mqtt"
@@ -124,7 +402,16 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-mqtt-v{{ version }}"
 git_release_name = "uptrakit-mqtt v{{ version }}"
-changelog_include = ["uptrakit-mqtt-runtime"]
+changelog_update = true
+changelog_include = [
+  "uptrakit-mqtt-runtime",
+  "uptrakit-build-info",
+  "uptrakit-service-sdk",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-wire",
+]
 
 [[package]]
 name = "uptrakit-scheduler"
@@ -133,7 +420,46 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-scheduler-v{{ version }}"
 git_release_name = "uptrakit-scheduler v{{ version }}"
-changelog_include = ["uptrakit-scheduler-runtime"]
+changelog_update = true
+changelog_include = [
+  "uptrakit-scheduler-engine",
+  "uptrakit-scheduler-runtime",
+  "uptrakit-audit-log",
+  "uptrakit-backoff",
+  "uptrakit-build-info",
+  "uptrakit-command",
+  "uptrakit-config-merge",
+  "uptrakit-crypto",
+  "uptrakit-nats",
+  "uptrakit-service-sdk",
+  "uptrakit-shared-db",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-wire",
+  "uptrakit-notification-plugin-core",
+  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-generic-shell",
+  "uptrakit-plugin-hook-shell",
+  "uptrakit-plugin-hook-systemd",
+  "uptrakit-plugin-infrastructure-core",
+  "uptrakit-plugin-infrastructure-proxmox",
+  "uptrakit-plugin-infrastructure-registry",
+  "uptrakit-plugin-package-manager-apk",
+  "uptrakit-plugin-package-manager-apt",
+  "uptrakit-plugin-package-manager-cargo",
+  "uptrakit-plugin-package-manager-dnf",
+  "uptrakit-plugin-package-manager-homebrew",
+  "uptrakit-plugin-package-manager-mas",
+  "uptrakit-plugin-package-manager-npm",
+  "uptrakit-plugin-package-manager-pacman",
+  "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-releases-docker",
+  "uptrakit-plugin-releases-forgejo",
+  "uptrakit-plugin-releases-github",
+  "uptrakit-plugin-releases-gitlab",
+]
 
 [[package]]
 name = "uptrakit-cli"
@@ -142,13 +468,28 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-cli-v{{ version }}"
 git_release_name = "uptrakit v{{ version }} (CLI)"
+changelog_update = true
+changelog_include = [
+  "uptrakit-build-info",
+  "uptrakit-crypto",
+  "uptrakit-directories",
+  "uptrakit-openapi-client",
+  "uptrakit-shared-macros",
+  "uptrakit-shared-types",
+  "uptrakit-surfaces",
+  "uptrakit-tracing-init",
+  "uptrakit-web-api-types",
+  "uptrakit-wire",
+]
 
+# ===== Standalone consumable libraries: keep own tag/release/changelog =====
 [[package]]
 name = "uptrakit-openapi-client"
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-openapi-client-v{{ version }}"
 git_release_name = "uptrakit-openapi-client v{{ version }}"
+changelog_update = true
 
 [[package]]
 name = "uptrakit-service-sdk"
@@ -156,3 +497,4 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-service-sdk-v{{ version }}"
 git_release_name = "uptrakit-service-sdk v{{ version }}"
+changelog_update = true
