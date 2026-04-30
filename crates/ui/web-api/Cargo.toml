@@ -8,7 +8,8 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["oidc"]
+default = ["oidc", "mcp"]
+mcp = ["dep:rmcp", "dep:vt100"]
 oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
@@ -65,6 +66,8 @@ hostname = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"], optional = true }
+rmcp = { version = "1.5", features = ["transport-streamable-http-server"], optional = true }
+vt100 = { version = "0.16", optional = true }
 x509-ocsp = { workspace = true }
 der = { workspace = true }
 spki = { workspace = true }

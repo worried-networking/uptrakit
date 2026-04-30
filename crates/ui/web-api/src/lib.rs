@@ -35,6 +35,8 @@ pub mod surface_registry;
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod tenant_db;
 pub(crate) mod update_orchestrator;
 pub mod update_output_broadcaster;
@@ -51,6 +53,8 @@ pub use app_state::{
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use embedded_support::EmbeddedServiceNotifier;
+#[cfg(feature = "mcp")]
+pub use mcp::build_mcp_router;
 pub use router::{api_not_found, build_pki_router, build_router};
 pub use uptrakit_web_api_auth::SettingKey;
 pub use uptrakit_web_api_types::MaskedUrl;
