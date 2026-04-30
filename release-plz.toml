@@ -4,6 +4,21 @@ git_release_enable = false
 git_tag_enable = false
 
 [[package]]
+name = "uptrakit-shared-macros"
+
+[[package]]
+name = "uptrakit-surfaces"
+
+[[package]]
+name = "uptrakit-shared-types"
+
+[[package]]
+name = "uptrakit-wire"
+
+[[package]]
+name = "uptrakit-web-api-types"
+
+[[package]]
 name = "uptrakit-frontend"
 git_only = true
 git_tag_enable = true
@@ -124,7 +139,6 @@ git_release_name = "uptrakit v{{ version }} (CLI)"
 
 [[package]]
 name = "uptrakit-openapi-client"
-git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-openapi-client-v{{ version }}"
@@ -132,7 +146,6 @@ git_release_name = "uptrakit-openapi-client v{{ version }}"
 
 [[package]]
 name = "uptrakit-service-sdk"
-git_only = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-service-sdk-v{{ version }}"
