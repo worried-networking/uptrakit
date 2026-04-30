@@ -30,7 +30,7 @@ pub mod tools;
 /// ```
 pub fn build_mcp_router(state: Arc<AppState>) -> Router {
     let config = build_config(&state);
-    let service = StreamableHttpService::new(
+    let raw_service = StreamableHttpService::new(
         {
             let state = Arc::clone(&state);
             move || Ok(McpHandler::new(Arc::clone(&state)))
@@ -38,6 +38,11 @@ pub fn build_mcp_router(state: Arc<AppState>) -> Router {
         Arc::new(LocalSessionManager::default()),
         config,
     );
+
+    let auth_layer = auth::McpAuthLayer::new(Arc::clone(&state));
+    let service = tower::ServiceBuilder::new()
+        .layer(auth_layer)
+        .service(raw_service);
 
     Router::new().nest_service("/mcp", service)
 }

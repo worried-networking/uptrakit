@@ -56,7 +56,7 @@ pub fn authenticated_user_audit_actor(
     user.audit_actor(api_token_id)
 }
 
-fn emit_api_token_auth_audit(
+pub(crate) fn emit_api_token_auth_audit(
     state: &AppState,
     request_id: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -199,7 +199,7 @@ pub(crate) enum AuthFailure {
 }
 
 impl AuthFailure {
-    fn api_token_reason_code(&self) -> Option<&'static str> {
+    pub(crate) fn api_token_reason_code(&self) -> Option<&'static str> {
         match self {
             Self::InvalidApiToken => Some("invalid_or_revoked_api_token"),
             Self::UserNotFound => Some("user_not_found"),
