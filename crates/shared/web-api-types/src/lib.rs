@@ -140,10 +140,25 @@ mod tests {
     }
 
     #[test]
-    fn permission_from_str_invalid_returns_err() {
-        assert!("nonexistent".parse::<Permission>().is_err());
-        assert!("".parse::<Permission>().is_err());
-        assert!("VIEW_SETTINGS".parse::<Permission>().is_err());
+    fn permission_from_str_unknown_becomes_other() {
+        let p: Permission = "access_mcp".parse().unwrap();
+        assert!(matches!(p, Permission::Other(ref s) if s == "access_mcp"));
+    }
+
+    #[test]
+    fn permission_other_not_in_iter() {
+        for p in Permission::iter() {
+            assert!(
+                !matches!(p, Permission::Other(_)),
+                "Other should not appear in iter"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_other_as_str_returns_inner() {
+        let p = Permission::Other("foo_bar".to_string());
+        assert_eq!(p.as_str(), "foo_bar");
     }
 
     #[test]
