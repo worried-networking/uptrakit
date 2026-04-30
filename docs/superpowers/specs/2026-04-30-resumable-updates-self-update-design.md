@@ -495,8 +495,8 @@ pub struct ServiceMetadata {
     pub binary_path: Option<PathBuf>,   // std::env::current_exe(); None if Docker
     pub version: String,                // current running version
     pub deployment_topology: DeploymentTopology,
-    pub reuseport_enabled: bool,        // whether SO_REUSEPORT takeover is active
-    pub pid: u32,                       // current process PID for --takeover-from
+    pub reuseport_configured: bool,     // whether SO_REUSEPORT takeover protocol is active
+    pub pid_file: Option<PathBuf>,      // path where binary writes its PID on startup
 }
 
 pub enum DeploymentTopology {
@@ -515,8 +515,9 @@ pub trait ServiceMetadataProvider: Send + Sync {
 plugin-infrastructure types (`HostRuntime`, `Discoverer`, etc.) that the discovery plugin
 already imports.
 
-```rust
-```
+The binary writes its PID to `pid_file` on startup (standard Unix PID file). The update
+script reads the PID at runtime — not from `ServiceMetadata.pid` baked at discovery time,
+since the process may have restarted between discovery and update execution.
 
 The `HostRuntime` trait gains a default method returning `None`:
 
@@ -556,43 +557,76 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
 
 - **`StandaloneBinary`**: execute_update = shell plugin with `resumable: true`. The update
   script is generated at discovery time from `ServiceMetadata` and branches on
-  `reuseport_enabled`:
+  `reuseport_configured`. The takeover protocol itself is implemented inside the binary —
+  the script's job is just to replace the binary on disk and signal the running process.
 
-  **`reuseport_enabled = true` (preferred, zero-downtime, no dead-control-plane risk):**
-  The script downloads the new release asset, replaces the binary at `binary_path`, then
-  executes `<binary_path> --reuseport --takeover-from <pid>` (where `pid` is captured from
-  `ServiceMetadata.pid` at discovery time and refreshed per-run via a `$UPTRAKIT_PID`
-  env var injected by the shell plugin). The new binary binds the port via `SO_REUSEPORT`
-  alongside the old process. The old process detects the takeover and drains active
-  connections before exiting. If the new binary fails to start (crash, missing dependency,
-  invalid config), it never successfully binds the port and the old process detects the
-  child exit — **the old process remains running and continues serving**. No outage occurs.
-  This is the primary dead-control-plane mitigation: the old process is the safety net and
-  only exits after the new process is confirmed running.
+  **`reuseport_configured = true` (preferred — zero-downtime, supervisor-transparent, no
+  dead-control-plane risk):**
 
-  The `UpdateResultPayload { resumable: true }` is sent by the embedded agent before the
-  post-update hook fires. The post-update hook is the takeover command. Because the old
-  process survives a bad new binary, the controller receives the early result payload, and
-  the embedded agent in the old process handles it — even if the new binary never starts.
-  On the next scheduler tick, `detect_version` runs against whatever binary is current
-  and determines `Completed` or `Failed` accordingly.
+  The script:
 
-  **`reuseport_enabled = false` (fallback, requires supervisor and deferred restart):**
-  When `SO_REUSEPORT` is not configured, the update script downloads and replaces the
-  binary, then the post-update hook triggers a supervisor restart. For this path, the hook
-  **must** use a deferred restart (e.g., `systemd-run --on-active=10s`), not an immediate
-  one. The deferred gap serves two purposes: (1) the agent sends the early result payload
-  and the controller commits the `AwaitingRestart` DB write before the process exits;
-  (2) the supervisor can detect a fast-crashing new binary and restart the old one before
-  the deferred timer fires. Immediate `systemctl restart` is explicitly prohibited on the
-  fallback path — it races with the DB commit and can leave `InProgress` records that
-  resolve as `Failed`. This path has a brief connectivity gap and does not provide the
-  dead-control-plane protection that `--reuseport` does. It is supported but operators
+  ```bash
+  # Download and atomically replace binary (atomic rename — safe while running)
+  curl -L "$RELEASE_URL" -o /tmp/uptrakit-new
+  chmod +x /tmp/uptrakit-new
+  mv /tmp/uptrakit-new "$BINARY_PATH"
+  # Signal takeover — binary handles the rest
+  kill -USR2 "$(cat "$PID_FILE")"
+  ```
+
+  The binary's SIGUSR2 handler executes the combined SO_REUSEPORT + execve protocol:
+
+  1. **Fork** a child (PID B). Child execs the new binary at `binary_path` with
+     `--reuseport --post-takeover-child --notify-fd <pipe_write_fd>`.
+  2. **PID B** (new binary) binds the listening port via `SO_REUSEPORT` alongside the old
+     process (PID A). Both are now accepting connections. PID B writes `ready` to the pipe
+     when its async runtime is up.
+  3. **PID A** reads `ready` from the pipe. Sends `UpdateResultPayload { resumable: true }`
+     via the embedded agent (the early result channel). Stops calling `accept()` — OS routes
+     all new connections to PID B.
+  4. **PID A** drains in-flight connections (waits for active requests to complete, bounded
+     by a short grace period).
+  5. **PID A** calls `execve(binary_path, ["--reuseport", "--post-takeover-parent",
+     "--notify-fd", "<pipe_write_fd>"])` — PID A is now running the new binary with the
+     original PID. The supervisor still tracks PID A; it never saw a process exit.
+  6. **PID A** (new binary) writes `done` to the pipe.
+  7. **PID B** reads `done` and exits cleanly.
+  8. **PID A** is now the sole process: new binary, original PID, supervisor-transparent.
+
+  **Dead-control-plane protection:** if the new binary (PID B, step 2) crashes at startup,
+  it never writes `ready` to the pipe. PID A detects child exit via `waitpid`, aborts the
+  takeover, remains running with the old binary, and logs an error. The `AwaitingRestart`
+  early result payload was not yet sent (step 3 never fired), so the update remains
+  `InProgress`. The agent then sends a failure result; the controller marks the update
+  `Failed` and unblocks the host. No control plane outage.
+
+  **Supervisor interaction:** no MAINPID notification or special unit configuration needed.
+  PID A never exits during the protocol — the supervisor always tracks a live process.
+  Works with systemd (`Type=simple` or `Type=exec`), s6, runit, supervisord, and any other
+  supervisor that tracks a single PID.
+
+  **`reuseport_configured = false` (fallback — requires supervisor + deferred restart):**
+
+  The script downloads and replaces the binary, then issues a deferred supervisor restart:
+
+  ```bash
+  curl -L "$RELEASE_URL" -o /tmp/uptrakit-new
+  chmod +x /tmp/uptrakit-new
+  mv /tmp/uptrakit-new "$BINARY_PATH"
+  systemd-run --on-active=10s systemctl restart "$SERVICE_NAME"
+  ```
+
+  The 10-second delay ensures the embedded agent sends the early result payload and the
+  controller commits the `AwaitingRestart` DB write before the process exits. Immediate
+  `systemctl restart` is explicitly prohibited — it races with the DB commit and leaves
+  `InProgress` records that resolve as `Failed`. This path has a brief connectivity gap
+  (old process exits, new process starts) and no dead-control-plane protection — if the
+  new binary fails to start, the supervisor restarts it, but there is a gap. Operators
   are strongly encouraged to enable `SO_REUSEPORT`.
 
-  The `reuseport_enabled` flag is populated from `ServiceMetadata` at discovery time. The
-  discovery plugin generates the appropriate update script inline in the shell plugin config
-  `update_command`; no separate template files are needed.
+  The `reuseport_configured` flag is read from `ServiceMetadata` at discovery time. The
+  discovery plugin generates the appropriate `update_command` inline in the shell plugin
+  config; no separate template files are needed.
 
 - **`DockerContainer`**: execute_update = existing Docker plugin with `resumable: true`.
   The correct operation sequence is: pull new image → stop container → remove container →
@@ -708,20 +742,22 @@ time, the entire control plane goes offline simultaneously. This is not prevente
 current design. Document as unsupported; operators must roll controllers manually in
 multi-controller deployments.
 
-**Failed self-update and the control plane:** When `SO_REUSEPORT` is enabled (preferred),
-a failed new binary never kills the old process — the old process is the safety net and
-only exits after confirming the new binary has bound the port. The dead-control-plane risk
-is eliminated for this path. When `SO_REUSEPORT` is not enabled (fallback path), the old
-process exits before the new one is confirmed running. If the new binary fails to start,
-the control plane is briefly dead until the supervisor restarts it. The self-update
-discovery plugin checks for a running supervisor (systemd unit or Docker restart policy)
-during `discover_software` and logs a warning when none is detected — this check is
-**warning-only and never blocks discovery**; the software item is always emitted regardless
-of supervisor presence. Supervisor detection is inherently unreliable (wrapper scripts, s6,
-runit, symlinks, Docker containers all produce false negatives), so blocking on it would
-silently suppress self-update in valid deployments. Operators using the fallback path are
-responsible for ensuring a supervisor is in place; operators using `--reuseport` have no
-supervisor dependency.
+**Failed self-update and the control plane:** When `SO_REUSEPORT` is configured (preferred
+path), a failed new binary (PID B) never writes `ready` to the coordination pipe. The old
+process (PID A) detects child exit, aborts the takeover, remains running with the old binary,
+and sends a failure result. The dead-control-plane risk is fully eliminated on this path —
+PID A only execs itself into the new binary after PID B has confirmed it is up.
+
+When `SO_REUSEPORT` is not configured (fallback path), the old process exits before the new
+one is confirmed running. If the new binary fails to start, the control plane is briefly dead
+until the supervisor restarts it. The self-update discovery plugin checks for a running
+supervisor (systemd unit or Docker restart policy) during `discover_software` and logs a
+warning when none is detected — this check is **warning-only and never blocks discovery**;
+the software item is always emitted regardless of supervisor presence. Supervisor detection
+is inherently unreliable (wrapper scripts, s6, runit, symlinks, Docker containers all
+produce false negatives), so blocking on it would silently suppress self-update in valid
+deployments. Operators using the fallback path are responsible for ensuring a supervisor is
+in place; operators using `--reuseport` have no supervisor dependency.
 
 **Natural recovery after failed self-update:** No startup flag is needed to clean up
 `AwaitingRestart` records on controller restart. The natural flow resolves them correctly:
@@ -769,15 +805,27 @@ without explicit user action. Existing automation (e.g., scheduled batch updates
 to the newly discovered items. Operators should be aware of this behavior; a future opt-in
 gate would address the surprise.
 
-**Supervisor restart race (fallback path, `reuseport_enabled = false` only):** The
-`--reuseport` takeover path has no restart race — the old process remains alive throughout
-the takeover, so it can send the early result payload at any time without risk of being
-killed. For the supervisor fallback path, an immediate restart (`systemctl restart`) races
-with the controller's DB commit of `AwaitingRestart`. This is a spec constraint: the
-post-update hook on the fallback path **must** use deferred restart (`systemd-run
---on-active=10s`) — immediate supervisor restart is not a valid configuration for resumable
-updates on the fallback path. Operators using the fallback path without deferred restart
-may observe updates incorrectly marked `Failed`.
+**Supervisor restart race (fallback path, `reuseport_configured = false` only):** The
+combined SO_REUSEPORT + execve path has no restart race — PID A remains alive throughout
+the entire protocol and only execs after the early result payload is sent and PID B is
+confirmed running. For the supervisor fallback path, an immediate restart (`systemctl
+restart`) races with the controller's DB commit of `AwaitingRestart`. This is a spec
+constraint: the fallback update script **must** use deferred restart (`systemd-run
+--on-active=10s`) — immediate supervisor restart is not valid on this path. Operators
+using the fallback path without deferred restart may observe updates incorrectly marked
+`Failed`.
+
+**Existing connection drops on `reuseport_configured = false`:** The fallback path
+(supervisor restart) drops in-flight WebSocket and HTTP connections. Agents reconnect
+automatically. Web UI sessions reconnect on drop. This is acceptable for a self-update
+event and is not tracked as an open issue.
+
+**`post-takeover-child` startup race:** PID B writes `ready` to the pipe when its async
+runtime is initialized, but before it has accepted the first real connection. There is a
+brief window where both PID A (draining) and PID B (starting) may drop a new connection
+that arrives between PID B's bind and its first `accept()` call. In practice the OS queues
+these in the accept backlog; they are served once PID B's accept loop starts. Not a known
+issue in practice but documented for completeness.
 
 **`ServiceMetadata` extensibility:** The in-process metadata query works only for the
 embedded agent. Future support for external services (agent, mqtt, scheduler) requires a
