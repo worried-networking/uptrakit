@@ -107,6 +107,13 @@ pub enum Permission {
     /// Test plugin configurations against hosts (dry-run validation).
     TestPluginConfigs,
 
+    // ── MCP ──────────────────────────────────────────────────────────────
+    /// Access the MCP server endpoint (`/mcp`).
+    ///
+    /// Gate to the MCP endpoint. Tools enforce their own additional
+    /// fine-grained permission checks (`ViewSoftware`, `TriggerUpdates`).
+    AccessMcp,
+
     /// An unknown permission received from a newer build.
     ///
     /// Preserved on the wire instead of being dropped, so old binaries
@@ -158,6 +165,7 @@ impl Permission {
             Permission::ManageUsers => "manage_users",
             Permission::ManageIgnores => "manage_ignores",
             Permission::TestPluginConfigs => "test_plugin_configs",
+            Permission::AccessMcp => "access_mcp",
             Permission::Other(s) => s.as_str(),
         }
     }
@@ -204,6 +212,7 @@ impl Permission {
             Permission::ManageUsers => "Manage user roles and access",
             Permission::ManageIgnores => "Manage autodiscovery ignore rules",
             Permission::TestPluginConfigs => "Test plugin configurations against hosts",
+            Permission::AccessMcp => "Access the MCP server endpoint",
             Permission::Other(_) => "(unknown permission)",
         }
     }
@@ -257,6 +266,7 @@ impl From<String> for Permission {
             "manage_users" => Self::ManageUsers,
             "manage_ignores" => Self::ManageIgnores,
             "test_plugin_configs" => Self::TestPluginConfigs,
+            "access_mcp" => Self::AccessMcp,
             _ => Self::Other(s),
         }
     }

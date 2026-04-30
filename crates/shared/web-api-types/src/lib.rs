@@ -141,8 +141,8 @@ mod tests {
 
     #[test]
     fn permission_from_str_unknown_becomes_other() {
-        let p: Permission = "access_mcp".parse().unwrap();
-        assert!(matches!(p, Permission::Other(ref s) if s == "access_mcp"));
+        let p: Permission = "totally_unknown_perm".parse().unwrap();
+        assert!(matches!(p, Permission::Other(ref s) if s == "totally_unknown_perm"));
     }
 
     #[test]
@@ -170,7 +170,25 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 33);
+        // 34 after AccessMcp added; Other(String) excluded via #[strum(disabled)]
+        assert_eq!(Permission::iter().count(), 34);
+    }
+
+    #[test]
+    fn permission_iter_covers_all_variants_with_access_mcp() {
+        // 34 after AccessMcp added; Other(String) excluded via #[strum(disabled)]
+        assert_eq!(Permission::iter().count(), 34);
+    }
+
+    #[test]
+    fn access_mcp_as_str() {
+        assert_eq!(Permission::AccessMcp.as_str(), "access_mcp");
+    }
+
+    #[test]
+    fn access_mcp_round_trips_from_str() {
+        let p: Permission = "access_mcp".parse().unwrap();
+        assert_eq!(p, Permission::AccessMcp);
     }
 
     #[test]

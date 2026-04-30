@@ -64,6 +64,7 @@ mod m20260416_000001_update_history_protection;
 mod m20260417_000001_semantic_audit_logs;
 mod m20260422_000001_email_change_request;
 pub(super) mod m20260423_000001_permission_wire_safe;
+pub(super) mod m20260424_000001_access_mcp_permission;
 
 pub struct Migrator;
 
@@ -132,6 +133,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260417_000001_semantic_audit_logs::Migration),
             Box::new(m20260422_000001_email_change_request::Migration),
             Box::new(m20260423_000001_permission_wire_safe::Migration),
+            Box::new(m20260424_000001_access_mcp_permission::Migration),
         ]
     }
 }
