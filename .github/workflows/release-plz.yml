@@ -123,14 +123,71 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - uses: release-plz/action@v0.5
-        id: release-plz
+      # Inlined replacement for `release-plz/action@v0.5` with `command: release-pr`.
+      # The upstream action swallows release-plz stderr on HTTP 422 (see
+      # action.yml lines 178-188), making PR-creation failures undebuggable.
+      # We install release-plz the same way the action does and run release-pr
+      # ourselves so stderr is always visible.
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@v2
         with:
-          command: release-pr
-          verbose: "true"
+          tool: cargo-semver-checks@0.46
+
+      - name: Install release-plz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: release-plz@0.3.157
+
+      - name: Configure git user from RELEASE_PLZ_TOKEN
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          VIEWER_JSON=$(gh api graphql -f query='query { viewer { name login databaseId }}' --jq '.data.viewer')
+          VIEWER_NAME=$(jq --raw-output '.name | values' <<< "$VIEWER_JSON")
+          VIEWER_LOGIN=$(jq --raw-output '.login' <<< "$VIEWER_JSON")
+          VIEWER_DATABASE_ID=$(jq --raw-output '.databaseId' <<< "$VIEWER_JSON")
+          USER_NAME="${VIEWER_NAME:-$VIEWER_LOGIN}"
+          USER_EMAIL="${VIEWER_DATABASE_ID}+${VIEWER_LOGIN}@users.noreply.github.com"
+          git config --global user.name  "$USER_NAME"
+          git config --global user.email "$USER_EMAIL"
+
+      - name: Run release-plz release-pr (stderr visible)
+        id: release-plz
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           RUST_LOG: debug
+        run: |
+          set +e
+          release-plz release-pr \
+            --git-token "$GITHUB_TOKEN" \
+            --repo-url "https://github.com/$GITHUB_REPOSITORY" \
+            --forge github \
+            -v \
+            -o json > /tmp/rp.stdout 2> /tmp/rp.stderr
+          code=$?
+          echo "===== release-plz stderr ====="
+          cat /tmp/rp.stderr >&2 || true
+          echo "===== release-plz stdout ====="
+          cat /tmp/rp.stdout || true
+          echo "===== exit code: $code ====="
+          if [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
+          output=$(cat /tmp/rp.stdout)
+          prs=$(jq -c .prs <<< "$output")
+          prs_length=$(jq 'length' <<< "$prs")
+          if [ "$prs_length" != "0" ]; then
+            first_pr=$(jq -c '.[0]' <<< "$prs")
+            prs_created=true
+          else
+            first_pr='{}'
+            prs_created=false
+          fi
+          {
+            echo "prs=$prs"
+            echo "pr=$first_pr"
+            echo "prs_created=$prs_created"
+          } >> "$GITHUB_OUTPUT"
 
       - name: sccache stats
         if: always()
