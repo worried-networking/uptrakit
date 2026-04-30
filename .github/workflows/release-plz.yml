@@ -93,6 +93,26 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # release-pr emits only .crate tarballs (cargo wrapper injects
+      # --no-verify); target/ stays nearly empty. Cache primarily benefits
+      # ~/.cargo/registry/{index,cache} which all 13 git_only worktrees
+      # consult during dep resolution.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-pr
+          cache-targets: false
+
+      # Wrapper around cargo that injects --no-verify into
+      # `cargo package --workspace` invocations. release-plz git_only mode
+      # otherwise rebuilds the entire workspace per analyzed package in a
+      # /tmp worktree, blowing disk to ENOSPC. See ci/release-plz/cargo-wrapper.sh.
+      - name: Install cargo wrapper
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-shim"
+          cp ci/release-plz/cargo-wrapper.sh "$RUNNER_TEMP/cargo-shim/cargo"
+          chmod +x "$RUNNER_TEMP/cargo-shim/cargo"
+          echo "$RUNNER_TEMP/cargo-shim" >> "$GITHUB_PATH"
+
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
