@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rmcp::{
     ErrorData, Json, ServerHandler,
     handler::server::tool::Extension,
+    handler::server::wrapper::Parameters,
     model::{Implementation, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
@@ -14,6 +15,8 @@ pub mod history;
 pub mod update;
 pub mod user;
 
+use history::{GetUpdateHistoryDetailInput, ListUpdateHistoryInput};
+use history::{ListUpdateHistoryResult, UpdateHistoryDetailResult};
 use user::GetCurrentUserResult;
 
 /// Build an `rmcp::ErrorData` with the `internal_error` code.
@@ -48,6 +51,43 @@ impl McpHandler {
         Extension(ctx): Extension<McpRequestContext>,
     ) -> Result<Json<GetCurrentUserResult>, ErrorData> {
         self.get_current_user_impl(ctx).await
+    }
+
+    /// List update history records for the authenticated tenant, newest first.
+    ///
+    /// Requires the `ViewSoftware` permission. The `output` field is excluded
+    /// from list results — call `get_update_history_detail` to retrieve the
+    /// rendered terminal output for a specific record.
+    #[tool(
+        name = "list_update_history",
+        description = "List update history records for the authenticated tenant, newest \
+                       first. Requires ViewSoftware permission. Terminal output is not \
+                       included; use get_update_history_detail for that."
+    )]
+    pub async fn list_update_history(
+        &self,
+        Extension(ctx): Extension<McpRequestContext>,
+        Parameters(input): Parameters<ListUpdateHistoryInput>,
+    ) -> Result<Json<ListUpdateHistoryResult>, ErrorData> {
+        self.list_update_history_impl(ctx, input).await
+    }
+
+    /// Retrieve a single update history record with rendered terminal output.
+    ///
+    /// Requires the `ViewSoftware` permission. The raw vt100 byte stream is
+    /// rendered to plain text (ANSI escape sequences stripped) before returning.
+    #[tool(
+        name = "get_update_history_detail",
+        description = "Retrieve a single update history record, including rendered \
+                       terminal output (ANSI escapes stripped). Requires ViewSoftware \
+                       permission."
+    )]
+    pub async fn get_update_history_detail(
+        &self,
+        Extension(ctx): Extension<McpRequestContext>,
+        Parameters(input): Parameters<GetUpdateHistoryDetailInput>,
+    ) -> Result<Json<UpdateHistoryDetailResult>, ErrorData> {
+        self.get_update_history_detail_impl(ctx, input).await
     }
 }
 
