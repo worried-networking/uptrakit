@@ -7,6 +7,7 @@ use uptrakit_web_api_types::notifications::NotificationEventType;
 ///
 /// The `details` variant is the single source of truth for both the
 /// event type and event-specific data.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct NotificationEvent {
     pub tenant_id: Uuid,
@@ -66,6 +67,7 @@ pub enum NotificationEventDetails {
 }
 
 /// Parameters for actionable notifications (only `UpdateAvailable`).
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct ActionParams {
     pub software_item_id: Uuid,
@@ -73,7 +75,29 @@ pub struct ActionParams {
     pub to_version: String,
 }
 
+impl ActionParams {
+    pub fn new(host_id: Uuid, software_item_id: Uuid, to_version: String) -> Self {
+        Self {
+            host_id,
+            software_item_id,
+            to_version,
+        }
+    }
+}
+
 impl NotificationEvent {
+    pub fn new(tenant_id: Uuid, details: NotificationEventDetails) -> Self {
+        Self {
+            tenant_id,
+            host_id: None,
+            host_name: None,
+            software_item_id: None,
+            software_item_name: None,
+            plugin_type: None,
+            details,
+        }
+    }
+
     /// Derive the event type from the details variant.
     pub fn event_type(&self) -> NotificationEventType {
         match &self.details {
