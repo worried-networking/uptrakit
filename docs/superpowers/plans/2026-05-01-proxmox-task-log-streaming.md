@@ -208,16 +208,22 @@ pub async fn wait_for_task_completion_with_logs(
     loop {
         // Check status first; log is fetched only on running iterations.
         // This avoids a redundant log HTTP call on the final (stopped) iteration.
-        let mut status = self.task_status(node, upid).await?;
+        let status = self.task_status(node, upid).await?;
+        // Re-poll once if exitstatus is absent. Proxmox sets exitstatus atomically
+        // with the stopped transition, but a brief finalization lag can occur on
+        // busy nodes. One short retry is sufficient.
+        // NOTE: the spec uses `let mut status` with reassignment, but this shadow
+        // form is used here to satisfy Clippy's `unused_mut` / `needless_late_init`
+        // lints. Do NOT revert to the spec's `let mut` form.
+        let status = if status.status.eq_ignore_ascii_case("stopped")
+            && status.exitstatus.is_none()
+        {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            self.task_status(node, upid).await?
+        } else {
+            status
+        };
         if status.status.eq_ignore_ascii_case("stopped") {
-            // Re-poll once if exitstatus is absent. Proxmox sets exitstatus atomically
-            // with the stopped transition, but a brief finalization lag can occur on
-            // busy nodes. One short retry is sufficient.
-            if status.exitstatus.is_none() {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                status = self.task_status(node, upid).await?;
-            }
-
             // Single drain: fetch all lines since the last poll.
             match self.task_log(node, upid, next_n).await {
                 Ok(entries) => {
@@ -241,7 +247,7 @@ pub async fn wait_for_task_completion_with_logs(
             }
             let exit = status.exitstatus.as_deref().unwrap_or("unknown");
             bail!(ProxmoxError::Plugin(format!(
-                "Proxmox task failed with exit status: {exit}"
+                "Proxmox task {upid} on {node} failed with exit status: {exit}"
             )));
         }
 
@@ -265,9 +271,9 @@ pub async fn wait_for_task_completion_with_logs(
         }
 
         if Instant::now() >= deadline {
-            bail!(ProxmoxError::Plugin(
-                "Timed out waiting for Proxmox task completion".to_string()
-            ));
+            bail!(ProxmoxError::Plugin(format!(
+                "Timed out waiting for Proxmox task {upid} on {node} to complete"
+            )));
         }
 
         tracing::trace!(node, upid, "Proxmox task still running; polling again in 2s");
@@ -309,7 +315,9 @@ git commit -m "feat(proxmox): add wait_for_task_completion_with_logs"
 
 Replace the existing `if let Err(error) = client.wait_for_task_completion(...)` block
 (lines 412–447) with the log-streaming pattern. The error branch body (audit upsert, output
-send, early return) is identical to before.
+send, early return) is identical to before. Note: `--- end ---` fires unconditionally after
+the wait regardless of success or failure — the failure status message follows it. This is
+intentional per the spec; the operator sees the log section close before the error line.
 
 - [ ] **Step 1: Replace the snapshot wait block**
 
@@ -572,8 +580,7 @@ cargo clippy --all-targets --all-features && \
 cargo test -p uptrakit-plugin-infrastructure-proxmox --all-features
 ```
 
-Expected: all clean. If `clippy` flags the `let mut status` pattern inside the loop (rare),
-add `#[expect(clippy::..., reason = "...")]` with an appropriate reason.
+Expected: all clean.
 
 - [ ] **Step 4: Commit**
 
