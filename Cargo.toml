@@ -122,6 +122,7 @@ uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core"
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook", version = "0.0.1" }
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram", version = "0.0.1" }
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email", version = "0.0.1" }
+uptrakit-notification-delivery = { path = "crates/plugins/notifications/delivery", version = "0.0.1" }
 uptrakit-config-merge = { path = "crates/shared/update-hooks", version = "0.0.1" }
 uptrakit-wire = { path = "crates/shared/wire", version = "0.0.1" }
 uptrakit-surfaces = { path = "crates/shared/surfaces", version = "0.0.1" }
