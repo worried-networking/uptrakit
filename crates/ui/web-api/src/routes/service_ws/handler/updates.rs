@@ -1395,6 +1395,51 @@ pub(super) async fn handle_update_result(
         select_best_output(state, payload.update_history_id, payload.output.clone()).await;
 
     let final_status = payload.status.clone();
+
+    // ── Resumable interception — BEFORE finalize_update_result_if_owned ──
+    //
+    // When the agent reports `Completed` with `resumable = Some(true)`, the
+    // update is not yet terminal: it has produced an artifact that requires a
+    // restart to take effect.  Transition `InProgress → AwaitingRestart` via
+    // CAS (guarded by `execution_owner_service_id = service_id`) while the row
+    // is still `InProgress`.  If the CAS wins, return early — SSE/MQTT/dispatch
+    // will fire when the update reaches terminal status post-restart.  If the
+    // CAS loses (row is not InProgress with this owner), fall through to normal
+    // finalization so we don't silently discard a completion result we own.
+    if matches!(final_status, UpdateFinalStatus::Completed) && payload.resumable == Some(true) {
+        let rows = crate::queries::update_batches::transition_to_awaiting_restart(
+            state.db(),
+            payload.update_history_id,
+            service_id,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                error = %e,
+                update_history_id = %payload.update_history_id,
+                "transition_to_awaiting_restart failed"
+            );
+            0
+        });
+        if rows > 0 {
+            emit_update_finalized_audit(
+                state,
+                service_id,
+                &record,
+                &final_status,
+                uptrakit_audit_log::AuditOutcome::Partial,
+                agent_truncated,
+                Some("awaiting_restart"),
+            )
+            .await;
+            return ProcessorResponse::cont();
+        }
+        tracing::warn!(
+            update_history_id = %payload.update_history_id,
+            "transition_to_awaiting_restart: CAS lost (rows_affected=0), falling through to finalization"
+        );
+    }
+
     let updated = match crate::queries::update_batches::finalize_update_result_if_owned(
         state.db(),
         crate::queries::update_batches::FinalizeUpdateResultIfOwnedArgs {
@@ -1511,44 +1556,6 @@ pub(super) async fn handle_update_result(
     }
 
     if updated > 0 {
-        // Resumable check FIRST — before any post-finalization side-effects.
-        //
-        // When the agent reports `Completed` with `resumable = Some(true)`, the
-        // update is not yet terminal: it has produced an artifact that requires
-        // a restart to take effect. Transition `InProgress -> AwaitingRestart`
-        // via CAS (guarded by `execution_owner_service_id = service_id`). If the
-        // CAS lost a race we log and skip — the row is no longer ours to mutate.
-        //
-        // `AwaitingRestart` is not a terminal status, so we deliberately skip
-        // SSE/MQTT broadcasts, post-update finalization, notifications, and
-        // dispatch progression: those will fire when the update eventually
-        // reaches `Completed` (after the restart) or times out into `Failed`.
-        if matches!(payload.status, UpdateFinalStatus::Completed) && payload.resumable == Some(true)
-        {
-            let rows = crate::queries::update_batches::transition_to_awaiting_restart(
-                state.db(),
-                payload.update_history_id,
-                service_id,
-            )
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(
-                    error = %e,
-                    update_history_id = %payload.update_history_id,
-                    "transition_to_awaiting_restart failed"
-                );
-                0
-            });
-            if rows == 0 {
-                tracing::warn!(
-                    update_history_id = %payload.update_history_id,
-                    "transition_to_awaiting_restart: CAS lost (rows_affected=0), skipping"
-                );
-            }
-            // AwaitingRestart is not terminal — skip SSE/MQTT/dispatch side-effects.
-            return ProcessorResponse::cont();
-        }
-
         let mut finalized_record = record.clone();
         finalized_record.status = match final_status {
             UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
