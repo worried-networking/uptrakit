@@ -98,6 +98,8 @@
 		} finally {
 			emailChanging = false;
 		}
+		// Best-effort refresh — if this fails the modal stays open and the user
+		// can close manually; don't overwrite emailError with a stale-data message.
 		await initialize().catch(() => {});
 	}
 
