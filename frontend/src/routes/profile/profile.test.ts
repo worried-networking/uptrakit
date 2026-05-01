@@ -37,6 +37,11 @@ const user = {
 	permissions: []
 };
 
+async function goToTokensTab() {
+	await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
+	await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+}
+
 describe('Profile Route', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
@@ -125,6 +130,7 @@ describe('Tab Navigation', () => {
 describe('Button Migrations', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
 		vi.mocked(api.listApiTokens).mockResolvedValue({
 			tokens: [
 				{
@@ -140,11 +146,6 @@ describe('Button Migrations', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
 	});
-
-	async function goToTokensTab() {
-		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
-		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
-	}
 
 	it('New Token launcher renders variant="primary"', async () => {
 		render(ProfilePage);
@@ -330,11 +331,6 @@ describe('API Tokens Tab', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
 	});
-
-	async function goToTokensTab() {
-		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
-		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
-	}
 
 	it('filters out revoked tokens from the DataTable', async () => {
 		vi.mocked(api.listApiTokens).mockResolvedValue({
