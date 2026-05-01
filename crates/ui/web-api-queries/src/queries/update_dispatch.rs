@@ -1095,6 +1095,7 @@ pub async fn has_active_update_for_host(db: &DatabaseConnection, host_id: Uuid) 
         .filter(update_history::Column::Status.is_in([
             update_history::UpdateStatus::Pending,
             update_history::UpdateStatus::InProgress,
+            update_history::UpdateStatus::AwaitingRestart,
         ]))
         .count(db)
         .await
@@ -1683,6 +1684,51 @@ mod tests {
         assert_eq!(policy.mode, ProxmoxProtectionMode::Snapshot);
         assert_eq!(policy.snapshot_timeout_seconds, Some(180));
         assert_eq!(policy.backup_timeout_seconds, Some(1200));
+    }
+
+    #[tokio::test]
+    async fn test_has_active_update_includes_awaiting_restart() {
+        use sea_orm::ActiveModelTrait;
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::AwaitingRestart),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(None),
+            awaiting_restart_since: sea_orm::Set(Some(now)),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let active = super::has_active_update_for_host(&db, host_id)
+            .await
+            .unwrap();
+        assert!(active, "AwaitingRestart should count as active");
     }
 
     #[tokio::test]
