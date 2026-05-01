@@ -62,10 +62,10 @@ pub enum TriggerUpdateError {
     /// The linked agent exists but is not in `Approved` status.
     #[error("agent is not approved")]
     AgentNotApproved,
-    /// A `Pending` or `InProgress` update already exists for this
+    /// A `Pending`, `InProgress`, or `AwaitingRestart` update already exists for this
     /// (host_id, software_item_id) pair. This is the belt-and-suspenders path
     /// when the partial unique DB index rejects a concurrent INSERT.
-    #[error("an update is already pending or in progress")]
+    #[error("an update is already pending, in progress, or awaiting restart")]
     UpdateAlreadyActive,
     /// The plugin config referenced by the role assignment was not found.
     #[error("plugin config not found")]
@@ -1087,7 +1087,7 @@ pub async fn validate_update_preconditions(
     load_target_for_dispatch(db, tenant_id, host_id, item_id).await
 }
 
-/// Returns `true` if a `Pending` or `InProgress` update already exists for
+/// Returns `true` if a `Pending`, `InProgress`, or `AwaitingRestart` update already exists for
 /// the given host (across all software items and batches).
 pub async fn has_active_update_for_host(db: &DatabaseConnection, host_id: Uuid) -> Result<bool> {
     let count = UpdateHistory::find()
