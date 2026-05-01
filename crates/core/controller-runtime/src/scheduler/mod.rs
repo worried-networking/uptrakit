@@ -90,6 +90,11 @@ pub(crate) async fn run_embedded_scheduler(
                     audit_emitter.clone(),
                 )),
             );
+            scheduler.register_tick_executor(Box::new(
+                uptrakit_scheduler_engine::executors::awaiting_restart::AwaitingRestartExecutor::new(
+                    Arc::clone(&notifier_for_extras),
+                ),
+            ));
         },
     )
     .await;

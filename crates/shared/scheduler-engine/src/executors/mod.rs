@@ -1,5 +1,6 @@
 pub mod audit_log_cleanup;
 pub mod auth_cleanup;
+pub mod awaiting_restart;
 pub mod crl_renewal;
 pub mod detect_version;
 pub mod discover_software;
