@@ -87,6 +87,11 @@ pub struct AgentRuntimeConfig {
     freeze_file_path: PathBuf,
     agent_version: String,
     audit_emitter: RuntimeAuditEmitter,
+    /// Optional service-metadata provider injected by the embedded
+    /// controller-standalone agent so discovery plugins can introspect the
+    /// running controller binary.  Standalone agents leave this `None`.
+    metadata_provider:
+        Option<Arc<dyn uptrakit_plugin_infrastructure_core::ServiceMetadataProvider>>,
 }
 
 impl AgentRuntimeConfig {
@@ -114,7 +119,21 @@ impl AgentRuntimeConfig {
             freeze_file_path,
             agent_version,
             audit_emitter,
+            metadata_provider: None,
         }
+    }
+
+    /// Set an optional service-metadata provider.
+    ///
+    /// Used by the embedded controller-standalone agent to inject
+    /// `ControllerMetadataProvider` so the self-update discovery plugin can
+    /// introspect the running controller binary.
+    pub fn with_metadata_provider(
+        mut self,
+        provider: Arc<dyn uptrakit_plugin_infrastructure_core::ServiceMetadataProvider>,
+    ) -> Self {
+        self.metadata_provider = Some(provider);
+        self
     }
 }
 
@@ -148,6 +167,7 @@ impl AgentRuntime {
             freeze_file_path,
             agent_version,
             audit_emitter,
+            metadata_provider,
         } = config;
         let (audit_tx, audit_rx) = tokio::sync::mpsc::unbounded_channel();
         let forwarder: Arc<dyn RuntimeAuditForwarder> =
@@ -166,7 +186,10 @@ impl AgentRuntime {
             bg_tx,
             pending_initial_report: None,
             agent_version,
-            ctx: ConnectionContext::default(),
+            ctx: ConnectionContext {
+                metadata_provider,
+                ..ConnectionContext::default()
+            },
         }
     }
 

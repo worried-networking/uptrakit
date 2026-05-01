@@ -6925,6 +6925,7 @@ dependencies = [
  "uptrakit-agent-core",
  "uptrakit-audit-log",
  "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-service-sdk",
  "uptrakit-wire",
  "uuid",
@@ -7464,6 +7465,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-discovery-uptrakit-self-update"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+]
+
+[[package]]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
 version = "0.0.1"
 dependencies = [
@@ -7599,6 +7616,7 @@ dependencies = [
  "uptrakit-notification-plugin-telegram",
  "uptrakit-notification-plugin-webhook",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+ "uptrakit-plugin-discovery-uptrakit-self-update",
  "uptrakit-plugin-enhancement-dashboard-icons",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-hook-shell",

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use uptrakit_agent_runtime::{
@@ -11,6 +12,7 @@ use uptrakit_agent_runtime::{
 use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_wire::{Capability, DisconnectReason, ServiceTransport};
 
+use crate::embedded::metadata_runtime::ControllerMetadataProvider;
 use crate::embedded::types::EmbeddedTransport;
 
 /// Timeout for graceful shutdown: how long to wait for an in-flight update.
@@ -27,12 +29,21 @@ pub(crate) async fn run_embedded_agent(
     cancel: CancellationToken,
     state_dir: PathBuf,
 ) {
-    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::with_audit_emitter(
-        make_local_executor(),
-        state_dir.join("embedded-agent").join("update-freeze"),
+    let metadata_provider = Arc::new(ControllerMetadataProvider::new(
+        "uptrakit-controller-standalone".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
-        RuntimeAuditEmitter::new(),
+        /* reuseport_configured */ false,
+        /* pid_file */ None,
     ));
+    let mut runtime = AgentRuntime::new(
+        AgentRuntimeConfig::with_audit_emitter(
+            make_local_executor(),
+            state_dir.join("embedded-agent").join("update-freeze"),
+            env!("CARGO_PKG_VERSION").to_string(),
+            RuntimeAuditEmitter::new(),
+        )
+        .with_metadata_provider(metadata_provider),
+    );
 
     if let Err(error) = runtime.on_connected(&mut transport).await {
         tracing::error!(error = %error, "embedded agent: failed to initialize runtime");

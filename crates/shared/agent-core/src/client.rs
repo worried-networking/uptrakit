@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_plugin_infrastructure_registry::{
-    BatchUpdateItem, HostCapabilities, HostCompatibility, PluginCapability, UpdateLifecycleContext,
-    construct_host_runtime, get_descriptor,
+    BatchUpdateItem, HostCapabilities, HostCompatibility, MetadataAwareHostRuntime,
+    PluginCapability, UpdateLifecycleContext, construct_host_runtime, get_descriptor,
 };
 use uptrakit_service_sdk::LoopOutcome;
 use uptrakit_wire::{
@@ -692,7 +692,14 @@ async fn discover_software_inner(
         let mut effective_config = assignment.config.clone();
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+        let base_runtime =
+            construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+        let runtime: Arc<dyn uptrakit_plugin_infrastructure_registry::HostRuntime> =
+            if let Some(ref provider) = ctx.metadata_provider {
+                MetadataAwareHostRuntime::new(base_runtime, Arc::clone(provider))
+            } else {
+                base_runtime
+            };
 
         let result = match get_descriptor(assignment.plugin_type.as_str()) {
             None => {
