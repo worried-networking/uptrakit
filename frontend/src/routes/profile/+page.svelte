@@ -14,8 +14,16 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
-	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge, TabStrip } from '$lib/components/ui';
-	import type { TabStripItem } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TabStrip,
+		type TabStripItem
+	} from '$lib/components/ui';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { FormFieldRow, Input } from '$lib/components/forms';
