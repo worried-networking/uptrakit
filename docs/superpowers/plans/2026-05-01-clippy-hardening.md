@@ -19,22 +19,25 @@ task is mandatory because feature-conditional sites fail under only one variant.
 
 ## File Map
 
-| File                                                       | Change                                                     |
-| ---------------------------------------------------------- | ---------------------------------------------------------- |
-| `clippy.toml` (new)                                        | test-mode exemptions                                       |
-| `Cargo.toml` (workspace root, lines 191–196)               | add `unfulfilled_lint_expectations = "deny"`; add 24 lints |
-| `crates/shared/github-client/Cargo.toml`                   | add `[lints] workspace = true`                             |
-| `crates/ui/mcp/Cargo.toml`                                 | add `[lints] workspace = true`                             |
-| `crates/core/controller-runtime/src/lib.rs`                | cfg_attr→expect (lines 92, 276, 323, 376, 792, 794)        |
-| `crates/shared/service-sdk/src/lifecycle.rs`               | feature-cond exception (lines 56, 132)                     |
-| `crates/ui/web-api/src/batch_progress_broadcaster.rs`      | feature-cond exception (line 110)                          |
-| `crates/shared/agent-core/src/client.rs`                   | feature-cond exception (line 366)                          |
-| `crates/plugins/infrastructure/registry/src/registry.rs`   | feature-cond exception (lines 20, 218)                     |
-| `crates/plugins/releases/docker/src/update.rs`             | feature-cond exception (line 92)                           |
-| `crates/ui/web-api/src/routes/settings_global_combined.rs` | feature-cond exception (line 63)                           |
-| `crates/plugins/infrastructure/core/src/macros.rs`         | feature-cond exception (lines 78, 187, 191)                |
-| All files with `#[allow(...)]` (see Task 6)                | →`#[expect(..., reason = "...")]`                          |
-| `docs/development/coding-standards.md`                     | add Lint Suppression section                               |
+| File                                                       | Change                                                                                          |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `clippy.toml` (new)                                        | test-mode exemptions                                                                            |
+| `Cargo.toml` (workspace root, lines 191–196)               | add `unfulfilled_lint_expectations = "deny"`; add 24 lints                                      |
+| `crates/shared/github-client/Cargo.toml`                   | add `[lints] workspace = true`                                                                  |
+| `crates/ui/mcp/Cargo.toml`                                 | add `[lints] workspace = true`                                                                  |
+| `crates/core/controller-runtime/src/lib.rs`                | cfg_attr→expect (lines 10, 173, 276, 323, 376, 779, 792, 794); feature-cond exception (line 92) |
+| `crates/plugins/releases/docker/src/plugin.rs`             | cfg_attr→expect (line 137)                                                                      |
+| `crates/plugins/releases/docker/src/daemon_client.rs`      | cfg_attr→expect (line 67)                                                                       |
+| `crates/plugins/releases/docker/src/docker_client.rs`      | cfg_attr→expect (line 185)                                                                      |
+| `crates/shared/service-sdk/src/lifecycle.rs`               | feature-cond exception (lines 56, 132)                                                          |
+| `crates/ui/web-api/src/batch_progress_broadcaster.rs`      | feature-cond exception (line 110)                                                               |
+| `crates/shared/agent-core/src/client.rs`                   | feature-cond exception (line 366)                                                               |
+| `crates/plugins/infrastructure/registry/src/registry.rs`   | feature-cond exception (lines 20, 218)                                                          |
+| `crates/plugins/releases/docker/src/update.rs`             | feature-cond exception (line 92)                                                                |
+| `crates/ui/web-api/src/routes/settings_global_combined.rs` | feature-cond exception (line 63)                                                                |
+| `crates/plugins/infrastructure/core/src/macros.rs`         | feature-cond exception (lines 78, 187, 191)                                                     |
+| All files with `#[allow(...)]` (see Task 6)                | →`#[expect(..., reason = "...")]`                                                               |
+| `docs/development/coding-standards.md`                     | add Lint Suppression section                                                                    |
 
 ---
 
@@ -165,7 +168,10 @@ cargo clippy --all-targets --all-features 2>&1 | grep "^warning" > /tmp/clippy-a
 wc -l /tmp/clippy-sqlite.txt /tmp/clippy-all.txt
 ```
 
-Expected: ~150 warnings (the 95 `allow_attributes` warnings + ~55 new lint warnings). Use these files to drive Tasks 3–6.
+Expected: the `--all-features` run shows ~245 warnings (95 `#[allow]` sites × 2 lints = 190, plus ~55
+new lint warnings). The `--no-default-features --features db-sqlite` run will show materially fewer —
+feature-gated crates are not compiled, so fewer allow sites are visible. Both counts are correct; do
+not expect them to match. Use these files to drive Tasks 3–6.
 
 - [ ] **Commit**
 
@@ -208,6 +214,8 @@ For each violation, either:
 let val = some_result.unwrap();
 // becomes:
 let val = some_result?;
+// Note: ? only works in functions returning Result/Option. In closures with a
+// non-Result return type use unwrap_or_else or restructure into a named fn.
 
 // expect_used in build.rs: change fn main() signature
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -248,6 +256,13 @@ let item = arr[idx];
 let chunk = &s[start..end];
 ```
 
+**Important — `unreachable!()` in test code:** `clippy.toml` has no `allow-unreachable-in-tests` key.
+`unreachable!()` inside `#[cfg(test)]` blocks and `#[test]` functions is NOT auto-exempted.
+Any `unreachable!()` in test code must be suppressed with a per-site `#[expect]` OR the call
+removed. Similarly, never place `#[expect(clippy::unwrap_used)]` (or `expect_used`, `panic`,
+`indexing_slicing`) inside test code — `clippy.toml` already suppresses those lints in tests,
+so the `#[expect]` would be unfulfilled and cause a compile error under `unfulfilled_lint_expectations = "deny"`.
+
 - [ ] **Fix or suppress every violation shown by `cargo clippy --all-targets --all-features`** (excluding `allow_attributes` warnings)
 
 - [ ] **Verify both variants are clean of non-suppression violations**
@@ -270,11 +285,61 @@ git commit -m "fix(clippy): remediate new lint violations (panic, silent-failure
 
 ## Task 4: Migrate `cfg_attr` Allow Sites
 
-`#[cfg_attr(cond, allow(lint))]` must become `#[cfg_attr(cond, expect(lint, reason = "..."))]`. All five sites are in `crates/core/controller-runtime/src/lib.rs`.
+`#[cfg_attr(cond, allow(lint))]` must become `#[cfg_attr(cond, expect(lint, reason = "..."))]`. Sites span
+`crates/core/controller-runtime/src/lib.rs` (8 sites) and the docker plugin crate (3 sites).
 
 **Files:**
 
-- Modify: `crates/core/controller-runtime/src/lib.rs` (lines 276, 323, 376, 792, 794)
+- Modify: `crates/core/controller-runtime/src/lib.rs` (lines 10, 173, 276, 323, 376, 779, 792, 794)
+- Modify: `crates/plugins/releases/docker/src/plugin.rs` (line 137)
+- Modify: `crates/plugins/releases/docker/src/daemon_client.rs` (line 67)
+- Modify: `crates/plugins/releases/docker/src/docker_client.rs` (line 185)
+
+- [ ] **Convert lines 10–18** (`embedded` module — multi-line `dead_code`)
+
+```rust
+// Before (lines 10–18)
+#[cfg_attr(
+    not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
+    )),
+    allow(dead_code) // Infrastructure types used by follow-up service embeddings.
+)]
+mod embedded;
+
+// After
+#[cfg_attr(
+    not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
+    )),
+    expect(dead_code, reason = "infrastructure types used only when at least one service is embedded")
+)]
+mod embedded;
+```
+
+- [ ] **Convert lines 173–176** (`controller_installation_id` — multi-line `unused_variables`)
+
+```rust
+// Before (lines 173–176)
+#[cfg_attr(
+    not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+    allow(unused_variables)
+)]
+let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
+
+// After
+#[cfg_attr(
+    not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+    expect(unused_variables, reason = "only read inside the embedded-scheduler and embedded-agent feature blocks below")
+)]
+let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
+```
 
 - [ ] **Convert line 276**
 
@@ -317,6 +382,32 @@ let mut nats_client = /* ... */;
 )]
 ```
 
+- [ ] **Convert lines 779–786** (`controller_installation_id` param — multi-line `unused_variables`)
+
+```rust
+// Before (lines 779–786)
+#[cfg_attr(
+    not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-mqtt"
+    )),
+    allow(unused_variables)
+)]
+controller_installation_id: uuid::Uuid,
+
+// After
+#[cfg_attr(
+    not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-mqtt"
+    )),
+    expect(unused_variables, reason = "only read inside the embedded-scheduler, embedded-agent, and embedded-mqtt feature blocks")
+)]
+controller_installation_id: uuid::Uuid,
+```
+
 - [ ] **Convert line 792**
 
 ```rust
@@ -343,20 +434,58 @@ let mut nats_client = /* ... */;
 )] pid_file: Option</* ... */>
 ```
 
+- [ ] **Convert `docker/src/plugin.rs` line 137** (inline `unused_variables`, `daemon` feature)
+
+```rust
+// Before (line 137)
+#[cfg_attr(not(feature = "daemon"), allow(unused_variables))] proxy_handle: OpaqueHandle,
+
+// After
+#[cfg_attr(not(feature = "daemon"), expect(unused_variables, reason = "only used inside the daemon feature block"))] proxy_handle: OpaqueHandle,
+```
+
+- [ ] **Convert `docker/src/daemon_client.rs` line 67** (`dead_code` when not in test)
+
+```rust
+// Before (line 67)
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn effective_dial_stdio_command(&self) -> &'static str {
+
+// After
+#[cfg_attr(not(test), expect(dead_code, reason = "called only from tests; not dead in test builds"))]
+pub(crate) fn effective_dial_stdio_command(&self) -> &'static str {
+```
+
+- [ ] **Convert `docker/src/docker_client.rs` line 185** (`dead_code` gated on `cfg(all(unix, feature = "daemon"))`)
+
+```rust
+// Before (line 185)
+#[cfg_attr(test, allow(dead_code))]
+fn probe_local_socket_path() -> Option<String> {
+
+// After
+#[cfg_attr(test, expect(dead_code, reason = "function exists only under unix + daemon; unreachable in test builds"))]
+fn probe_local_socket_path() -> Option<String> {
+```
+
 - [ ] **Verify both variants clean**
 
 ```bash
-cargo clippy --all-targets --no-default-features --features db-sqlite 2>&1 | grep "controller.runtime" | grep "allow_attributes"
-cargo clippy --all-targets --all-features 2>&1 | grep "controller.runtime" | grep "allow_attributes"
+cargo clippy --all-targets --no-default-features --features db-sqlite 2>&1 | grep -E "controller.runtime|docker" | grep "allow_attributes"
+cargo clippy --all-targets --all-features 2>&1 | grep -E "controller.runtime|docker" | grep "allow_attributes"
 ```
 
-Expected: zero lines for this file.
+Expected: zero lines for these files.
 
 - [ ] **Commit**
 
 ```bash
-git add crates/core/controller-runtime/src/lib.rs
-git commit -m "fix(clippy): convert cfg_attr allow sites to expect in controller-runtime"
+git add \
+  crates/core/controller-runtime/src/lib.rs \
+  crates/plugins/releases/docker/src/plugin.rs \
+  crates/plugins/releases/docker/src/daemon_client.rs \
+  crates/plugins/releases/docker/src/docker_client.rs
+git commit -m "fix(clippy): convert cfg_attr allow sites to expect"
 ```
 
 ---
@@ -389,6 +518,23 @@ The wrapping pattern for every site in this task:
 )]
 #[allow(LINT_NAME)]
 ```
+
+- [ ] **Verify `macros.rs` sites actually fire `allow_attributes` before wrapping**
+
+`macro_rules!` attribute tokens may be invisible to `allow_attributes` when the macro is
+expanded in other crates. Check **both** variants explicitly:
+
+```bash
+cargo clippy --all-targets --all-features 2>&1 | grep "macros.rs" | grep "allow_attributes"
+cargo clippy --all-targets --no-default-features --features db-sqlite 2>&1 | grep "macros.rs" | grep "allow_attributes"
+```
+
+- If lines appear in **both** variants: apply the wrapper pattern below for each site.
+- If lines appear in **only one** variant: the outer `#[expect(allow_attributes, ...)]` wrapper
+  would fire `unfulfilled_lint_expectations` under the other variant. These sites **cannot** use
+  the wrapper pattern. Leave them as bare `#[allow]` — they will fail Task 7 promotion and must be
+  addressed separately (likely by moving the allow to the `cfg_attr` pattern instead).
+- If no lines appear in either variant: skip the three `macros.rs` steps entirely — no change needed.
 
 - [ ] **`macros.rs` line 78** — inside `declare_plugin!` macro body
 
@@ -587,11 +733,11 @@ All remaining `#[allow]` sites receive a straightforward conversion:
 
 Work through the sites below in sub-batches, committing after each group. Run both Clippy variants after each sub-batch.
 
-### 6a: `clippy::too_many_arguments` (22 sites)
+### 6a: `clippy::too_many_arguments` (25 sites)
 
 Reason pattern: `"mirrors the N fields of <struct/record>"` — read the function signature to count parameters and name the record type.
 
-- [ ] **Convert all 22 sites**
+- [ ] **Convert all 25 sites**
 
 | File                                                                       | Line                 |
 | -------------------------------------------------------------------------- | -------------------- |
@@ -679,7 +825,7 @@ git add -p
 git commit -m "fix(clippy): convert type_complexity allow→expect with reason"
 ```
 
-### 6c: `dead_code` (25 sites)
+### 6c: `dead_code` (29 sites)
 
 Reason: describe why the item is kept. Read each site to determine the reason. Common patterns:
 
@@ -687,25 +833,25 @@ Reason: describe why the item is kept. Read each site to determine the reason. C
 - Test helpers: `"used by integration tests via mod.rs re-export"`
 - Pending wiring: `"infrastructure type reserved for follow-up service embeddings"`
 
-- [ ] **Convert all 25 sites**
+- [ ] **Convert all 29 sites**
 
-| File                                                                           | Line                         | Known context                                       |
-| ------------------------------------------------------------------------------ | ---------------------------- | --------------------------------------------------- |
-| `crates/core/controller-runtime/src/embedded/mod.rs`                           | 17                           | "infrastructure types for follow-up embeddings"     |
-| `crates/core/controller-runtime/src/embedded/mod.rs`                           | 52                           | "fields used by agent embedding follow-up"          |
-| `crates/core/controller-runtime/src/embedded/types.rs`                         | 33                           | "transport methods used by service closures"        |
-| `crates/core/integration-tests/tests/database_helpers/harness.rs`              | 14                           | read file for context                               |
-| `crates/core/integration-tests/tests/database_helpers/mod.rs`                  | 1, 3, 5, 7, 9                | "test helper re-exports used by sibling test files" |
-| `crates/plugins/hooks/shell/src/plugin.rs`                                     | 20                           | read for context                                    |
-| `crates/plugins/infrastructure/core/src/catalog.rs`                            | 344, 392                     | read for context                                    |
-| `crates/plugins/notifications/webhook/src/plugin.rs`                           | 46                           | read for context                                    |
-| `crates/plugins/releases/docker/src/plugin.rs`                                 | 105, 166                     | read for context                                    |
-| `crates/shared/db/src/migration/m20260309_000003_unified_software_tracking.rs` | 56, 58, 170                  | "migration helper used by SeaORM migration runner"  |
-| `crates/shared/openapi-client/src/lib.rs`                                      | 370, 389                     | read for context                                    |
-| `crates/ui/web-api/src/global_providers/github.rs`                             | 149, 386, 392, 398, 410, 626 | read for context                                    |
-| `crates/ui/web-api/src/routes/service_ws/protocol.rs`                          | 94                           | "used by tests in mod.rs"                           |
-| `crates/ui/web-api/src/surface_proxy/controller_local.rs`                      | 67                           | read for context                                    |
-| `crates/ui/web-api/src/test_harness/mod.rs`                                    | 23                           | "test harness helper"                               |
+| File                                                                           | Line                                                                   | Known context                                                                                                                                                                            |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/core/controller-runtime/src/embedded/mod.rs`                           | 17                                                                     | "infrastructure types for follow-up embeddings"                                                                                                                                          |
+| `crates/core/controller-runtime/src/embedded/mod.rs`                           | 52                                                                     | "fields used by agent embedding follow-up"                                                                                                                                               |
+| `crates/core/controller-runtime/src/embedded/types.rs`                         | 33                                                                     | "transport methods used by service closures"                                                                                                                                             |
+| `crates/core/integration-tests/tests/database_helpers/harness.rs`              | 14                                                                     | read file for context                                                                                                                                                                    |
+| `crates/core/integration-tests/tests/database_helpers/mod.rs`                  | 1, 3, 5, 7, 9                                                          | "test helper re-exports used by sibling test files"                                                                                                                                      |
+| `crates/plugins/hooks/shell/src/plugin.rs`                                     | 20                                                                     | read for context                                                                                                                                                                         |
+| `crates/plugins/infrastructure/core/src/catalog.rs`                            | 344 (**both** `dead_code` + `unreachable_pub`), 392 (`dead_code` only) | line 344 is `#[allow(dead_code, unreachable_pub)]` on `mod tests` — convert to `#[expect(dead_code, unreachable_pub, reason = "test-only module; items not re-exported at crate root")]` |
+| `crates/plugins/notifications/webhook/src/plugin.rs`                           | 46                                                                     | read for context                                                                                                                                                                         |
+| `crates/plugins/releases/docker/src/plugin.rs`                                 | 105, 166                                                               | read for context                                                                                                                                                                         |
+| `crates/shared/db/src/migration/m20260309_000003_unified_software_tracking.rs` | 56, 58, 170                                                            | "migration helper used by SeaORM migration runner"                                                                                                                                       |
+| `crates/shared/openapi-client/src/lib.rs`                                      | 370, 389                                                               | read for context                                                                                                                                                                         |
+| `crates/ui/web-api/src/global_providers/github.rs`                             | 149, 386, 392, 398, 410, 626                                           | read for context                                                                                                                                                                         |
+| `crates/ui/web-api/src/routes/service_ws/protocol.rs`                          | 94                                                                     | "used by tests in mod.rs"                                                                                                                                                                |
+| `crates/ui/web-api/src/surface_proxy/controller_local.rs`                      | 67                                                                     | read for context                                                                                                                                                                         |
+| `crates/ui/web-api/src/test_harness/mod.rs`                                    | 23                                                                     | "test harness helper"                                                                                                                                                                    |
 
 For each site, read the surrounding ~10 lines to write a specific reason.
 
@@ -724,18 +870,29 @@ git add -p
 git commit -m "fix(clippy): convert dead_code allow→expect with reason"
 ```
 
-### 6d: Remaining `unused_*` and Miscellaneous Sites (35 sites)
+### 6d: Remaining `unused_*` and Miscellaneous Sites
 
 - [ ] **Convert `unused_imports` (3 sites in `controller_local.rs`)**
 
-`crates/ui/web-api/src/surface_proxy/controller_local.rs` lines 45, 54, 58:
+`crates/ui/web-api/src/surface_proxy/controller_local.rs` lines 45, 54, 58.
 
-Read each to identify which import and which feature gates it:
+Read each site before applying. Line 54 is inside a `#[cfg(test)]` block — use a test-specific reason:
+
+Lines 45 and 58 (production code — pending wiring):
 
 ```rust
 #[expect(
     unused_imports,
-    reason = "import used only when <feature> is enabled — cfg condition on line N"
+    reason = "pending wiring of local_executor.rs into the module tree — remove once local_executor.rs is incorporated"
+)]
+```
+
+Line 54 (inside `#[cfg(test)]`):
+
+```rust
+#[expect(
+    unused_imports,
+    reason = "test-only import used by local_executor.rs tests — remove once local_executor.rs is incorporated"
 )]
 ```
 
@@ -762,7 +919,6 @@ Read context; typical reason: `"mut required by the ... API even though this pat
 | `crates/core/agent-ssh/src/db/migration/m20260308_000003_ssh_host_uuid_columns.rs` | 263     | `clippy::enum_variant_names`      | `"migration enum variants share prefix by convention"`                                                    |
 | `crates/plugins/infrastructure/core/src/descriptor.rs`                             | 443     | `clippy::derivable_impls`         | `"cfg-gated fields prevent automatic derive"`                                                             |
 | `crates/plugins/infrastructure/core/src/testing.rs`                                | 62, 134 | `clippy::new_ret_no_self`         | `"builder returns a concrete plugin type, not Self by design"`                                            |
-| `crates/plugins/infrastructure/core/src/catalog.rs`                                | 344     | `dead_code, unreachable_pub`      | read for context                                                                                          |
 | `crates/shared/openapi-client/src/lib.rs`                                          | 54      | `unused_imports`                  | read for context                                                                                          |
 | `crates/ui/web-api-queries/src/queries/autodiscovery/mod.rs`                       | 94      | `unreachable_pub`                 | `"public item needed by integration tests but not re-exported at crate root"`                             |
 | `crates/ui/web-api/src/routes/plugin_type_settings.rs`                             | 35      | `clippy::result_large_err`        | `"error type is large due to axum Response; refactoring would require significant handler restructuring"` |
@@ -870,7 +1026,7 @@ git commit -m "chore(clippy): promote all 24 new lints from warn to deny"
 
 **Files:**
 
-- Modify: `docs/development/coding-standards.md` (after the **Panic Policy** section, around line 33)
+- Modify: `docs/development/coding-standards.md` (after the **Panic Policy** section, after line 42)
 
 - [ ] **Insert new Lint Suppression section**
 
