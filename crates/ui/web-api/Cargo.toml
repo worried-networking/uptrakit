@@ -87,6 +87,7 @@ sha2 = { workspace = true }
 uptrakit-global-github-provider = { workspace = true }
 uptrakit-github-client = { workspace = true }
 uptrakit-notification-delivery = { workspace = true }
+uptrakit-service-connections = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }
