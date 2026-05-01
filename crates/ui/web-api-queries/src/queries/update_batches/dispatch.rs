@@ -287,6 +287,7 @@ async fn maybe_complete_batch(
             update_history::UpdateStatus::Queued,
             update_history::UpdateStatus::Pending,
             update_history::UpdateStatus::InProgress,
+            update_history::UpdateStatus::AwaitingRestart,
         ]))
         .count(&txn)
         .await
@@ -1202,6 +1203,108 @@ mod tests {
         .unwrap();
 
         (batch_id, pending_id, queued_id)
+    }
+
+    // -- maybe_complete_batch / AwaitingRestart --
+
+    /// A batch containing one `Completed` item and one `AwaitingRestart` item
+    /// must not be marked complete — `AwaitingRestart` is a non-terminal status.
+    #[tokio::test]
+    async fn test_maybe_complete_batch_waits_for_awaiting_restart() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item2_id = insert_second_item(&db, &f).await;
+        let now = OffsetDateTime::now_utc();
+        let batch_id = Uuid::now_v7();
+
+        update_batch::ActiveModel {
+            id: Set(batch_id),
+            tenant_id: Set(f.tenant_id),
+            batch_type: Set("host_software_item".to_string()),
+            status: Set(uptrakit_shared_types::BatchStatus::InProgress),
+            total_count: Set(2),
+            actor_type: Set("user".to_string()),
+            actor_id: Set("test".to_string()),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            created_at: Set(now),
+            completed_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // First item: Completed.
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            awaiting_restart_since: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(Some(batch_id)),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Second item: AwaitingRestart.
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("2.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::AwaitingRestart),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            awaiting_restart_since: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(Some(batch_id)),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let result = maybe_complete_batch(&db, batch_id, f.tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "batch should not complete while an AwaitingRestart item exists"
+        );
     }
 
     // -- dispatch_next_in_batch --
