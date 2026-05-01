@@ -337,7 +337,7 @@ mod tests {
     /// filesystem) and is intended for explicit CI verification rather than the
     /// fast unit-test loop.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires running controller-standalone instance"]
     async fn test_self_update_plugin_discovers_running_controller() {
         use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
         use uptrakit_plugin_infrastructure_core::service_metadata::{

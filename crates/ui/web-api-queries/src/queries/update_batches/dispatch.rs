@@ -1130,10 +1130,7 @@ pub async fn apply_awaiting_restart_version_check(
     let result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(record.id))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::AwaitingRestart))
-        .col_expr(
-            update_history::Column::Status,
-            Expr::value(new_status.clone()),
-        )
+        .col_expr(update_history::Column::Status, Expr::value(new_status))
         .col_expr(
             update_history::Column::CompletedAt,
             Expr::value(Some(OffsetDateTime::now_utc())),
