@@ -12,6 +12,7 @@
 //! decomposed parameters — no shared trait in any shared crate is needed.
 
 pub(crate) mod bridge;
+pub(crate) mod metadata_runtime;
 pub(crate) mod provision;
 #[allow(dead_code)] // Infrastructure types used by follow-up service embeddings.
 pub(crate) mod types;

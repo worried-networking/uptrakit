@@ -7130,6 +7130,7 @@ dependencies = [
  "uptrakit-frontend",
  "uptrakit-mcp",
  "uptrakit-mqtt-runtime",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
  "uptrakit-scheduler-runtime",
@@ -7921,6 +7922,7 @@ name = "uptrakit-scheduler-engine"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "rand 0.9.4",
  "rootcause",
  "sea-orm",
