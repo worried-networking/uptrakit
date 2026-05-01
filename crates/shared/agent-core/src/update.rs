@@ -255,6 +255,7 @@ pub async fn execute_update(
         to_version,
         output: accumulated_output,
         error: final_error,
+        resumable: None,
     };
 
     UpdateExecutionResult { result }

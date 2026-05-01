@@ -502,6 +502,7 @@ async fn batch_check_versions_inner(
                 latest_version,
                 error: merge_errors(detect_error, fetch_error),
                 update_category,
+                not_ready: None,
             }
         })
         .collect()

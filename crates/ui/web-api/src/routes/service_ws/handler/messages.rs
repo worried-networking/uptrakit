@@ -2706,6 +2706,7 @@ mod tests {
                 error: None,
                 update_category: Default::default(),
                 host_software_item_id: Some(hsi1.id),
+                not_ready: None,
             }],
         };
 
@@ -2758,6 +2759,7 @@ mod tests {
                 error: None,
                 update_category: Default::default(),
                 host_software_item_id: Some(hsi_b.id),
+                not_ready: None,
             }],
         };
 
@@ -2850,6 +2852,7 @@ mod tests {
                     error: Some("registry unavailable".to_string()),
                     update_category: UpdateCategory::Feature,
                     host_software_item_id: Some(hsi_error.id),
+                    not_ready: None,
                 },
                 VersionCheckResult {
                     software_item_id: sw.id,
@@ -2859,6 +2862,7 @@ mod tests {
                     error: None,
                     update_category: UpdateCategory::Security,
                     host_software_item_id: Some(hsi_success.id),
+                    not_ready: None,
                 },
             ],
         };
@@ -2954,6 +2958,7 @@ mod tests {
                 error: None,
                 update_category: Default::default(),
                 host_software_item_id: Some(hsi.id),
+                not_ready: None,
             }],
         };
 
@@ -3047,6 +3052,7 @@ mod tests {
                     error: Some("registry unavailable".to_string()),
                     update_category: Default::default(),
                     host_software_item_id: Some(hsi_error.id),
+                    not_ready: None,
                 },
                 VersionCheckResult {
                     software_item_id: sw.id,
@@ -3056,6 +3062,7 @@ mod tests {
                     error: None,
                     update_category: Default::default(),
                     host_software_item_id: Some(hsi_success.id),
+                    not_ready: None,
                 },
             ],
         };

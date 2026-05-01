@@ -938,6 +938,7 @@ fn make_ssh_update_error_response(
         to_version: None,
         output: String::new(),
         error: Some(error_message),
+        resumable: None,
     })
 }
 
@@ -954,6 +955,7 @@ fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<V
             latest_version: None,
             error: Some(error.to_string()),
             update_category: UpdateCategory::Unknown,
+            not_ready: None,
         })
         .collect()
 }

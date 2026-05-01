@@ -148,6 +148,7 @@ pub async fn send_update_result(
                 to_version: None,
                 output: String::new(),
                 error: Some(format!("Update task panicked: {e}")),
+                resumable: None,
             }))
             .await?;
         }
@@ -199,6 +200,7 @@ pub async fn handle_graceful_shutdown(
                         to_version: None,
                         output: String::new(),
                         error: Some(format!("Agent shutdown timeout ({}s) reached", shutdown_timeout.as_secs())),
+                        resumable: None,
                     })).await;
                     break;
                 }
@@ -394,6 +396,7 @@ pub async fn handle_execute_update(
             to_version: None,
             output: String::new(),
             error: Some("Another update is already in progress".to_string()),
+            resumable: None,
         }))
         .await;
         return;
