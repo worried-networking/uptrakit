@@ -6,7 +6,6 @@ use std::task::{Context, Poll};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tower::{Layer, Service};
-use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
@@ -14,37 +13,7 @@ use crate::middleware::require_auth::{
     AuthFailure, authenticate_api_token, emit_api_token_auth_audit,
 };
 
-/// Per-request context injected by the MCP auth layer into request extensions.
-///
-/// Tool handlers can read this by extracting `http::request::Parts` via rmcp's
-/// `Extension<Parts>` and calling `parts.extensions.get::<McpRequestContext>()`.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use rmcp::handler::server::tool::Extension;
-/// use http::request::Parts;
-/// use uptrakit_web_api::mcp::auth::McpRequestContext;
-///
-/// async fn my_tool(Extension(parts): Extension<Parts>) {
-///     let ctx = parts.extensions.get::<McpRequestContext>().unwrap();
-///     tracing::info!(user_id = %ctx.user_id, "tool called");
-/// }
-/// ```
-#[derive(Clone, Debug)]
-pub struct McpRequestContext {
-    pub user_id: Uuid,
-    pub token_id: Uuid,
-    pub tenant_id: Uuid,
-    pub permissions: Vec<Permission>,
-}
-
-impl McpRequestContext {
-    /// Returns `true` if the user holds `perm`.
-    pub fn has_permission(&self, perm: &Permission) -> bool {
-        self.permissions.contains(perm)
-    }
-}
+pub use crate::McpRequestContext;
 
 // ---------------------------------------------------------------------------
 // Tower layer
@@ -259,20 +228,4 @@ fn plain(status: StatusCode, body: &'static str) -> Response {
 
 fn unauthorized(body: &'static str) -> Response {
     plain(StatusCode::UNAUTHORIZED, body)
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_send_sync<T: Send + Sync + Clone>() {}
-
-    #[test]
-    fn mcp_request_context_is_clone_send_sync() {
-        assert_send_sync::<McpRequestContext>();
-    }
 }
