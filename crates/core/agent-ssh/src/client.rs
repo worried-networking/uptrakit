@@ -507,6 +507,7 @@ pub async fn handle_execute_update_ssh(
     let forwarder = tokio::spawn(async move {
         let mut handle = in_flight.handle;
         let mut output_rx = in_flight.output_rx;
+        let mut early_result_rx = in_flight.early_result_rx;
         let update_history_id = in_flight.update_history_id;
         // Extract the attention channel (feature-gated in InFlightUpdate).
         let mut _attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
@@ -517,6 +518,9 @@ pub async fn handle_execute_update_ssh(
         loop {
             tokio::select! {
                 biased;
+                Some(early) = early_result_rx.recv() => {
+                    let _ = tx.send((host_id.clone(), UpdateEvent::EarlyResult(early))).await;
+                }
                 Some(msg) = output_rx.recv() => {
                     if tx.send((host_id.clone(), UpdateEvent::Output(msg))).await.is_err() {
                         // The aggregate channel receiver has gone away.  We must
@@ -545,6 +549,7 @@ pub async fn handle_execute_update_ssh(
         SshInFlightUpdate {
             update_history_id,
             forwarder,
+            early_sent: false,
             #[cfg(feature = "interactive")]
             stdin_tx,
             #[cfg(feature = "interactive")]
@@ -1076,6 +1081,7 @@ mod tests {
         SshInFlightUpdate {
             update_history_id: uuid::Uuid::nil(),
             forwarder: tokio::spawn(std::future::pending()),
+            early_sent: false,
             #[cfg(feature = "interactive")]
             stdin_tx: None,
             #[cfg(feature = "interactive")]
