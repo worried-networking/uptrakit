@@ -340,16 +340,62 @@ impl AgentRuntime {
                 send_update_output(transport, update.update_history_id, output_msg).await;
             }
             AgentRuntimeEvent::Update(UpdateEvent::Completed(result)) => {
-                let Some(update) = self.in_flight_update.take() else {
+                let Some(mut update) = self.in_flight_update.take() else {
                     tracing::error!("received update completion but no in-flight update exists");
                     self.drain_audit_events(transport).await;
                     return outcome;
                 };
-                if let Err(error) =
-                    send_update_result(transport, update.update_history_id, result).await
-                {
-                    tracing::error!(error = %error, "failed to send update result");
-                    outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
+                // Drain any pending early result that arrived in the same poll
+                // batch as Completed (the select! arms are biased in our
+                // favour but the channel may still hold a queued message).
+                while let Ok(early) = update.early_result_rx.try_recv() {
+                    if !update.early_sent {
+                        if let Err(error) = transport
+                            .transport_send(uptrakit_wire::ServiceMessage::UpdateResult(early))
+                            .await
+                        {
+                            tracing::error!(
+                                error = %error,
+                                "failed to send drained early update result"
+                            );
+                            outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
+                        }
+                        update.early_sent = true;
+                    }
+                }
+                if !update.early_sent {
+                    if let Err(error) =
+                        send_update_result(transport, update.update_history_id, result).await
+                    {
+                        tracing::error!(error = %error, "failed to send update result");
+                        outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
+                    }
+                } else {
+                    tracing::debug!(
+                        update_id = %update.update_history_id,
+                        "skipping final UpdateResult; early result already sent"
+                    );
+                }
+            }
+            AgentRuntimeEvent::Update(UpdateEvent::EarlyResult(early_payload)) => {
+                if let Some(update) = self.in_flight_update.as_mut() {
+                    if !update.early_sent {
+                        if let Err(error) = transport
+                            .transport_send(uptrakit_wire::ServiceMessage::UpdateResult(
+                                early_payload,
+                            ))
+                            .await
+                        {
+                            tracing::error!(
+                                error = %error,
+                                "failed to send early update result"
+                            );
+                            outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
+                        }
+                        update.early_sent = true;
+                    }
+                } else {
+                    tracing::warn!("received early update result but no in-flight update exists");
                 }
             }
             AgentRuntimeEvent::Update(UpdateEvent::Attention(update_history_id)) => {
@@ -570,6 +616,7 @@ async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) ->
     #[cfg(feature = "interactive")]
     let event = tokio::select! {
         biased;
+        Some(early) = update.early_result_rx.recv() => UpdateEvent::EarlyResult(early),
         Some(output_msg) = update.output_rx.recv() => UpdateEvent::Output(output_msg),
         result = &mut update.handle => UpdateEvent::Completed(result),
         Some(()) = recv_attention_rx(&mut attention_rx) => UpdateEvent::Attention(update_history_id),
@@ -578,6 +625,7 @@ async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) ->
     #[cfg(not(feature = "interactive"))]
     let event = tokio::select! {
         biased;
+        Some(early) = update.early_result_rx.recv() => UpdateEvent::EarlyResult(early),
         Some(output_msg) = update.output_rx.recv() => UpdateEvent::Output(output_msg),
         result = &mut update.handle => UpdateEvent::Completed(result),
     };
@@ -709,12 +757,15 @@ mod tests {
 
         let update_history_id = uuid::Uuid::now_v7();
         let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
+        let (_early_tx, early_result_rx) = tokio::sync::mpsc::unbounded_channel();
         runtime.in_flight_update = Some(InFlightUpdate {
             update_history_id,
             handle: tokio::spawn(async {
                 std::future::pending::<uptrakit_agent_core::update::UpdateExecutionResult>().await
             }),
             output_rx,
+            early_result_rx,
+            early_sent: false,
             #[cfg(feature = "interactive")]
             stdin_tx: None,
             #[cfg(feature = "interactive")]

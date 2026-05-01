@@ -202,6 +202,7 @@ pub async fn execute_update(
     payload: ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
+    early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
 ) -> UpdateExecutionResult {
     tracing::info!(software_item = %payload.software_item_name, "starting update");
     let update_history_id = payload.update_history_id;
@@ -285,6 +286,24 @@ pub async fn execute_update(
     let resumable_flag = succeeded && pipeline_resumable;
 
     if resumable_flag {
+        // Send the early result payload to the agent runtime *before* the
+        // restart-side-effect of post-hooks fires. The runtime forwards this
+        // to the controller so it can transition the update to
+        // `AwaitingRestart` ahead of the imminent restart signal.
+        let early_to_version = detect_current_version(&payload, Arc::clone(&executor)).await;
+        let early_payload = UpdateResultPayload {
+            update_history_id,
+            status: UpdateFinalStatus::Completed,
+            from_version: from_version.clone(),
+            to_version: early_to_version,
+            output: accumulated_output.clone(),
+            error: None,
+            resumable: Some(true),
+        };
+        // Fire-and-forget: the receiver may be closed if the runtime tore
+        // down (graceful shutdown, agent restart, etc.).
+        let _ = early_result_tx.send(early_payload);
+
         // Fire-and-forget: the host is restarting; we cannot block on hooks.
         tracing::info!(
             update_id = %update_history_id,
@@ -1142,6 +1161,7 @@ pub async fn execute_update_interactive(
     payload: ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
+    early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
 ) -> InteractiveUpdateHandle {
     let (channels_tx, channels_rx) = tokio::sync::oneshot::channel::<InteractiveChannels>();
 
@@ -1150,7 +1170,9 @@ pub async fn execute_update_interactive(
         channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
     });
 
-    let handle = tokio::spawn(async move { execute_update(payload, forwarding, output_tx).await });
+    let handle = tokio::spawn(async move {
+        execute_update(payload, forwarding, output_tx, early_result_tx).await
+    });
 
     // Await delivery of the interactive channels from
     // ForwardingInteractiveExecutor::execute(). This resolves when the plugin's
@@ -1254,7 +1276,8 @@ mod tests {
         }];
         payload.release_info = None;
 
-        let result = execute_update(payload, test_executor(), tx).await;
+        let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
+        let result = execute_update(payload, test_executor(), tx, early_tx).await;
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         rx.close();
@@ -1278,7 +1301,8 @@ mod tests {
             config: serde_json::json!({"pre_command": "exit 1"}),
         }];
 
-        let result = execute_update(payload, test_executor(), tx).await;
+        let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
+        let result = execute_update(payload, test_executor(), tx, early_tx).await;
 
         assert_eq!(result.result.status, UpdateFinalStatus::Failed);
         assert!(result.result.error.is_some(), "Expected error but got None");

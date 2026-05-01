@@ -212,6 +212,10 @@ fn emit_update_freeze_apply_failure(
 pub struct SshInFlightUpdate {
     pub update_history_id: uuid::Uuid,
     pub forwarder: tokio::task::JoinHandle<()>,
+    /// `true` once the early result has been forwarded to the controller for
+    /// a resumable update. Guards against double-sending the same payload
+    /// (early + final) when the spawned task ultimately completes.
+    pub early_sent: bool,
     #[cfg(feature = "interactive")]
     pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
     #[cfg(feature = "interactive")]
@@ -614,7 +618,7 @@ where
     ) -> Option<LoopOutcome> {
         let outcome = match event {
             SshAgentEvent::Update(host_machine_id, update_event) => {
-                if let Some(update) = self.in_flight_updates.get(&host_machine_id) {
+                if let Some(update) = self.in_flight_updates.get_mut(&host_machine_id) {
                     let update_history_id = update.update_history_id;
 
                     match update_event {
@@ -623,17 +627,23 @@ where
                             None
                         }
                         UpdateEvent::Completed(result) => {
-                            if let Err(error) =
+                            let early_sent = update.early_sent;
+                            self.in_flight_updates.remove(&host_machine_id);
+                            if early_sent {
+                                tracing::debug!(
+                                    %update_history_id,
+                                    "skipping final UpdateResult; early result already sent"
+                                );
+                                None
+                            } else if let Err(error) =
                                 send_update_result(transport, update_history_id, result).await
                             {
                                 tracing::error!(
                                     error = %error,
                                     "failed to send UpdateResult; disconnecting"
                                 );
-                                self.in_flight_updates.remove(&host_machine_id);
                                 Some(LoopOutcome::Disconnected)
                             } else {
-                                self.in_flight_updates.remove(&host_machine_id);
                                 None
                             }
                         }
@@ -644,6 +654,24 @@ where
                                 ))
                                 .await;
                             None
+                        }
+                        UpdateEvent::EarlyResult(early_payload) => {
+                            if update.early_sent {
+                                None
+                            } else if let Err(error) = transport
+                                .transport_send(ServiceMessage::UpdateResult(early_payload))
+                                .await
+                            {
+                                tracing::error!(
+                                    error = %error,
+                                    "failed to send early update result; disconnecting"
+                                );
+                                update.early_sent = true;
+                                Some(LoopOutcome::Disconnected)
+                            } else {
+                                update.early_sent = true;
+                                None
+                            }
                         }
                     }
                 } else {
@@ -692,22 +720,44 @@ where
                 tokio::select! {
                     biased;
                     Some((host_machine_id, event)) = self.aggregate_rx.recv() => {
-                        if let Some(update) = self.in_flight_updates.get(&host_machine_id) {
+                        if let Some(update) = self.in_flight_updates.get_mut(&host_machine_id) {
                             let update_history_id = update.update_history_id;
                             match event {
                                 UpdateEvent::Output(output_msg) => {
                                     send_update_output(transport, update_history_id, output_msg).await;
                                 }
                                 UpdateEvent::Completed(result) => {
-                                    if let Err(error) = send_update_result(transport, update_history_id, result).await {
-                                        tracing::warn!(
-                                            error = %error,
-                                            "failed to send UpdateResult during shutdown"
+                                    let early_sent = update.early_sent;
+                                    self.in_flight_updates.remove(&host_machine_id);
+                                    if !early_sent {
+                                        if let Err(error) = send_update_result(transport, update_history_id, result).await {
+                                            tracing::warn!(
+                                                error = %error,
+                                                "failed to send UpdateResult during shutdown"
+                                            );
+                                        }
+                                    } else {
+                                        tracing::debug!(
+                                            %update_history_id,
+                                            "skipping final UpdateResult during shutdown; early result already sent"
                                         );
                                     }
-                                    self.in_flight_updates.remove(&host_machine_id);
                                 }
                                 UpdateEvent::Attention(_) => {}
+                                UpdateEvent::EarlyResult(early_payload) => {
+                                    if !update.early_sent {
+                                        if let Err(error) = transport
+                                            .transport_send(ServiceMessage::UpdateResult(early_payload))
+                                            .await
+                                        {
+                                            tracing::warn!(
+                                                error = %error,
+                                                "failed to send early UpdateResult during shutdown"
+                                            );
+                                        }
+                                        update.early_sent = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1788,6 +1838,7 @@ mod tests {
             SshInFlightUpdate {
                 update_history_id: uuid::Uuid::nil(),
                 forwarder: tokio::spawn(std::future::pending()),
+                early_sent: false,
                 #[cfg(feature = "interactive")]
                 stdin_tx: None,
                 #[cfg(feature = "interactive")]

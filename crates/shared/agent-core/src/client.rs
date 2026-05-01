@@ -21,6 +21,15 @@ pub struct InFlightUpdate {
     pub update_history_id: uuid::Uuid,
     pub handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
     pub output_rx: tokio::sync::mpsc::Receiver<crate::update::UpdateOutputMessage>,
+    /// Receiver for an early `UpdateResultPayload` emitted by resumable
+    /// updates *before* the spawned task completes. The agent runtime forwards
+    /// this payload to the controller so it can transition to
+    /// `AwaitingRestart` ahead of the imminent restart signal. For
+    /// non-resumable updates this channel is never sent on.
+    pub early_result_rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_wire::UpdateResultPayload>,
+    /// `true` once the early result has been forwarded to the controller.
+    /// Guards against double-sending the same payload (early + final).
+    pub early_sent: bool,
     /// Stdin writer for interactive updates. `None` for non-interactive.
     #[cfg(feature = "interactive")]
     pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
@@ -54,12 +63,19 @@ async fn spawn_update_task(
     payload: uptrakit_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     output_tx: tokio::sync::mpsc::Sender<crate::update::UpdateOutputMessage>,
+    early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
     _update_history_id: uuid::Uuid,
 ) -> SpawnedUpdate {
     // Try interactive execution when the feature is enabled and requested.
     #[cfg(feature = "interactive")]
     if payload.interactive && executor.supports_interactive() {
-        let result = crate::update::execute_update_interactive(payload, executor, output_tx).await;
+        let result = crate::update::execute_update_interactive(
+            payload,
+            executor,
+            output_tx,
+            early_result_tx,
+        )
+        .await;
         return SpawnedUpdate {
             handle: result.handle,
             stdin_tx: result.stdin_tx,
@@ -69,10 +85,9 @@ async fn spawn_update_task(
     }
 
     // Non-interactive fallback (always compiled, always reachable without the feature).
-    let handle =
-        tokio::spawn(
-            async move { crate::update::execute_update(payload, executor, output_tx).await },
-        );
+    let handle = tokio::spawn(async move {
+        crate::update::execute_update(payload, executor, output_tx, early_result_tx).await
+    });
     SpawnedUpdate {
         handle,
         #[cfg(feature = "interactive")]
@@ -91,6 +106,11 @@ pub enum UpdateEvent {
     /// The update process appears to be waiting for stdin input.
     /// Carries the `update_history_id` for correlation.
     Attention(uuid::Uuid),
+    /// A resumable update emitted its result payload before the spawned task
+    /// completed. The runtime forwards the payload to the controller so it can
+    /// transition the update to `AwaitingRestart` ahead of the imminent
+    /// restart signal.
+    EarlyResult(uptrakit_wire::UpdateResultPayload),
 }
 
 /// Send an update output message to the controller.
@@ -183,8 +203,15 @@ pub async fn handle_graceful_shutdown(
                     send_update_output(conn, update.update_history_id, output_msg).await;
                 }
                 result = &mut update.handle => {
-                    if let Err(e) = send_update_result(conn, update.update_history_id, result).await {
-                        tracing::warn!(error = %e, "failed to send UpdateResult during shutdown");
+                    if !update.early_sent {
+                        if let Err(e) = send_update_result(conn, update.update_history_id, result).await {
+                            tracing::warn!(error = %e, "failed to send UpdateResult during shutdown");
+                        }
+                    } else {
+                        tracing::debug!(
+                            update_id = %update.update_history_id,
+                            "skipping final UpdateResult during shutdown; early result already sent"
+                        );
                     }
                     break;
                 }
@@ -318,10 +345,21 @@ pub async fn start_update(
     let (output_tx, output_rx) =
         tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
 
+    // Create an unbounded channel for the early result emitted by resumable
+    // updates before the spawned task completes.
+    let (early_result_tx, early_result_rx) =
+        tokio::sync::mpsc::unbounded_channel::<UpdateResultPayload>();
+
     let update_history_id = effective_payload.update_history_id;
 
-    let spawned =
-        spawn_update_task(effective_payload, executor, output_tx, update_history_id).await;
+    let spawned = spawn_update_task(
+        effective_payload,
+        executor,
+        output_tx,
+        early_result_tx,
+        update_history_id,
+    )
+    .await;
 
     // Confirmed PTY allocation: stdin_tx is Some only when execute_update_interactive
     // successfully allocated a PTY and delivered channels via the oneshot.
@@ -348,6 +386,8 @@ pub async fn start_update(
         update_history_id,
         handle: spawned.handle,
         output_rx,
+        early_result_rx,
+        early_sent: false,
         #[cfg(feature = "interactive")]
         stdin_tx: spawned.stdin_tx,
         #[cfg(feature = "interactive")]
@@ -795,6 +835,15 @@ mod tests {
     use uuid::Uuid;
 
     use crate::connection_context::ConnectionContext;
+
+    #[test]
+    fn test_in_flight_update_has_early_result_fields() {
+        fn _assert_fields(u: &super::InFlightUpdate) {
+            let _: &tokio::sync::mpsc::UnboundedReceiver<uptrakit_wire::UpdateResultPayload> =
+                &u.early_result_rx;
+            let _: bool = u.early_sent;
+        }
+    }
 
     fn noop_executor() -> Arc<dyn uptrakit_command::CommandExecutor> {
         Arc::new(NoopCommandExecutor)
