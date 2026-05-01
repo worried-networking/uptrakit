@@ -57,6 +57,7 @@
 	},
 	"dependencies": {
 		"dompurify": "^3.4.1",
+		"lucide-svelte": "^1.0.1",
 		"markdown-it": "^14.1.1",
 		"markdown-it-emoji": "^3.0.0",
 		"markdown-it-footnote": "^4.0.0",
