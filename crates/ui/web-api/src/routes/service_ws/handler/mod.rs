@@ -1410,7 +1410,8 @@ impl MessageProcessor {
             }
             ServiceMessage::SurfaceActionResponse(payload) => {
                 self.state
-                    .surface_proxy
+                    .surface_proxy_deps
+                    .proxy
                     .complete(payload.request_id, payload);
                 ProcessorResponse::cont()
             }
@@ -1452,8 +1453,8 @@ impl MessageProcessor {
 
         let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
         if let Err(e) = register_surface_provider(
-            self.state.surface_registry.as_ref(),
-            self.state.surface_proxy.as_ref(),
+            self.state.surface_proxy_deps.registry.as_ref(),
+            self.state.surface_proxy_deps.proxy.as_ref(),
             self.service_id,
             app_name,
             self.service_tenant_id,
@@ -1615,12 +1616,16 @@ impl MessageProcessor {
             params: payload.params.clone(),
             encrypted_sensitive_params: payload.encrypted_sensitive_params.clone(),
         };
-        let resolved = match self.state.surface_registry.resolve_surface_action(
-            request_tenant_id,
-            payload.surface_id.as_str(),
-            payload.interaction_id.as_str(),
-            payload.target_provider_id.as_deref(),
-        ) {
+        let resolved = match self
+            .state
+            .surface_proxy_deps
+            .registry
+            .resolve_surface_action(
+                request_tenant_id,
+                payload.surface_id.as_str(),
+                payload.interaction_id.as_str(),
+                payload.target_provider_id.as_deref(),
+            ) {
             Ok(resolved) => Some(resolved),
             Err(error) => {
                 let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
@@ -1649,10 +1654,11 @@ impl MessageProcessor {
 
         let response = match self
             .state
-            .surface_proxy
+            .surface_proxy_deps
+            .proxy
             .invoke(
                 &self.state.service_connections,
-                &self.state.surface_registry,
+                &self.state.surface_proxy_deps.registry,
                 invoke_request,
                 None,
             )
@@ -2206,12 +2212,20 @@ async fn cleanup_embedded_service_session(
         workload::release_all_claims_on_disconnect(state, service_id).await;
     }
 
-    if let Some(provider_id) = state.surface_registry.provider_id_for_service(&service_id) {
+    if let Some(provider_id) = state
+        .surface_proxy_deps
+        .registry
+        .provider_id_for_service(&service_id)
+    {
         state
-            .surface_proxy
+            .surface_proxy_deps
+            .proxy
             .fail_in_flight_for_provider(&provider_id);
     }
-    state.surface_registry.unregister_service(&service_id);
+    state
+        .surface_proxy_deps
+        .registry
+        .unregister_service(&service_id);
 
     state.service_connections.unregister(&service_id).await;
 
@@ -2511,12 +2525,20 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
 
     // Cleanup must not rely on the session-start UiSurfaces snapshot because
     // services can upgrade capabilities in-session via Register.
-    if let Some(provider_id) = state.surface_registry.provider_id_for_service(&service_id) {
+    if let Some(provider_id) = state
+        .surface_proxy_deps
+        .registry
+        .provider_id_for_service(&service_id)
+    {
         state
-            .surface_proxy
+            .surface_proxy_deps
+            .proxy
             .fail_in_flight_for_provider(&provider_id);
     }
-    state.surface_registry.unregister_service(&service_id);
+    state
+        .surface_proxy_deps
+        .registry
+        .unregister_service(&service_id);
 
     // Notify services that this agent's hosts are now offline.
     if !is_system
@@ -3419,8 +3441,10 @@ mod tests {
                     uptrakit_audit_log::NoopBackend,
                 )),
             ),
-            surface_registry,
-            surface_proxy,
+            surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
+                surface_registry,
+                surface_proxy,
+            ),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
@@ -3463,7 +3487,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     fn register_test_runtime_state(state: &Arc<AppState>, service_id: Uuid, tenant_id: Uuid) {
         state
-            .surface_registry
+            .surface_proxy_deps
+            .registry
             .register_service(
                 service_id,
                 "uptrakit-agent-ssh",
@@ -3985,7 +4010,8 @@ mod tests {
         let mut registration = test_surface_registration("provider-a", tenant_id);
         registration.surfaces[0].interactions[0].required_permission = None;
         state
-            .surface_registry
+            .surface_proxy_deps
+            .registry
             .register_service(
                 service_id,
                 "uptrakit-agent-ssh",
@@ -4074,7 +4100,8 @@ mod tests {
         let mut registration = test_surface_registration("provider-a", tenant_id);
         registration.surfaces[0].interactions[0].required_permission = None;
         state
-            .surface_registry
+            .surface_proxy_deps
+            .registry
             .register_service(
                 service_id,
                 "uptrakit-agent-ssh",
@@ -4092,7 +4119,7 @@ mod tests {
                 Some("uptrakit-agent-ssh".to_string()),
             )
             .await;
-        let proxy = Arc::clone(&state.surface_proxy);
+        let proxy = Arc::clone(&state.surface_proxy_deps.proxy);
         tokio::spawn(async move {
             if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
                 proxy.complete(
@@ -4192,7 +4219,8 @@ mod tests {
         let mut registration = test_surface_registration("provider-a", tenant_id);
         registration.surfaces[0].interactions[0].required_permission = None;
         state
-            .surface_registry
+            .surface_proxy_deps
+            .registry
             .register_service(
                 service_id,
                 "uptrakit-agent-ssh",
@@ -5344,7 +5372,8 @@ mod tests {
                 .await;
 
             state
-                .surface_registry
+                .surface_proxy_deps
+                .registry
                 .register_service(
                     service_id,
                     "uptrakit-mqtt",
@@ -5362,7 +5391,10 @@ mod tests {
             assert!(claim_result.granted.contains(&claim_key));
             assert!(state.service_connections.is_connected(&service_id).await);
             assert_eq!(
-                state.surface_registry.provider_id_for_service(&service_id),
+                state
+                    .surface_proxy_deps
+                    .registry
+                    .provider_id_for_service(&service_id),
                 Some("provider-mqtt".to_string())
             );
 
@@ -5383,7 +5415,8 @@ mod tests {
             assert!(!state.service_connections.is_connected(&service_id).await);
             assert!(
                 state
-                    .surface_registry
+                    .surface_proxy_deps
+                    .registry
                     .provider_id_for_service(&service_id)
                     .is_none()
             );
@@ -5407,7 +5440,10 @@ mod tests {
             register_test_runtime_state(&state, service_id, tenant_id);
 
             assert_eq!(
-                state.surface_registry.provider_id_for_service(&service_id),
+                state
+                    .surface_proxy_deps
+                    .registry
+                    .provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
             );
 
@@ -5419,7 +5455,8 @@ mod tests {
 
             assert!(
                 state
-                    .surface_registry
+                    .surface_proxy_deps
+                    .registry
                     .provider_id_for_service(&service_id)
                     .is_none(),
                 "surface provider should be removed on disconnect"
@@ -5585,7 +5622,8 @@ mod tests {
 
             assert!(
                 state
-                    .surface_registry
+                    .surface_proxy_deps
+                    .registry
                     .provider_id_for_service(&service_id)
                     .is_none()
             );
@@ -5609,7 +5647,10 @@ mod tests {
             .await;
 
             assert_eq!(
-                state.surface_registry.provider_id_for_service(&service_id),
+                state
+                    .surface_proxy_deps
+                    .registry
+                    .provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
             );
             assert!(state.service_connections.is_connected(&service_id).await);
@@ -5633,7 +5674,10 @@ mod tests {
             .await;
 
             assert_eq!(
-                state.surface_registry.provider_id_for_service(&service_id),
+                state
+                    .surface_proxy_deps
+                    .registry
+                    .provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
             );
             assert!(state.service_connections.is_connected(&service_id).await);
@@ -5647,7 +5691,8 @@ mod tests {
 
             let service_id = Uuid::now_v7();
             state
-                .surface_registry
+                .surface_proxy_deps
+                .registry
                 .register_service(
                     service_id,
                     "uptrakit-agent-ssh",
@@ -5670,10 +5715,11 @@ mod tests {
             let state_for_invoke = Arc::clone(&state);
             let invoke_task = tokio::spawn(async move {
                 state_for_invoke
-                    .surface_proxy
+                    .surface_proxy_deps
+                    .proxy
                     .invoke(
                         &state_for_invoke.service_connections,
-                        &state_for_invoke.surface_registry,
+                        &state_for_invoke.surface_proxy_deps.registry,
                         crate::surface_proxy::SurfaceInvokeRequest {
                             tenant_id,
                             surface_id: "ssh.guest.panel".to_string(),

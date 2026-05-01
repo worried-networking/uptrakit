@@ -8235,6 +8235,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-surface-proxy",
  "uptrakit-web-api-auth",
  "uptrakit-web-api-queries",
  "uptrakit-web-api-types",

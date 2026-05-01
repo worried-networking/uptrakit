@@ -621,8 +621,11 @@ pub async fn test_channel(
     };
 
     // Build settings bag from database
-    let settings_bag =
-        crate::notifications::dispatcher::build_settings_bag(state.db(), tenant_db.tenant_id).await;
+    let settings_bag = uptrakit_web_api_queries::notification_settings::build_settings_bag(
+        state.db(),
+        tenant_db.tenant_id,
+    )
+    .await;
 
     // Build test message
     let test_msg = DeliveryMessage::new(
@@ -1143,11 +1146,13 @@ pub async fn notification_callback(
 
     // Delegate to the plugin's surface action handler.
     let surface_id = format!("notifications.{_channel_type}");
-    let controller = crate::surface_proxy::AppStateSurfaceActionController::from_app_state(
-        state.as_ref(),
-        channel_model.tenant_id,
-        None,
-    );
+    let controller =
+        uptrakit_surface_proxy::AppStateSurfaceActionController::from_database_connection(
+            state.db(),
+            state.plugin_ops.as_ref(),
+            channel_model.tenant_id,
+            None,
+        );
     let ctx = SurfaceActionContext {
         controller: &controller,
     };

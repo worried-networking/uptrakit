@@ -30,8 +30,17 @@ pub mod routes;
 pub mod service_connections;
 pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;
-pub mod surface_proxy;
-pub mod surface_registry;
+// Preserves uptrakit_web_api::surface_proxy::* paths used by controller-runtime and routes.
+pub use uptrakit_surface_proxy as surface_proxy;
+
+// Preserves uptrakit_web_api::surface_registry::* paths.
+pub mod surface_registry {
+    pub use uptrakit_surface_proxy::{
+        ResolvedSurfaceAction, ResolvedSurfaceRead, SurfaceCatalogItem, SurfaceProviderRejection,
+        SurfaceProviderRejectionCode, SurfaceProviderRejectionReason, SurfaceProviderSummary,
+        SurfaceRegistry, SurfaceRegistryConfig, SurfaceRegistryError, SurfaceRegistryLookupError,
+    };
+}
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
@@ -51,7 +60,7 @@ pub use app_state::{
     AppState, AppStateBuildError, AppStateBuilder, AuthState, BroadcastState, CertState,
     NotificationState, SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT,
     ServiceCredentialSources, SurfaceFrameworkGeneration, SurfaceProviderReport,
-    SurfaceProviderRequirement, SurfaceRuntimeMode, SurfaceRuntimeRolloutState,
+    SurfaceProviderRequirement, SurfaceProxyDeps, SurfaceRuntimeMode, SurfaceRuntimeRolloutState,
     default_surface_runtime_requirements,
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
@@ -252,10 +261,12 @@ mod tests {
                     uptrakit_audit_log::NoopBackend,
                 )),
             ),
-            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
-                crate::surface_registry::SurfaceRegistryConfig::default(),
-            )),
-            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+            surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
+                Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                    crate::surface_registry::SurfaceRegistryConfig::default(),
+                )),
+                Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+            ),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),

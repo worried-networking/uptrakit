@@ -850,8 +850,8 @@ impl SurfaceRegistry {
             .unwrap_or(0)
     }
 
-    #[cfg(test)]
-    pub(crate) fn register_provider_for_test(
+    #[cfg(any(test, feature = "testing"))]
+    pub fn register_provider_for_test(
         &self,
         registration: surfaces::SurfaceRegistration,
         service_id: Option<Uuid>,

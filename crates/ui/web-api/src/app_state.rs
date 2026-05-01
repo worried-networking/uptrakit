@@ -22,6 +22,27 @@ use crate::settings::Settings;
 use crate::surface_proxy::SurfaceProxy;
 use crate::surface_registry::SurfaceRegistry;
 
+/// Grouped surface-proxy dependencies stored in [`AppState`].
+///
+/// Bundles the surface registry (provider catalog) and the surface proxy
+/// (in-flight request/response tracker) so they can be replaced together in
+/// tests and accessed through a single named sub-field.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct SurfaceProxyDeps {
+    /// Registry tracking normalized surface contracts from built-ins/services.
+    pub registry: Arc<SurfaceRegistry>,
+    /// Request/response proxy for surface interaction invocations.
+    pub proxy: Arc<SurfaceProxy>,
+}
+
+impl SurfaceProxyDeps {
+    /// Creates a new [`SurfaceProxyDeps`] from a registry and proxy.
+    pub fn new(registry: Arc<SurfaceRegistry>, proxy: Arc<SurfaceProxy>) -> Self {
+        Self { registry, proxy }
+    }
+}
+
 /// Credential sources for building [`ServiceCredentialsPayload`] for services
 /// that advertise credential capabilities (`database_access`, `nats_access`,
 /// `master_key_access`).
@@ -477,10 +498,8 @@ pub struct AppState {
     pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
     /// Audit emitter used by semantic producers.
     pub audit_emitter: uptrakit_audit_log::AuditEmitter,
-    /// Registry tracking normalized surface contracts from built-ins/services.
-    pub surface_registry: Arc<SurfaceRegistry>,
-    /// Request/response proxy for surface interaction invocations.
-    pub surface_proxy: Arc<SurfaceProxy>,
+    /// Grouped surface-proxy dependencies (registry + proxy).
+    pub surface_proxy_deps: SurfaceProxyDeps,
     /// Request/response proxy for plugin configuration test invocations.
     pub config_test_proxy: Arc<ConfigTestProxy>,
     /// Path to the PKI directory (for server cert renewal).
@@ -981,14 +1000,15 @@ impl AppStateBuilder {
             audit_log_filter: self.audit_log_filter.unwrap_or_default(),
             audit_log_dispatcher,
             audit_emitter,
-            surface_registry: self.surface_registry.unwrap_or_else(|| {
-                Arc::new(SurfaceRegistry::new(
-                    crate::surface_registry::SurfaceRegistryConfig::default(),
-                ))
-            }),
-            surface_proxy: self
-                .surface_proxy
-                .unwrap_or_else(|| Arc::new(SurfaceProxy::new())),
+            surface_proxy_deps: SurfaceProxyDeps::new(
+                self.surface_registry.unwrap_or_else(|| {
+                    Arc::new(SurfaceRegistry::new(
+                        crate::surface_registry::SurfaceRegistryConfig::default(),
+                    ))
+                }),
+                self.surface_proxy
+                    .unwrap_or_else(|| Arc::new(SurfaceProxy::new())),
+            ),
             config_test_proxy: self
                 .config_test_proxy
                 .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
