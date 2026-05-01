@@ -12,6 +12,7 @@ pub enum UpdateStatus {
     Queued,
     Pending,
     InProgress,
+    AwaitingRestart,
     Completed,
     Failed,
 }
@@ -22,6 +23,7 @@ impl UpdateStatus {
             Self::Queued => "queued",
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
+            Self::AwaitingRestart => "awaiting_restart",
             Self::Completed => "completed",
             Self::Failed => "failed",
         }
@@ -46,6 +48,7 @@ impl std::str::FromStr for UpdateStatus {
             "queued" => Ok(Self::Queued),
             "pending" => Ok(Self::Pending),
             "in_progress" => Ok(Self::InProgress),
+            "awaiting_restart" => Ok(Self::AwaitingRestart),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             _ => Err(ParseUpdateStatusError),
@@ -231,4 +234,18 @@ pub struct UpdateCompletedSSE {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StdinAttentionSSE {
     pub hint: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_awaiting_restart_serde() {
+        let s = UpdateStatus::AwaitingRestart;
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(json, r#""awaiting_restart""#);
+        let back: UpdateStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, UpdateStatus::AwaitingRestart);
+    }
 }

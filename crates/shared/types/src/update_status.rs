@@ -28,6 +28,9 @@ pub enum UpdateStatus {
     /// The update is currently running on the agent.
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "in_progress"))]
     InProgress,
+    /// The update has finished but requires a system restart to take effect.
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "awaiting_restart"))]
+    AwaitingRestart,
     /// The update completed successfully.
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "completed"))]
     Completed,
@@ -43,6 +46,7 @@ impl UpdateStatus {
             Self::Queued => "queued",
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
+            Self::AwaitingRestart => "awaiting_restart",
             Self::Completed => "completed",
             Self::Failed => "failed",
         }
@@ -75,6 +79,7 @@ impl FromStr for UpdateStatus {
             "queued" => Ok(Self::Queued),
             "pending" => Ok(Self::Pending),
             "in_progress" => Ok(Self::InProgress),
+            "awaiting_restart" => Ok(Self::AwaitingRestart),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             _ => Err(ParseUpdateStatusError),
@@ -125,8 +130,17 @@ mod tests {
         assert_eq!(UpdateStatus::Queued.as_str(), "queued");
         assert_eq!(UpdateStatus::Pending.as_str(), "pending");
         assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(UpdateStatus::AwaitingRestart.as_str(), "awaiting_restart");
         assert_eq!(UpdateStatus::Completed.as_str(), "completed");
         assert_eq!(UpdateStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn test_awaiting_restart_round_trip() {
+        let s = UpdateStatus::AwaitingRestart;
+        assert_eq!(s.as_str(), "awaiting_restart");
+        let parsed: UpdateStatus = "awaiting_restart".parse().unwrap();
+        assert_eq!(parsed, UpdateStatus::AwaitingRestart);
     }
 
     #[test]
