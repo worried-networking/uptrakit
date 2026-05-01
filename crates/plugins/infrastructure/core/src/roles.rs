@@ -136,6 +136,15 @@ pub trait PackageIndexer: PluginMeta {
     async fn refresh_package_index(&self) -> Result<()>;
 }
 
+/// Result returned by [`UpdateExecutor::execute_update`].
+pub struct ExecuteUpdateResult {
+    pub output: String,
+    /// When `true`, the controller will transition this update to `AwaitingRestart`
+    /// instead of `Completed`. The plugin decides this based on what actually happened
+    /// (e.g., the shell plugin's `resumable: true` config, or APT detecting a reboot is needed).
+    pub resumable: bool,
+}
+
 /// Execute software updates.
 #[async_trait]
 pub trait UpdateExecutor: PluginMeta {
@@ -146,7 +155,7 @@ pub trait UpdateExecutor: PluginMeta {
         to_version: &str,
         release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String>;
+    ) -> Result<ExecuteUpdateResult>;
 
     /// Execute updates for multiple packages in a single operation.
     ///
@@ -167,10 +176,10 @@ pub trait UpdateExecutor: PluginMeta {
                 )
                 .await
             {
-                Ok(output) => results.push(BatchUpdateResult {
+                Ok(result) => results.push(BatchUpdateResult {
                     package_identifier: item.package_identifier.clone(),
                     success: true,
-                    output,
+                    output: result.output,
                 }),
                 Err(e) => results.push(BatchUpdateResult {
                     package_identifier: item.package_identifier.clone(),
@@ -981,6 +990,20 @@ pub trait GuestExec: PluginMeta {
         ctx: &crate::agent_infra::InfraPluginContext<'_>,
         request: &SurfaceActionRequest,
     ) -> Option<SurfaceActionResponse>;
+}
+
+#[cfg(test)]
+mod execute_update_result_tests {
+    use super::*;
+
+    #[test]
+    fn test_execute_update_result_default_not_resumable() {
+        let r = ExecuteUpdateResult {
+            output: "ok".to_string(),
+            resumable: false,
+        };
+        assert!(!r.resumable);
+    }
 }
 
 #[cfg(test)]
