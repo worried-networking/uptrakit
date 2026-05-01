@@ -7128,6 +7128,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-frontend",
+ "uptrakit-mcp",
  "uptrakit-mqtt-runtime",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -7258,6 +7259,24 @@ dependencies = [
  "x509-ocsp",
  "x509-parser",
  "zeroize",
+]
+
+[[package]]
+name = "uptrakit-mcp"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "rmcp",
+ "schemars 1.2.1",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "tower",
+ "uptrakit-shared-db",
+ "uptrakit-web-api",
+ "uptrakit-web-api-types",
+ "uuid",
+ "vt100",
 ]
 
 [[package]]
@@ -8103,10 +8122,8 @@ dependencies = [
  "rand 0.9.4",
  "rcgen",
  "reqwest",
- "rmcp",
  "rootcause",
  "rustls",
- "schemars 1.2.1",
  "sea-orm",
  "serde",
  "serde_json",
@@ -8144,7 +8161,6 @@ dependencies = [
  "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
- "vt100",
  "x509-cert",
  "x509-ocsp",
  "x509-parser",
