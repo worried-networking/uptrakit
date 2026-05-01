@@ -9,9 +9,10 @@ use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
-    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
-    UpdateOutputSender, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
+    ExecuteUpdateResult, HostCompatibility, HostRequirements, HostRuntime,
+    PluginConfigValidationError, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result,
+    SudoCommandEntry, UpdateCategory, UpdateOutputSender, UpstreamRelease, Version, declare_plugin,
+    execute_and_capture, plugin_ids,
 };
 // Subtrait imports -- needed so `use super::*` in tests brings these methods into scope.
 #[cfg(test)]
@@ -643,7 +644,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version)
             .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
@@ -654,7 +655,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
             "running dnf install"
         );
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "dnf",
@@ -670,7 +671,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates using a single `dnf install -y` invocation.

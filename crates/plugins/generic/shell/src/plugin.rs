@@ -6,8 +6,9 @@ use uptrakit_plugin_infrastructure_core::command::{
     CommandExecutor, CommandSpec, send_output, shell_escape,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, OutputStreamType, PluginError,
-    PluginFamily, ReleaseInfo, Result, UpdateOutputSender, Version, declare_plugin,
+    ConfigModel, ConfigTestKind, ExecuteUpdateResult, HostRequirements, HostRuntime,
+    OutputStreamType, PluginError, PluginFamily, ReleaseInfo, Result, UpdateOutputSender, Version,
+    declare_plugin,
 };
 
 use crate::config::ShellConfig;
@@ -92,7 +93,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ShellPlugin {
         to_version: &str,
         release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         let Some(ref cmd_template) = self.config.update_command else {
             bail!(PluginError::Configuration(
                 "execute_update is not configured: update_command is absent".to_string()
@@ -125,7 +126,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ShellPlugin {
                 )))
             })?;
 
-        Ok(cmd_output.output)
+        Ok(ExecuteUpdateResult::new(cmd_output.output, false))
     }
 }
 
@@ -257,7 +258,7 @@ mod tests {
             .execute_update("mypkg", "2.3.4", None, &tx)
             .await
             .expect("should succeed");
-        assert!(result.contains("2.3.4"));
+        assert!(result.output.contains("2.3.4"));
         rx.close();
         while rx.recv().await.is_some() {}
     }
@@ -271,7 +272,7 @@ mod tests {
             .execute_update("mypkg", "1.0.0", None, &tx)
             .await
             .expect("should succeed");
-        assert!(result.contains("1.0.0"));
+        assert!(result.output.contains("1.0.0"));
         rx.close();
         while rx.recv().await.is_some() {}
     }
@@ -291,7 +292,7 @@ mod tests {
             .execute_update("mypkg", "1.2.3", Some(&release_info), &tx)
             .await
             .expect("should succeed");
-        assert!(result.contains("v1.2.3"));
+        assert!(result.output.contains("v1.2.3"));
         rx.close();
         while rx.recv().await.is_some() {}
     }

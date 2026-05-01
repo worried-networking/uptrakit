@@ -563,10 +563,11 @@ async fn execute_update_pulls_by_tag_not_digest() {
         .expect("execute_update should succeed");
 
     assert!(
-        result.contains("Pulling Docker image nginx:latest"),
-        "should pull by tag, not digest: {result}"
+        result.output.contains("Pulling Docker image nginx:latest"),
+        "should pull by tag, not digest: {}",
+        result.output
     );
-    assert!(result.contains(&pull_output));
+    assert!(result.output.contains(&pull_output));
 
     rx.close();
     while rx.recv().await.is_some() {}
@@ -609,8 +610,8 @@ async fn execute_update_recreates_running_containers() {
         .await
         .expect("execute_update should succeed");
 
-    assert!(result.contains("Recreating container my-nginx"));
-    assert!(result.contains("running"));
+    assert!(result.output.contains("Recreating container my-nginx"));
+    assert!(result.output.contains("running"));
 
     rx.close();
     while rx.recv().await.is_some() {}
@@ -634,8 +635,8 @@ async fn execute_update_recreates_stopped_containers() {
         .await
         .expect("execute_update should succeed");
 
-    assert!(result.contains("Recreating container stopped-nginx"));
-    assert!(result.contains("stopped"));
+    assert!(result.output.contains("Recreating container stopped-nginx"));
+    assert!(result.output.contains("stopped"));
 
     rx.close();
     while rx.recv().await.is_some() {}
@@ -677,7 +678,7 @@ async fn execute_update_no_containers_succeeds() {
         .await
         .expect("should succeed with no containers");
 
-    assert!(result.contains("Pulling Docker image nginx:latest"));
+    assert!(result.output.contains("Pulling Docker image nginx:latest"));
 
     rx.close();
     while rx.recv().await.is_some() {}
@@ -704,10 +705,10 @@ async fn execute_update_with_post_pull_command_skips_recreation() {
         .await
         .expect("execute_update with post_pull_command should succeed");
 
-    assert!(result.contains("Pulling Docker image nginx:latest"));
+    assert!(result.output.contains("Pulling Docker image nginx:latest"));
     // post_pull_command is set, so auto-recreate must be skipped
     assert!(
-        !result.contains("Recreating container"),
+        !result.output.contains("Recreating container"),
         "recreation should be skipped when post_pull_command is set"
     );
 
@@ -743,10 +744,13 @@ async fn execute_update_with_compose_restart_running_uses_detach() {
         .expect("execute_update with compose_restart should succeed");
 
     // When containers were running, compose command must include `-d`
-    assert!(result.contains("docker compose"));
-    assert!(result.contains("-d"), "running state should use -d flag");
+    assert!(result.output.contains("docker compose"));
     assert!(
-        !result.contains("--no-start"),
+        result.output.contains("-d"),
+        "running state should use -d flag"
+    );
+    assert!(
+        !result.output.contains("--no-start"),
         "should not use --no-start when containers were running"
     );
 
@@ -782,13 +786,13 @@ async fn execute_update_with_compose_restart_stopped_uses_no_start() {
         .expect("execute_update with compose_restart should succeed");
 
     // When containers were stopped, compose command must include `--no-start`
-    assert!(result.contains("docker compose"));
+    assert!(result.output.contains("docker compose"));
     assert!(
-        result.contains("--no-start"),
+        result.output.contains("--no-start"),
         "stopped state should use --no-start flag"
     );
     assert!(
-        !result.contains(" -d "),
+        !result.output.contains(" -d "),
         "should not use -d when containers were stopped"
     );
 
@@ -811,8 +815,9 @@ async fn execute_update_tracked_tag_override_respected() {
         .expect("should succeed");
 
     assert!(
-        result.contains("Pulling Docker image nginx:stable"),
-        "should pull by configured tracked_tag: {result}"
+        result.output.contains("Pulling Docker image nginx:stable"),
+        "should pull by configured tracked_tag: {}",
+        result.output
     );
 
     rx.close();
@@ -1049,12 +1054,14 @@ async fn execute_update_with_container_qualifier_only_recreates_named_container(
         .expect("execute_update should succeed");
 
     assert!(
-        result.contains("Recreating container web-server"),
-        "web-server must be recreated: {result}"
+        result.output.contains("Recreating container web-server"),
+        "web-server must be recreated: {}",
+        result.output
     );
     assert!(
-        !result.contains("Recreating container api-proxy"),
-        "api-proxy must NOT be recreated: {result}"
+        !result.output.contains("Recreating container api-proxy"),
+        "api-proxy must NOT be recreated: {}",
+        result.output
     );
 
     rx.close();
@@ -1088,12 +1095,14 @@ async fn execute_update_without_qualifier_recreates_all_containers() {
         .expect("should succeed");
 
     assert!(
-        result.contains("Recreating container web-server"),
-        "web-server must be recreated: {result}"
+        result.output.contains("Recreating container web-server"),
+        "web-server must be recreated: {}",
+        result.output
     );
     assert!(
-        result.contains("Recreating container api-proxy"),
-        "api-proxy must be recreated: {result}"
+        result.output.contains("Recreating container api-proxy"),
+        "api-proxy must be recreated: {}",
+        result.output
     );
 
     rx.close();
@@ -1121,12 +1130,14 @@ async fn execute_update_container_not_found_succeeds_silently() {
 
     // Pull happened but no containers were recreated.
     assert!(
-        result.contains("Pulling Docker image nginx:latest"),
-        "should pull the image: {result}"
+        result.output.contains("Pulling Docker image nginx:latest"),
+        "should pull the image: {}",
+        result.output
     );
     assert!(
-        !result.contains("Recreating"),
-        "no containers should be recreated: {result}"
+        !result.output.contains("Recreating"),
+        "no containers should be recreated: {}",
+        result.output
     );
 
     rx.close();

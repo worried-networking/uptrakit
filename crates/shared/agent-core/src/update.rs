@@ -16,7 +16,8 @@ use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
 use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_plugin_infrastructure_registry::{
-    HostCapabilities, PluginError, UpdateLifecycleContext, construct_host_runtime, get_descriptor,
+    ExecuteUpdateResult, HostCapabilities, PluginError, UpdateLifecycleContext,
+    construct_host_runtime, get_descriptor,
 };
 use uptrakit_wire::{
     AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
@@ -115,9 +116,11 @@ async fn execute_update_pipeline(
     tracing::debug!("executing plugin update");
     let update_succeeded =
         match execute_plugin_update(payload, output_tx, Arc::clone(&executor)).await {
-            Ok(output) => {
+            Ok(exec_result) => {
                 tracing::debug!("plugin update returned successfully");
-                append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
+                let resumable = exec_result.resumable;
+                append_bounded(accumulated_output, &exec_result.output, MAX_OUTPUT_BYTES);
+                let _ = resumable; // used in Task 6
                 true
             }
             Err(e) => {
@@ -299,7 +302,7 @@ async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
-) -> UpdateResult<String> {
+) -> UpdateResult<ExecuteUpdateResult> {
     let eu = &payload.execute_update_plugin;
     let runtime = construct_host_runtime(executor, HostCapabilities::default());
 

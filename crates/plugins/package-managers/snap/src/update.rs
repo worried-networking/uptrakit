@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, OutputStreamType, ReleaseInfo, Result, UpdateOutputLine,
+    BatchUpdateItem, BatchUpdateResult, ExecuteUpdateResult, OutputStreamType, ReleaseInfo, Result,
+    UpdateOutputLine,
 };
 
 use crate::plugin::{SnapPlugin, validate_identifier};
@@ -22,7 +23,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
 
         let mut args = vec!["refresh".to_string(), package_identifier.to_string()];
@@ -44,7 +45,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
         )
         .await;
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "snap",
@@ -56,7 +57,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch Snap package updates using a single `snap refresh` invocation.

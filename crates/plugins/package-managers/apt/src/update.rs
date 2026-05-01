@@ -3,8 +3,8 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputSender,
+    BatchUpdateItem, BatchUpdateResult, ExecuteUpdateResult, OutputStreamType, PluginError,
+    ReleaseInfo, Result, UpdateOutputSender,
 };
 
 use crate::plugin::{APT_BATCH_PREF_FILE, AptPlugin, validate_identifier, validate_version};
@@ -46,7 +46,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version)
             .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
@@ -57,7 +57,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
             "running apt-get install"
         );
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "apt-get",
@@ -76,7 +76,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates using APT preferences pin-priority mechanism.
