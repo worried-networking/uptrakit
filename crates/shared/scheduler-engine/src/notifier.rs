@@ -59,4 +59,5 @@ impl SchedulerNotifier for NoopSchedulerNotifier {
     async fn signal_ca_rotation(&self, _reason: &str) {}
     async fn signal_software_states_changed(&self, _tenant_id: Uuid) {}
     async fn signal_crl_renewal(&self) {}
+    async fn signal_host_progression(&self, _host_id: Uuid, _tenant_id: Uuid) {}
 }

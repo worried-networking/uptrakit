@@ -334,7 +334,11 @@ impl Scheduler {
             }
         }
 
-        // Run tick executors unconditionally on every poll cycle.
+        // Skip tick executors if a shutdown has been requested — consistent with main task behavior.
+        if drain.is_cancelled() || abort.is_cancelled() {
+            return;
+        }
+
         let mut tick_join_set: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
         for exec in &self.tick_executors {
             let exec = std::sync::Arc::clone(exec);
