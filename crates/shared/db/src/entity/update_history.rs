@@ -23,6 +23,7 @@ pub struct Model {
     pub execution_owner_instance_id: Option<Uuid>,
     pub started_at: Option<OffsetDateTime>,
     pub completed_at: Option<OffsetDateTime>,
+    pub awaiting_restart_since: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     /// Classification of the update (security, bugfix, feature, unknown).
     #[sea_orm(default_value = "unknown")]

@@ -253,6 +253,7 @@ pub async fn create_software_item(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        awaiting_restart_timeout: Set(None),
     };
 
     let inserted = model.insert(&txn).await.context_to()?;

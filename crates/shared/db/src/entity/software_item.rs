@@ -14,6 +14,7 @@ pub struct Model {
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub deactivated_at: Option<OffsetDateTime>,
+    pub awaiting_restart_timeout: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
