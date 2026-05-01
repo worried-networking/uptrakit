@@ -46,7 +46,7 @@ uptrakit-web-api-types                  = { workspace = true }
 uptrakit-wire                           = { workspace = true }
 
 [dev-dependencies]
-sea-orm                    = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+sea-orm                    = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio"] }
 time                       = { workspace = true }
 tokio                      = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
 uptrakit-shared-db         = { workspace = true, features = ["migration", "db-sqlite"] }
