@@ -1,17 +1,11 @@
-use std::sync::Arc;
-
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
 use uuid::Uuid;
 
-use crate::auth::permissions::Permission;
 use crate::mcp::auth::McpRequestContext;
 use crate::mcp::tools::{McpHandler, mcp_error};
-use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
-use crate::queries::update_triggers::TriggerUpdateParams;
-use crate::queries::update_types::ActorType;
+use crate::mcp_trigger_update;
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -48,6 +42,7 @@ impl McpHandler {
         ctx: McpRequestContext,
         input: TriggerUpdateInput,
     ) -> Result<Json<TriggerUpdateResult>, ErrorData> {
+        use crate::auth::permissions::Permission;
         if !ctx.has_permission(&Permission::TriggerUpdates) {
             return Err(ErrorData::invalid_request(
                 "permission denied: TriggerUpdates required",
@@ -66,100 +61,18 @@ impl McpHandler {
             )
         })?;
 
-        let actor_id_str = ctx.token_id.to_string();
-
-        let state = Arc::clone(&self.state);
-        let tenant_db = crate::tenant_db::TenantDb(uptrakit_shared_db::TenantDb::new(
-            state.db().clone(),
-            ctx.tenant_id,
-        ));
-        let mut_ctx = state.mutation_context();
-
-        // Construct helpers for audit emission.
-        let audit_user = AuthenticatedUser {
-            user_id: ctx.user_id,
-            auth_method: crate::auth::AuthMethod::ApiToken,
-            permissions: ctx.permissions.clone(),
-            jti: None,
-        };
-        let audit_token = AuthenticatedApiTokenId(ctx.token_id);
-
-        let result = crate::actions::software_items::trigger_update(
-            &tenant_db,
-            &mut_ctx,
-            TriggerUpdateParams {
-                tenant_id: ctx.tenant_id,
-                item_id: software_item_id,
-                host_id,
-                to_version: input.to_version.clone(),
-                actor_type: ActorType::ApiToken.as_str(),
-                actor_id: &actor_id_str,
-                release_info: None,
-                interactive: false,
-            },
-        )
-        .await;
-
-        let result = match result {
-            Ok(r) => r,
-            Err(err) => {
-                let (outcome, reason_code) = err.current_context().trigger_audit_classification();
-                crate::routes::software_items::emit_software_update_audit(
-                    &state,
-                    ctx.tenant_id,
-                    &audit_user,
-                    Some(audit_token),
-                    software_item_id,
-                    outcome,
-                    serde_json::json!({
-                        "host_id": host_id,
-                        "to_version": input.to_version,
-                        "interactive": false,
-                        "reason_code": reason_code,
-                    }),
-                );
-                return Err(mcp_error(format!("trigger_update failed: {err}")));
-            }
-        };
-
-        if let Some(work) = result.pending_protection_work {
-            crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(&state), *work);
-        }
-
-        let status = match result.initial_status {
-            uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
-                TriggerUpdateStatus::Pending
-            }
-            uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => {
-                TriggerUpdateStatus::Failed
-            }
-            _ => TriggerUpdateStatus::Queued,
-        };
-
-        let audit_outcome = if matches!(status, TriggerUpdateStatus::Failed) {
-            uptrakit_audit_log::AuditOutcome::Failed
-        } else {
-            uptrakit_audit_log::AuditOutcome::Success
-        };
-
-        crate::routes::software_items::emit_software_update_audit(
-            &state,
-            ctx.tenant_id,
-            &audit_user,
-            Some(audit_token),
+        let (update_history_id, status) = mcp_trigger_update(
+            std::sync::Arc::clone(&self.state),
+            &ctx,
+            host_id,
             software_item_id,
-            audit_outcome,
-            serde_json::json!({
-                "host_id": host_id,
-                "to_version": input.to_version,
-                "interactive": false,
-                "update_history_id": result.update_history_id,
-                "dispatch_status": status.to_string(),
-            }),
-        );
+            input.to_version.clone(),
+        )
+        .await
+        .map_err(|err| mcp_error(format!("trigger_update failed: {err}")))?;
 
         Ok(Json(TriggerUpdateResult {
-            update_history_id: result.update_history_id.to_string(),
+            update_history_id: update_history_id.to_string(),
             status: status.to_string(),
         }))
     }
@@ -172,6 +85,7 @@ impl McpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::McpTriggerError;
 
     #[test]
     fn trigger_update_input_type_exists() {
@@ -188,5 +102,17 @@ mod tests {
         };
         let json = serde_json::to_string(&result).expect("serialisation must succeed");
         assert!(json.contains("queued"));
+    }
+
+    #[test]
+    fn mcp_trigger_error_variants_exist() {
+        // Compile-time check that the variants named in the spec are present.
+        let _ = McpTriggerError::PermissionDenied;
+        let _ = McpTriggerError::HostNotFound;
+        let _ = McpTriggerError::SoftwareItemNotFound;
+        let _ = McpTriggerError::NotConfigured;
+        let _ = McpTriggerError::AgentUnavailable;
+        let _ = McpTriggerError::AlreadyInProgress;
+        let _ = McpTriggerError::Internal;
     }
 }
