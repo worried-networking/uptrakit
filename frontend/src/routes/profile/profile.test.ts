@@ -295,3 +295,43 @@ describe('Account Tab — Profile Card', () => {
 		expect(screen.getByText('Change pending')).toBeInTheDocument();
 	});
 });
+
+describe('Account Tab — Change Email Modal', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('change email modal opens when "Change email" is clicked', async () => {
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change email' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Change Email' })).toBeInTheDocument());
+	});
+
+	it('change email modal closes when Cancel is clicked', async () => {
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change email' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Change Email' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('heading', { name: 'Change Email' })).not.toBeInTheDocument());
+	});
+
+	it('shows pending-change Callout when has_pending_email_change is true', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...user,
+			has_pending_email_change: true
+		});
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change email' }));
+		await waitFor(() => expect(screen.getByText(/A confirmation email has been sent/)).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: 'Cancel email change' })).toBeInTheDocument();
+	});
+});
