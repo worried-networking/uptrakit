@@ -75,12 +75,10 @@
 	}
 
 	// Change email form
-	let showChangeEmail = $state(false);
-	let _showChangeEmailModal = $state(false);
+	let showChangeEmailModal = $state(false);
 	let newEmail = $state('');
 	let emailCurrentPassword = $state('');
 	let emailChanging = $state(false);
-	let emailChangeSuccess = $state(false);
 	let emailError = $state('');
 
 	async function handleInitiateEmailChange() {
@@ -92,14 +90,15 @@
 				new_email: newEmail,
 				current_password: emailCurrentPassword
 			});
-			emailChangeSuccess = true;
 			newEmail = '';
 			emailCurrentPassword = '';
 		} catch (e) {
 			emailError = e instanceof Error ? e.message : 'Failed to initiate email change';
+			return;
 		} finally {
 			emailChanging = false;
 		}
+		await initialize().catch(() => {});
 	}
 
 	async function handleCancelEmailChange() {
@@ -108,6 +107,7 @@
 			await cancelEmailChange(user.id);
 			showSuccess('Email change cancelled');
 			await initialize();
+			showChangeEmailModal = false;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to cancel email change');
 		}
@@ -252,7 +252,7 @@
 					<FormFieldRow label="Email" inputId="profile-email">
 						<Input id="profile-email" type="email" value={user?.email ?? ''} disabled />
 						{#if authMethod === 'password'}
-							<Button variant="secondary" size="sm" onclick={() => (_showChangeEmailModal = true)}>Change email</Button>
+							<Button variant="secondary" size="sm" onclick={() => (showChangeEmailModal = true)}>Change email</Button>
 							{#if user.has_pending_email_change}
 								<StatusBadge tone="warning" label="Change pending" />
 							{/if}
@@ -266,52 +266,6 @@
 					</div>
 				</div>
 			</SectionCard>
-
-			{#if authMethod === 'password'}
-				<SectionCard title="Change email">
-					<div data-ui="change-email-section">
-						{#if emailChangeSuccess}
-							<Callout tone="success">
-								A confirmation link has been sent to your new address. Check your inbox and click the link to complete
-								the change.
-							</Callout>
-						{:else if user?.has_pending_email_change}
-							<Callout tone="info">
-								A confirmation email has been sent. Check your inbox. If you did not request this change, you can cancel
-								it.
-							</Callout>
-							<div class="flex justify-end">
-								<Button variant="ghost" onclick={handleCancelEmailChange}>Cancel email change</Button>
-							</div>
-						{:else if showChangeEmail}
-							<FormFieldRow label="New email address" inputId="email-new-email">
-								<Input id="email-new-email" type="email" bind:value={newEmail} placeholder="new@example.com" />
-							</FormFieldRow>
-							<FormFieldRow label="Current password" inputId="email-current-password">
-								<Input
-									id="email-current-password"
-									type="password"
-									bind:value={emailCurrentPassword}
-									placeholder="Enter your password"
-								/>
-							</FormFieldRow>
-							{#if emailError}
-								<Callout tone="danger" message={emailError} />
-							{/if}
-							<div class="flex justify-end gap-2">
-								<Button variant="ghost" onclick={() => (showChangeEmail = false)}>Cancel</Button>
-								<Button variant="primary" loading={emailChanging} onclick={handleInitiateEmailChange}>
-									Send confirmation email
-								</Button>
-							</div>
-						{:else}
-							<p class="text-sm text-[var(--text-secondary)]">
-								Update your email address. A confirmation link will be sent to your new address.
-							</p>
-						{/if}
-					</div>
-				</SectionCard>
-			{/if}
 
 			{#if authMethod === 'password'}
 				<SectionCard title="Change password">
@@ -344,6 +298,49 @@
 					</div>
 				</SectionCard>
 			{/if}
+		{/if}
+
+		{#if showChangeEmailModal}
+			<ModalShell
+				title="Change Email"
+				onclose={() => {
+					showChangeEmailModal = false;
+				}}
+				maxWidth="max-w-lg"
+			>
+				{#if user?.has_pending_email_change}
+					<Callout
+						tone="info"
+						message="A confirmation email has been sent. Check your inbox. If you did not request this change, you can cancel it."
+					/>
+				{:else}
+					<FormFieldRow label="New email address" inputId="email-new-email">
+						<Input id="email-new-email" type="email" bind:value={newEmail} placeholder="new@example.com" />
+					</FormFieldRow>
+					<FormFieldRow label="Current password" inputId="email-current-password">
+						<Input
+							id="email-current-password"
+							type="password"
+							bind:value={emailCurrentPassword}
+							placeholder="Enter your password"
+						/>
+					</FormFieldRow>
+					{#if emailError}
+						<Callout tone="danger" message={emailError} />
+					{/if}
+				{/if}
+				{#snippet footer()}
+					{#if user?.has_pending_email_change}
+						<Button variant="ghost" onclick={handleCancelEmailChange}>Cancel email change</Button>
+						<Button variant="primary" onclick={() => (showChangeEmailModal = false)}>Close</Button>
+					{:else}
+						<Button variant="ghost" onclick={() => (showChangeEmailModal = false)}>Cancel</Button>
+						<Button variant="primary" loading={emailChanging} onclick={handleInitiateEmailChange}>
+							Send confirmation email
+						</Button>
+					{/if}
+				{/snippet}
+			</ModalShell>
 		{/if}
 
 		{#if activeTab === 'api-tokens'}
