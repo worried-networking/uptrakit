@@ -58,10 +58,10 @@ cd frontend && npm install lucide-svelte
 - [ ] **Step 2: Verify it appears in `dependencies`**
 
 ```bash
-grep '"lucide-svelte"' frontend/package.json
+cd frontend && node -e "const p=require('./package.json'); if (!p.dependencies?.['lucide-svelte']) { console.error('FAIL: lucide-svelte missing from dependencies'); process.exit(1); } console.log('OK:', p.dependencies['lucide-svelte']);"
 ```
 
-Expected: a line like `"lucide-svelte": "^0.x.x"` under `"dependencies"` (not `devDependencies`).
+Expected: prints `OK: ^0.x.x` (or similar semver). Failure means it landed in `devDependencies` — reinstall with `npm install lucide-svelte` (no `--save-dev`).
 
 - [ ] **Step 3: Commit**
 
@@ -453,6 +453,15 @@ Replace the entire `{#if user}...{/if}` template block with:
 
 Keep the existing modals below unchanged (ConfirmDialog + showCreateModal ModalShell).
 
+- [ ] **Step 5b: Verify the template compiles**
+
+```bash
+cd frontend && npm run check
+```
+
+Expected: no type errors or Svelte compile errors.
+This step catches template syntax issues from the large paste before subsequent tasks build on it.
+
 - [ ] **Step 6: Update existing tests that now require tab navigation**
 
 In `profile.test.ts`, replace the entire `describe('Profile Route', ...)` block:
@@ -523,7 +532,7 @@ describe("Profile Route", () => {
         screen.getByRole("button", { name: "New Token" }),
       ).toBeInTheDocument(),
     );
-    await fireEvent.click(screen.getByRole("button", { name: "New Token" }));
+    await userEvent.click(screen.getByRole("button", { name: "New Token" }));
     const modalTitle = await screen.findByText("New API Token");
     const modal = modalTitle.closest('[data-ui="modal-shell"]') as HTMLElement;
     expect(modal).toBeInTheDocument();
@@ -1009,13 +1018,16 @@ async function handleInitiateEmailChange() {
     });
     newEmail = "";
     emailCurrentPassword = "";
-    await initialize();
   } catch (e) {
     emailError =
       e instanceof Error ? e.message : "Failed to initiate email change";
+    return;
   } finally {
     emailChanging = false;
   }
+  // Best-effort refresh — if initialize() fails, the modal stays open
+  // and the user can close manually; don't surface a misleading error.
+  await initialize().catch(() => {});
 }
 ```
 
@@ -1704,14 +1716,22 @@ Status column.
 
 From `describe('Button Migrations', ...)` — confirm no test still queries `data-ui="status-badge"` in a tokens context.
 
-Run a grep to find any remaining stale assertions:
+Run greps to find any remaining stale assertions:
 
 ```bash
 grep -n 'change-email-section\|change-password-section\|data-ui="status-badge"' \
   frontend/src/routes/profile/profile.test.ts
 ```
 
-Expected: no output. If any lines appear, delete them — they reference old inline-form `data-ui` attributes or the removed Status column badge.
+```bash
+grep -n 'confirmation link has been sent\|Other sessions have been signed out\|emailChangeSuccess\|passwordChangeSuccess' \
+  frontend/src/routes/profile/profile.test.ts
+```
+
+Expected: no output from either command. The first catches stale `data-ui` attribute assertions
+from old inline forms and the removed Status column. The second catches stale success-state text
+assertions from the old inline `emailChangeSuccess` / `passwordChangeSuccess` display gates.
+If any lines appear, delete them.
 
 - [ ] **Step 2: Run the full test suite**
 
