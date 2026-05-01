@@ -259,3 +259,39 @@ describe('Button Migrations', () => {
 		expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument();
 	});
 });
+
+describe('Account Tab — Profile Card', () => {
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('shows "Change email" button for password auth', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument();
+	});
+
+	it('hides "Change email" button for OIDC auth', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('oidc');
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: 'Change email' })).not.toBeInTheDocument();
+	});
+
+	it('shows "Change pending" StatusBadge when has_pending_email_change is true', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...user,
+			has_pending_email_change: true
+		});
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.getByText('Change pending')).toBeInTheDocument();
+	});
+});
