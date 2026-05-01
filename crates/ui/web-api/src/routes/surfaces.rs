@@ -34,7 +34,7 @@ pub async fn list_surfaces(
     tenant_ctx: TenantContext,
     Query(query): Query<ListSurfacesQuery>,
 ) -> Response {
-    let catalog = state.surface_registry.list_surfaces_for_tenant(
+    let catalog = state.surface_proxy_deps.registry.list_surfaces_for_tenant(
         tenant_ctx.tenant_id,
         query.slot.as_deref(),
         query.page.as_deref(),
@@ -75,7 +75,8 @@ pub async fn list_surface_providers(
     Path(surface_id): Path<String>,
 ) -> Response {
     let providers = state
-        .surface_registry
+        .surface_proxy_deps
+        .registry
         .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
     if providers.is_empty() {
         return error_response_with_code(StatusCode::NOT_FOUND, "Surface not found", "not_found");
@@ -156,7 +157,8 @@ pub async fn get_surface_read(
     Path(surface_id): Path<String>,
 ) -> Response {
     let resolved = match state
-        .surface_registry
+        .surface_proxy_deps
+        .registry
         .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
     {
         Ok(resolved) => resolved,
@@ -200,7 +202,7 @@ pub async fn invoke_surface_interaction(
         api_token_id,
     };
 
-    let resolved = match state.surface_registry.resolve_surface_action(
+    let resolved = match state.surface_proxy_deps.registry.resolve_surface_action(
         tenant_ctx.tenant_id,
         &surface_id,
         &interaction_id,
@@ -291,10 +293,11 @@ pub async fn invoke_surface_interaction(
         .map(|seconds| Duration::from_secs(u64::from(seconds)));
 
     let result = state
-        .surface_proxy
+        .surface_proxy_deps
+        .proxy
         .invoke(
             &state.service_connections,
-            &state.surface_registry,
+            &state.surface_proxy_deps.registry,
             request,
             timeout_override,
         )
@@ -1093,10 +1096,12 @@ mod tests {
                 audit_emitter: uptrakit_audit_log::AuditEmitter::new(
                     uptrakit_audit_log::AuditLogDispatcher::new(backend),
                 ),
-                surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
-                    crate::surface_registry::SurfaceRegistryConfig::default(),
-                )),
-                surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+                surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
+                    Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                        crate::surface_registry::SurfaceRegistryConfig::default(),
+                    )),
+                    Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+                ),
                 config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
                 workload_claim_registry: Arc::new(
                     crate::workload_claims::WorkloadClaimRegistry::new(),
@@ -1150,11 +1155,14 @@ mod tests {
     #[tokio::test]
     async fn invoke_surface_interaction_missing_surface_permission_emits_denied_audit_row() {
         let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", tenant_id),
-            Some(Uuid::now_v7()),
-            Some("uptrakit-agent-ssh"),
-        );
+        state
+            .surface_proxy_deps
+            .registry
+            .register_provider_for_test(
+                service_surface_registration("provider-a", tenant_id),
+                Some(Uuid::now_v7()),
+                Some("uptrakit-agent-ssh"),
+            );
 
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
@@ -1213,11 +1221,14 @@ mod tests {
     #[tokio::test]
     async fn invoke_surface_interaction_missing_interaction_permission_emits_denied_audit_row() {
         let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", tenant_id),
-            Some(Uuid::now_v7()),
-            Some("uptrakit-agent-ssh"),
-        );
+        state
+            .surface_proxy_deps
+            .registry
+            .register_provider_for_test(
+                service_surface_registration("provider-a", tenant_id),
+                Some(Uuid::now_v7()),
+                Some("uptrakit-agent-ssh"),
+            );
 
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
@@ -1279,11 +1290,14 @@ mod tests {
     async fn invoke_surface_interaction_invalid_provider_emits_validation_failed_audit_row() {
         let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", tenant_id),
-            Some(Uuid::now_v7()),
-            Some("uptrakit-agent-ssh"),
-        );
+        state
+            .surface_proxy_deps
+            .registry
+            .register_provider_for_test(
+                service_surface_registration("provider-a", tenant_id),
+                Some(Uuid::now_v7()),
+                Some("uptrakit-agent-ssh"),
+            );
 
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
@@ -1346,11 +1360,14 @@ mod tests {
         let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", tenant_id),
-            Some(service_id),
-            Some("uptrakit-agent-ssh"),
-        );
+        state
+            .surface_proxy_deps
+            .registry
+            .register_provider_for_test(
+                service_surface_registration("provider-a", tenant_id),
+                Some(service_id),
+                Some("uptrakit-agent-ssh"),
+            );
         let (mut rx, _cancel) = state
             .service_connections
             .register(
@@ -1362,7 +1379,7 @@ mod tests {
             )
             .await;
 
-        let proxy = Arc::clone(&state.surface_proxy);
+        let proxy = Arc::clone(&state.surface_proxy_deps.proxy);
         tokio::spawn(async move {
             if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
                 proxy.complete(
@@ -1435,11 +1452,14 @@ mod tests {
     async fn invoke_surface_interaction_provider_unavailable_emits_failed_audit_row() {
         let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", tenant_id),
-            Some(service_id),
-            Some("uptrakit-agent-ssh"),
-        );
+        state
+            .surface_proxy_deps
+            .registry
+            .register_provider_for_test(
+                service_surface_registration("provider-a", tenant_id),
+                Some(service_id),
+                Some("uptrakit-agent-ssh"),
+            );
         let (rx, _cancel) = state
             .service_connections
             .register(

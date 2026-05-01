@@ -393,10 +393,12 @@ mod tests {
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: dispatcher.clone(),
             audit_emitter: uptrakit_audit_log::AuditEmitter::new(dispatcher),
-            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
-                crate::surface_registry::SurfaceRegistryConfig::default(),
-            )),
-            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+            surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
+                Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                    crate::surface_registry::SurfaceRegistryConfig::default(),
+                )),
+                Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+            ),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),

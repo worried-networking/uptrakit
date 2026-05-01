@@ -18,6 +18,9 @@ db-postgres            = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-
 notifications-email    = ["uptrakit-plugin-infrastructure-registry/notifications-email"]
 notifications-telegram = ["uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-all      = ["notifications-email", "notifications-telegram"]
+# Exposes test-only helpers (e.g. `register_provider_for_test`) to downstream
+# integration-test crates. Never enable in production builds.
+testing = []
 
 [dependencies]
 async-trait = { workspace = true }

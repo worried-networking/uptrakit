@@ -1231,7 +1231,8 @@ async fn send_email_change_emails(
     };
 
     let settings_bag =
-        crate::notifications::dispatcher::build_settings_bag(state.db(), tenant_id).await;
+        uptrakit_web_api_queries::notification_settings::build_settings_bag(state.db(), tenant_id)
+            .await;
 
     // Template 1: to new address — confirm link
     let config1 = serde_json::json!({ "to_addresses": [new_email] });

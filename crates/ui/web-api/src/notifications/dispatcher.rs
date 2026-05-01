@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 
-pub(crate) use uptrakit_web_api_queries::notification_settings::build_settings_bag;
+use uptrakit_web_api_queries::notification_settings::build_settings_bag;
 
 use uptrakit_notification_delivery::NotificationEvent;
 
