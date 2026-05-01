@@ -1,21 +1,31 @@
+use rootcause::report;
 use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
 use uuid::Uuid;
 
+use crate::deliver::{NotificationDeliveryError, Result};
 use crate::event::{NotificationEvent, NotificationEventDetails};
 
 /// Build a channel-agnostic `DeliveryMessage` from a `NotificationEvent`.
 ///
 /// This is the single translation point between the event model and
 /// the delivery model. Channel implementations never see `NotificationEvent`.
+///
+/// # Errors
+///
+/// Returns [`NotificationDeliveryError::SerializationFailed`] if the event
+/// details cannot be serialized to JSON (should never happen in practice, as
+/// [`NotificationEventDetails`] derives `Serialize` with no custom
+/// implementation).
 pub fn build_delivery_message(
     event: &NotificationEvent,
     action_token: Option<Uuid>,
     callback_base_url: &str,
     channel_type: &str,
     channel_id: Uuid,
-) -> DeliveryMessage {
+) -> Result<DeliveryMessage> {
     let (title, body, body_html) = build_content(event);
-    let event_payload = serde_json::to_value(&event.details).unwrap_or_default();
+    let event_payload = serde_json::to_value(&event.details)
+        .map_err(|e| report!(NotificationDeliveryError::SerializationFailed(e)))?;
 
     let actions = if let (Some(params), Some(token)) = (event.action_params(), action_token) {
         let callback_url = format!(
@@ -33,7 +43,13 @@ pub fn build_delivery_message(
         vec![]
     };
 
-    DeliveryMessage::new(title, body, Some(body_html), event_payload, actions)
+    Ok(DeliveryMessage::new(
+        title,
+        body,
+        Some(body_html),
+        event_payload,
+        actions,
+    ))
 }
 
 fn build_content(event: &NotificationEvent) -> (String, String, String) {
@@ -202,7 +218,8 @@ mod tests {
         };
 
         let msg =
-            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil());
+            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil())
+                .expect("build_delivery_message must succeed for a valid event");
 
         // body_html must not contain raw HTML tags from user input
         let html = msg.body_html.as_deref().unwrap();
@@ -249,7 +266,8 @@ mod tests {
             "https://example.com",
             "telegram",
             Uuid::nil(),
-        );
+        )
+        .expect("build_delivery_message must succeed for a valid event");
 
         assert_eq!(msg.title, "Update Available: nginx");
         assert!(msg.body.contains("1.25.0"));
@@ -272,7 +290,8 @@ mod tests {
         };
 
         let msg =
-            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil());
+            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil())
+                .expect("build_delivery_message must succeed for a valid event");
         assert_eq!(msg.title, "CA Certificate Rotated");
         assert!(msg.actions.is_empty());
     }

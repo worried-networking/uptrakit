@@ -6,12 +6,14 @@ use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError
 use uptrakit_plugin_infrastructure_core::NotificationTransport;
 use uptrakit_shared_macros::impl_report_conversion;
 
-/// Error returned by [`deliver`].
+/// Error returned by [`deliver`] and [`build_delivery_message`].
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum NotificationDeliveryError {
     #[error("{0}")]
     DeliveryFailed(NotificationPluginError),
+    #[error("failed to serialize notification event details: {0}")]
+    SerializationFailed(serde_json::Error),
 }
 
 impl_report_conversion!(NotificationPluginError => NotificationDeliveryError::DeliveryFailed);
