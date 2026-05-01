@@ -17,6 +17,7 @@
 	import {
 		Callout,
 		DataTable,
+		EmptyState,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -157,6 +158,7 @@
 	}
 
 	let tokens: ApiTokenResponse[] = $state([]);
+	const activeTokens = $derived(tokens.filter((t) => t.revoked_at === null));
 	let loading: boolean = $state(true);
 	let showCreateModal: boolean = $state(false);
 	let newTokenName: string = $state('');
@@ -364,47 +366,42 @@
 					<Button variant="primary" onclick={openCreateModal}>New Token</Button>
 				{/snippet}
 
-				<DataTable
-					columns={[]}
-					rows={tokens as unknown as Record<string, unknown>[]}
-					{loading}
-					emptyTitle="No API tokens yet."
-					rowKey={(row) => (row as unknown as ApiTokenResponse).id}
-				>
-					{#snippet header()}
-						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col">Name</th
-							>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col">Created</th
-							>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col">Status</th
-							>
-							<th
-								class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col"
-							></th>
-						</tr>
-					{/snippet}
-					{#snippet row(rowValue, _index)}
-						{@const token = rowValue as unknown as ApiTokenResponse}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-							<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{token.name}</td>
-							<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
-							<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
-								{#if token.revoked_at}
-									<StatusBadge tone="neutral" label="Revoked" />
-								{:else}
-									<StatusBadge tone="success" label="Active" />
-								{/if}
-							</td>
-							<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
-								{#if !token.revoked_at}
+				{#if activeTokens.length === 0}
+					<EmptyState title="No API tokens" description="Create a token to access Uptrakit programmatically.">
+						{#snippet actions()}
+							<Button variant="ghost" onclick={openCreateModal}>New Token</Button>
+						{/snippet}
+					</EmptyState>
+				{:else}
+					<DataTable
+						columns={[]}
+						rows={activeTokens as unknown as Record<string, unknown>[]}
+						{loading}
+						rowKey={(row) => (row as unknown as ApiTokenResponse).id}
+					>
+						{#snippet header()}
+							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Name</th
+								>
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Created</th
+								>
+								<th
+									class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								></th>
+							</tr>
+						{/snippet}
+						{#snippet row(rowValue, _index)}
+							{@const token = rowValue as unknown as ApiTokenResponse}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{token.name}</td>
+								<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{formatDate(token.created_at)}</td
+								>
+								<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 									<Button
 										variant="danger"
 										size="sm"
@@ -412,11 +409,11 @@
 									>
 										Revoke
 									</Button>
-								{/if}
-							</td>
-						</tr>
-					{/snippet}
-				</DataTable>
+								</td>
+							</tr>
+						{/snippet}
+					</DataTable>
+				{/if}
 			</SectionCard>
 		{/if}
 	</PageShell>

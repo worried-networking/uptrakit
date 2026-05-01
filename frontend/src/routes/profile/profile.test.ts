@@ -125,7 +125,16 @@ describe('Tab Navigation', () => {
 describe('Button Migrations', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({
+			tokens: [
+				{
+					id: 'token-1',
+					name: 'Automation',
+					created_at: '2026-03-10T12:00:00Z',
+					revoked_at: null
+				}
+			]
+		});
 	});
 
 	afterEach(() => {
@@ -188,7 +197,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-2', token: 'secret-token-123' });
 		render(ProfilePage);
 		await goToTokensTab();
 		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
@@ -204,7 +213,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Created state Done button renders variant="primary"', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-3', token: 'secret-token-123' });
 		render(ProfilePage);
 		await goToTokensTab();
 		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
@@ -220,7 +229,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Copy button invokes clipboard.writeText and surfaces success toast', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-4', token: 'secret-token-123' });
 		const writeTextMock = vi.fn().mockResolvedValue(undefined);
 		Object.defineProperty(navigator, 'clipboard', {
 			value: { writeText: writeTextMock },
@@ -257,6 +266,69 @@ describe('Button Migrations', () => {
 		await userEvent.click(revokeBtn);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument());
 		expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument();
+	});
+});
+
+describe('API Tokens Tab', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	async function goToTokensTab() {
+		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+	}
+
+	it('filters out revoked tokens from the DataTable', async () => {
+		vi.mocked(api.listApiTokens).mockResolvedValue({
+			tokens: [
+				{
+					id: 'token-1',
+					name: 'Active Token',
+					created_at: '2026-01-01T00:00:00Z',
+					revoked_at: null
+				},
+				{
+					id: 'token-2',
+					name: 'Revoked Token',
+					created_at: '2026-01-02T00:00:00Z',
+					revoked_at: '2026-02-01T00:00:00Z'
+				}
+			]
+		});
+		render(ProfilePage);
+		await goToTokensTab();
+		await waitFor(() => expect(screen.getByText('Active Token')).toBeInTheDocument());
+		expect(screen.queryByText('Revoked Token')).not.toBeInTheDocument();
+	});
+
+	it('renders EmptyState when all tokens are revoked', async () => {
+		vi.mocked(api.listApiTokens).mockResolvedValue({
+			tokens: [
+				{
+					id: 'token-1',
+					name: 'Old Token',
+					created_at: '2026-01-01T00:00:00Z',
+					revoked_at: '2026-02-01T00:00:00Z'
+				}
+			]
+		});
+		render(ProfilePage);
+		await goToTokensTab();
+		await waitFor(() => expect(screen.getByText('No API tokens')).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="data-table"]')).not.toBeInTheDocument();
+	});
+
+	it('renders EmptyState when token list is empty', async () => {
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		render(ProfilePage);
+		await goToTokensTab();
+		await waitFor(() => expect(screen.getByText('No API tokens')).toBeInTheDocument());
 	});
 });
 
