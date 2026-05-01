@@ -521,6 +521,7 @@ mod tests {
         assert_eq!(UpdateStatus::Queued.as_str(), "queued");
         assert_eq!(UpdateStatus::Pending.as_str(), "pending");
         assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(UpdateStatus::AwaitingRestart.as_str(), "awaiting_restart");
         assert_eq!(UpdateStatus::Completed.as_str(), "completed");
         assert_eq!(UpdateStatus::Failed.as_str(), "failed");
     }
