@@ -158,15 +158,15 @@ impl AwaitingRestartExecutor {
         // for the same host_software_item_id are collapsed; conflicts are warned.
         let mut owner_map: HashMap<Uuid, Uuid> = HashMap::new();
         for (hsi_id, svc_id) in dispatch_targets {
-            if let Some(prev) = owner_map.insert(hsi_id, svc_id) {
-                if prev != svc_id {
-                    tracing::warn!(
-                        host_software_item_id = %hsi_id,
-                        prev_owner = %prev,
-                        new_owner = %svc_id,
-                        "multiple AwaitingRestart records share same host_software_item_id — using last owner"
-                    );
-                }
+            if let Some(prev) = owner_map.insert(hsi_id, svc_id)
+                && prev != svc_id
+            {
+                tracing::warn!(
+                    host_software_item_id = %hsi_id,
+                    prev_owner = %prev,
+                    new_owner = %svc_id,
+                    "multiple AwaitingRestart records share same host_software_item_id — using last owner"
+                );
             }
         }
         let target_hsi_ids: Vec<Uuid> = owner_map.keys().copied().collect();

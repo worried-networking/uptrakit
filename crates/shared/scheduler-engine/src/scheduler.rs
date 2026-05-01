@@ -357,10 +357,10 @@ impl Scheduler {
             });
         }
         while let Some(result) = tick_join_set.join_next().await {
-            if let Err(e) = result {
-                if e.is_panic() {
-                    tracing::error!("tick executor panicked — continuing");
-                }
+            if let Err(e) = result
+                && e.is_panic()
+            {
+                tracing::error!("tick executor panicked — continuing");
             }
         }
     }

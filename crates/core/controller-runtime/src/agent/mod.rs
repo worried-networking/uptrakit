@@ -28,11 +28,12 @@ pub(crate) async fn run_embedded_agent(
     mut transport: EmbeddedTransport,
     cancel: CancellationToken,
     state_dir: PathBuf,
+    reuseport_configured: bool,
 ) {
     let metadata_provider = Arc::new(ControllerMetadataProvider::new(
         "uptrakit-controller-standalone".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
-        /* reuseport_configured */ false,
+        reuseport_configured,
         /* pid_file */ None,
     ));
     let mut runtime = AgentRuntime::new(
