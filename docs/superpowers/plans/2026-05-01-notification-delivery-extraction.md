@@ -189,6 +189,10 @@ the ADR.
           .unwrap_or_default();
   ```
 
+  Note: `.unwrap_or_default()` is a pre-existing pattern from the original
+  `web-api-auth` call being replaced. Preserving it as-is satisfies the "No behaviour
+  change" requirement for this commit — do not introduce a new error-handling path here.
+
 - [ ] **Step 7: Verify all `uptrakit_web_api_auth` references are gone**
 
   `uptrakit_web_api_auth` is used **inline only** in `dispatcher.rs` — there is no
@@ -267,7 +271,9 @@ the ADR.
   uptrakit-notification-plugin-core  = { workspace = true }
   uptrakit-plugin-infrastructure-core = { workspace = true }
   uptrakit-web-api-types             = { workspace = true }
+  uptrakit-shared-macros             = { workspace = true }
   rootcause                          = { workspace = true }
+  thiserror                          = { workspace = true }
   uuid                               = { workspace = true }
   serde                              = { workspace = true }
   serde_json                         = { workspace = true }
@@ -334,41 +340,44 @@ the ADR.
   ```rust
   use std::sync::Arc;
 
-  use rootcause::Report;
+  use rootcause::prelude::*;
+  use thiserror::Error;
   use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError};
   use uptrakit_plugin_infrastructure_core::NotificationTransport;
+  use uptrakit_shared_macros::impl_report_conversion;
 
   /// Error returned by [`deliver`].
   #[non_exhaustive]
-  #[derive(Debug)]
+  #[derive(Debug, Error)]
   pub enum NotificationDeliveryError {
-      DeliveryFailed(Report<NotificationPluginError>),
+      #[error("{0}")]
+      DeliveryFailed(NotificationPluginError),
   }
 
-  impl std::fmt::Display for NotificationDeliveryError {
-      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-          match self {
-              Self::DeliveryFailed(e) => e.fmt(f),
-          }
-      }
-  }
+  impl_report_conversion!(NotificationPluginError => NotificationDeliveryError::DeliveryFailed);
 
-  impl std::error::Error for NotificationDeliveryError {}
+  pub type Result<T> = std::result::Result<T, rootcause::Report<NotificationDeliveryError>>;
 
   /// Invoke a transport for a single channel delivery.
   ///
   /// The caller is responsible for looking up the transport and handling
   /// `TransportNotFound` before calling this function.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`NotificationDeliveryError::DeliveryFailed`] if the transport
+  /// layer returns an error.
   pub async fn deliver(
       transport: Arc<dyn NotificationTransport>,
       channel_config: &serde_json::Value,
       settings_bag: &serde_json::Value,
       message: &DeliveryMessage,
-  ) -> Result<(), NotificationDeliveryError> {
+  ) -> Result<()> {
       transport
           .deliver(channel_config, settings_bag, message)
           .await
-          .map_err(NotificationDeliveryError::DeliveryFailed)
+          .context_to()?;
+      Ok(())
   }
 
   #[cfg(test)]
@@ -443,9 +452,11 @@ the ADR.
               &stub_message(),
           )
           .await;
+          // deliver() returns Result<(), Report<NotificationDeliveryError>>; deref Report to match inner variant
+          let err = result.unwrap_err();
           assert!(
-              matches!(result, Err(NotificationDeliveryError::DeliveryFailed(_))),
-              "expected DeliveryFailed, got: {result:?}",
+              matches!(*err, NotificationDeliveryError::DeliveryFailed(_)),
+              "expected DeliveryFailed, got: {err}",
           );
       }
   }
@@ -460,7 +471,7 @@ the ADR.
   mod event;
   mod message_builder;
 
-  pub use deliver::{NotificationDeliveryError, deliver};
+  pub use deliver::{NotificationDeliveryError, Result, deliver};
   pub use event::{ActionParams, NotificationEvent, NotificationEventDetails};
   pub use message_builder::build_delivery_message;
   ```
@@ -641,9 +652,9 @@ the ADR.
           Ok(()) => {
   ```
 
-  The `Err(e)` arm stays unchanged — `NotificationDeliveryError` implements `Display`
-  (forwards to the inner `Report`), so `error = %e` and `e.to_string()` both work
-  correctly.
+  The `Err(e)` arm stays unchanged — `e` is `rootcause::Report<NotificationDeliveryError>`,
+  and `rootcause::Report` implements `Display`, so `error = %e` and `e.to_string()` both
+  work correctly.
 
 - [ ] **Step 6: Verify no stale references remain**
 
