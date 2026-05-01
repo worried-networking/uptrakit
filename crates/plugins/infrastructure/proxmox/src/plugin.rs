@@ -942,7 +942,9 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ProxmoxPlugin {
         _to_version: &str,
         _release_info: Option<&uptrakit_plugin_infrastructure_core::ReleaseInfo>,
         _output_tx: &uptrakit_plugin_infrastructure_core::UpdateOutputSender,
-    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        uptrakit_plugin_infrastructure_core::ExecuteUpdateResult,
+    > {
         Err(rootcause::report!(
             uptrakit_plugin_infrastructure_core::PluginError::UnsupportedOperation(
                 "Proxmox VE plugin does not execute software updates directly".to_string()

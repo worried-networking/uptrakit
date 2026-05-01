@@ -11,9 +11,9 @@ use tokio::io::AsyncWriteExt;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    AttestationStatus, ConfigModel, ConfigTestKind, HostRequirements, HostRuntime,
-    OutputStreamType, PluginCapability, PluginError, PluginFamily, ReleaseAsset, ReleaseInfo,
-    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
+    AttestationStatus, ConfigModel, ConfigTestKind, ExecuteUpdateResult, HostRequirements,
+    HostRuntime, OutputStreamType, PluginCapability, PluginError, PluginFamily, ReleaseAsset,
+    ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
@@ -574,7 +574,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
         _to_version: &str,
         release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<ExecuteUpdateResult> {
         let install_path = self.config.install_path.as_deref().ok_or_else(|| {
             report!(PluginError::Configuration(
                 "execute_update requires install_path to be configured".to_string()
@@ -808,7 +808,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
         let summary = format!("Installed {} to {install_path}", asset.name);
         send_output(output_tx, &summary, OutputStreamType::Stdout).await;
 
-        Ok(summary)
+        Ok(ExecuteUpdateResult::new(summary, false))
     }
 }
 

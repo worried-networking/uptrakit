@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, ReleaseInfo, Result, UpdateOutputLine,
+    ExecuteUpdateResult, OutputStreamType, ReleaseInfo, Result, UpdateOutputLine,
 };
 
 use crate::plugin::CargoPlugin;
@@ -17,7 +17,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
 
         let mut args = vec![
@@ -43,7 +43,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
         )
         .await;
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "cargo",
@@ -55,6 +55,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 }

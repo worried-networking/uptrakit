@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputSender,
+    BatchUpdateItem, BatchUpdateResult, ExecuteUpdateResult, PluginError, ReleaseInfo, Result,
+    UpdateOutputSender,
 };
 
 use crate::plugin::{NpmPlugin, validate_version};
@@ -16,7 +17,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version)
             .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
@@ -27,7 +28,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
             "running npm install -g"
         );
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "npm",
@@ -43,7 +44,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates using a single `npm install -g pkg1@v1 pkg2@v2 ...` command.

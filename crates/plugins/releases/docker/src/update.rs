@@ -7,7 +7,7 @@ use crate::image_ref::ImageRef;
 use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output, shell_escape};
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, PluginError, ReleaseInfo, UpdateOutputLine, mpsc,
+    ExecuteUpdateResult, OutputStreamType, PluginError, ReleaseInfo, UpdateOutputLine, mpsc,
 };
 
 #[async_trait]
@@ -19,7 +19,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
         _to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<ExecuteUpdateResult> {
         let executor = self.executor.as_ref().ok_or_else(|| {
             report!(PluginError::Configuration(
                 "execute_update requires a POSIX executor (not available on controller)"
@@ -207,6 +207,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
             }
         }
 
-        Ok(output)
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 }

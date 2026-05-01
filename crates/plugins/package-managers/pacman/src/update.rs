@@ -3,7 +3,8 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputLine,
+    BatchUpdateItem, BatchUpdateResult, ExecuteUpdateResult, PluginError, ReleaseInfo, Result,
+    UpdateOutputLine,
 };
 
 use crate::plugin::{PacmanPlugin, validate_identifier, validate_version};
@@ -17,7 +18,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PacmanPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version)
             .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
@@ -28,7 +29,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PacmanPlugin {
             "running pacman -S --noconfirm"
         );
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "pacman",
@@ -44,7 +45,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PacmanPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates by installing all targeted packages in a single

@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputSender,
+    BatchUpdateItem, BatchUpdateResult, ExecuteUpdateResult, PluginError, ReleaseInfo, Result,
+    UpdateOutputSender,
 };
 
 use crate::plugin::HomebrewPlugin;
@@ -40,7 +41,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
         _to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &UpdateOutputSender,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
 
         let args: Vec<String> = if self.is_cask() {
@@ -55,7 +56,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
 
         tracing::debug!(package = %package_identifier, "running brew upgrade");
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "brew",
@@ -67,7 +68,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.

@@ -9,9 +9,10 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
-    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine,
-    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
+    ExecuteUpdateResult, HostCompatibility, HostRequirements, HostRuntime,
+    PluginConfigValidationError, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result,
+    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
+    execute_and_capture, plugin_ids,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -643,14 +644,14 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version)
             .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
 
         tracing::debug!(package = %package_identifier, version = %to_version, "running apk add");
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "apk",
@@ -665,7 +666,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     #[tracing::instrument(skip_all)]
@@ -1232,7 +1234,7 @@ openssl>=3.0
             .execute_update("busybox", "1.36.1-r5", None, &tx)
             .await
             .expect("execute update");
-        assert!(result.contains("apk add busybox=1.36.1-r5"));
+        assert!(result.output.contains("apk add busybox=1.36.1-r5"));
     }
 
     // ── detect_host_compatibility ───────────────────────────────────────────

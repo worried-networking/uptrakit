@@ -9,9 +9,10 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
-    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
-    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
+    ExecuteUpdateResult, HostCompatibility, HostRequirements, HostRuntime,
+    PluginConfigValidationError, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result,
+    SudoCommandEntry, UpdateCategory, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
+    execute_and_capture, plugin_ids,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -442,12 +443,12 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
         _to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
+    ) -> Result<ExecuteUpdateResult> {
         self.require_package_identifier(package_identifier)?;
 
         tracing::debug!(package = %package_identifier, "running pkg install");
 
-        uptrakit_plugin_infrastructure_core::execute_command_update(
+        let output = uptrakit_plugin_infrastructure_core::execute_command_update(
             uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                 executor: self.executor.as_ref(),
                 binary: "pkg",
@@ -463,7 +464,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
             },
             output_tx,
         )
-        .await
+        .await?;
+        Ok(ExecuteUpdateResult::new(output, false))
     }
 
     /// Execute batch updates using a single `pkg install -y` call.
