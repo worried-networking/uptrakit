@@ -154,7 +154,22 @@ impl AwaitingRestartExecutor {
             return Ok(());
         }
 
-        let target_hsi_ids: Vec<Uuid> = dispatch_targets.iter().map(|(hsi, _)| *hsi).collect();
+        // Build owner_map with duplicate detection — multiple AwaitingRestart records
+        // for the same host_software_item_id are collapsed; conflicts are warned.
+        let mut owner_map: HashMap<Uuid, Uuid> = HashMap::new();
+        for (hsi_id, svc_id) in dispatch_targets {
+            if let Some(prev) = owner_map.insert(hsi_id, svc_id) {
+                if prev != svc_id {
+                    tracing::warn!(
+                        host_software_item_id = %hsi_id,
+                        prev_owner = %prev,
+                        new_owner = %svc_id,
+                        "multiple AwaitingRestart records share same host_software_item_id — using last owner"
+                    );
+                }
+            }
+        }
+        let target_hsi_ids: Vec<Uuid> = owner_map.keys().copied().collect();
 
         // 2. Query detect_version plugin assignments for the targeted host_software_item_ids.
         //    Uses the same join pattern as query_agent_assignment_rows but filtered to
@@ -240,10 +255,6 @@ impl AwaitingRestartExecutor {
             );
             return Ok(());
         }
-
-        // Build a map from host_software_item_id → execution_owner_service_id
-        // for routing verification back through the correct service.
-        let owner_map: HashMap<Uuid, Uuid> = dispatch_targets.into_iter().collect();
 
         // 3. Build VersionCheckAssignment per (service_id, host_machine_id),
         //    same grouping strategy as DetectVersionExecutor.
@@ -562,31 +573,31 @@ mod tests {
     // ── spy notifier ─────────────────────────────────────────────────────────
 
     struct SpyNotifier {
-        send_to_service_calls: std::sync::Mutex<Vec<Uuid>>,
-        signal_host_progression_calls: std::sync::Mutex<Vec<(Uuid, Uuid)>>,
+        send_to_service_calls: parking_lot::Mutex<Vec<Uuid>>,
+        signal_host_progression_calls: parking_lot::Mutex<Vec<(Uuid, Uuid)>>,
     }
 
     impl SpyNotifier {
         fn new() -> Arc<Self> {
             Arc::new(Self {
-                send_to_service_calls: std::sync::Mutex::new(Vec::new()),
-                signal_host_progression_calls: std::sync::Mutex::new(Vec::new()),
+                send_to_service_calls: parking_lot::Mutex::new(Vec::new()),
+                signal_host_progression_calls: parking_lot::Mutex::new(Vec::new()),
             })
         }
 
         fn send_count(&self) -> usize {
-            self.send_to_service_calls.lock().unwrap().len()
+            self.send_to_service_calls.lock().len()
         }
 
         fn progression_count(&self) -> usize {
-            self.signal_host_progression_calls.lock().unwrap().len()
+            self.signal_host_progression_calls.lock().len()
         }
     }
 
     #[async_trait::async_trait]
     impl SchedulerNotifier for SpyNotifier {
         async fn send_to_service(&self, service_id: &Uuid, _msg: ControllerMessage) {
-            self.send_to_service_calls.lock().unwrap().push(*service_id);
+            self.send_to_service_calls.lock().push(*service_id);
         }
         async fn broadcast(&self, _msg: ControllerMessage) {}
         async fn send_by_capability(&self, _cap: &str, _msg: ControllerMessage) {}
@@ -596,7 +607,6 @@ mod tests {
         async fn signal_host_progression(&self, host_id: Uuid, tenant_id: Uuid) {
             self.signal_host_progression_calls
                 .lock()
-                .unwrap()
                 .push((host_id, tenant_id));
         }
     }
@@ -735,7 +745,7 @@ mod tests {
             "send_to_service must be called once for the AwaitingRestart record with execution owner"
         );
         assert_eq!(
-            notifier.send_to_service_calls.lock().unwrap()[0],
+            notifier.send_to_service_calls.lock()[0],
             service_id,
             "must send to the execution owner service"
         );
@@ -798,6 +808,91 @@ mod tests {
             notifier.progression_count(),
             0,
             "no progression signal for record within timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_executor_times_out_default_600s() {
+        use super::AwaitingRestartExecutor;
+        use crate::TickExecutor;
+        use sea_orm::EntityTrait;
+
+        let db = setup_test_db().await;
+        let tenant_id = insert_tenant(&db).await;
+        // Two separate hosts — the partial unique index allows only one active
+        // AwaitingRestart record per host_id at a time.
+        let host_past = insert_host(&db, tenant_id).await;
+        let host_within = insert_host(&db, tenant_id).await;
+        // software_item with awaiting_restart_timeout = NULL → defaults to 600 s
+        let sw_id = insert_software_item(&db, tenant_id, None).await;
+        let _hsi_past = insert_host_software_item(&db, host_past, sw_id).await;
+        let _hsi_within = insert_host_software_item(&db, host_within, sw_id).await;
+
+        // Record past the 600 s default timeout → must be transitioned to Failed.
+        let past_deadline = OffsetDateTime::now_utc() - time::Duration::seconds(601);
+        let timed_out_id = insert_update_history(
+            &db,
+            tenant_id,
+            host_past,
+            sw_id,
+            None,
+            UpdateStatus::AwaitingRestart,
+            Some(past_deadline),
+            None,
+        )
+        .await;
+
+        // Record still within the 600 s default timeout → must remain AwaitingRestart.
+        let within_deadline = OffsetDateTime::now_utc() - time::Duration::seconds(599);
+        let still_waiting_id = insert_update_history(
+            &db,
+            tenant_id,
+            host_within,
+            sw_id,
+            None,
+            UpdateStatus::AwaitingRestart,
+            Some(within_deadline),
+            None,
+        )
+        .await;
+
+        let notifier = SpyNotifier::new();
+        let executor = AwaitingRestartExecutor::new(notifier.clone() as Arc<dyn SchedulerNotifier>);
+        executor.execute_tick(&db).await.unwrap();
+
+        // The 601 s record must have timed out.
+        let timed_out = update_history::Entity::find_by_id(timed_out_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            timed_out.status,
+            UpdateStatus::Failed,
+            "record at 601 s must be transitioned to Failed with NULL timeout (default 600 s)"
+        );
+        assert!(
+            timed_out.completed_at.is_some(),
+            "completed_at must be set when NULL-timeout record expires"
+        );
+
+        // The 599 s record must still be waiting.
+        let still_waiting = update_history::Entity::find_by_id(still_waiting_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            still_waiting.status,
+            UpdateStatus::AwaitingRestart,
+            "record at 599 s must remain AwaitingRestart with NULL timeout (default 600 s)"
+        );
+
+        // Only the timed-out record triggers a progression signal.
+        assert_eq!(
+            notifier.progression_count(),
+            1,
+            "signal_host_progression must be called exactly once for the timed-out record"
         );
     }
 }
