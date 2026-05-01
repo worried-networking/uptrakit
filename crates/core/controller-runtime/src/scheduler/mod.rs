@@ -215,6 +215,23 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
             ))
             .await;
     }
+
+    async fn signal_host_progression(&self, host_id: uuid::Uuid, tenant_id: uuid::Uuid) {
+        let dispatch = uptrakit_web_api::queries::update_dispatch::DispatchContext {
+            notifier: &self.notification_service,
+            protection: None,
+        };
+        if let Err(e) = uptrakit_web_api::queries::update_batches::dispatch_next_queued_for_host(
+            &self.db, dispatch, host_id, tenant_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                error = %e, %host_id, %tenant_id,
+                "signal_host_progression: dispatch_next_queued_for_host failed"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

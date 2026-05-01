@@ -52,6 +52,10 @@ impl SchedulerConfig {
 ///
 /// Within each poll cycle, all claimed tasks are spawned concurrently into a
 /// [`JoinSet`] so that a slow executor cannot block other due tasks.
+///
+/// Tick executors registered via [`Scheduler::register_tick_executor`] run
+/// unconditionally on every poll cycle in a second [`JoinSet`] after the
+/// scheduled-task join set has been drained.
 pub struct Scheduler {
     db: DatabaseConnection,
     config: SchedulerConfig,
@@ -61,6 +65,7 @@ pub struct Scheduler {
     /// connected). Internal tasks (CRL renewal, CA rotation check, service
     /// cert check) always run regardless of the return value.
     should_yield_external: Box<dyn Fn() -> bool + Send + Sync>,
+    tick_executors: Vec<std::sync::Arc<dyn crate::tick_executor::TickExecutor>>,
 }
 
 impl Scheduler {
@@ -74,6 +79,7 @@ impl Scheduler {
             config,
             executors: HashMap::new(),
             should_yield_external,
+            tick_executors: vec![],
         }
     }
 
@@ -91,6 +97,18 @@ impl Scheduler {
         );
         self.executors
             .insert(task_type, std::sync::Arc::from(executor));
+    }
+
+    /// Register a tick executor that runs unconditionally on every poll cycle.
+    ///
+    /// Tick executors run in a separate [`JoinSet`] after the scheduled-task
+    /// join set has been drained. They are not tied to any `scheduled_task`
+    /// row and are responsible for their own timing and concurrency guards.
+    pub fn register_tick_executor(
+        &mut self,
+        executor: Box<dyn crate::tick_executor::TickExecutor>,
+    ) {
+        self.tick_executors.push(std::sync::Arc::from(executor));
     }
 
     /// Run the scheduler loop until a cancellation token is triggered.
@@ -313,6 +331,32 @@ impl Scheduler {
         while let Some(res) = join_set.join_next().await {
             if let Err(e) = res {
                 tracing::warn!(error = ?e, "scheduled task execution panicked");
+            }
+        }
+
+        // Run tick executors unconditionally on every poll cycle.
+        let mut tick_join_set: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+        for exec in &self.tick_executors {
+            let exec = std::sync::Arc::clone(exec);
+            let db = self.db.clone();
+            tick_join_set.spawn(async move {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    exec.execute_tick(&db),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::warn!(error = %e, "tick executor error"),
+                    Err(_) => tracing::warn!("tick executor timed out after 60s"),
+                }
+            });
+        }
+        while let Some(result) = tick_join_set.join_next().await {
+            if let Err(e) = result {
+                if e.is_panic() {
+                    tracing::error!("tick executor panicked — continuing");
+                }
             }
         }
     }
@@ -807,6 +851,42 @@ mod tests {
             .expect("task exists");
         assert!(task.locked_by.is_none());
         assert_eq!(task.run_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_tick_executor_runs_on_poll_cycle() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let db = setup_test_db().await;
+
+        let counter = std::sync::Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+
+        struct CountingTickExecutor(std::sync::Arc<AtomicU32>);
+
+        #[async_trait::async_trait]
+        impl crate::tick_executor::TickExecutor for CountingTickExecutor {
+            async fn execute_tick(
+                &self,
+                _db: &sea_orm::DatabaseConnection,
+            ) -> crate::error::Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let config = SchedulerConfig::new(Uuid::now_v7());
+        let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
+        scheduler.register_tick_executor(Box::new(CountingTickExecutor(counter_clone)));
+
+        let token = CancellationToken::new();
+        scheduler.poll_cycle(&token, &token).await;
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "tick executor should have been called exactly once per poll cycle"
+        );
     }
 
     #[tokio::test]
