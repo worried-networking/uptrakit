@@ -189,11 +189,11 @@ the ADR.
           .unwrap_or_default();
   ```
 
-- [ ] **Step 7: Remove the `uptrakit_web_api_auth` import**
+- [ ] **Step 7: Verify all `uptrakit_web_api_auth` references are gone**
 
-  Find the import line for `uptrakit_web_api_auth` at the top of `dispatcher.rs`. It will
-  look like `use uptrakit_web_api_auth::...` or be used inline. After steps 3–6, there
-  should be no remaining references. Remove it. Verify with:
+  `uptrakit_web_api_auth` is used **inline only** in `dispatcher.rs` — there is no
+  top-level `use` statement for it. Steps 1, 4, 5, and 6 replace all four occurrences
+  (one in the test, three in `build_settings_bag`). Confirm nothing remains:
 
   ```bash
   grep "uptrakit_web_api_auth" crates/ui/web-api/src/notifications/dispatcher.rs
@@ -201,7 +201,16 @@ the ADR.
 
   Expected: no output.
 
-- [ ] **Step 8: Run tests green**
+- [ ] **Step 8: Format and lint**
+
+  ```bash
+  cargo fmt -p uptrakit-web-api
+  cargo clippy -p uptrakit-web-api --no-default-features --features db-sqlite 2>&1 | tail -20
+  ```
+
+  Expected: no warnings from `dispatcher.rs`.
+
+- [ ] **Step 9: Run tests green**
 
   ```bash
   cargo test -p uptrakit-web-api --no-default-features --features db-sqlite 2>&1 | tail -20
@@ -209,18 +218,10 @@ the ADR.
 
   Expected: `test result: ok`.
 
-- [ ] **Step 9: Run clippy**
-
-  ```bash
-  cargo clippy -p uptrakit-web-api --no-default-features --features db-sqlite 2>&1 | tail -20
-  ```
-
-  Expected: no warnings from `dispatcher.rs`.
-
 - [ ] **Step 10: Commit**
 
   ```bash
-  git commit crates/ui/web-api/src/notifications/dispatcher.rs \
+  git commit --only crates/ui/web-api/src/notifications/dispatcher.rs \
     -m "fix(notifications): replace web-api-auth settings_store with raw_settings in build_settings_bag"
   ```
 
@@ -464,13 +465,15 @@ the ADR.
   pub use message_builder::build_delivery_message;
   ```
 
-- [ ] **Step 7: Run the new crate's tests**
+- [ ] **Step 7: Format, lint, and test the new crate**
 
   ```bash
+  cargo fmt -p uptrakit-notification-delivery
+  cargo clippy -p uptrakit-notification-delivery 2>&1 | tail -20
   cargo test -p uptrakit-notification-delivery 2>&1 | tail -20
   ```
 
-  Expected output:
+  Expected test output:
 
   ```text
   test deliver::tests::deliver_success_path ... ok
@@ -485,11 +488,20 @@ the ADR.
   test result: ok.
   ```
 
-- [ ] **Step 8: Commit (immediately proceed to Task 3 — no other commits before it)**
+- [ ] **Step 8: Check all-features and deny**
 
   ```bash
-  git add crates/plugins/notifications/delivery/ Cargo.toml
-  git commit -m "feat(notifications): create uptrakit-notification-delivery crate scaffold"
+  cargo check --all-features -p uptrakit-notification-delivery 2>&1 | tail -10
+  cargo deny check 2>&1 | tail -10
+  ```
+
+  Expected: no errors.
+
+- [ ] **Step 9: Commit (immediately proceed to Task 3 — no other commits before it)**
+
+  ```bash
+  git commit --only crates/plugins/notifications/delivery/ Cargo.toml \
+    -m "feat(notifications): create uptrakit-notification-delivery crate scaffold"
   ```
 
 ---
@@ -658,20 +670,23 @@ the ADR.
 
   Expected: `test result: ok`.
 
-- [ ] **Step 9: Run clippy on both crates**
+- [ ] **Step 9: Format, lint, all-features check, deny**
 
   ```bash
+  cargo fmt -p uptrakit-web-api -p uptrakit-notification-delivery
   cargo clippy -p uptrakit-web-api -p uptrakit-notification-delivery \
     --no-default-features --features db-sqlite 2>&1 | tail -20
+  cargo check --all-features 2>&1 | tail -10
+  cargo deny check 2>&1 | tail -10
   ```
 
-  Expected: no warnings.
+  Expected: no errors or warnings.
 
 - [ ] **Step 10: Commit**
 
   ```bash
-  git add crates/ui/web-api/src/notifications/ crates/ui/web-api/Cargo.toml
-  git commit -m "refactor(web-api): wire dispatcher to uptrakit-notification-delivery"
+  git commit --only crates/ui/web-api/src/notifications/ crates/ui/web-api/Cargo.toml \
+    -m "refactor(web-api): wire dispatcher to uptrakit-notification-delivery"
   ```
 
 ---
@@ -757,6 +772,6 @@ the ADR.
 - [ ] **Step 5: Commit**
 
   ```bash
-  git commit docs/adr/0001-web-api-decomposition-strategy.md \
+  git commit --only docs/adr/0001-web-api-decomposition-strategy.md \
     -m "docs(adr): mark notification delivery core extraction as completed"
   ```
