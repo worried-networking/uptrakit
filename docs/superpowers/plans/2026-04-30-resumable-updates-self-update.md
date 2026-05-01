@@ -664,10 +664,19 @@ Expected: all previously passing tests still pass.
 
 - [ ] **Step 6: Commit**
 
+Use the file list you noted in Step 1. Example (adjust to actual files):
+
 ```bash
-git add -p  # stage all execute_update return type fixes
-git commit -m "feat(plugins): update all UpdateExecutor impls to return ExecuteUpdateResult"
+git commit --only \
+  crates/plugins/generic/shell/src/plugin.rs \
+  crates/plugins/package-managers/apt/src/plugin.rs \
+  crates/plugins/package-managers/homebrew/src/plugin.rs \
+  crates/plugins/package-managers/npm/src/plugin.rs \
+  crates/shared/agent-core/src/update.rs \
+  -m "feat(plugins): update all UpdateExecutor impls to return ExecuteUpdateResult"
 ```
+
+If any plugins found in Step 1 are not listed above, add them to the `--only` list.
 
 ---
 
@@ -769,7 +778,8 @@ async fn execute_update_pipeline(
 ) -> PipelineResult
 ```
 
-Remove the `run_post_hook_plugins` call at the end of the pipeline. The pipeline now ends after `execute_plugin_update`. Return:
+Remove the `run_post_hook_plugins` call at the end of the pipeline. The pipeline now ends after
+`execute_plugin_update`. Return:
 
 ```rust
 // On success (execute_plugin_update returned Ok with resumable=true):
@@ -784,6 +794,22 @@ PipelineResult { succeeded: false, resumable: false }
 
 The `resumable` value comes from the `ExecuteUpdateResult` returned by the plugin (captured in Task 5 Step 3).
 If `execute_plugin_update` returns `Err`, `resumable` is always `false`.
+
+**Important:** The old return type `Result<(), AgentCoreError>` used `?` for early-exit on errors
+(pre-hook failures, attestation failures, plugin errors). The new return type `PipelineResult` has
+no `?` operator. Replace every `?` in the function body with an explicit match arm that returns
+`PipelineResult { succeeded: false, resumable: false }`. Example:
+
+```rust
+// Before:
+run_pre_hooks(&payload, ...).await?;
+
+// After:
+if let Err(e) = run_pre_hooks(&payload, ...).await {
+    tracing::warn!(error = %e, "pre-hook failed");
+    return PipelineResult { succeeded: false, resumable: false };
+}
+```
 
 - [ ] **Step 5: Update `execute_update` to call post-hooks conditionally**
 
@@ -942,9 +968,19 @@ Return the updated `InFlightUpdate` with `early_result_rx` and `early_sent: fals
 
 - [ ] **Step 5: Update `poll_in_flight_update` in `agent-runtime`**
 
-In `crates/core/agent-runtime/src/lib.rs`, `poll_in_flight_update`, add the early result as the highest-priority arm:
+In `crates/core/agent-runtime/src/lib.rs`, `poll_in_flight_update`, add `EarlyResult` as the
+highest-priority arm to **both** select blocks (interactive and non-interactive):
 
 ```rust
+#[cfg(feature = "interactive")]
+let event = tokio::select! {
+    biased;
+    Some(early) = update.early_result_rx.recv() => UpdateEvent::EarlyResult(early),
+    Some(output_msg) = update.output_rx.recv() => UpdateEvent::Output(output_msg),
+    result = &mut update.handle => UpdateEvent::Completed(result),
+    Some(()) = recv_attention_rx(&mut attention_rx) => UpdateEvent::Attention(update_history_id),
+};
+
 #[cfg(not(feature = "interactive"))]
 let event = tokio::select! {
     biased;
@@ -954,17 +990,22 @@ let event = tokio::select! {
 };
 ```
 
-Add `EarlyResult(uptrakit_wire::UpdateResultPayload)` variant to `UpdateEvent` enum in `agent-core/src/client.rs`:
+Add `EarlyResult(uptrakit_wire::UpdateResultPayload)` variant to `UpdateEvent` enum in
+`agent-core/src/client.rs`:
 
 ```rust
 pub enum UpdateEvent {
     Output(crate::update::UpdateOutputMessage),
     Completed(std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>),
     EarlyResult(uptrakit_wire::UpdateResultPayload),
-    #[cfg(feature = "interactive")]
+    /// The update process appears to be waiting for stdin input.
+    /// Carries the `update_history_id` for correlation.
     Attention(uuid::Uuid),
 }
 ```
+
+Note: `Attention` is NOT feature-gated in the real enum (line 93 of `client.rs`) — do NOT add
+`#[cfg(feature = "interactive")]` to it.
 
 Handle `UpdateEvent::EarlyResult` in the agent-runtime event loop (alongside `UpdateEvent::Output` and `UpdateEvent::Completed`):
 
@@ -1160,37 +1201,42 @@ async fn test_awaiting_restart_does_not_trigger_dispatch() {
 
 - [ ] **Step 6: Update `handle_update_result` in the WS handler**
 
-In `crates/ui/web-api/src/routes/service_ws/handler/updates.rs`, after `finalize_update_result_if_owned`
-succeeds (when `updated > 0`) and `status == Completed`, check `payload.resumable`:
+In `crates/ui/web-api/src/routes/service_ws/handler/updates.rs`, insert the resumable check at the
+**top of the `if updated > 0 { ... }` block**, before `finalize_post_update_best_effort` is called.
+This prevents the SSE broadcast and MQTT side-effects from firing for an AwaitingRestart record.
+
+Follow the existing call pattern for internal query functions — use `crate::queries::update_batches::`
+prefix (same as `finalize_update_result_if_owned` is called at line 1398):
 
 ```rust
-// After: let updated = finalize_update_result_if_owned(...).await?;
-// if updated == 0: existing fallback logic (unchanged)
-// if updated > 0 AND status == Completed AND payload.resumable == Some(true):
-if updated > 0
-    && matches!(payload.status, UpdateFinalStatus::Completed)
-    && payload.resumable == Some(true)
-{
-    let rows = uptrakit_web_api_queries::transition_to_awaiting_restart(
-        state.db(),
-        payload.update_history_id,
-        service_id,
-    )
-    .await
-    .unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "transition_to_awaiting_restart failed");
-        0
-    });
-    if rows == 0 {
-        tracing::warn!(
-            update_history_id = %payload.update_history_id,
-            "transition_to_awaiting_restart: CAS lost (rows_affected=0), skipping"
-        );
+if updated > 0 {
+    // Resumable check FIRST — before any post-finalization side-effects.
+    if matches!(payload.status, UpdateFinalStatus::Completed)
+        && payload.resumable == Some(true)
+    {
+        let rows = crate::queries::update_batches::transition_to_awaiting_restart(
+            state.db(),
+            payload.update_history_id,
+            service_id,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "transition_to_awaiting_restart failed");
+            0
+        });
+        if rows == 0 {
+            tracing::warn!(
+                update_history_id = %payload.update_history_id,
+                "transition_to_awaiting_restart: CAS lost (rows_affected=0), skipping"
+            );
+        }
+        // AwaitingRestart is not terminal — skip SSE/MQTT/dispatch side-effects.
+        return ProcessorResponse::ok();
     }
-    // Do NOT call dispatch_next_in_batch — AwaitingRestart is not terminal.
-    return ProcessorResponse::ok();
+
+    // Non-resumable path: existing finalize_post_update_best_effort call continues here.
+    // ... (unchanged)
 }
-// Otherwise: existing dispatch logic (unchanged).
 ```
 
 - [ ] **Step 7: Verify compilation and tests**
@@ -1298,26 +1344,40 @@ to:
 
 - [ ] **Step 5: Add unique constraint violation handling**
 
-In `dispatch_next_queued_for_host` (or wherever the `Pending` insert happens), find the call that inserts the
-new `update_history` row. Wrap it to handle DB unique constraint errors gracefully:
+The insert of the `update_history` row happens inside `create_update_history_record` in
+`update_dispatch.rs` (line 1153: `record.insert(db).await.context_to()?`). The call site in
+`dispatch_next_queued_for_host` calls `create_update_history_record(...)`. To intercept the unique
+constraint error, change the call site to not use `?` directly:
 
 ```rust
-match insert_pending_update_history_row(...).await {
-    Ok(_) => { /* proceed */ }
-    Err(e) if is_unique_constraint_violation(&e) => {
-        tracing::debug!(
-            host_id = %host_id,
-            "dispatch: host already has an active update (unique constraint), skipping"
-        );
-        return Ok(None);
+// Before (somewhere in dispatch_next_queued_for_host):
+let record_id = create_update_history_record(db, &params).await?;
+
+// After — catch unique constraint before propagating:
+let record_id = match create_update_history_record(db, &params).await {
+    Ok(id) => id,
+    Err(e) => {
+        // Check the inner DbErr. The rootcause Report wraps it;
+        // extract via Display and check the string pattern.
+        let msg = e.to_string();
+        if msg.contains("UNIQUE constraint failed")
+            || msg.contains("duplicate key value")
+        {
+            tracing::debug!(
+                host_id = %host_id,
+                "dispatch: host already has active update (unique constraint), skipping"
+            );
+            return Ok(None);
+        }
+        return Err(e);
     }
-    Err(e) => return Err(e),
-}
+};
 ```
 
-Find the `is_unique_constraint_violation` helper or implement it: check if the `DbErr` string contains
-`"UNIQUE constraint"` (SQLite) or `"duplicate key value"` (Postgres). The existing codebase may already have
-a helper for this — grep for `unique_constraint` or `duplicate_key`.
+Alternatively, use `uptrakit_shared_db::is_unique_constraint_violation` which takes `&sea_orm::DbErr`
+directly. If `create_update_history_record` is changed to return the raw `DbErr` at the insert point
+(before `context_to()`), this cleaner helper becomes usable. The string-match approach above works
+against the wrapped error and requires no API change — prefer it for minimal diff.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -1491,7 +1551,7 @@ In `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`, inside the per
 ```rust
 // Inside the loop, after apply_version_update_to_db:
 if let Some(hsi_id) = result.host_software_item_id {
-    let terminal = uptrakit_web_api_queries::apply_awaiting_restart_version_check(
+    let terminal = crate::queries::update_batches::apply_awaiting_restart_version_check(
         state.db(),
         hsi_id,
         result.installed_version.clone(),
@@ -1522,14 +1582,76 @@ if let Some(hsi_id) = result.host_software_item_id {
 }
 ```
 
-Implement `trigger_host_progression_after_awaiting_restart` as a private async fn in messages.rs that:
+Implement `trigger_host_progression_after_awaiting_restart` as a private async fn in messages.rs.
+The function must load the just-transitioned record (Completed or Failed) to get `batch_id`,
+`tenant_id`, and `host_id` — `apply_awaiting_restart_version_check` only returns the new status,
+not these fields. Full implementation:
 
-1. Loads the just-completed update_history record (now Completed or Failed)
-2. Extracts `batch_id`, `tenant_id`
-3. Constructs `DispatchContext`
-4. Calls `dispatch_next_in_batch` or `dispatch_next_queued_for_host`
+```rust
+async fn trigger_host_progression_after_awaiting_restart(
+    state: &AppState,
+    hsi_id: uuid::Uuid,
+) {
+    use uptrakit_shared_db::entity::update_history;
+    use sea_orm::{EntityTrait, QueryFilter, ColumnTrait, QueryOrder};
 
-Follow the exact pattern from `handle_update_result` in `updates.rs`.
+    // Load the record just transitioned from AwaitingRestart.
+    // It is now Completed or Failed with a recent completed_at.
+    let record = match update_history::Entity::find()
+        .filter(update_history::Column::HostSoftwareItemId.eq(hsi_id))
+        .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Completed,
+            update_history::UpdateStatus::Failed,
+        ]))
+        .order_by_desc(update_history::Column::CompletedAt)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            tracing::warn!(
+                hsi_id = %hsi_id,
+                "no Completed/Failed record after AwaitingRestart transition"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                hsi_id = %hsi_id,
+                "failed to load update_history for post-AwaitingRestart dispatch"
+            );
+            return;
+        }
+    };
+
+    let dispatch = crate::queries::DispatchContext {
+        notifier: state.service_notifier(),
+        protection: state.controller_update_protection(),
+    };
+
+    // Follow the dispatch progression pattern from handle_update_result in updates.rs.
+    if let Some(batch_id) = record.batch_id {
+        if let Err(e) = crate::queries::update_batches::dispatch_next_in_batch(
+            state.db(), dispatch, batch_id, record.host_id, record.tenant_id,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, batch_id = %batch_id, "post-AwaitingRestart batch dispatch failed");
+        }
+    } else if let Err(e) = crate::queries::dispatch_next_queued_for_host(
+        state.db(), dispatch, record.host_id, record.tenant_id,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, host_id = %record.host_id, "post-AwaitingRestart dispatch failed");
+    }
+}
+```
+
+Verify the exact call paths for `DispatchContext`, `dispatch_next_in_batch`, and
+`dispatch_next_queued_for_host` by checking how `handle_update_result` in `updates.rs` calls them
+(around line 1398). Adjust module paths to match.
 
 - [ ] **Step 5: Run tests**
 
@@ -1748,7 +1870,6 @@ async fn test_awaiting_restart_executor_skips_null_execution_owner() {
     assert_eq!(notifier.send_to_service_calls(), 0, "should not dispatch to NULL owner");
 }
 
-#[tokio::test]
 #[tokio::test(start_paused = true)]
 async fn test_awaiting_restart_executor_times_out_record() {
     let db = setup_test_db().await;
