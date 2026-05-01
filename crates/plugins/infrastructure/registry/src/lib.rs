@@ -25,18 +25,19 @@ pub use uptrakit_plugin_infrastructure_core::{
     ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
     DockerItemHostRequest, DockerSurfaceStore, DockerSwitchTagRequest, EmailSmtpSettings,
     EmailSmtpSettingsPatch, EmailSmtpSettingsStore, GlobalProviderLookup, HostRuntime,
-    NotificationActionTokenRecord, NotificationChannelListItem, NotificationChannelListPage,
-    NotificationChannelListRequest, NotificationChannelStore, NotificationTransport,
-    PluginCapability, PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginMeta,
-    PostUpdateOutcome, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
-    ProxmoxHostInfoRequest, ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest,
-    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest,
-    ProxmoxMappingRequest, ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord,
-    ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
-    ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
-    SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-    SoftwareItemPatch, SudoCommandEntry, SudoHelperScript, SurfaceActionController,
-    SurfaceActionError, TelegramGlobalSettingsStore, UpdateProtectionController,
+    MetadataAwareHostRuntime, NotificationActionTokenRecord, NotificationChannelListItem,
+    NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
+    NotificationTransport, PluginCapability, PluginCatalog, PluginConfigValidationError,
+    PluginDescriptor, PluginMeta, PostUpdateOutcome, ProxmoxApproveMatchRequest,
+    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
+    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
+    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
+    ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
+    ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
+    ProxmoxUnmatchedGuestsRequest, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
+    SurfaceActionController, SurfaceActionError, TelegramGlobalSettingsStore,
+    UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
@@ -59,7 +60,7 @@ pub use uptrakit_plugin_infrastructure_core::roles::ReleaseFetcher;
 pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, ExecuteUpdateResult,
     HostCapabilities, HostCompatibility, InfraBundle, PluginError, PluginFamily,
-    UpdateLifecycleContext, construct_host_runtime,
+    ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
 };
 pub use uptrakit_plugin_infrastructure_core::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,

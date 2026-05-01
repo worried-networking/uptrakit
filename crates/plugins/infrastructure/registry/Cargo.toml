@@ -36,6 +36,7 @@ uptrakit-plugin-releases-gitlab = { workspace = true }
 uptrakit-plugin-releases-forgejo = { workspace = true }
 uptrakit-plugin-releases-docker = { workspace = true }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { workspace = true }
+uptrakit-plugin-discovery-uptrakit-self-update = { workspace = true }
 uptrakit-plugin-package-manager-homebrew = { workspace = true }
 uptrakit-plugin-package-manager-apt = { workspace = true }
 uptrakit-plugin-package-manager-npm = { workspace = true }

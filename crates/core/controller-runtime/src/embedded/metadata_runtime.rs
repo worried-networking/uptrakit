@@ -1,50 +1,10 @@
 // crates/core/controller-runtime/src/embedded/metadata_runtime.rs
-use std::sync::Arc;
-use uptrakit_command::CommandExecutor;
-use uptrakit_plugin_infrastructure_core::{
-    HostCapabilities, HostRuntime,
-    service_metadata::{DeploymentTopology, ServiceMetadata, ServiceMetadataProvider},
+use uptrakit_plugin_infrastructure_core::service_metadata::{
+    DeploymentTopology, ServiceMetadata, ServiceMetadataProvider,
 };
-
-/// A [`HostRuntime`] wrapper that injects a [`ServiceMetadataProvider`] so plugins
-/// running inside the controller can introspect the controller binary itself.
-#[allow(dead_code)] // wired in Task 18 (self-update plugin registration)
-pub(crate) struct MetadataAwareHostRuntime {
-    inner: Arc<dyn HostRuntime>,
-    provider: Arc<dyn ServiceMetadataProvider>,
-}
-
-#[allow(dead_code)]
-impl MetadataAwareHostRuntime {
-    pub(crate) fn new(
-        inner: Arc<dyn HostRuntime>,
-        provider: Arc<dyn ServiceMetadataProvider>,
-    ) -> Arc<Self> {
-        Arc::new(Self { inner, provider })
-    }
-}
-
-impl HostRuntime for MetadataAwareHostRuntime {
-    fn capabilities(&self) -> &HostCapabilities {
-        self.inner.capabilities()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn executor(&self) -> Arc<dyn CommandExecutor> {
-        self.inner.executor()
-    }
-
-    fn metadata_provider(&self) -> Option<Arc<dyn ServiceMetadataProvider>> {
-        Some(Arc::clone(&self.provider))
-    }
-}
 
 /// Implements [`ServiceMetadataProvider`] by reading the running binary path from
 /// [`std::env::current_exe()`].
-#[allow(dead_code)] // wired in Task 18 (self-update plugin registration)
 pub(crate) struct ControllerMetadataProvider {
     service_name: String,
     version: String,
@@ -52,7 +12,6 @@ pub(crate) struct ControllerMetadataProvider {
     pid_file: Option<std::path::PathBuf>,
 }
 
-#[allow(dead_code)]
 impl ControllerMetadataProvider {
     pub(crate) fn new(
         service_name: String,
@@ -88,7 +47,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use uptrakit_command::NoopCommandExecutor;
-    use uptrakit_plugin_infrastructure_core::HostRuntime;
+    use uptrakit_plugin_infrastructure_core::{HostRuntime, MetadataAwareHostRuntime};
 
     #[test]
     fn test_metadata_aware_host_runtime_returns_some_provider() {

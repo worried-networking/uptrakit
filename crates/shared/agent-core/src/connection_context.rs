@@ -7,12 +7,15 @@
 
 use std::sync::Arc;
 
+use uptrakit_plugin_infrastructure_registry::ServiceMetadataProvider;
+
 /// Runtime connection details injected by the agent into plugin creation.
 ///
 /// # Default
 ///
-/// [`ConnectionContext::default()`] (empty `keep_alive` vec) is used by the
-/// local `agent` and in tests — it has no effect on plugin configuration.
+/// [`ConnectionContext::default()`] (empty `keep_alive` vec, `None`
+/// `metadata_provider`) is used by the local `agent` and in tests — it has
+/// no effect on plugin configuration.
 #[derive(Clone, Default)]
 pub struct ConnectionContext {
     /// Opaque RAII handles kept alive for the lifetime of any operation that
@@ -24,6 +27,14 @@ pub struct ConnectionContext {
     ///
     /// The local agent and tests always leave this empty.
     pub keep_alive: Vec<Arc<dyn std::any::Any + Send + Sync>>,
+
+    /// Optional service-metadata provider, set by the embedded
+    /// controller-standalone agent so discovery plugins can introspect the
+    /// running controller binary.
+    ///
+    /// Standalone agents leave this `None`; embedded agents inject a
+    /// `ControllerMetadataProvider` at startup.
+    pub metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>,
 }
 
 impl std::fmt::Debug for ConnectionContext {
@@ -32,6 +43,10 @@ impl std::fmt::Debug for ConnectionContext {
             .field(
                 "keep_alive",
                 &format_args!("[{} handle(s)]", self.keep_alive.len()),
+            )
+            .field(
+                "metadata_provider",
+                &self.metadata_provider.as_ref().map(|_| "<provider>"),
             )
             .finish()
     }
@@ -89,6 +104,7 @@ mod tests {
         let counter = Arc::new(DropCounter);
         let ctx = ConnectionContext {
             keep_alive: vec![counter as Arc<dyn std::any::Any + Send + Sync>],
+            ..ConnectionContext::default()
         };
 
         // Clone shares the Arc — not yet dropped.

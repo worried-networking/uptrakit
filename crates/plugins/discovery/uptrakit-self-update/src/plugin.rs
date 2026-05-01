@@ -328,4 +328,76 @@ mod tests {
             .and_then(|v| v.as_u64());
         assert_eq!(timeout, Some(120), "awaiting_restart_timeout must be 120");
     }
+
+    /// Integration smoke test: the plugin, constructed via the real registry path
+    /// (MetadataAwareHostRuntime + ControllerMetadataProvider), discovers exactly
+    /// one software item representing the running test binary.
+    ///
+    /// This test is `#[ignore]` because it reads `std::env::current_exe()` (live
+    /// filesystem) and is intended for explicit CI verification rather than the
+    /// fast unit-test loop.
+    #[tokio::test]
+    #[ignore]
+    async fn test_self_update_plugin_discovers_running_controller() {
+        use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
+        use uptrakit_plugin_infrastructure_core::service_metadata::{
+            DeploymentTopology, ServiceMetadata,
+        };
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, LocalCommandExecutor};
+        use uptrakit_plugin_infrastructure_core::{
+            MetadataAwareHostRuntime, ServiceMetadataProvider, construct_host_runtime,
+        };
+
+        struct TestMetadataProvider {
+            version: String,
+        }
+        impl ServiceMetadataProvider for TestMetadataProvider {
+            fn get_metadata(&self) -> ServiceMetadata {
+                ServiceMetadata::new(
+                    "uptrakit-controller-standalone".to_string(),
+                    std::env::current_exe().ok(),
+                    self.version.clone(),
+                    DeploymentTopology::UnixBinary,
+                    false,
+                    None,
+                )
+            }
+        }
+
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let base_runtime = construct_host_runtime(executor, HostCapabilities::default());
+        let provider = Arc::new(TestMetadataProvider {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }) as Arc<dyn ServiceMetadataProvider>;
+        let runtime = MetadataAwareHostRuntime::new(base_runtime, provider);
+
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let plugin =
+            UptrakitSelfUpdatePlugin::new(config, runtime).expect("plugin creation must not fail");
+
+        let compat = plugin
+            .detect_host_compatibility()
+            .await
+            .expect("detect_host_compatibility must not error");
+        assert!(
+            matches!(compat, HostCompatibility::Compatible),
+            "plugin must be Compatible when MetadataAwareHostRuntime is used: {compat:?}"
+        );
+
+        let items = plugin
+            .discover_software()
+            .await
+            .expect("discover_software must not error");
+        assert_eq!(items.len(), 1, "must discover exactly one software item");
+
+        let item = &items[0];
+        assert_eq!(
+            item.name, "uptrakit-controller-standalone",
+            "software item name must match service name"
+        );
+        assert!(
+            !item.installed_version.is_empty(),
+            "discovered item must carry installed version"
+        );
+    }
 }

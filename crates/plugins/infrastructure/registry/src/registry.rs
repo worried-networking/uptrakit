@@ -26,6 +26,7 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
         &uptrakit_plugin_releases_docker::DESCRIPTOR,
         // Software — Discovery
         &uptrakit_plugin_discovery_proxmox_helper_scripts::DESCRIPTOR,
+        &uptrakit_plugin_discovery_uptrakit_self_update::DESCRIPTOR,
         // Software — Package managers
         &uptrakit_plugin_package_manager_homebrew::DESCRIPTOR,
         &uptrakit_plugin_package_manager_apt::DESCRIPTOR,
@@ -245,6 +246,7 @@ mod tests {
             &plugin_ids::RELEASES_FORGEJO,
             &plugin_ids::RELEASES_DOCKER,
             &plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS,
+            &plugin_ids::DISCOVERY_UPTRAKIT_SELF_UPDATE,
             &plugin_ids::PACKAGE_MANAGER_APT,
             &plugin_ids::PACKAGE_MANAGER_HOMEBREW,
             &plugin_ids::PACKAGE_MANAGER_DNF,

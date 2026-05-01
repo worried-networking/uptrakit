@@ -86,6 +86,8 @@ pub mod plugin_ids {
     pub const RELEASES_DOCKER: PluginTypeId = PluginTypeId::from_static("releases_docker");
     pub const DISCOVERY_PROXMOX_HELPER_SCRIPTS: PluginTypeId =
         PluginTypeId::from_static("discovery_proxmox_helper_scripts");
+    pub const DISCOVERY_UPTRAKIT_SELF_UPDATE: PluginTypeId =
+        PluginTypeId::from_static("discovery_uptrakit_self_update");
     pub const PACKAGE_MANAGER_APT: PluginTypeId = PluginTypeId::from_static("package_manager_apt");
     pub const PACKAGE_MANAGER_HOMEBREW: PluginTypeId =
         PluginTypeId::from_static("package_manager_homebrew");
@@ -123,6 +125,7 @@ pub mod plugin_ids {
         RELEASES_FORGEJO,
         RELEASES_DOCKER,
         DISCOVERY_PROXMOX_HELPER_SCRIPTS,
+        DISCOVERY_UPTRAKIT_SELF_UPDATE,
         PACKAGE_MANAGER_APT,
         PACKAGE_MANAGER_HOMEBREW,
         PACKAGE_MANAGER_DNF,
@@ -219,7 +222,7 @@ mod tests {
     #[test]
     fn all_constants_count() {
         // Update this if you add a new well-known constant.
-        assert_eq!(plugin_ids::ALL.len(), 23);
+        assert_eq!(plugin_ids::ALL.len(), 24);
     }
 
     #[test]

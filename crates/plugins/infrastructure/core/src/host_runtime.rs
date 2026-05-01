@@ -74,6 +74,50 @@ impl HostRuntime for StandardHostRuntime {
     }
 }
 
+/// A [`HostRuntime`] wrapper that injects a [`ServiceMetadataProvider`] so
+/// plugins running inside a controller process can introspect the controller
+/// binary itself.
+///
+/// All other [`HostRuntime`] methods delegate transparently to the wrapped
+/// inner runtime.
+pub struct MetadataAwareHostRuntime {
+    inner: Arc<dyn HostRuntime>,
+    provider: Arc<dyn crate::service_metadata::ServiceMetadataProvider>,
+}
+
+impl MetadataAwareHostRuntime {
+    /// Wrap `inner` with a fixed metadata `provider`.
+    ///
+    /// Returns an `Arc` so callers can use the result directly as
+    /// `Arc<dyn HostRuntime>`.
+    pub fn new(
+        inner: Arc<dyn HostRuntime>,
+        provider: Arc<dyn crate::service_metadata::ServiceMetadataProvider>,
+    ) -> Arc<Self> {
+        Arc::new(Self { inner, provider })
+    }
+}
+
+impl HostRuntime for MetadataAwareHostRuntime {
+    fn capabilities(&self) -> &HostCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn executor(&self) -> Arc<dyn CommandExecutor> {
+        self.inner.executor()
+    }
+
+    fn metadata_provider(
+        &self,
+    ) -> Option<Arc<dyn crate::service_metadata::ServiceMetadataProvider>> {
+        Some(Arc::clone(&self.provider))
+    }
+}
+
 /// Construct the appropriate `HostRuntime` for a host based on its capabilities.
 ///
 /// Currently always returns [`StandardHostRuntime`]. When non-standard host
