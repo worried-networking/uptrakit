@@ -28,7 +28,7 @@ embedded-frontend = ["dep:uptrakit-frontend"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
-mcp = ["uptrakit-web-api/mcp"]
+mcp = ["dep:uptrakit-mcp"]
 
 [dependencies]
 uptrakit-wire = { workspace = true }
@@ -85,6 +85,7 @@ tracing-journald = { workspace = true, optional = true }
 reqwest = { workspace = true }
 uptrakit-frontend = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
+uptrakit-mcp = { workspace = true, optional = true }
 
 [dev-dependencies]
 uptrakit-crypto = { workspace = true, features = ["testing"] }
