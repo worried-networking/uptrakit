@@ -30,11 +30,12 @@ structure self-evident.
 
 ### 2. Account Tab — Profile Card
 
-`SectionCard title="Profile"`:
+`SectionCard title="Profile"` wrapping element carries `data-ui="profile-details-section"`
+(retains existing attribute, tested in "renders shared shell primitives"):
 
-- `FormFieldRow label="First name"` + `Input` (editable, bound to `firstName`)
-- `FormFieldRow label="Last name"` + `Input` (editable, bound to `lastName`)
-- `FormFieldRow label="Email"`:
+- `FormFieldRow label="First name" inputId="profile-first-name"` + `Input id="profile-first-name"` (editable, bound to `firstName`)
+- `FormFieldRow label="Last name" inputId="profile-last-name"` + `Input id="profile-last-name"` (editable, bound to `lastName`)
+- `FormFieldRow label="Email" inputId="profile-email"`:
   - Disabled `Input` showing `user.email`
   - (password auth only) `Button variant="secondary" size="sm"` "Change email" — opens change-email modal
   - (password auth only, when `user.has_pending_email_change`) `StatusBadge tone="warning" label="Change pending"` rendered inline after the button
@@ -45,7 +46,7 @@ structure self-evident.
 
 Triggered by the "Change email" button. `ModalShell title="Change Email" maxWidth="max-w-lg"`.
 
-**Pending-change state** (`user.has_pending_email_change || emailChangeSuccess`):
+**Pending-change state** (`user.has_pending_email_change`):
 
 - `Callout tone="info"` — "A confirmation email has been sent. Check your inbox. If you did
   not request this change, you can cancel it."
@@ -54,15 +55,17 @@ Triggered by the "Change email" button. `ModalShell title="Change Email" maxWidt
 
 **Not-pending state** (default form):
 
-- `FormFieldRow label="New email address"` + `Input type="email"` bound to `newEmail`
-- `FormFieldRow label="Current password"` + `Input type="password"` bound to `emailCurrentPassword`
+- `FormFieldRow label="New email address" inputId="email-new-email"` + `Input id="email-new-email" type="email"` bound to `newEmail`
+- `FormFieldRow label="Current password" inputId="email-current-password"` + `Input id="email-current-password" type="password"` bound to `emailCurrentPassword`
 - Error `Callout tone="danger"` when `emailError` is set
 - Footer: `Button variant="ghost"` "Cancel" (closes modal) + `Button variant="primary"
 loading={emailChanging}` "Send confirmation email"
 
-Success path: `emailChangeSuccess = true` flips the modal to pending-change state (shows the
-info Callout). No auto-close — user explicitly closes. Closing the modal (Cancel or Close)
-resets `emailChangeSuccess = false` and `showChangeEmailModal = false`.
+Success path: `await initialize()` to refresh user data (ensuring `user.has_pending_email_change`
+is `true` before the modal re-evaluates), then let the modal flip to pending-change state
+reactively. No auto-close — user explicitly closes. The local `emailChangeSuccess` variable
+is not needed for display gating — `user.has_pending_email_change` is the canonical source
+of truth. Closing the modal (Cancel or Close) sets `showChangeEmailModal = false`.
 
 `handleCancelEmailChange` calls `cancelEmailChange`, then `showSuccess`, then `initialize()`,
 then closes modal.
@@ -86,9 +89,6 @@ text-[var(--text-secondary)]">••••••••</span>` and `Button varia
 
 Triggered by the "Change" button in the Security card. `ModalShell title="Change Password"
 maxWidth="max-w-lg"`.
-
-**Success state** (`passwordChangeSuccess`): close modal + `showSuccess('Password changed.
-Other sessions have been signed out.')`.
 
 **Form state** (default):
 
@@ -122,9 +122,11 @@ are active.
 
 **DataTable columns:** Name, Created, Actions (Revoke button).
 
-**Empty state:** when the filtered token list is empty, `EmptyState title="No API tokens"
-description="Create a token to access Uptrakit programmatically."` with `{#snippet actions()}`
-→ `Button variant="ghost"` "New Token" (same handler as header button).
+**Empty state:** when the filtered token list is empty, render `EmptyState` instead of
+`DataTable` (`{#if activeTokens.length === 0}…{:else}…{/if}`):
+`EmptyState title="No API tokens" description="Create a token to access Uptrakit
+programmatically."` with `{#snippet actions()}` → `Button variant="ghost"` "New Token"
+(same handler as header button).
 
 **Revoke:** existing `ConfirmDialog` flow unchanged.
 
@@ -148,12 +150,15 @@ whitespace-pre-wrap">{createdToken}</pre>`
   - `<div class="absolute top-2 right-2">` → `Button variant="ghost" size="sm"
 ariaLabel="Copy token" onclick={() => copyToken(createdToken!)}` containing
     `<Copy size={14} />` from lucide-svelte
-- Footer: `Button variant="secondary"` "Copy" (calls `copyToken`) + `Button variant="primary"`
-  "Done" (calls `closeCreateModal`)
+- Footer: `<div class="contents" data-ui="profile-token-modal-footer">` wrapping
+  `Button variant="secondary"` "Copy" (calls `copyToken`) + `Button variant="primary"`
+  "Done" (calls `closeCreateModal`) (retains existing attribute, tested in "uses shared
+  account detail rhythm and modal footer actions")
 
 ### 8. Icon Library
 
-Add `lucide-svelte` to `frontend/package.json` dependencies.
+Add `lucide-svelte` to `frontend/package.json` `dependencies` (consistent with other UI
+component packages).
 
 Import pattern:
 
@@ -171,6 +176,9 @@ Remove tests tied to the old inline-form structure:
 - Inline change-password form rendering
 - Separate "Change email" / "Change password" section card assertions
 - Status column in token table
+- `data-ui="status-badge"` assertion in the "renders shared shell primitives" test (Status
+  column removed; replace with a `StatusBadge "Change pending"` assertion scoped to the
+  `has_pending_email_change: true` scenario)
 
 Add tests:
 
@@ -189,9 +197,29 @@ Add tests:
 Keep:
 
 - Clipboard copy tests
-- Revoke `ConfirmDialog` launch and confirm flow
+- Revoke `ConfirmDialog` launch test
 - Token creation name-entry form
 - Profile save button and form field tests
+
+### 10. State Variable Migration
+
+The following `$state` variables from the current inline-form implementation are **removed**
+and must not survive the refactor:
+
+| Remove | Replaced by |
+| ------ | ----------- |
+| `showChangeEmail` | `showChangeEmailModal` |
+| `showChangePassword` (if present) | `showChangePasswordModal` |
+| `emailChangeSuccess` (local display gate) | removed — `user.has_pending_email_change` (refreshed via `initialize()`) is the canonical source of truth |
+| `passwordChangeSuccess` (in-modal display gate) | removed — success triggers close+toast directly |
+
+Any `{:else if showChangeEmail}` or `{:else if showChangePassword}` inline branches in the
+current single-card layout are deleted.
+
+The `StatusBadge tone="warning" label="Change pending"` inline on the Account tab (§2) is
+the sole in-page signal for a pending email change. The cancellation affordance lives inside
+the change-email modal (§3). This is an intentional tradeoff: the badge is visible on page
+load without opening the modal; the full cancel flow requires one extra click.
 
 ## Out of Scope
 
