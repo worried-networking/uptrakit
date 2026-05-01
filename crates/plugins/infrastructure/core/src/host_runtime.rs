@@ -30,6 +30,14 @@ pub trait HostRuntime: Send + Sync + 'static {
 
     /// The command executor for this runtime.
     fn executor(&self) -> Arc<dyn CommandExecutor>;
+
+    /// Returns the controller's self-metadata provider, if available.
+    /// Only the controller-standalone overrides this — standalone agents return `None`.
+    fn metadata_provider(
+        &self,
+    ) -> Option<Arc<dyn crate::service_metadata::ServiceMetadataProvider>> {
+        None
+    }
 }
 
 /// Standard host runtime wrapping a command executor and capabilities.
@@ -134,5 +142,12 @@ mod tests {
                 .has_feature(host_features::POSIX_SHELL)
         );
         assert!(runtime.capabilities().has_feature(host_features::SYSTEMD));
+    }
+
+    #[test]
+    fn test_standard_host_runtime_metadata_provider_returns_none() {
+        let executor = Arc::new(uptrakit_command::NoopCommandExecutor);
+        let runtime = construct_host_runtime(executor, Default::default());
+        assert!(runtime.metadata_provider().is_none());
     }
 }
