@@ -17,6 +17,7 @@ use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationEr
 /// - `{tag}` — the upstream release tag (`update_command` only; falls back to
 ///   `{version}` when no release info is available; shell-escaped).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ShellConfig {
     /// Shell command to detect the installed version.
     ///
