@@ -1,0 +1,26 @@
+[package]
+name = "uptrakit-notification-delivery"
+description = "Stateless notification delivery core for Uptrakit"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+uptrakit-notification-plugin-core  = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-web-api-types             = { workspace = true }
+uptrakit-shared-macros             = { workspace = true }
+rootcause                          = { workspace = true }
+thiserror                          = { workspace = true }
+uuid                               = { workspace = true }
+serde                              = { workspace = true }
+serde_json                         = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio       = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
