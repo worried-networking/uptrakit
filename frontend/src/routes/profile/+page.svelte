@@ -76,6 +76,7 @@
 
 	// Change email form
 	let showChangeEmail = $state(false);
+	let _showChangeEmailModal = $state(false);
 	let newEmail = $state('');
 	let emailCurrentPassword = $state('');
 	let emailChanging = $state(false);
@@ -251,7 +252,10 @@
 					<FormFieldRow label="Email" inputId="profile-email">
 						<Input id="profile-email" type="email" value={user?.email ?? ''} disabled />
 						{#if authMethod === 'password'}
-							<Button variant="secondary" size="sm" onclick={() => (showChangeEmail = true)}>Change email</Button>
+							<Button variant="secondary" size="sm" onclick={() => (_showChangeEmailModal = true)}>Change email</Button>
+							{#if user.has_pending_email_change}
+								<StatusBadge tone="warning" label="Change pending" />
+							{/if}
 						{/if}
 					</FormFieldRow>
 					{#if profileError}
