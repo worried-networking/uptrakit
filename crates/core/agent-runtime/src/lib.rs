@@ -360,6 +360,8 @@ impl AgentRuntime {
                             );
                             outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
                         }
+                        // Mark sent even on transport failure — recovery is delegated to
+                        // AwaitingRestartExecutor (Task 12), which polls version via detect_version.
                         update.early_sent = true;
                     }
                 }
@@ -392,6 +394,8 @@ impl AgentRuntime {
                             );
                             outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
                         }
+                        // Mark sent even on transport failure — recovery is delegated to
+                        // AwaitingRestartExecutor (Task 12), which polls version via detect_version.
                         update.early_sent = true;
                     }
                 } else {

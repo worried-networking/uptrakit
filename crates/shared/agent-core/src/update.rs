@@ -290,12 +290,11 @@ pub async fn execute_update(
         // restart-side-effect of post-hooks fires. The runtime forwards this
         // to the controller so it can transition the update to
         // `AwaitingRestart` ahead of the imminent restart signal.
-        let early_to_version = detect_current_version(&payload, Arc::clone(&executor)).await;
         let early_payload = UpdateResultPayload {
             update_history_id,
             status: UpdateFinalStatus::Completed,
             from_version: from_version.clone(),
-            to_version: early_to_version,
+            to_version: None, // controller will verify post-restart via AwaitingRestartExecutor
             output: accumulated_output.clone(),
             error: None,
             resumable: Some(true),
