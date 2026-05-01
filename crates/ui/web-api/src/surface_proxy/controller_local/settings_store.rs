@@ -39,12 +39,13 @@ impl EmailSmtpSettingsStore for AppStateSurfaceActionController<'_> {
         &self,
         tenant_id: Uuid,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<EmailSmtpSettings> {
-        let settings = uptrakit_web_api_auth::settings_store::load_typed_settings_by_prefix(
+        let settings = uptrakit_shared_db::raw_settings::load_settings_by_prefix(
             self.db(),
             tenant_id,
             SMTP_PREFIX,
         )
         .await
+        .and_then(|r| uptrakit_shared_db::raw_settings::decode_prefixed_settings(SMTP_PREFIX, &r))
         .map_err(plugin_internal_error)?;
         Ok(normalize_smtp_settings(
             settings,
@@ -66,11 +67,14 @@ impl EmailSmtpSettingsStore for AppStateSurfaceActionController<'_> {
     async fn load_global_smtp_settings(
         &self,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<EmailSmtpSettings> {
-        let settings = uptrakit_web_api_auth::settings_store::load_typed_global_settings_by_prefix(
+        let settings = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
             self.db(),
             GLOBAL_SMTP_PREFIX,
         )
         .await
+        .and_then(|r| {
+            uptrakit_shared_db::raw_settings::decode_prefixed_settings(GLOBAL_SMTP_PREFIX, &r)
+        })
         .map_err(plugin_internal_error)?;
         Ok(normalize_smtp_settings(
             settings,
@@ -105,7 +109,7 @@ impl TelegramGlobalSettingsStore for AppStateSurfaceActionController<'_> {
     async fn load_global_bot_token(
         &self,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<String> {
-        let map = uptrakit_web_api_auth::settings_store::load_global_settings_by_prefix(
+        let map = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
             self.db(),
             GLOBAL_TELEGRAM_PREFIX,
         )
@@ -123,7 +127,7 @@ impl TelegramGlobalSettingsStore for AppStateSurfaceActionController<'_> {
         &self,
         bot_token: String,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<String> {
-        uptrakit_web_api_auth::settings_store::upsert_global_setting_raw(
+        uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
             self.db(),
             KEY_GLOBAL_TELEGRAM_BOT_TOKEN,
             serde_json::json!(bot_token),
@@ -351,7 +355,7 @@ async fn upsert_tenant_setting_raw(
     value: Option<serde_json::Value>,
 ) -> uptrakit_plugin_infrastructure_registry::PluginResult<()> {
     let payload = value.unwrap_or(serde_json::Value::Null);
-    uptrakit_web_api_auth::settings_store::upsert_setting_raw(db, tenant_id, key, payload)
+    uptrakit_shared_db::raw_settings::upsert_setting_raw(db, tenant_id, key, payload)
         .await
         .map_err(plugin_internal_error)
 }
@@ -362,7 +366,7 @@ async fn upsert_global_setting_raw(
     value: Option<serde_json::Value>,
 ) -> uptrakit_plugin_infrastructure_registry::PluginResult<()> {
     let payload = value.unwrap_or(serde_json::Value::Null);
-    uptrakit_web_api_auth::settings_store::upsert_global_setting_raw(db, key, payload)
+    uptrakit_shared_db::raw_settings::upsert_global_setting_raw(db, key, payload)
         .await
         .map_err(plugin_internal_error)
 }
