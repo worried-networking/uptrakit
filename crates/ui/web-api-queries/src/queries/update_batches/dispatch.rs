@@ -1037,6 +1037,39 @@ pub async fn finalize_batch_item_if_owned(
     Ok(result.rows_affected)
 }
 
+/// CAS transition from `InProgress` to `AwaitingRestart` for the resumable-update flow.
+///
+/// Filters: `id = update_history_id AND status = 'in_progress' AND
+/// execution_owner_service_id = service_id`.
+///
+/// Sets: `status = 'awaiting_restart'`, `awaiting_restart_since = now()`.
+///
+/// Returns the number of rows affected (`0` indicates the CAS lost a race —
+/// caller must skip dispatch progression and post-finalization side-effects).
+pub async fn transition_to_awaiting_restart(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let now = OffsetDateTime::now_utc();
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .filter(update_history::Column::ExecutionOwnerServiceId.eq(service_id))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::AwaitingRestart),
+        )
+        .col_expr(
+            update_history::Column::AwaitingRestartSince,
+            Expr::value(Some(now)),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(result.rows_affected)
+}
+
 /// Guarded no-op used to reject stale `StdinAttention` from non-owners.
 pub async fn touch_stdin_attention_if_owned(
     db: &DatabaseConnection,
@@ -2124,6 +2157,78 @@ mod tests {
         .unwrap();
 
         assert_eq!(rows, 0);
+    }
+
+    // -- transition_to_awaiting_restart --
+
+    #[tokio::test]
+    async fn test_transition_to_awaiting_restart_updates_status() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+
+        let rows = transition_to_awaiting_restart(&db, record.id, f.service_id)
+            .await
+            .unwrap();
+
+        assert_eq!(rows, 1);
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::AwaitingRestart);
+        assert!(after.awaiting_restart_since.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_transition_to_awaiting_restart_wrong_service_is_noop() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        let other_service_id = Uuid::now_v7();
+
+        let rows = transition_to_awaiting_restart(&db, record.id, other_service_id)
+            .await
+            .unwrap();
+
+        assert_eq!(rows, 0);
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::InProgress);
+        assert!(after.awaiting_restart_since.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_does_not_trigger_dispatch() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+
+        let rows = transition_to_awaiting_restart(&db, record.id, f.service_id)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1);
+
+        // The CAS path itself MUST NOT create a follow-up Pending record for
+        // the host — dispatch progression is the caller's responsibility, and
+        // the resumable branch in the WS handler skips it.
+        let pending_for_host = UpdateHistory::find()
+            .filter(update_history::Column::HostId.eq(f.host_id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+            .count(&db)
+            .await
+            .unwrap();
+        assert_eq!(pending_for_host, 0);
     }
 
     async fn insert_orchestrator_inprogress_record(
