@@ -163,7 +163,7 @@ impl UptrakitSelfUpdatePlugin {
                 image,
                 container_name,
             } => Ok(self.build_docker_execute_target(metadata, image, container_name)),
-            _ => Err(rootcause::report!(SelfUpdateError::NoBinaryPath)),
+            _ => Err(rootcause::report!(SelfUpdateError::UnsupportedTopology)),
         }
     }
 
@@ -177,6 +177,7 @@ impl UptrakitSelfUpdatePlugin {
             .ok_or(SelfUpdateError::NoBinaryPath)?;
         let binary_path_str = binary_path.display().to_string();
 
+        // $RELEASE_URL is set by the GenericShell executor at update dispatch time.
         let update_command = if metadata.reuseport_configured {
             let pid_file = metadata
                 .pid_file
