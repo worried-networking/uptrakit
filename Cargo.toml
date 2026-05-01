@@ -196,7 +196,45 @@ unreachable_pub = "deny"
 unfulfilled_lint_expectations = "deny"
 
 [workspace.lints.clippy]
-all = "deny"
+all = { level = "deny", priority = -1 }
+
+# Panic prevention
+unwrap_used = "warn"
+expect_used = "warn"
+get_unwrap = "warn"
+unwrap_in_result = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+
+# Silent failure prevention
+map_err_ignore = "warn"
+let_underscore_future = "warn"
+let_underscore_must_use = "warn"
+unused_result_ok = "warn"
+assertions_on_result_states = "warn"
+
+# Async correctness
+large_futures = "warn"
+
+# Memory and unsafe hygiene
+mem_forget = "warn"
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
+# Numeric correctness
+float_cmp = "warn"
+
+# Suppression hygiene
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+# Hygiene
+dbg_macro = "warn"
+rc_mutex = "warn"
 
 [profile.dev]
 # Reduce debug info to line tables only — backtraces still work,
