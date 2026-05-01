@@ -76,7 +76,7 @@ pub struct ActionParams {
 }
 
 impl ActionParams {
-    pub fn new(host_id: Uuid, software_item_id: Uuid, to_version: String) -> Self {
+    pub fn new(software_item_id: Uuid, host_id: Uuid, to_version: String) -> Self {
         Self {
             host_id,
             software_item_id,
