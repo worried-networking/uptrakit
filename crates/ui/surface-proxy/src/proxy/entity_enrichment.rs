@@ -19,7 +19,7 @@ use uptrakit_wire::surfaces::{SurfaceEntityType, SurfaceNode, SurfaceTableCellTy
 /// Box<dyn EntityResolver>>` populated at startup) rather than adding more arms
 /// here. At two or more additional entity types the registry pattern pays for
 /// itself.
-pub(crate) async fn enrich_entity_links(
+pub async fn enrich_entity_links(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     surface_node: &SurfaceNode,

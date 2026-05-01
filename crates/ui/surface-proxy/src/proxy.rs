@@ -10,14 +10,14 @@ use uptrakit_plugin_infrastructure_registry::{
 };
 
 mod controller_local;
-pub(crate) use controller_local::AppStateSurfaceActionController;
-pub(crate) mod entity_enrichment;
+pub use controller_local::AppStateSurfaceActionController;
+pub mod entity_enrichment;
 use uuid::Uuid;
 
 use uptrakit_wire::{ControllerMessage, surfaces};
 
-use crate::service_connections::ServiceConnectionRegistry;
-use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryLookupError};
+use crate::registry::{SurfaceRegistry, SurfaceRegistryLookupError};
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 const DEFAULT_TIMEOUT_SECONDS: u16 = 30;
 const MIN_TIMEOUT_SECONDS: u16 = 1;
@@ -151,7 +151,7 @@ struct ProviderFailureState {
 pub trait SurfaceLocalActionExecutor: Send + Sync {
     async fn execute(
         &self,
-        _resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        _resolved: &crate::registry::ResolvedSurfaceAction,
         _request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError>;
 }
@@ -324,7 +324,7 @@ impl PluginSurfaceLocalExecutor {
 impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
     async fn execute(
         &self,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError> {
         if resolved.provider_kind != surfaces::ProviderKind::Plugin {
@@ -841,10 +841,11 @@ async fn execute_allowlisted_notification_channel_action(
         "create" => {
             let req = build_notification_channel_create_request(channel_type, params)?;
             req.validate().map_err(|error| error.to_string())?;
-            let response =
-                crate::queries::notifications::create_channel(tenant_db, &req, plugin_ops)
-                    .await
-                    .map_err(|error| error.to_string())?;
+            let response = uptrakit_web_api_queries::queries::notifications::create_channel(
+                tenant_db, &req, plugin_ops,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             serde_json::to_value(response)
                 .map_err(|error| format!("failed to serialize create response: {error}"))
         }
@@ -853,7 +854,7 @@ async fn execute_allowlisted_notification_channel_action(
             require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
             let req = build_notification_channel_update_request(params)?;
             req.validate().map_err(|error| error.to_string())?;
-            let response = crate::queries::notifications::update_channel(
+            let response = uptrakit_web_api_queries::queries::notifications::update_channel(
                 tenant_db, channel_id, &req, plugin_ops,
             )
             .await
@@ -867,9 +868,11 @@ async fn execute_allowlisted_notification_channel_action(
         "delete" => {
             let channel_id = required_uuid_param(params, "id")?;
             require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
-            let deleted = crate::queries::notifications::delete_channel(tenant_db, channel_id)
-                .await
-                .map_err(|error| error.to_string())?;
+            let deleted = uptrakit_web_api_queries::queries::notifications::delete_channel(
+                tenant_db, channel_id,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             if !deleted {
                 return Err("Channel not found".to_string());
             }
@@ -1552,9 +1555,11 @@ async fn execute_notification_channel_test_action(
         .transport(&channel_type_id)
         .ok_or_else(|| format!("Unsupported channel type: {}", channel.channel_type))?;
 
-    let settings_bag =
-        crate::notifications::dispatcher::build_settings_bag(tenant_db.db(), tenant_db.tenant_id)
-            .await;
+    let settings_bag = uptrakit_web_api_queries::notification_settings::build_settings_bag(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+    )
+    .await;
     let test_msg = uptrakit_plugin_infrastructure_registry::DeliveryMessage::new(
         "Test Notification",
         "This is a test notification from Uptrakit.",
@@ -1833,7 +1838,7 @@ struct NoopSurfaceLocalExecutor;
 impl SurfaceLocalActionExecutor for NoopSurfaceLocalExecutor {
     async fn execute(
         &self,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         _request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError> {
         Err(SurfaceProxyError::SchemaValidationFailed(format!(
@@ -2335,7 +2340,7 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProxyError {
 fn caller_origin_for_request(
     registry: &SurfaceRegistry,
     caller: &SurfaceCallerOrigin,
-    _resolved: &crate::surface_registry::ResolvedSurfaceAction,
+    _resolved: &crate::registry::ResolvedSurfaceAction,
     _request: &SurfaceInvokeRequest,
 ) -> Result<surfaces::CallerOrigin, SurfaceProxyError> {
     match caller {
@@ -2415,7 +2420,7 @@ async fn implicit_target_provider_for_request(
 
 async fn provider_is_available(
     service_connections: &ServiceConnectionRegistry,
-    provider: &crate::surface_registry::SurfaceProviderSummary,
+    provider: &crate::registry::SurfaceProviderSummary,
 ) -> bool {
     match provider.service_id {
         Some(service_id) => {
@@ -2604,7 +2609,8 @@ mod tests {
     use uptrakit_wire::ControllerMessage;
 
     use super::*;
-    use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
+    use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+    use uptrakit_service_connections::ServiceConnectionRegistry;
 
     fn tenant_id() -> Uuid {
         Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()

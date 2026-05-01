@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use super::super::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError};
 use super::{tenant_id, user_id};
-use crate::service_connections::ServiceConnectionRegistry;
-use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 mod rollout;
 

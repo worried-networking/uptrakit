@@ -12,8 +12,8 @@ use super::super::{
     SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError, map_surface_action_error,
 };
 use super::{TestPluginInvoker, tenant_id, user_id};
-use crate::service_connections::ServiceConnectionRegistry;
-use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 fn plugin_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {

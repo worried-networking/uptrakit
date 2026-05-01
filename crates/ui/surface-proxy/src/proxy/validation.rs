@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use uptrakit_wire::surfaces;
 
-use crate::service_connections::ServiceConnectionRegistry;
-use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryLookupError};
+use crate::registry::{SurfaceRegistry, SurfaceRegistryLookupError};
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 use super::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
 
@@ -24,7 +24,7 @@ pub(super) fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProx
 pub(super) fn caller_origin_for_request(
     registry: &SurfaceRegistry,
     caller: &SurfaceCallerOrigin,
-    _resolved: &crate::surface_registry::ResolvedSurfaceAction,
+    _resolved: &crate::registry::ResolvedSurfaceAction,
     _request: &SurfaceInvokeRequest,
 ) -> Result<surfaces::CallerOrigin, SurfaceProxyError> {
     match caller {
@@ -104,7 +104,7 @@ pub(super) async fn implicit_target_provider_for_request(
 
 pub(super) async fn provider_is_available(
     service_connections: &ServiceConnectionRegistry,
-    provider: &crate::surface_registry::SurfaceProviderSummary,
+    provider: &crate::registry::SurfaceProviderSummary,
 ) -> bool {
     match provider.service_id {
         Some(service_id) => {

@@ -21,7 +21,7 @@ use super::{AppStateSurfaceActionController, SurfaceProxyError};
 pub trait SurfaceLocalActionExecutor: Send + Sync {
     async fn execute(
         &self,
-        _resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        _resolved: &crate::registry::ResolvedSurfaceAction,
         _request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError>;
 }
@@ -192,7 +192,7 @@ impl PluginSurfaceLocalExecutor {
 impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
     async fn execute(
         &self,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError> {
         if resolved.provider_kind != surfaces::ProviderKind::Plugin {
@@ -308,7 +308,7 @@ pub(super) struct NoopSurfaceLocalExecutor;
 impl SurfaceLocalActionExecutor for NoopSurfaceLocalExecutor {
     async fn execute(
         &self,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         _request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError> {
         Err(SurfaceProxyError::SchemaValidationFailed(format!(

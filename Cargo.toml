@@ -124,6 +124,7 @@ uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/t
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email", version = "0.0.1" }
 uptrakit-notification-delivery = { path = "crates/plugins/notifications/delivery", version = "0.0.1" }
 uptrakit-service-connections = { path = "crates/ui/service-connections", version = "0.0.1" }
+uptrakit-surface-proxy = { path = "crates/ui/surface-proxy", version = "0.0.1", default-features = false }
 uptrakit-config-merge = { path = "crates/shared/update-hooks", version = "0.0.1" }
 uptrakit-wire = { path = "crates/shared/wire", version = "0.0.1" }
 uptrakit-surfaces = { path = "crates/shared/surfaces", version = "0.0.1" }
