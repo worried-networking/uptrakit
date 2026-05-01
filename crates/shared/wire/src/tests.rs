@@ -312,6 +312,7 @@ fn version_check_results_serialization_roundtrip() {
                 latest_version: None,
                 error: None,
                 update_category: UpdateCategory::Unknown,
+                not_ready: None,
             },
             VersionCheckResult {
                 software_item_id: TEST_UUID_2,
@@ -321,6 +322,7 @@ fn version_check_results_serialization_roundtrip() {
                 latest_version: None,
                 error: Some("detection failed".to_string()),
                 update_category: UpdateCategory::Unknown,
+                not_ready: None,
             },
         ],
     });
@@ -373,6 +375,7 @@ fn version_check_result_with_latest_version() {
             latest_version: Some("1.24.5".to_string()),
             error: None,
             update_category: UpdateCategory::Unknown,
+            not_ready: None,
         }],
     });
     let json = serde_json::to_string(&msg).unwrap();
@@ -524,6 +527,7 @@ fn update_result_completed_serialization_roundtrip() {
         to_version: Some("2.0.0".to_string()),
         output: "Update completed successfully".to_string(),
         error: None,
+        resumable: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"update_result"#));
@@ -542,6 +546,7 @@ fn update_result_failed_serialization_roundtrip() {
         to_version: None,
         output: "Error output".to_string(),
         error: Some("Package not found".to_string()),
+        resumable: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"update_result"#));
@@ -1803,6 +1808,7 @@ fn spec_conformance_version_check_results() {
                 latest_version: Some("1.3.0".to_string()),
                 error: None,
                 update_category: UpdateCategory::Unknown,
+                not_ready: None,
             }],
         },
     ));
@@ -1841,6 +1847,7 @@ fn spec_conformance_update_result() {
         to_version: Some("2.0.0".to_string()),
         output: "Update completed successfully".to_string(),
         error: None,
+        resumable: None,
     }));
     spec.validate("updateResultPayload", &json);
 }

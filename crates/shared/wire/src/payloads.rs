@@ -369,6 +369,14 @@ pub struct VersionCheckResult {
     /// `None` when the plugin does not provide a display version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_display_version: Option<String>,
+    /// When `true`, the agent is not yet ready to report a meaningful version
+    /// for this item (e.g. a self-update is in progress and the binary has not
+    /// restarted yet). The controller should treat this as "check again later"
+    /// rather than clearing the installed version.
+    ///
+    /// `None` / absent means "ready" for wire backward compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_ready: Option<bool>,
 }
 
 // --- Update execution messages ---
@@ -453,6 +461,13 @@ pub struct UpdateResultPayload {
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// When `true`, the agent signals that this update can be resumed after
+    /// a restart (e.g. the update script supports idempotent re-entry or the
+    /// agent is mid-self-update and will re-attach on reconnect).
+    ///
+    /// `None` / absent means "not resumable" for wire backward compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumable: Option<bool>,
 }
 
 // --- Batch update messages ---
@@ -1715,5 +1730,41 @@ impl TestPluginConfigResultPayload {
             detected_version: None,
             duration_ms,
         }
+    }
+}
+
+#[cfg(test)]
+mod resumable_tests {
+    use super::*;
+
+    #[test]
+    fn test_update_result_payload_resumable_defaults_none() {
+        let json = r#"{"update_history_id":"00000000-0000-0000-0000-000000000001","status":"completed","output":""}"#;
+        let p: UpdateResultPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(p.resumable, None);
+    }
+
+    #[test]
+    fn test_update_result_payload_resumable_true_round_trips() {
+        let p = UpdateResultPayload {
+            update_history_id: uuid::Uuid::nil(),
+            status: crate::UpdateFinalStatus::Completed,
+            from_version: None,
+            to_version: None,
+            output: String::new(),
+            error: None,
+            resumable: Some(true),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"resumable\":true"));
+        let back: UpdateResultPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.resumable, Some(true));
+    }
+
+    #[test]
+    fn test_version_check_result_not_ready_defaults_none() {
+        let json = r#"{"software_item_id":"00000000-0000-0000-0000-000000000001","update_category":"none"}"#;
+        let r: VersionCheckResult = serde_json::from_str(json).unwrap();
+        assert_eq!(r.not_ready, None);
     }
 }

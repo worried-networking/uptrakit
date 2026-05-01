@@ -729,6 +729,7 @@ where
                                             "Agent shutdown timeout ({}s) reached",
                                             shutdown_timeout.as_secs()
                                         )),
+                                        resumable: None,
                                     },
                                 ))
                                 .await;
@@ -1803,6 +1804,7 @@ mod tests {
                     to_version: None,
                     output: String::new(),
                     error: None,
+                    resumable: None,
                 },
             }
         })

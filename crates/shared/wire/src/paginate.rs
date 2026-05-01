@@ -399,6 +399,7 @@ mod tests {
                 error: None,
                 host_software_item_id: None,
                 update_category: uptrakit_shared_types::UpdateCategory::Unknown,
+                not_ready: None,
             })
             .collect();
         let payload = VersionCheckResultsPayload { results };
@@ -419,6 +420,7 @@ mod tests {
                     error: None,
                     host_software_item_id: None,
                     update_category: uptrakit_shared_types::UpdateCategory::Unknown,
+                    not_ready: None,
                 })
                 .collect(),
         };
