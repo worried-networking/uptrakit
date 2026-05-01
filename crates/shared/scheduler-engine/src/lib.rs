@@ -20,10 +20,12 @@ pub mod executor;
 pub mod executors;
 pub mod interval;
 pub mod notifier;
+pub mod tick_executor;
 
 pub use error::{Result, SchedulerError};
 pub use executor::TaskExecutor;
 pub use notifier::SchedulerNotifier;
+pub use tick_executor::TickExecutor;
 
 // Re-export the scheduler struct, config, and constants.
 pub mod scheduler;

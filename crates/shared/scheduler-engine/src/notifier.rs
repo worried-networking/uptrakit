@@ -34,6 +34,13 @@ pub trait SchedulerNotifier: Send + Sync {
     /// and publishes `RequestCrlRenewal` to NATS for remote instances.
     /// The NATS-only implementation (external scheduler) publishes to NATS only.
     async fn signal_crl_renewal(&self);
+
+    /// Signal that a host has progressed (e.g. completed or resumed an update)
+    /// and the controller should dispatch the next queued update for that host.
+    ///
+    /// The default implementation is a no-op. Override in the embedded-controller
+    /// implementation to call `dispatch_next_queued_for_host`.
+    async fn signal_host_progression(&self, _host_id: uuid::Uuid, _tenant_id: uuid::Uuid) {}
 }
 
 /// No-op implementation of [`SchedulerNotifier`] for use in unit tests.
