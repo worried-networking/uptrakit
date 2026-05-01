@@ -1767,4 +1767,22 @@ mod resumable_tests {
         let r: VersionCheckResult = serde_json::from_str(json).unwrap();
         assert_eq!(r.not_ready, None);
     }
+
+    #[test]
+    fn test_version_check_result_not_ready_true_round_trips() {
+        let r = VersionCheckResult {
+            software_item_id: uuid::Uuid::nil(),
+            installed_version: None,
+            latest_version: None,
+            error: None,
+            update_category: crate::UpdateCategory::default(),
+            host_software_item_id: None,
+            installed_display_version: None,
+            not_ready: Some(true),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"not_ready\":true"));
+        let back: VersionCheckResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.not_ready, Some(true));
+    }
 }
