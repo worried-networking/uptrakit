@@ -1806,6 +1806,7 @@ mod tests {
                     error: None,
                     resumable: None,
                 },
+                resumable: false,
             }
         })
         .await;

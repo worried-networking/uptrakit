@@ -62,6 +62,26 @@ pub(crate) type UpdateResult<T> = std::result::Result<T, Report<UpdateError>>;
 /// Result of an update execution.
 pub struct UpdateExecutionResult {
     pub result: UpdateResultPayload,
+    /// `true` when the plugin signalled the update is mid-restart (e.g.
+    /// self-update or APT phased reboot) and the post-update state should be
+    /// observed on the next reconnect rather than reported now.
+    pub resumable: bool,
+}
+
+/// Outcome of [`execute_update_pipeline`].
+///
+/// The pipeline runs pre-hooks, the attestation gate, and the plugin update,
+/// but no longer runs post-hooks itself — the outer [`execute_update`]
+/// function handles those, since post-hook scheduling depends on whether the
+/// update was resumable (run inline vs spawned for fire-and-forget).
+struct PipelineResult {
+    /// `true` when pre-hooks, attestation, and the plugin update all
+    /// completed without error.
+    succeeded: bool,
+    /// `true` when the plugin's [`ExecuteUpdateResult::resumable`] flag was
+    /// set, meaning a restart is imminent and post-update observations must
+    /// happen after reconnect. Only meaningful when `succeeded` is `true`.
+    resumable: bool,
 }
 
 /// Output message sent during update execution.
@@ -70,7 +90,12 @@ pub struct UpdateOutputMessage {
     pub stream: OutputStreamType,
 }
 
-/// Run the update pipeline: pre-hook plugins → plugin execution → post-hook plugins.
+/// Run the update pipeline: pre-hook plugins → attestation gate → plugin execution.
+///
+/// Post-hook plugins are NOT run here — the outer [`execute_update`] function
+/// runs them inline for non-resumable updates and spawns them as a
+/// fire-and-forget task for resumable ones (so the host can restart without
+/// waiting for them).
 ///
 /// The caller wraps this in [`tokio::time::timeout`] so cancellation
 /// (`drop`) releases the `&mut accumulated_output` borrow cleanly.
@@ -79,7 +104,7 @@ async fn execute_update_pipeline(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
     accumulated_output: &mut String,
-) -> std::result::Result<(), AgentCoreError> {
+) -> PipelineResult {
     // Run pre-update lifecycle hook plugins
     let lifecycle_ctx = UpdateLifecycleContext::for_pre_hook(
         &payload.execute_update_plugin.package_identifier,
@@ -87,19 +112,34 @@ async fn execute_update_pipeline(
         None, // from_version not yet available at this stage
         payload.release_info.clone(),
     );
-    run_pre_hook_plugins(
+    if let Err(e) = run_pre_hook_plugins(
         &payload.pre_update_hook_plugins,
         &lifecycle_ctx,
         Arc::clone(&executor),
         output_tx,
         accumulated_output,
     )
-    .await?;
+    .await
+    {
+        tracing::warn!(error = %e, "pre-update hook failed; aborting pipeline");
+        return PipelineResult {
+            succeeded: false,
+            resumable: false,
+        };
+    }
 
     // Attestation gate — abort if policy requires a verified attestation
     // and none was found.
     tracing::debug!("checking attestation gate");
-    check_attestation_gate(payload.release_info.as_ref(), output_tx).await?;
+    if let Err(e) = check_attestation_gate(payload.release_info.as_ref(), output_tx).await {
+        tracing::warn!(error = %e, "attestation gate failed; aborting pipeline");
+        let formatted = format!("[error] {e}\n");
+        append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+        return PipelineResult {
+            succeeded: false,
+            resumable: false,
+        };
+    }
     tracing::debug!("attestation gate passed");
 
     // Execute actual update based on plugin type
@@ -114,58 +154,39 @@ async fn execute_update_pipeline(
     .await;
 
     tracing::debug!("executing plugin update");
-    let update_succeeded =
-        match execute_plugin_update(payload, output_tx, Arc::clone(&executor)).await {
-            Ok(exec_result) => {
-                tracing::debug!("plugin update returned successfully");
-                let resumable = exec_result.resumable;
-                append_bounded(accumulated_output, &exec_result.output, MAX_OUTPUT_BYTES);
-                let _ = resumable; // used in Task 6
-                true
+    match execute_plugin_update(payload, output_tx, Arc::clone(&executor)).await {
+        Ok(exec_result) => {
+            tracing::debug!(
+                resumable = exec_result.resumable,
+                "plugin update returned successfully"
+            );
+            append_bounded(accumulated_output, &exec_result.output, MAX_OUTPUT_BYTES);
+            PipelineResult {
+                succeeded: true,
+                resumable: exec_result.resumable,
             }
-            Err(e) => {
-                let error_msg = e.to_string();
-                tracing::warn!(
-                    software_item = %payload.software_item_name,
-                    error = %error_msg,
-                    "plugin update command failed"
-                );
-                let formatted = format!("[error] {error_msg}\n");
-                send_output(
-                    output_tx,
-                    &format!("[error] {error_msg}"),
-                    OutputStreamType::Stderr,
-                )
-                .await;
-                append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
-                false
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            tracing::warn!(
+                software_item = %payload.software_item_name,
+                error = %error_msg,
+                "plugin update command failed"
+            );
+            let formatted = format!("[error] {error_msg}\n");
+            send_output(
+                output_tx,
+                &format!("[error] {error_msg}"),
+                OutputStreamType::Stderr,
+            )
+            .await;
+            append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+            PipelineResult {
+                succeeded: false,
+                resumable: false,
             }
-        };
-
-    // Run post-update lifecycle hook plugins (always, even on failure)
-    let post_ctx = UpdateLifecycleContext::for_post_hook(
-        &payload.execute_update_plugin.package_identifier,
-        &payload.to_version,
-        None,
-        payload.release_info.clone(),
-        update_succeeded,
-    );
-    run_post_hook_plugins(
-        &payload.post_update_hook_plugins,
-        &post_ctx,
-        executor,
-        output_tx,
-        accumulated_output,
-    )
-    .await;
-
-    if !update_succeeded {
-        return Err(AgentCoreError::UpdateExecution(
-            "plugin update command failed".to_string(),
-        ));
+        }
     }
-
-    Ok(())
 }
 
 /// Execute an update based on the payload.
@@ -208,29 +229,13 @@ pub async fn execute_update(
     )
     .await;
 
-    // Handle timeout or execution result
-    let to_version = match execution_result {
-        Ok(Ok(())) => {
-            tracing::info!(software_item = %payload.software_item_name, "update completed successfully");
-            send_output(
-                &output_tx,
-                "[update] Update completed successfully",
-                OutputStreamType::System,
-            )
-            .await;
-            // Detect new version after update
-            let to_version = detect_current_version(&payload, executor).await;
-            tracing::debug!(to_version = ?to_version, "post-update version detected");
-            to_version
-        }
-        Ok(Err(e)) => {
-            // The error was already logged and appended to accumulated_output in the
-            // execute_update_pipeline error arm above; here we only set the final state.
-            final_status = UpdateFinalStatus::Failed;
-            final_error = Some(e.to_string());
-            None
-        }
-        Err(_) => {
+    // Resolve pipeline outcome (timeout vs. PipelineResult).
+    let PipelineResult {
+        succeeded,
+        resumable: pipeline_resumable,
+    } = match execution_result {
+        Ok(r) => r,
+        Err(_elapsed) => {
             let timeout_msg = format!("Update timed out after {}s", timeout_duration.as_secs());
             tracing::warn!(
                 software_item = %payload.software_item_name,
@@ -245,10 +250,106 @@ pub async fn execute_update(
             )
             .await;
             append_bounded(&mut accumulated_output, &formatted, MAX_OUTPUT_BYTES);
-            final_status = UpdateFinalStatus::Failed;
             final_error = Some(timeout_msg);
-            None
+            PipelineResult {
+                succeeded: false,
+                resumable: false,
+            }
         }
+    };
+
+    if !succeeded {
+        final_status = UpdateFinalStatus::Failed;
+        if final_error.is_none() {
+            final_error = Some("plugin update command failed".to_string());
+        }
+    }
+
+    // Post-hook scheduling depends on whether the update is resumable.
+    //
+    // - Non-resumable (success or failure): run inline so we can wait for
+    //   completion, capture output, and reflect any side effects in the
+    //   final UpdateResultPayload.
+    // - Resumable (only meaningful on success): the host is about to
+    //   restart, so we spawn the post-hooks fire-and-forget. Their output
+    //   would not survive the restart anyway, and blocking would defeat
+    //   the purpose of resumable updates.
+    let post_ctx = UpdateLifecycleContext::for_post_hook(
+        &payload.execute_update_plugin.package_identifier,
+        &payload.to_version,
+        None,
+        payload.release_info.clone(),
+        succeeded,
+    );
+
+    let resumable_flag = succeeded && pipeline_resumable;
+
+    if resumable_flag {
+        // Fire-and-forget: the host is restarting; we cannot block on hooks.
+        tracing::info!(
+            update_id = %update_history_id,
+            "spawning post-update hooks for resumable update"
+        );
+        let post_hook_plugins = payload.post_update_hook_plugins.clone();
+        let post_executor = Arc::clone(&executor);
+        let post_output_tx = output_tx.clone();
+        tokio::spawn(async move {
+            let mut spawned_output = String::new();
+            run_post_hook_plugins(
+                &post_hook_plugins,
+                &post_ctx,
+                post_executor,
+                &post_output_tx,
+                &mut spawned_output,
+            )
+            .await;
+            // The host is restarting; this output is captured only by the
+            // bridge channel (already closed once the runtime tears down).
+            tracing::debug!(
+                output_len = spawned_output.len(),
+                "spawned post-hook task finished"
+            );
+        });
+    } else {
+        run_post_hook_plugins(
+            &payload.post_update_hook_plugins,
+            &post_ctx,
+            Arc::clone(&executor),
+            &output_tx,
+            &mut accumulated_output,
+        )
+        .await;
+    }
+
+    // Final logging + version detection (skipped for resumable: post-state
+    // is unobservable here because the restart is imminent).
+    let to_version = if succeeded {
+        if resumable_flag {
+            tracing::info!(
+                software_item = %payload.software_item_name,
+                "resumable update dispatched; awaiting post-restart observation"
+            );
+            send_output(
+                &output_tx,
+                "[update] Resumable update dispatched; awaiting restart",
+                OutputStreamType::System,
+            )
+            .await;
+            None
+        } else {
+            tracing::info!(software_item = %payload.software_item_name, "update completed successfully");
+            send_output(
+                &output_tx,
+                "[update] Update completed successfully",
+                OutputStreamType::System,
+            )
+            .await;
+            let detected = detect_current_version(&payload, Arc::clone(&executor)).await;
+            tracing::debug!(to_version = ?detected, "post-update version detected");
+            detected
+        }
+    } else {
+        None
     };
 
     let result = UpdateResultPayload {
@@ -258,10 +359,13 @@ pub async fn execute_update(
         to_version,
         output: accumulated_output,
         error: final_error,
-        resumable: None,
+        resumable: if resumable_flag { Some(true) } else { None },
     };
 
-    UpdateExecutionResult { result }
+    UpdateExecutionResult {
+        result,
+        resumable: resumable_flag,
+    }
 }
 
 /// Detect the current version of a software item by delegating to the plugin registry.
@@ -1307,5 +1411,22 @@ mod tests {
             }
         }
         assert!(found);
+    }
+}
+
+#[cfg(test)]
+mod pipeline_resumable_tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_result_struct_exists() {
+        let _ = PipelineResult {
+            succeeded: true,
+            resumable: true,
+        };
+        let _ = PipelineResult {
+            succeeded: false,
+            resumable: false,
+        };
     }
 }
