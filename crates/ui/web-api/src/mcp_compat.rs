@@ -1,12 +1,21 @@
 // crates/ui/web-api/src/mcp_compat.rs
 
+use std::sync::Arc;
+
 use uuid::Uuid;
 
+use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
+
 use crate::AppState;
+use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::{
-    AuthFailure, authenticate_api_token, emit_api_token_auth_audit,
+    AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser, authenticate_api_token,
+    emit_api_token_auth_audit,
 };
+use crate::queries::update_triggers::TriggerUpdateParams;
+use crate::queries::update_types::ActorType;
+use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
 
 /// Per-request auth context injected into MCP request extensions by `McpAuthLayer`.
 ///
@@ -143,6 +152,142 @@ pub async fn validate_api_token_for_mcp(
         state.default_tenant_id,
         auth_user.permissions,
     ))
+}
+
+/// Error variants for the MCP update-trigger bridge.
+///
+/// Maps the full `TriggerUpdateError` surface from `uptrakit-web-api-queries` so that
+/// MCP tool handlers can produce meaningful protocol-level errors rather than collapsing
+/// everything to a generic internal error.
+///
+/// `#[non_exhaustive]`: future triggers (rate-limit, quota) may add variants.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum McpTriggerError {
+    PermissionDenied,
+    HostNotFound,
+    SoftwareItemNotFound,
+    /// Host exists but lacks assignment, plugin config, or a known plugin type.
+    NotConfigured,
+    /// Host has no linked agent or agent is not in Approved status.
+    AgentUnavailable,
+    AlreadyInProgress,
+    Internal,
+}
+
+/// Trigger a software update for an MCP tool call.
+///
+/// Wraps `actions::software_items::trigger_update`, `update_orchestrator::spawn_protection_and_dispatch`,
+/// and `routes::software_items::emit_software_update_audit` — all of which are `pub(crate)` in `web-api`.
+///
+/// Returns `(update_history_id, TriggerUpdateStatus)` using only types from shared workspace crates,
+/// so `uptrakit-mcp` can call this without a circular dependency.
+pub async fn mcp_trigger_update(
+    state: Arc<AppState>,
+    ctx: &McpRequestContext,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    to_version: String,
+) -> Result<(Uuid, TriggerUpdateStatus), rootcause::Report<McpTriggerError>> {
+    let actor_id_str = ctx.token_id.to_string();
+    let tenant_db = crate::tenant_db::TenantDb(uptrakit_shared_db::TenantDb::new(
+        state.db().clone(),
+        ctx.tenant_id,
+    ));
+    let mut_ctx = state.mutation_context();
+
+    let audit_user = AuthenticatedUser {
+        user_id: ctx.user_id,
+        auth_method: AuthMethod::ApiToken,
+        permissions: ctx.permissions.clone(),
+        jti: None,
+    };
+    let audit_token = AuthenticatedApiTokenId(ctx.token_id);
+
+    let trigger_result = crate::actions::software_items::trigger_update(
+        &tenant_db,
+        &mut_ctx,
+        TriggerUpdateParams {
+            tenant_id: ctx.tenant_id,
+            item_id: software_item_id,
+            host_id,
+            to_version: to_version.clone(),
+            actor_type: ActorType::ApiToken.as_str(),
+            actor_id: &actor_id_str,
+            release_info: None,
+            interactive: false,
+        },
+    )
+    .await
+    .map_err(|err| {
+        let (outcome, reason_code) = err.current_context().trigger_audit_classification();
+        crate::routes::software_items::emit_software_update_audit(
+            &state,
+            ctx.tenant_id,
+            &audit_user,
+            Some(audit_token),
+            software_item_id,
+            outcome,
+            serde_json::json!({
+                "host_id": host_id,
+                "to_version": to_version,
+                "interactive": false,
+                "reason_code": reason_code,
+            }),
+        );
+        let mcp_err = match err.current_context() {
+            TriggerUpdateError::HostNotFound => McpTriggerError::HostNotFound,
+            TriggerUpdateError::SoftwareItemNotFound => McpTriggerError::SoftwareItemNotFound,
+            TriggerUpdateError::UpdateAlreadyActive => McpTriggerError::AlreadyInProgress,
+            TriggerUpdateError::HostNotAssigned
+            | TriggerUpdateError::NoExecuteUpdatePlugin
+            | TriggerUpdateError::PluginConfigNotFound
+            | TriggerUpdateError::UnknownPluginType(_) => McpTriggerError::NotConfigured,
+            TriggerUpdateError::NoAgent | TriggerUpdateError::AgentNotApproved => {
+                McpTriggerError::AgentUnavailable
+            }
+            _ => McpTriggerError::Internal,
+        };
+        rootcause::report!(mcp_err)
+    })?;
+
+    if let Some(work) = trigger_result.pending_protection_work {
+        crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(&state), *work);
+    }
+
+    let status = match trigger_result.initial_status {
+        uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
+            TriggerUpdateStatus::Pending
+        }
+        uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => {
+            TriggerUpdateStatus::Failed
+        }
+        _ => TriggerUpdateStatus::Queued,
+    };
+
+    let audit_outcome = if matches!(status, TriggerUpdateStatus::Failed) {
+        uptrakit_audit_log::AuditOutcome::Failed
+    } else {
+        uptrakit_audit_log::AuditOutcome::Success
+    };
+
+    crate::routes::software_items::emit_software_update_audit(
+        &state,
+        ctx.tenant_id,
+        &audit_user,
+        Some(audit_token),
+        software_item_id,
+        audit_outcome,
+        serde_json::json!({
+            "host_id": host_id,
+            "to_version": to_version,
+            "interactive": false,
+            "update_history_id": trigger_result.update_history_id,
+            "dispatch_status": status.to_string(),
+        }),
+    );
+
+    Ok((trigger_result.update_history_id, status))
 }
 
 #[cfg(test)]
