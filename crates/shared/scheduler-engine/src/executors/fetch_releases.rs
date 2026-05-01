@@ -728,6 +728,7 @@ mod tests {
             featured: Set(false),
             icon_url: Set(None),
             last_checked_at: Set(None),
+            awaiting_restart_timeout: sea_orm::Set(None),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
