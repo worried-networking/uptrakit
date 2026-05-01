@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, HostCompatibility, HostRequirements,
-    HostRuntime, PluginFamily, declare_plugin,
+    HostRuntime, PluginFamily, ServiceMetadataProvider, declare_plugin,
 };
 
 use crate::config::UptrakitSelfUpdateConfig;
@@ -17,20 +17,24 @@ use crate::config::UptrakitSelfUpdateConfig;
 /// the operator explicitly opts in by setting `enabled = true`.
 pub struct UptrakitSelfUpdatePlugin {
     config: UptrakitSelfUpdateConfig,
-    _runtime: Arc<dyn HostRuntime>,
+    // Populated at construction time; used in Task 17 for discovery.
+    #[allow(dead_code)]
+    metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>,
 }
 
 impl UptrakitSelfUpdatePlugin {
     /// Create a new instance.
     ///
-    /// Construction is infallible — no I/O is performed here.
+    /// Construction never fails — no I/O is performed here. The `Result` return type
+    /// satisfies the `declare_plugin!` macro contract; the `Err` variant is never produced.
     pub fn new(
         config: UptrakitSelfUpdateConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
+        let metadata_provider = runtime.metadata_provider();
         Ok(Self {
             config,
-            _runtime: runtime,
+            metadata_provider,
         })
     }
 }
