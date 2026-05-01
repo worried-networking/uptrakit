@@ -18,6 +18,8 @@ pub mod form_schema;
 pub mod helpers;
 pub mod host_requirements;
 pub mod host_runtime;
+pub mod service_metadata;
+pub use service_metadata::{DeploymentTopology, ServiceMetadata, ServiceMetadataProvider};
 pub mod macros;
 pub mod plugin_config;
 pub mod plugin_ops;
