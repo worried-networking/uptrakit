@@ -1,3 +1,7 @@
 pub mod dispatcher;
-pub mod events;
-pub mod message_builder;
+
+pub mod events {
+    pub use uptrakit_notification_delivery::{
+        ActionParams, NotificationEvent, NotificationEventDetails,
+    };
+}

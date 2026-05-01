@@ -7345,6 +7345,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-notification-delivery"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uptrakit-notification-plugin-core",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "uptrakit-web-api-types",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-notification-plugin-core"
 version = "0.0.1"
 dependencies = [
@@ -8168,6 +8185,7 @@ dependencies = [
  "uptrakit-github-client",
  "uptrakit-global-github-provider",
  "uptrakit-nats",
+ "uptrakit-notification-delivery",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
