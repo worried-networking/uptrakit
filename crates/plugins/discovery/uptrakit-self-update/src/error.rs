@@ -15,6 +15,9 @@ pub enum SelfUpdateError {
 
     #[error("pid file not configured for UnixBinary topology with reuseport")]
     NoPidFile,
+
+    #[error("deployment topology not supported for self-update")]
+    UnsupportedTopology,
 }
 
 /// Result type alias for self-update plugin operations.
