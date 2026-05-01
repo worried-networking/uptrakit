@@ -24,6 +24,26 @@ pub enum DeploymentTopology {
     },
 }
 
+impl ServiceMetadata {
+    pub fn new(
+        service_name: String,
+        binary_path: Option<PathBuf>,
+        version: String,
+        deployment_topology: DeploymentTopology,
+        reuseport_configured: bool,
+        pid_file: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            service_name,
+            binary_path,
+            version,
+            deployment_topology,
+            reuseport_configured,
+            pid_file,
+        }
+    }
+}
+
 /// Implemented by the controller-standalone; injected into the self-update plugin at construction.
 pub trait ServiceMetadataProvider: Send + Sync {
     fn get_metadata(&self) -> ServiceMetadata;
