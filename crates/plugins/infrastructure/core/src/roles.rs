@@ -137,12 +137,24 @@ pub trait PackageIndexer: PluginMeta {
 }
 
 /// Result returned by [`UpdateExecutor::execute_update`].
+#[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct ExecuteUpdateResult {
     pub output: String,
     /// When `true`, the controller will transition this update to `AwaitingRestart`
     /// instead of `Completed`. The plugin decides this based on what actually happened
     /// (e.g., the shell plugin's `resumable: true` config, or APT detecting a reboot is needed).
     pub resumable: bool,
+}
+
+impl ExecuteUpdateResult {
+    /// Construct an update result.
+    pub fn new(output: impl Into<String>, resumable: bool) -> Self {
+        Self {
+            output: output.into(),
+            resumable,
+        }
+    }
 }
 
 /// Execute software updates.
@@ -179,6 +191,8 @@ pub trait UpdateExecutor: PluginMeta {
                 Ok(result) => results.push(BatchUpdateResult {
                     package_identifier: item.package_identifier.clone(),
                     success: true,
+                    // resumable is intentionally not propagated; batch callers handle
+                    // resumability at the batch level via BatchUpdateResult.
                     output: result.output,
                 }),
                 Err(e) => results.push(BatchUpdateResult {
