@@ -335,3 +335,50 @@ describe('Account Tab — Change Email Modal', () => {
 		expect(screen.getByRole('button', { name: 'Cancel email change' })).toBeInTheDocument();
 	});
 });
+
+describe('Account Tab — Security Card', () => {
+	beforeEach(() => {
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('shows masked password row and "Change" button for password auth', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.getByText('••••••••')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument();
+	});
+
+	it('shows SSO Callout for OIDC auth', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('oidc');
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.getByText(/Your account uses single sign-on/)).toBeInTheDocument();
+	});
+
+	it('change password modal opens when "Change" is clicked', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Change Password' })).toBeInTheDocument());
+	});
+
+	it('change password modal closes when Cancel is clicked', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Change Password' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('heading', { name: 'Change Password' })).not.toBeInTheDocument());
+	});
+});
