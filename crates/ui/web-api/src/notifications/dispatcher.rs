@@ -87,29 +87,39 @@ pub(crate) async fn build_settings_bag(
     tenant_id: Uuid,
 ) -> serde_json::Value {
     let tenant_smtp = typed_smtp_settings_or_empty(
-        uptrakit_web_api_auth::settings_store::load_typed_settings_by_prefix(
-            db,
-            tenant_id,
-            SMTP_PREFIX,
-        )
-        .await,
+        {
+            let raw = uptrakit_shared_db::raw_settings::load_settings_by_prefix(
+                db,
+                tenant_id,
+                SMTP_PREFIX,
+            )
+            .await;
+            raw.and_then(|r| {
+                uptrakit_shared_db::raw_settings::decode_prefixed_settings(SMTP_PREFIX, &r)
+            })
+        },
         "tenant",
         Some(tenant_id),
         SMTP_PASSWORD_AAD,
     );
 
     let global_smtp = typed_smtp_settings_or_empty(
-        uptrakit_web_api_auth::settings_store::load_typed_global_settings_by_prefix(
-            db,
-            GLOBAL_SMTP_PREFIX,
-        )
-        .await,
+        {
+            let raw = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
+                db,
+                GLOBAL_SMTP_PREFIX,
+            )
+            .await;
+            raw.and_then(|r| {
+                uptrakit_shared_db::raw_settings::decode_prefixed_settings(GLOBAL_SMTP_PREFIX, &r)
+            })
+        },
         "global",
         None,
         GLOBAL_SMTP_PASSWORD_AAD,
     );
 
-    let global_telegram = uptrakit_web_api_auth::settings_store::load_global_settings_by_prefix(
+    let global_telegram = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
         db,
         GLOBAL_TELEGRAM_PREFIX,
     )
@@ -127,7 +137,7 @@ pub(crate) async fn build_settings_bag(
 }
 
 fn typed_smtp_settings_or_empty(
-    result: uptrakit_web_api_auth::auth::Result<EmailSmtpSettings>,
+    result: uptrakit_shared_db::raw_settings::Result<EmailSmtpSettings>,
     scope: &'static str,
     tenant_id: Option<Uuid>,
     password_aad: &str,
@@ -470,7 +480,7 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         let settings = typed_smtp_settings_or_empty(
             Err(rootcause::report!(
-                uptrakit_web_api_auth::auth::AuthError::Internal("boom".to_string())
+                uptrakit_shared_db::raw_settings::RawSettingsError::Decode("boom".into())
             )),
             "tenant",
             Some(tenant_id),
