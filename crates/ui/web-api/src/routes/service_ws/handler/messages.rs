@@ -982,6 +982,31 @@ pub(super) async fn handle_version_check_results(
 
         apply_version_update_to_db(state.db(), result, matching_ids, now).await;
 
+        // AwaitingRestart correlation: if any record is waiting for a version
+        // confirmation on this host_software_item, evaluate the transition.
+        if let Some(hsi_id) = result.host_software_item_id {
+            let terminal = crate::queries::update_batches::apply_awaiting_restart_version_check(
+                state.db(),
+                hsi_id,
+                result.installed_version.clone(),
+                result.not_ready,
+                result.error.clone(),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    error = %e,
+                    host_software_item_id = %hsi_id,
+                    "apply_awaiting_restart_version_check failed"
+                );
+                None
+            });
+
+            if terminal.is_some() {
+                trigger_host_progression_after_awaiting_restart(state, hsi_id).await;
+            }
+        }
+
         if let Some(tenant_id) = svc_tenant_id {
             dispatch_version_update_notification(state, tenant_id, result, matching_host_ids).await;
         }
@@ -1019,6 +1044,82 @@ pub(super) async fn handle_version_check_results(
     }
 
     ProcessorResponse::cont()
+}
+
+/// After an `AwaitingRestart` record transitions to `Completed` or `Failed`,
+/// promote the next queued update for the same host (batch or standalone).
+async fn trigger_host_progression_after_awaiting_restart(
+    state: &Arc<AppState>,
+    hsi_id: uuid::Uuid,
+) {
+    use sea_orm::QueryOrder;
+    use uptrakit_shared_db::entity::update_history;
+
+    // Load the record that was just transitioned out of AwaitingRestart.
+    let record = match update_history::Entity::find()
+        .filter(update_history::Column::HostSoftwareItemId.eq(hsi_id))
+        .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Completed,
+            update_history::UpdateStatus::Failed,
+        ]))
+        .order_by_desc(update_history::Column::CompletedAt)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            tracing::warn!(
+                host_software_item_id = %hsi_id,
+                "no Completed/Failed record found after AwaitingRestart transition"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                host_software_item_id = %hsi_id,
+                "failed to load update_history for post-AwaitingRestart dispatch"
+            );
+            return;
+        }
+    };
+
+    let dispatch = crate::queries::update_dispatch::DispatchContext {
+        notifier: &state.notification.notification_service,
+        protection: state.controller_update_protection(),
+    };
+
+    if let Some(batch_id) = record.batch_id {
+        if let Err(e) = crate::queries::update_batches::dispatch_next_in_batch(
+            state.db(),
+            dispatch,
+            batch_id,
+            record.host_id,
+            record.tenant_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                error = %e,
+                %batch_id,
+                host_id = %record.host_id,
+                "post-AwaitingRestart batch dispatch failed"
+            );
+        }
+    } else if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
+        state.db(),
+        dispatch,
+        record.host_id,
+        record.tenant_id,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            host_id = %record.host_id,
+            "post-AwaitingRestart standalone dispatch failed"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
