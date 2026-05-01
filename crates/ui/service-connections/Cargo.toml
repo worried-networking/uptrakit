@@ -1,0 +1,25 @@
+[package]
+name = "uptrakit-service-connections"
+description = "Uptrakit service connection registry"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+futures-util  = { workspace = true, features = ["alloc"] }
+parking_lot   = { workspace = true }
+rand          = { workspace = true }
+time          = { workspace = true }
+tokio         = { workspace = true, features = ["rt", "sync", "time"] }
+tokio-util    = { workspace = true }
+tracing       = { workspace = true }
+uptrakit-wire = { workspace = true }
+uuid          = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "test-util"] }

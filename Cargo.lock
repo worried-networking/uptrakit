@@ -8004,6 +8004,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-service-connections"
+version = "0.0.1"
+dependencies = [
+ "futures-util",
+ "parking_lot",
+ "rand 0.9.4",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uptrakit-wire",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-service-platform"
 version = "0.0.1"
 dependencies = [
@@ -8187,6 +8202,7 @@ dependencies = [
  "uptrakit-nats",
  "uptrakit-notification-delivery",
  "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-service-connections",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
