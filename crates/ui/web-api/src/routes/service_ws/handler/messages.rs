@@ -782,21 +782,20 @@ async fn dispatch_version_update_notification(
             .flatten()
             .map(|h| h.hostname.clone());
 
-        state
-            .notification
-            .notification_dispatcher
-            .dispatch(NotificationEvent {
+        {
+            let mut event = NotificationEvent::new(
                 tenant_id,
-                host_id: Some(host_id),
-                host_name,
-                software_item_id: Some(software_item_id),
-                software_item_name: sw_name.clone(),
-                plugin_type: None,
-                details: NotificationEventDetails::UpdateAvailable {
+                NotificationEventDetails::UpdateAvailable {
                     installed_version: result.installed_version.clone(),
                     latest_version: latest_version.clone(),
                 },
-            });
+            );
+            event.host_id = Some(host_id);
+            event.host_name = host_name;
+            event.software_item_id = Some(software_item_id);
+            event.software_item_name = sw_name.clone();
+            state.notification.notification_dispatcher.dispatch(event);
+        }
     }
 }
 
@@ -1247,20 +1246,17 @@ async fn process_discovery_page_for_host(
                     .flatten()
                     .map(|h| h.hostname.clone());
 
-                state
-                    .notification
-                    .notification_dispatcher
-                    .dispatch(NotificationEvent {
-                        tenant_id: svc.tenant_id,
-                        host_id: Some(host_id),
-                        host_name,
-                        software_item_id: None,
-                        software_item_name: None,
-                        plugin_type: None,
-                        details: NotificationEventDetails::NewSoftwareDiscovered {
+                {
+                    let mut event = NotificationEvent::new(
+                        svc.tenant_id,
+                        NotificationEventDetails::NewSoftwareDiscovered {
                             discovered_count: total_discovered,
                         },
-                    });
+                    );
+                    event.host_id = Some(host_id);
+                    event.host_name = host_name;
+                    state.notification.notification_dispatcher.dispatch(event);
+                }
             }
         }
         PageOutcome::Pending => {

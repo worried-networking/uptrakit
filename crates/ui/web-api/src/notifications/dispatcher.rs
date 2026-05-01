@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_registry::{EmailSmtpSettings, PluginOps};
 
-use super::events::NotificationEvent;
+use uptrakit_notification_delivery::NotificationEvent;
 
 /// Bounded capacity for the notification dispatcher channel.
 ///
@@ -377,13 +377,23 @@ async fn dispatch_loop(
             let action_token = event.action_params().map(|_| Uuid::now_v7());
 
             // Build the channel-agnostic message
-            let message = super::message_builder::build_delivery_message(
+            let message = match uptrakit_notification_delivery::build_delivery_message(
                 &event,
                 action_token,
                 &callback_base_url,
                 &channel_model.channel_type,
                 channel_model.id,
-            );
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        channel_id = %channel_model.id,
+                        "failed to build delivery message"
+                    );
+                    continue;
+                }
+            };
 
             // Serialize event payload for the log
             let event_payload = serde_json::to_value(&event.details).unwrap_or_default();
@@ -419,9 +429,13 @@ async fn dispatch_loop(
             let db_clone = db.clone();
             let channel_transport = channel_transport.clone();
             tokio::spawn(async move {
-                match channel_transport
-                    .deliver(&config_json, &settings_bag, &message)
-                    .await
+                match uptrakit_notification_delivery::deliver(
+                    channel_transport,
+                    &config_json,
+                    &settings_bag,
+                    &message,
+                )
+                .await
                 {
                     Ok(()) => {
                         let now = OffsetDateTime::now_utc();

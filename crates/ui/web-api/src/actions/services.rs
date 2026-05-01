@@ -28,18 +28,13 @@ pub(crate) async fn approve(
         .await;
 
     let service_label = resp.service_label.clone();
-    ctx.notification_dispatcher.dispatch(NotificationEvent {
-        tenant_id: tenant_db.tenant_id,
-        host_id: None,
-        host_name: None,
-        software_item_id: None,
-        software_item_name: None,
-        plugin_type: None,
-        details: NotificationEventDetails::NewServiceEnrolled {
+    ctx.notification_dispatcher.dispatch(NotificationEvent::new(
+        tenant_db.tenant_id,
+        NotificationEventDetails::NewServiceEnrolled {
             service_id,
             service_label,
         },
-    });
+    ));
 
     ctx.event_broadcaster
         .send(

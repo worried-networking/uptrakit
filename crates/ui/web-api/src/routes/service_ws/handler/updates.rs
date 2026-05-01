@@ -1347,18 +1347,14 @@ async fn dispatch_update_notification(
             },
         };
 
-        state
-            .notification
-            .notification_dispatcher
-            .dispatch(NotificationEvent {
-                tenant_id: svc.tenant_id,
-                host_id: Some(record.host_id),
-                host_name,
-                software_item_id: Some(record.software_item_id),
-                software_item_name: sw_name,
-                plugin_type: None,
-                details,
-            });
+        {
+            let mut event = NotificationEvent::new(svc.tenant_id, details);
+            event.host_id = Some(record.host_id);
+            event.host_name = host_name;
+            event.software_item_id = Some(record.software_item_id);
+            event.software_item_name = sw_name;
+            state.notification.notification_dispatcher.dispatch(event);
+        }
     }
 }
 
@@ -1888,15 +1884,7 @@ pub(super) async fn handle_batch_completion(
     state
         .notification
         .notification_dispatcher
-        .dispatch(NotificationEvent {
-            tenant_id: completion.tenant_id,
-            host_id: None,
-            host_name: None,
-            software_item_id: None,
-            software_item_name: None,
-            plugin_type: None,
-            details,
-        });
+        .dispatch(NotificationEvent::new(completion.tenant_id, details));
 }
 
 /// Promote the next Queued update for the given host to Pending during reconnect
@@ -2496,20 +2484,20 @@ pub(crate) async fn handle_stdin_attention(
         .flatten()
         .map(|s| s.name);
 
-        state.notification.notification_dispatcher.dispatch(
-            crate::notifications::events::NotificationEvent {
-                tenant_id: latest_record.tenant_id,
-                host_id: Some(latest_record.host_id),
-                host_name,
-                software_item_id: Some(latest_record.software_item_id),
-                software_item_name: sw_name,
-                plugin_type: None,
-                details: crate::notifications::events::NotificationEventDetails::StdinAttention {
+        {
+            let mut event = crate::notifications::events::NotificationEvent::new(
+                latest_record.tenant_id,
+                crate::notifications::events::NotificationEventDetails::StdinAttention {
                     update_history_id: payload.update_history_id,
                     hint: payload.hint.clone(),
                 },
-            },
-        );
+            );
+            event.host_id = Some(latest_record.host_id);
+            event.host_name = host_name;
+            event.software_item_id = Some(latest_record.software_item_id);
+            event.software_item_name = sw_name;
+            state.notification.notification_dispatcher.dispatch(event);
+        }
     }
 
     emit_stdin_attention_audit(
