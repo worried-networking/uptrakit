@@ -115,11 +115,10 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
-pub use roles::ExecuteUpdateResult;
 pub use roles::{
     ControllerUpdateProtection, Discoverer, DockerItemHostRequest, DockerSurfaceStore,
     DockerSwitchTagRequest, EmailSmtpSettings, EmailSmtpSettingsPatch, EmailSmtpSettingsStore,
-    LifecycleHook, NotificationActionTokenRecord, NotificationChannelListItem,
+    ExecuteUpdateResult, LifecycleHook, NotificationActionTokenRecord, NotificationChannelListItem,
     NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
     NotificationTransport, PackageIndexer, PluginMeta, ProxmoxApproveMatchRequest,
     ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
