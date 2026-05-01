@@ -131,6 +131,7 @@ uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", version = "0.0.
 uptrakit-audit-log = { path = "crates/shared/audit-log", version = "0.0.1", default-features = false }
 uptrakit-build-info = { path = "crates/shared/build-info", version = "0.0.1" }
 uptrakit-cli = { path = "crates/ui/cli", version = "0.0.1" }
+uptrakit-mcp = { path = "crates/ui/mcp", version = "0.0.1" }
 uptrakit-plugin-releases-docker = { path = "crates/plugins/releases/docker", version = "0.0.1", default-features = false }
 uptrakit-plugin-releases-github = { path = "crates/plugins/releases/github", version = "0.0.1" }
 uptrakit-plugin-releases-gitlab = { path = "crates/plugins/releases/gitlab", version = "0.0.1" }

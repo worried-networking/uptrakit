@@ -1,0 +1,23 @@
+[package]
+name = "uptrakit-mcp"
+description = "MCP server for uptrakit — transport, auth layer, and tools"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+uptrakit-web-api       = { workspace = true }
+uptrakit-web-api-types = { workspace = true }
+uptrakit-shared-db     = { workspace = true }
+rmcp                   = { workspace = true }
+vt100                  = { workspace = true }
+schemars               = { workspace = true }
+sea-orm                = { workspace = true }
+axum                   = { workspace = true }
+tower                  = { workspace = true }
+uuid                   = { workspace = true }
+serde                  = { workspace = true }
+serde_json             = { workspace = true }
