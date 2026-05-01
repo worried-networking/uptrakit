@@ -151,6 +151,7 @@ uptrakit-plugin-hook-systemd = { path = "crates/plugins/hooks/systemd", version 
 uptrakit-plugin-hook-shell = { path = "crates/plugins/hooks/shell", version = "0.0.1" }
 uptrakit-plugin-enhancement-dashboard-icons = { path = "crates/plugins/enhancements/dashboard-icons", version = "0.0.1" }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts", version = "0.0.1" }
+uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discovery/uptrakit-self-update", version = "0.0.1" }
 # External deps used by a single crate — declared here so all versions are pinned in one place
 dirs = "6"
 rpassword = "7"
