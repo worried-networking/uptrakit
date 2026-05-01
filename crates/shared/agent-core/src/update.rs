@@ -5,7 +5,7 @@
 //! 2. Detect current version (`from_version`)
 //! 3. Run pre-update lifecycle hook plugins (ordered by assignment)
 //! 4. Execute actual update (dispatched through Plugin Registry)
-//! 5. Run post-update lifecycle hook plugins (always, even on failure)
+//! 5. Run post-update lifecycle hook plugins (inline for non-resumable; spawned fire-and-forget for resumable)
 //! 6. Detect to_version post-update
 //! 7. Return `UpdateExecutionResult` with final status and accumulated output
 
