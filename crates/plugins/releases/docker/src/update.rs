@@ -207,6 +207,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
             }
         }
 
-        Ok(ExecuteUpdateResult::new(output, false))
+        Ok(ExecuteUpdateResult::new(output, self.config.resumable))
     }
 }

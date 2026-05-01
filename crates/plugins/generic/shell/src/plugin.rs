@@ -126,7 +126,10 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ShellPlugin {
                 )))
             })?;
 
-        Ok(ExecuteUpdateResult::new(cmd_output.output, false))
+        Ok(ExecuteUpdateResult::new(
+            cmd_output.output,
+            self.config.resumable,
+        ))
     }
 }
 
@@ -150,6 +153,7 @@ mod tests {
                 version_command: version_command.map(String::from),
                 update_command: update_command.map(String::from),
                 prefer_interactive: false,
+                resumable: false,
             },
             test_runtime(),
         )

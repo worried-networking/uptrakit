@@ -48,6 +48,19 @@ pub struct ShellConfig {
     /// interactive terminal — typically those that may prompt the user for input.
     #[serde(default)]
     pub prefer_interactive: bool,
+
+    /// Indicate that a successful update requires a host restart to take effect.
+    ///
+    /// When `true`, the controller transitions the software item to
+    /// `AwaitingRestart` after a successful update instead of marking it
+    /// `UpToDate` immediately. The item moves to `UpToDate` once the agent
+    /// reports a version that matches the target (i.e. after the host has
+    /// restarted and the update has been applied).
+    ///
+    /// Defaults to `false`. Set to `true` for update scripts that install
+    /// packages requiring a reboot or service restart to become active.
+    #[serde(default)]
+    pub resumable: bool,
 }
 
 impl PluginConfig for ShellConfig {
@@ -96,6 +109,9 @@ impl PluginConfig for ShellConfig {
             FormFieldDescriptor::new("prefer_interactive", "Interactive Mode")
                 .with_type(FormFieldType::Toggle)
                 .with_help_text("Allocate a PTY for the update command. Enable for scripts that read from /dev/tty (e.g. interactive prompts)."),
+            FormFieldDescriptor::new("resumable", "Resumable (Restart Required)")
+                .with_type(FormFieldType::Toggle)
+                .with_help_text("Mark the update as requiring a host restart to take effect. The item stays in AwaitingRestart until the agent reports the expected version after reboot."),
         ]
     }
 }
@@ -117,6 +133,7 @@ mod tests {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
             prefer_interactive: false,
+            resumable: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -127,6 +144,7 @@ mod tests {
             version_command: None,
             update_command: Some("apt-get install -y myapp".to_string()),
             prefer_interactive: false,
+            resumable: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -137,6 +155,7 @@ mod tests {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("apt-get install -y myapp".to_string()),
             prefer_interactive: false,
+            resumable: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -147,6 +166,7 @@ mod tests {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
             prefer_interactive: false,
+            resumable: false,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("update_command"));
@@ -159,6 +179,7 @@ mod tests {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
             prefer_interactive: true,
+            resumable: false,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
@@ -178,12 +199,14 @@ mod tests {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
             prefer_interactive: false,
+            resumable: false,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.version_command, config.version_command);
         assert_eq!(deserialized.update_command, config.update_command);
         assert_eq!(deserialized.prefer_interactive, config.prefer_interactive);
+        assert_eq!(deserialized.resumable, config.resumable);
     }
 
     #[test]
@@ -193,6 +216,7 @@ mod tests {
             version_command: Some(cmd),
             update_command: None,
             prefer_interactive: false,
+            resumable: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -204,6 +228,7 @@ mod tests {
             version_command: Some(cmd),
             update_command: None,
             prefer_interactive: false,
+            resumable: false,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("version_command"));
@@ -217,6 +242,7 @@ mod tests {
             version_command: Some("echo ok".to_string()),
             update_command: Some(cmd),
             prefer_interactive: false,
+            resumable: false,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("update_command"));
@@ -228,10 +254,25 @@ mod tests {
             version_command: Some("cmd".to_string()),
             update_command: Some("update".to_string()),
             prefer_interactive: false,
+            resumable: false,
         };
         let masked = config.clone().with_secrets_masked();
         assert_eq!(masked.version_command, config.version_command);
         assert_eq!(masked.update_command, config.update_command);
         assert_eq!(masked.prefer_interactive, config.prefer_interactive);
+        assert_eq!(masked.resumable, config.resumable);
+    }
+
+    #[test]
+    fn test_shell_plugin_resumable_config_defaults_false() {
+        let config: ShellConfig = serde_json::from_str(r#"{"update_command":"echo hi"}"#).unwrap();
+        assert!(!config.resumable);
+    }
+
+    #[test]
+    fn test_shell_plugin_resumable_config_true() {
+        let config: ShellConfig =
+            serde_json::from_str(r#"{"update_command":"echo hi","resumable":true}"#).unwrap();
+        assert!(config.resumable);
     }
 }
