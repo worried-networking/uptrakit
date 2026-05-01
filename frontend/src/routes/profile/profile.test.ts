@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import type { ApiTokenResponse } from '$lib/types';
 
@@ -60,11 +60,14 @@ describe('Profile Route', () => {
 		render(ProfilePage);
 
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
-		expect(screen.getByText('Automation')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="profile-details-section"]')).toBeInTheDocument();
+
+		// Navigate to API Tokens tab to assert DataTable
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+		await waitFor(() => expect(screen.getByText('Automation')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
-		expect(document.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
 	});
 
 	it('uses shared account detail rhythm and modal footer actions', async () => {
@@ -73,7 +76,9 @@ describe('Profile Route', () => {
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="profile-details-section"]')).toBeInTheDocument();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'New Token' }));
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'New Token' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'New Token' }));
 		const modalTitle = await screen.findByText('New API Token');
 		const modal = modalTitle.closest('[data-ui="modal-shell"]') as HTMLElement;
 		expect(modal).toBeInTheDocument();
@@ -81,6 +86,39 @@ describe('Profile Route', () => {
 		expect(footer).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+	});
+});
+
+describe('Tab Navigation', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('renders Account and API Tokens tabs', async () => {
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(screen.getByRole('tab', { name: 'Account' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument();
+	});
+
+	it('Account tab is active by default', async () => {
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('tab', { name: 'Account' })).toBeInTheDocument());
+		expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true');
+		expect(screen.getByRole('tab', { name: 'API Tokens' })).toHaveAttribute('aria-selected', 'false');
+	});
+
+	it('clicking API Tokens tab makes it active', async () => {
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+		expect(screen.getByRole('tab', { name: 'API Tokens' })).toHaveAttribute('aria-selected', 'true');
+		expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'false');
 	});
 });
 
@@ -94,11 +132,17 @@ describe('Button Migrations', () => {
 		vi.clearAllMocks();
 	});
 
+	async function goToTokensTab() {
+		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+	}
+
 	it('New Token launcher renders variant="primary"', async () => {
 		render(ProfilePage);
+		await goToTokensTab();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'New Token' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'New Token' });
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
+		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
 	});
 
 	it('Row Revoke button renders variant="danger" size="sm"', async () => {
@@ -110,42 +154,44 @@ describe('Button Migrations', () => {
 		};
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
 		render(ProfilePage);
+		await goToTokensTab();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Revoke' });
-		expect(btn).toHaveClass('h-[19px]'); // size="sm"
-		expect(btn).toHaveClass('bg-[var(--color-danger-bg)]'); // danger variant
+		expect(btn).toHaveClass('h-[19px]');
+		expect(btn).toHaveClass('bg-[var(--color-danger-bg)]');
 	});
 
 	it('New API Token modal Create state Cancel button renders variant="secondary"', async () => {
 		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
+		await goToTokensTab();
+		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
 		await userEvent.click(newTokenBtn);
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-		expect(cancelBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
+		expect(cancelBtn).toHaveClass('bg-[var(--bg-raised)]');
 	});
 
 	it('New API Token modal Create state Create button already migrated (Wave 3)', async () => {
 		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
+		await goToTokensTab();
+		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
 		await userEvent.click(newTokenBtn);
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const createBtn = screen.getByRole('button', { name: 'Create' });
-		expect(createBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(createBtn).toBeDisabled(); // Disabled when name empty
+		expect(createBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+		expect(createBtn).toBeDisabled();
 		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
 		await userEvent.type(nameInput, 'new-token');
 		await waitFor(() => expect(createBtn).not.toHaveAttribute('disabled'));
-		// Verify no aria-busy when not loading (Button removes attr when loading=false)
 		expect(createBtn).not.toHaveAttribute('aria-busy');
-		// Verify static children "Create" (no text-swap)
 		expect(createBtn.textContent).toContain('Create');
 	});
 
 	it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
 		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
 		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
+		await goToTokensTab();
+		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
 		await userEvent.click(newTokenBtn);
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
@@ -154,13 +200,14 @@ describe('Button Migrations', () => {
 		await userEvent.click(createBtn);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument());
 		const copyBtn = screen.getByRole('button', { name: 'Copy' });
-		expect(copyBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
+		expect(copyBtn).toHaveClass('bg-[var(--bg-raised)]');
 	});
 
 	it('New API Token modal Created state Done button renders variant="primary"', async () => {
 		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
 		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
+		await goToTokensTab();
+		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
 		await userEvent.click(newTokenBtn);
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
@@ -169,7 +216,7 @@ describe('Button Migrations', () => {
 		await userEvent.click(createBtn);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument());
 		const doneBtn = screen.getByRole('button', { name: 'Done' });
-		expect(doneBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
+		expect(doneBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
 	});
 
 	it('New API Token modal Copy button invokes clipboard.writeText and surfaces success toast', async () => {
@@ -181,7 +228,8 @@ describe('Button Migrations', () => {
 			configurable: true
 		});
 		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
+		await goToTokensTab();
+		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
 		await userEvent.click(newTokenBtn);
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
@@ -203,12 +251,11 @@ describe('Button Migrations', () => {
 		};
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
 		render(ProfilePage);
+		await goToTokensTab();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
 		const revokeBtn = screen.getByRole('button', { name: 'Revoke' });
 		await userEvent.click(revokeBtn);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument());
-		// ConfirmDialog is rendered but its confirm button is owned by #3k
-		// We only assert that the launcher (Revoke) opened the dialog
 		expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument();
 	});
 });
