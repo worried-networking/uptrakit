@@ -57,15 +57,18 @@ name = "uptrakit-service-connections"
 version = "0.0.1"
 # workspace fields as usual
 
+[lints]
+workspace = true
+
 [dependencies]
-parking_lot  = { workspace = true }
-rand         = { workspace = true }
-time         = { workspace = true }
-tokio        = { workspace = true }
-tokio-util   = { workspace = true }
-tracing      = { workspace = true }
+parking_lot   = { workspace = true }
+rand          = { workspace = true }
+time          = { workspace = true }
+tokio         = { workspace = true }
+tokio-util    = { workspace = true }
+tracing       = { workspace = true }
 uptrakit-wire = { workspace = true }
-uuid         = { workspace = true }
+uuid          = { workspace = true }
 ```
 
 Move `crates/ui/web-api/src/service_connections.rs` → `crates/ui/service-connections/src/lib.rs`.
@@ -110,11 +113,10 @@ surface-proxy crate.
 All five auth functions are thin wrappers that delegate to
 `uptrakit_shared_db::raw_settings` and re-wrap errors into `AuthError::Internal`.
 Replace each call site in `settings_store.rs` with the direct `raw_settings` call.
-Update error handling: `RawSettingsError` must be converted to the trait's expected
-error type at each call site. The trait implementations in `settings_store.rs`
-return `PluginError` (from `uptrakit-plugin-infrastructure-registry`); map with
-`PluginError::Internal(e.to_string())` or the pattern already used by that trait.
-The `AuthError` wrapper disappears entirely.
+Update error handling: use the `plugin_internal_error` helper already defined at the
+top of `controller_local.rs` (`report!(PluginError::PluginInternal(error.to_string()))`)
+to wrap `RawSettingsError` values at each call site. The `AuthError` wrapper
+disappears entirely.
 
 This is the same pattern established by the notification-delivery pre-condition
 (commit 1 of that extraction).
@@ -136,6 +138,12 @@ that path is broken — the new crate cannot call back into `web-api`.
 `uptrakit_plugin_infrastructure_registry` (which provides `EmailSmtpSettings`),
 so the move requires no new deps for that crate.
 
+**Tradeoff note:** Moving SMTP helpers to `web-api-queries` makes that crate marginally
+wider for all its consumers. The alternative — a dedicated `uptrakit-notification-settings`
+micro-crate — would be cleaner but adds scope. Given that `uptrakit-surface-proxy`
+transitively pulls `sea-orm` anyway (so the build-time saving from the extraction is
+already small), the `web-api-queries` placement is the right call for simplicity.
+
 **New module `crates/ui/web-api-queries/src/notification_settings.rs`:**
 
 Move from `dispatcher.rs` into this module:
@@ -151,13 +159,29 @@ Move from `dispatcher.rs` into this module:
 
 Add `pub mod notification_settings;` to `web-api-queries/src/lib.rs`.
 
-Update `dispatcher.rs`: replace the `build_settings_bag` definition with an import:
+Update `dispatcher.rs`: replace the `build_settings_bag` definition with a
+`pub(crate)` re-export so existing callers in `routes/` continue to resolve
+the `crate::notifications::dispatcher::build_settings_bag` path:
 
 ```rust
 pub(crate) use uptrakit_web_api_queries::notification_settings::build_settings_bag;
 ```
 
-The `build_settings_bag` call in `dispatch_loop` is unchanged.
+Three additional callers exist beyond `dispatcher.rs` itself:
+
+- `surface_proxy.rs:1556` — this file moves to the new crate in Commit 4, where it
+  will call `uptrakit_web_api_queries::notification_settings::build_settings_bag`
+  directly. Update the import in that commit.
+- `routes/users.rs:1234` — update to
+  `uptrakit_web_api_queries::notification_settings::build_settings_bag` in Commit 5
+  when routes are being touched.
+- `routes/notifications.rs:625` — same, update in Commit 5.
+
+The `pub(crate) use` keeps the two `routes/` callers compiling through Commits 3
+and 4 without requiring all call sites to be updated in a single commit. The
+`surface_proxy.rs:1556` caller is updated when the file moves in Commit 4 (it calls
+`uptrakit_web_api_queries::notification_settings::build_settings_bag` directly from
+the new crate, no re-export needed).
 
 Update `controller_local/notifications.rs` (dead code): replace
 `crate::notifications::dispatcher::build_settings_bag` with
@@ -180,33 +204,40 @@ compiles standalone; `web-api` not yet updated.
 name = "uptrakit-surface-proxy"
 version = "0.0.1"
 
+[lints]
+workspace = true
+
 [features]
 default = []
-db-all      = ["db-sqlite", "db-postgres"]
-db-sqlite   = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
+db-all                 = ["db-sqlite", "db-postgres"]
+db-sqlite              = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
+db-postgres            = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
+notifications-email    = ["uptrakit-plugin-infrastructure-registry/notifications-email"]
+notifications-telegram = ["uptrakit-plugin-infrastructure-registry/notifications-telegram"]
+notifications-all      = ["notifications-email", "notifications-telegram"]
 
 [dependencies]
-async-trait           = { workspace = true }
-parking_lot           = { workspace = true }
-rand                  = { workspace = true }
-rootcause             = { workspace = true }
-sea-orm               = { workspace = true }
-serde_json            = { workspace = true }
-time                  = { workspace = true }
-tokio                 = { workspace = true }
-tracing               = { workspace = true }
-uuid                  = { workspace = true }
-uptrakit-audit-log                     = { workspace = true, features = ["db"] }
-uptrakit-notification-delivery         = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
-uptrakit-service-connections           = { workspace = true }
-uptrakit-shared-db                     = { workspace = true }
-uptrakit-shared-types                  = { workspace = true }
-uptrakit-web-api-queries               = { workspace = true }
-uptrakit-web-api-types                 = { workspace = true }
-uptrakit-wire                          = { workspace = true }
-uptrakit-crypto                        = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+rand        = { workspace = true }
+rootcause   = { workspace = true }
+sea-orm     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+time        = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+uuid        = { workspace = true }
+uptrakit-audit-log                      = { workspace = true, features = ["db"] }
+uptrakit-crypto                         = { workspace = true, features = ["sea-orm"] }
+uptrakit-notification-delivery          = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
+uptrakit-service-connections            = { workspace = true }
+uptrakit-shared-db                      = { workspace = true }
+uptrakit-shared-types                   = { workspace = true }
+uptrakit-web-api-queries                = { workspace = true }
+uptrakit-web-api-types                  = { workspace = true }
+uptrakit-wire                           = { workspace = true }
 ```
 
 `uptrakit-notification-delivery` is included now (per ADR-0001 sequencing note)
@@ -229,10 +260,44 @@ delivery abstraction without a new dep addition.
 | `surface_proxy/idempotency.rs`                         | `proxy/idempotency.rs`                         |
 | `surface_proxy/local_executor.rs`                      | `proxy/local_executor.rs`                      |
 | `surface_proxy/prepared.rs`                            | `proxy/prepared.rs`                            |
-| `surface_proxy/tests.rs`                               | `proxy/tests.rs`                               |
-| `surface_proxy/tests/`                                 | `proxy/tests/`                                 |
 | `surface_proxy/validation.rs`                          | `proxy/validation.rs`                          |
 | `surface_registry.rs`                                  | `registry.rs`                                  |
+
+**Note on orphan files:** `surface_proxy.rs` only declares two file-based submodules:
+`mod controller_local;` and `pub(crate) mod entity_enrichment;`. All other files
+in `surface_proxy/` — `bookkeeping.rs`, `dispatch.rs`, `idempotency.rs`,
+`local_executor.rs`, `prepared.rs`, `validation.rs`, `tests.rs`, and `tests/` —
+are orphaned (not referenced by any `mod` declaration). They are part of the
+in-progress `local_executor.rs` wiring work. Move them alongside the live files so
+the entire subsystem travels as a unit; they will be orphaned in the new crate
+exactly as they are now.
+
+`tests.rs` and `tests/` specifically: the external test files reference
+`SurfaceProxy::invoke_with_rollout` (method not yet implemented) and use
+`crate::SurfaceRuntimeRolloutState`, a path that would break after extraction
+since the type lives in `web-api/app_state.rs`. Do **not** wire `mod tests;` in
+this commit. They will be addressed in the `local_executor.rs` wiring spec.
+
+**Visibility changes and `from_app_state` deletion:**
+
+- `AppStateSurfaceActionController` is currently `pub(crate)` in `surface_proxy.rs`
+  and `controller_local.rs`. Change both to `pub`.
+- `entity_enrichment` module is currently `pub(crate) mod entity_enrichment;` in
+  `surface_proxy.rs`. Change to `pub mod entity_enrichment;` in `proxy.rs`. Also
+  promote `enrich_entity_links` from `pub(crate)` to `pub` inside
+  `entity_enrichment.rs`. This is required because `lib.rs` re-exports it as
+  `pub use proxy::entity_enrichment;` — Rust rejects re-exporting a `pub(crate)`
+  item with wider visibility, and `unreachable_pub = "deny"` turns any gap into a
+  build failure.
+
+Also **delete `from_app_state`** from `proxy/controller_local.rs` in this commit.
+`from_app_state` takes `&'a crate::AppState`, which does not exist in
+`uptrakit-surface-proxy` — keeping it would prevent the new crate from compiling. The
+single caller (`routes/notifications.rs:1146`) still resolves in Commit 4 because
+`web-api` retains its own copy of `surface_proxy.rs` (untouched until Commit 5).
+Commit 5 updates the caller to use `from_database_connection` directly.
+
+Add `AppStateSurfaceActionController` to the `lib.rs` public surface (see list below).
 
 **`src/lib.rs` public surface:**
 
@@ -255,6 +320,9 @@ pub use proxy::entity_enrichment;
 pub use registry::{
     ResolvedSurfaceAction,
     SurfaceCatalogItem,
+    SurfaceProviderRejection,
+    SurfaceProviderRejectionCode,
+    SurfaceProviderRejectionReason,
     SurfaceRegistry,
     SurfaceRegistryConfig,
     SurfaceRegistryError,
@@ -264,10 +332,17 @@ pub use registry::{
 
 **Import path updates inside moved files:**
 
-- `crate::surface_registry::*` → `crate::registry::*`
-- `crate::service_connections::ServiceConnectionRegistry` → `uptrakit_service_connections::ServiceConnectionRegistry`
-- `crate::queries::notifications::*` → `uptrakit_web_api_queries::queries::notifications::*`
-- `crate::notifications::dispatcher::build_settings_bag` → already fixed in commit 3 → `uptrakit_web_api_queries::notification_settings::build_settings_bag`
+- `crate::surface_registry::*` → `crate::registry::*` — apply to ALL files
+  including orphaned ones. `dispatch.rs` has `crate::surface_registry::ResolvedSurfaceAction`
+  at lines 7 and 66; update these to `crate::registry::ResolvedSurfaceAction` now even
+  though the file stays unwired. This prevents a hidden breakage when `dispatch.rs` is
+  wired in the `local_executor.rs` spec.
+- `crate::service_connections::ServiceConnectionRegistry` →
+  `uptrakit_service_connections::ServiceConnectionRegistry`
+- `crate::queries::notifications::*` →
+  `uptrakit_web_api_queries::queries::notifications::*`
+- `crate::notifications::dispatcher::build_settings_bag` → already fixed in
+  commit 3 → `uptrakit_web_api_queries::notification_settings::build_settings_bag`
 
 Add to root `Cargo.toml` `[workspace.dependencies]`:
 
@@ -287,9 +362,17 @@ At this point `cargo test -p uptrakit-surface-proxy --all-features` passes.
 **In `web-api/Cargo.toml`:** add
 
 ```toml
-uptrakit-surface-proxy     = { workspace = true }
+uptrakit-surface-proxy       = { workspace = true }
 uptrakit-service-connections = { workspace = true }  # already added in commit 1
+notifications-email          = ["uptrakit-surface-proxy/notifications-email"]
+notifications-telegram       = ["uptrakit-surface-proxy/notifications-telegram"]
+notifications-all            = ["notifications-email", "notifications-telegram"]
 ```
+
+The existing `notifications-*` feature definitions in `web-api/Cargo.toml` (which
+currently point to `uptrakit-plugin-infrastructure-registry`) must be updated to
+forward through `uptrakit-surface-proxy` instead. Web-api no longer owns the
+`#[cfg(feature = "notifications-*")]` gated code; the surface-proxy crate does.
 
 **Delete from `web-api/src/`:**
 
@@ -298,42 +381,57 @@ uptrakit-service-connections = { workspace = true }  # already added in commit 1
 - `surface_registry.rs`
 
 **Update `web-api/src/lib.rs`:**
+
 Remove `pub mod surface_proxy;` and `pub mod surface_registry;`. Add re-exports that
-preserve the existing public path for any external consumer that may import via
-`uptrakit_web_api::surface_proxy`:
+preserve the existing public paths for all known consumers:
 
 ```rust
-pub use uptrakit_surface_proxy as surface_proxy_crate;
-pub mod surface_proxy {
-    pub use uptrakit_surface_proxy::{
-        AppStateSurfaceActionController, PluginOpsSurfaceActionInvoker,
-        PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor,
-        SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceLocalActionExecutor,
-        SurfaceProxy, SurfaceProxyError,
-    };
-    pub mod entity_enrichment {
-        pub use uptrakit_surface_proxy::entity_enrichment::*;
-    }
-}
+// Preserves uptrakit_web_api::surface_proxy::* paths used by controller-runtime
+// and routes within web-api.
+pub use uptrakit_surface_proxy as surface_proxy;
+
+// Preserves uptrakit_web_api::surface_registry::* paths used by controller-runtime
+// and routes/service_ws/handler.
 pub mod surface_registry {
     pub use uptrakit_surface_proxy::{
-        ResolvedSurfaceAction, SurfaceCatalogItem, SurfaceRegistry,
-        SurfaceRegistryConfig, SurfaceRegistryError, SurfaceRegistryLookupError,
+        ResolvedSurfaceAction,
+        SurfaceCatalogItem,
+        SurfaceProviderRejection,
+        SurfaceProviderRejectionCode,
+        SurfaceProviderRejectionReason,
+        SurfaceRegistry,
+        SurfaceRegistryConfig,
+        SurfaceRegistryError,
+        SurfaceRegistryLookupError,
     };
 }
 ```
 
-This keeps `controller-runtime` import paths working unchanged and avoids a
-simultaneous multi-crate churn.
+Using `pub use uptrakit_surface_proxy as surface_proxy;` (a crate alias) is more
+idiomatic than a fabricated `pub mod surface_proxy { pub use ... }` block, consistent
+with how `web-api` already re-exports `pub use uptrakit_web_api_auth::auth;`. The
+`surface_registry` module needs a fabricated block only because its types live at the
+crate root of `uptrakit-surface-proxy` (not in a `surface_registry` submodule).
 
 **Introduce `SurfaceProxyDeps` in `web-api/src/app_state.rs`:**
 
 ```rust
+#[non_exhaustive]
 pub struct SurfaceProxyDeps {
     pub registry: Arc<SurfaceRegistry>,
     pub proxy: Arc<SurfaceProxy>,
 }
+
+impl SurfaceProxyDeps {
+    pub fn new(registry: Arc<SurfaceRegistry>, proxy: Arc<SurfaceProxy>) -> Self {
+        Self { registry, proxy }
+    }
+}
 ```
+
+`#[non_exhaustive]` is required by project standards for all extensible public structs.
+External crates must use `SurfaceProxyDeps::new(registry, proxy)` to construct and
+`..` spread when pattern-matching.
 
 Replace the two separate `AppState` fields:
 
@@ -352,15 +450,63 @@ AppStateBuilder staging fields stay separate
 `SurfaceProxyDeps`. Builder methods `.surface_registry(v)` and `.surface_proxy(v)`
 are unchanged, so `controller-runtime` needs no changes to its AppStateBuilder calls.
 
-Update all `state.surface_proxy.*` and `state.surface_registry.*` access sites in
-`web-api` to go through `state.surface_proxy_deps.proxy.*` and
-`state.surface_proxy_deps.registry.*`:
+**Update all `state.surface_proxy.*` and `state.surface_registry.*` access sites** in
+`web-api` to use `state.surface_proxy_deps.proxy.*` and
+`state.surface_proxy_deps.registry.*`. Also update all inline `AppState { surface_registry:
+Arc::new(...), surface_proxy: Arc::new(...), ... }` construction sites to use
+`surface_proxy_deps: SurfaceProxyDeps::new(...)`:
 
 - `routes/surfaces.rs`
+- `routes/service_ws/handler/mod.rs` — multiple access sites at lines ~1455,
+  ~1618, ~1655, ~2209, ~2214, ~2514, ~2519, ~4095, ~5365 and others
+- `routes/service_ws/handler/mod.rs:3422` — uses struct shorthand (`surface_registry,` /
+  `surface_proxy,`); change to `surface_proxy_deps: SurfaceProxyDeps::new(surface_registry, surface_proxy),`
+- `routes/surfaces.rs:1096` — constructs `AppState` inline (test helper)
+- `routes/services.rs:1133` — same
+- `routes/auth.rs:956` — same
+- `routes/users.rs:1234` and `routes/notifications.rs:625` — update
+  `crate::notifications::dispatcher::build_settings_bag` callers to
+  `uptrakit_web_api_queries::notification_settings::build_settings_bag`
 - `app_state.rs` (the `build()` method and builder field accessors)
 - Test harness setup code in `middleware/resolve_ip.rs`, `middleware/require_auth.rs`,
   `routes/settings_nats.rs`, `test_harness/mod.rs`
 - `lib.rs` default construction code
+
+**Fix `AppStateSurfaceActionController` caller in `routes/notifications.rs`:**
+
+`from_app_state` was deleted from `proxy/controller_local.rs` in Commit 4. Update the
+single caller at `routes/notifications.rs:1146` to call `from_database_connection`
+directly:
+
+```rust
+// before
+let controller = crate::surface_proxy::AppStateSurfaceActionController::from_app_state(
+    &state, tenant_id, caller_user_id,
+);
+
+// after
+let controller = uptrakit_surface_proxy::AppStateSurfaceActionController::from_database_connection(
+    state.db(), state.plugin_ops.as_ref(), tenant_id, caller_user_id,
+);
+```
+
+**Pre-commit verification:** Before touching Commit 5, run the following greps to
+produce exhaustive change-site inventories:
+
+```sh
+# All AppState inline construction sites (colon-form and shorthand form)
+grep -rn "surface_registry[,:]" crates/ui/web-api/src/ | grep -v "::"
+grep -rn "surface_proxy[,:]" crates/ui/web-api/src/ | grep -v "::"
+
+# All build_settings_bag callers still in web-api
+grep -rn "build_settings_bag" crates/ui/web-api/src/
+
+# Remaining notifications-* cfg guards in web-api (after surface_proxy files deleted)
+grep -rn 'cfg(feature = "notifications' crates/ui/web-api/src/
+```
+
+These greps catch any sites that are missing from the lists above. Add them to the
+update sweep before committing.
 
 **Full test suite green:** `cargo test -p uptrakit-web-api --all-features` and
 `cargo test -p uptrakit-surface-proxy --all-features`.
@@ -402,14 +548,13 @@ uptrakit-surface-proxy                (new)
   src/proxy/local_executor.rs   (dead, compiles)
   src/proxy/prepared.rs
   src/proxy/validation.rs
-  src/proxy/tests/
   src/registry.rs               ← SurfaceRegistry
 
 uptrakit-web-api                      (updated)
   service_connections.rs  ← re-export shim (pub use uptrakit_service_connections::*)
   surface_proxy/  ← deleted
   surface_registry.rs ← deleted
-  lib.rs          ← re-export shims for surface_proxy + surface_registry modules
+  lib.rs          ← pub use uptrakit_surface_proxy as surface_proxy; + surface_registry shim
   app_state.rs    ← SurfaceProxyDeps { proxy, registry }
 ```
 
@@ -426,8 +571,8 @@ uptrakit-surface-proxy
   ├── uptrakit-web-api-types
   ├── uptrakit-audit-log (features = ["db"])
   ├── uptrakit-wire
-  ├── uptrakit-crypto
-  └── sea-orm, parking_lot, async-trait, uuid, serde_json, rootcause, time, rand, tokio, tracing
+  ├── uptrakit-crypto (features = ["sea-orm"])
+  └── sea-orm, serde, parking_lot, async-trait, uuid, serde_json, rootcause, time, rand, tokio, tracing
 
 uptrakit-web-api  (adds: uptrakit-surface-proxy, uptrakit-service-connections)
 controller-runtime (no Cargo.toml change needed; imports via web-api re-exports)
@@ -439,15 +584,15 @@ controller-runtime (no Cargo.toml change needed; imports via web-api re-exports)
 
 ### `uptrakit-surface-proxy` (after commit 4)
 
-All existing tests inside `surface_proxy/tests/` move with the files:
-
-- `proxy/tests/controller_local.rs` — in-memory DB tests for `AppStateSurfaceActionController`
-- `proxy/tests/provider_proxied/` — proxy dispatch tests (mock WebSocket transport)
+The inline `#[cfg(test)] mod tests { ... }` block inside `surface_proxy.rs` (and its
+sub-tests wired through that block) move with the file. External `surface_proxy/tests.rs`
+and `surface_proxy/tests/` are orphan files not included in this commit (see the note
+above). The test suite that compiles and runs is what was already wired in the inline
+block.
 
 Run: `cargo test -p uptrakit-surface-proxy --all-features`
 
-No new tests are required for a mechanical extraction. The existing suite covers
-the surface proxy logic end-to-end.
+No new tests are required for a mechanical extraction.
 
 ### `uptrakit-web-api` (after commit 5)
 
@@ -474,8 +619,8 @@ result in the ADR update commit.
 
 ## Out of Scope
 
-- Wiring up `local_executor.rs` — the dead code stays dead; a future spec will
+- Wiring up `local_executor.rs` and the orphan `tests/` files — a future spec will
   handle the `PluginSurfaceLocalExecutor` refactor and deduplication.
-- Removing the `web-api` re-export shims (`pub mod surface_proxy { ... }`) — left
-  for a follow-on cleanup once all known consumers have updated their import paths.
+- Removing the `web-api` re-export shims — left for a follow-on cleanup once all
+  known consumers have updated their import paths.
 - Any behaviour changes to surface proxy or surface registry logic.
