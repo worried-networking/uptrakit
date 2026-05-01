@@ -1,0 +1,51 @@
+[package]
+name = "uptrakit-surface-proxy"
+description = "Uptrakit surface proxy and surface registry"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+db-all                 = ["db-sqlite", "db-postgres"]
+db-sqlite              = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
+db-postgres            = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
+notifications-email    = ["uptrakit-plugin-infrastructure-registry/notifications-email"]
+notifications-telegram = ["uptrakit-plugin-infrastructure-registry/notifications-telegram"]
+notifications-all      = ["notifications-email", "notifications-telegram"]
+
+[dependencies]
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+rand        = { workspace = true }
+rootcause   = { workspace = true }
+sea-orm     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+time        = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+uuid        = { workspace = true }
+uptrakit-audit-log                      = { workspace = true, features = ["db"] }
+uptrakit-crypto                         = { workspace = true, features = ["sea-orm"] }
+uptrakit-notification-delivery          = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
+uptrakit-service-connections            = { workspace = true }
+uptrakit-shared-db                      = { workspace = true }
+uptrakit-shared-types                   = { workspace = true }
+uptrakit-web-api-queries                = { workspace = true }
+uptrakit-web-api-types                  = { workspace = true }
+uptrakit-wire                           = { workspace = true }
+
+[dev-dependencies]
+sea-orm                    = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+time                       = { workspace = true }
+tokio                      = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
+uptrakit-shared-db         = { workspace = true, features = ["migration", "db-sqlite"] }
+uptrakit-crypto            = { workspace = true, features = ["testing"] }
+zeroize                    = { workspace = true }

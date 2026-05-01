@@ -4,7 +4,7 @@ use super::*;
 impl SurfaceProxy {
     pub(super) async fn execute_local_invocation(
         &self,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         request: &SurfaceInvokeRequest,
         caller_origin: surfaces::CallerOrigin,
         idem_key: IdempotencyKey,
@@ -63,7 +63,7 @@ impl SurfaceProxy {
     pub(super) async fn execute_proxied_invocation(
         &self,
         service_connections: &ServiceConnectionRegistry,
-        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        resolved: &crate::registry::ResolvedSurfaceAction,
         request: &SurfaceInvokeRequest,
         caller_origin: surfaces::CallerOrigin,
         idem_key: IdempotencyKey,

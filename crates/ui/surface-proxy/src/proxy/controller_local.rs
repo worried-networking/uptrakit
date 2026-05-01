@@ -1,3 +1,5 @@
+#![allow(unreachable_pub)]
+
 use super::SurfaceProxyError;
 use async_trait::async_trait;
 use rootcause::report;
@@ -43,7 +45,7 @@ mod settings_store;
 // lands, the functions exist here but have no compiled callers, triggering unused-import
 // warnings. Remove these allow attributes once `local_executor.rs` is incorporated.
 #[allow(unused_imports)]
-pub(crate) use notifications::{
+pub use notifications::{
     allowlisted_notification_channel_controller_local_action,
     execute_allowlisted_notification_channel_action, notification_channel_type_for_surface_id,
 };
@@ -52,11 +54,11 @@ pub(crate) use notifications::{
 // (again, `local_executor.rs`) are pending wiring.
 #[cfg(test)]
 #[allow(unused_imports)]
-pub(crate) use notifications::{
+pub use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
 #[allow(unused_imports)]
-pub(crate) use proxmox_add_config::{
+pub use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
@@ -65,7 +67,7 @@ pub(crate) use proxmox_add_config::{
 // `SurfaceProxyError` for the HTTP response layer. Not yet reachable because
 // `local_executor.rs` is pending wiring (see comments above).
 #[allow(dead_code)]
-pub(crate) fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
+pub fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {
             SurfaceProxyError::SchemaValidationFailed(message)
@@ -86,7 +88,7 @@ fn plugin_internal_error(error: impl std::fmt::Display) -> rootcause::Report<Plu
     report!(PluginError::PluginInternal(error.to_string()))
 }
 
-pub(crate) struct AppStateSurfaceActionController<'a> {
+pub struct AppStateSurfaceActionController<'a> {
     db: &'a sea_orm::DatabaseConnection,
     plugin_ops: &'a dyn PluginOps,
     tenant_id: Uuid,
@@ -94,20 +96,7 @@ pub(crate) struct AppStateSurfaceActionController<'a> {
 }
 
 impl<'a> AppStateSurfaceActionController<'a> {
-    pub(crate) fn from_app_state(
-        state: &'a crate::AppState,
-        tenant_id: Uuid,
-        caller_user_id: Option<Uuid>,
-    ) -> Self {
-        Self::from_database_connection(
-            state.db(),
-            state.plugin_ops.as_ref(),
-            tenant_id,
-            caller_user_id,
-        )
-    }
-
-    pub(crate) fn from_database_connection(
+    pub fn from_database_connection(
         db: &'a sea_orm::DatabaseConnection,
         plugin_ops: &'a dyn PluginOps,
         tenant_id: Uuid,
@@ -229,10 +218,12 @@ impl NotificationChannelStore for AppStateSurfaceActionController<'_> {
         action_token: Uuid,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<Option<NotificationActionTokenRecord>>
     {
-        let model =
-            crate::queries::notifications::find_log_by_action_token(self.db(), action_token)
-                .await
-                .map_err(plugin_internal_error)?;
+        let model = uptrakit_web_api_queries::queries::notifications::find_log_by_action_token(
+            self.db(),
+            action_token,
+        )
+        .await
+        .map_err(plugin_internal_error)?;
 
         Ok(model.map(|row| NotificationActionTokenRecord {
             action_token: row.action_token.unwrap_or(action_token),

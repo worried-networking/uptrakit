@@ -4,6 +4,7 @@
 // that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
 // this allow once `local_executor.rs` is incorporated.
 #![allow(dead_code)]
+#![allow(unreachable_pub)]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uuid::Uuid;
@@ -13,7 +14,7 @@ use super::params::{
     strict_bool_param_with_default, strict_optional_bool_param,
 };
 
-pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&str> {
+pub fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&str> {
     // Notification channel surfaces follow the naming convention "notifications.{channel_type}".
     // Extracting the suffix avoids hardcoding individual plugin-type identifiers here.
     surface_id.strip_prefix("notifications.")
@@ -29,7 +30,7 @@ fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &s
         || provider_id == format!("plugin.notifications_{channel_type}")
 }
 
-pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
+pub fn allowlisted_notification_channel_controller_local_action<'a>(
     provider_id: &str,
     surface_id: &'a str,
     interaction_id: &str,
@@ -41,7 +42,7 @@ pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
 }
 
-pub(crate) async fn execute_allowlisted_notification_channel_action(
+pub async fn execute_allowlisted_notification_channel_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     channel_type: &str,
@@ -168,7 +169,7 @@ async fn require_notification_channel_type(
     Ok(model)
 }
 
-pub(crate) fn build_notification_channel_create_request(
+pub fn build_notification_channel_create_request(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::CreateNotificationChannelRequest, String> {
@@ -184,7 +185,7 @@ pub(crate) fn build_notification_channel_create_request(
     )
 }
 
-pub(crate) fn build_notification_channel_update_request(
+pub fn build_notification_channel_update_request(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest, String> {

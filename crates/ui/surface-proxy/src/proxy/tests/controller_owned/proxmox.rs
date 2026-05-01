@@ -12,7 +12,7 @@ use super::super::super::{
 };
 use super::super::{tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
-use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
 
 fn proxmox_hosts_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {

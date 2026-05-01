@@ -10,7 +10,7 @@ use super::super::super::{
 };
 use super::super::{TestPluginInvoker, tenant_id};
 use super::{register_service_for_proxy, registry, request_with_idem};
-use crate::service_connections::ServiceConnectionRegistry;
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 fn rollout(active: bool) -> crate::SurfaceRuntimeRolloutState {
     crate::SurfaceRuntimeRolloutState::phase0(active, Vec::new(), std::collections::BTreeMap::new())

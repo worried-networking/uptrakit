@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use uptrakit_wire::surfaces;
 
-use crate::service_connections::ServiceConnectionRegistry;
-use crate::surface_registry::SurfaceRegistry;
+use crate::registry::SurfaceRegistry;
+use uptrakit_service_connections::ServiceConnectionRegistry;
 
 use super::idempotency::{build_idempotency_key, fingerprint_request};
 use super::validation::{
@@ -13,7 +13,7 @@ use super::validation::{
 use super::{IdempotencyKey, SurfaceInvokeRequest, SurfaceProxyError};
 
 pub(super) struct PreparedInvocation {
-    pub(super) resolved: crate::surface_registry::ResolvedSurfaceAction,
+    pub(super) resolved: crate::registry::ResolvedSurfaceAction,
     pub(super) caller_origin: surfaces::CallerOrigin,
     pub(super) timeout: Duration,
     pub(super) idem_key: IdempotencyKey,

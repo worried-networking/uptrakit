@@ -4977,6 +4977,7 @@ dependencies = [
  "aws-lc-rs",
  "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.103.13",
  "subtle",
@@ -8122,6 +8123,34 @@ dependencies = [
  "url",
  "utoipa",
  "webpki-roots 1.0.7",
+ "zeroize",
+]
+
+[[package]]
+name = "uptrakit-surface-proxy"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "parking_lot",
+ "rand 0.9.4",
+ "rootcause",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-audit-log",
+ "uptrakit-crypto",
+ "uptrakit-notification-delivery",
+ "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-service-connections",
+ "uptrakit-shared-db",
+ "uptrakit-shared-types",
+ "uptrakit-web-api-queries",
+ "uptrakit-web-api-types",
+ "uptrakit-wire",
+ "uuid",
  "zeroize",
 ]
 

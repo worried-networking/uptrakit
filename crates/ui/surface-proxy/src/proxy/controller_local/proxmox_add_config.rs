@@ -4,6 +4,7 @@
 // that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
 // this allow once `local_executor.rs` is incorporated.
 #![allow(dead_code)]
+#![allow(unreachable_pub)]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uuid::Uuid;
@@ -11,21 +12,21 @@ use uuid::Uuid;
 use super::SurfaceProxyError;
 use super::params::{parse_csv_array_or_string_array_param, required_string_param};
 
-pub(crate) fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
+pub fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
     matches!(
         provider_id,
         "plugin.infrastructure_proxmox" | "infrastructure_proxmox"
     )
 }
 
-pub(crate) fn allowlisted_proxmox_add_config_controller_local_action(
+pub fn allowlisted_proxmox_add_config_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
 ) -> bool {
     surface_id == "proxmox.hosts" && interaction_id == "add-config"
 }
 
-pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
+pub async fn execute_allowlisted_proxmox_add_config_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     plugin_type: uptrakit_shared_types::PluginTypeId,
@@ -61,7 +62,7 @@ pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
     })
 }
 
-pub(crate) fn emit_proxmox_add_config_audit_event(
+pub fn emit_proxmox_add_config_audit_event(
     audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
     caller_user_id: Option<Uuid>,
     tenant_id: Uuid,
@@ -113,7 +114,7 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
     }
 }
 
-pub(crate) fn build_proxmox_add_config_create_request(
+pub fn build_proxmox_add_config_create_request(
     plugin_type: uptrakit_shared_types::PluginTypeId,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest, String> {
