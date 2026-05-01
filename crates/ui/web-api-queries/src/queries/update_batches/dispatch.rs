@@ -1071,6 +1071,84 @@ pub async fn transition_to_awaiting_restart(
     Ok(result.rows_affected)
 }
 
+/// After a `VersionCheckResult` arrives for a `host_software_item_id`,
+/// apply the `AwaitingRestart` evaluation rules:
+///
+/// 1. `not_ready = Some(true)` → stay (host is still rebooting)
+/// 2. `error = Some(_)` → stay (transient check error)
+/// 3. `installed_version = None` (with no not_ready/error) → stay (version not yet visible)
+/// 4. version matches `to_version` → `Completed`
+/// 5. version does not match → `Failed`
+///
+/// Returns `Some(new_status)` if a CAS transition happened, `None` if the
+/// record stays in `AwaitingRestart` (or no record exists).
+pub async fn apply_awaiting_restart_version_check(
+    db: &DatabaseConnection,
+    host_software_item_id: Uuid,
+    installed_version: Option<String>,
+    not_ready: Option<bool>,
+    error: Option<String>,
+) -> std::result::Result<Option<update_history::UpdateStatus>, rootcause::Report<TriggerUpdateError>>
+{
+    // Load the AwaitingRestart record for this host_software_item_id.
+    let record = UpdateHistory::find()
+        .filter(update_history::Column::HostSoftwareItemId.eq(host_software_item_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::AwaitingRestart))
+        .one(db)
+        .await
+        .context_to()?;
+
+    let Some(record) = record else {
+        return Ok(None);
+    };
+
+    // 1. not_ready: Some(true) → stay
+    if not_ready == Some(true) {
+        return Ok(None);
+    }
+    // 2. error: Some(_) → stay
+    if error.is_some() {
+        return Ok(None);
+    }
+    // 3. installed_version: None (not_ready absent, error absent) → stay
+    let Some(installed) = installed_version else {
+        return Ok(None);
+    };
+    let Some(ref to_version) = record.to_version else {
+        // No to_version stored — cannot compare, stay
+        return Ok(None);
+    };
+
+    // 4. version mismatch → Failed; 5. version match → Completed
+    let new_status = if &installed == to_version {
+        update_history::UpdateStatus::Completed
+    } else {
+        update_history::UpdateStatus::Failed
+    };
+
+    // CAS: only transition if still AwaitingRestart (guard against concurrent transitions).
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(record.id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::AwaitingRestart))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(new_status.clone()),
+        )
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    if result.rows_affected == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(new_status))
+}
+
 /// Guarded no-op used to reject stale `StdinAttention` from non-owners.
 pub async fn touch_stdin_attention_if_owned(
     db: &DatabaseConnection,
@@ -2536,5 +2614,175 @@ mod tests {
             update_history::UpdateStatus::InProgress,
             "empty host list must be a no-op"
         );
+    }
+
+    // -- apply_awaiting_restart_version_check --
+
+    /// Look up the `host_software_item.id` for the given host + software_item pair.
+    async fn get_hsi_id(db: &DatabaseConnection, f: &Fixture) -> Uuid {
+        use uptrakit_shared_db::entity::host_software_item;
+        host_software_item::Entity::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
+            .one(db)
+            .await
+            .unwrap()
+            .expect("host_software_item row not found")
+            .id
+    }
+
+    /// Insert an `AwaitingRestart` update_history record for the given
+    /// `host_software_item_id` targeting `to_version`.
+    async fn create_awaiting_restart_record(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        hsi_id: Uuid,
+        to_version: &str,
+    ) -> update_history::Model {
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(Some(hsi_id)),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some(to_version.to_string())),
+            status: Set(update_history::UpdateStatus::AwaitingRestart),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            awaiting_restart_since: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_transitions_completed_on_version_match() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi_id = get_hsi_id(&db, &f).await;
+        let record = create_awaiting_restart_record(&db, &f, hsi_id, "1.2.0").await;
+
+        let result = apply_awaiting_restart_version_check(
+            &db,
+            hsi_id,
+            Some("1.2.0".to_string()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, Some(update_history::UpdateStatus::Completed));
+
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::Completed);
+        assert!(after.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_stays_on_not_ready() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi_id = get_hsi_id(&db, &f).await;
+        let record = create_awaiting_restart_record(&db, &f, hsi_id, "1.2.0").await;
+
+        let result = apply_awaiting_restart_version_check(
+            &db,
+            hsi_id,
+            Some("1.2.0".to_string()),
+            Some(true),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result, None,
+            "not_ready=true must keep the record AwaitingRestart"
+        );
+
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::AwaitingRestart);
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_fails_on_version_mismatch() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi_id = get_hsi_id(&db, &f).await;
+        let record = create_awaiting_restart_record(&db, &f, hsi_id, "1.2.0").await;
+
+        let result = apply_awaiting_restart_version_check(
+            &db,
+            hsi_id,
+            Some("1.1.0".to_string()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, Some(update_history::UpdateStatus::Failed));
+
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::Failed);
+        assert!(after.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_awaiting_restart_stays_on_absent_installed_version() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi_id = get_hsi_id(&db, &f).await;
+        let record = create_awaiting_restart_record(&db, &f, hsi_id, "1.2.0").await;
+
+        let result = apply_awaiting_restart_version_check(
+            &db, hsi_id, None, // no installed_version yet
+            None, None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result, None,
+            "absent installed_version with no error or not_ready must stay AwaitingRestart"
+        );
+
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::AwaitingRestart);
     }
 }
