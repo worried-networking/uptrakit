@@ -54,10 +54,11 @@ pub(crate) async fn execute_allowlisted_notification_channel_action(
         "create" => {
             let req = build_notification_channel_create_request(channel_type, params)?;
             req.validate().map_err(|error| error.to_string())?;
-            let response =
-                crate::queries::notifications::create_channel(tenant_db, &req, plugin_ops)
-                    .await
-                    .map_err(|error| error.to_string())?;
+            let response = uptrakit_web_api_queries::queries::notifications::create_channel(
+                tenant_db, &req, plugin_ops,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             serde_json::to_value(response)
                 .map_err(|error| format!("failed to serialize create response: {error}"))
         }
@@ -66,7 +67,7 @@ pub(crate) async fn execute_allowlisted_notification_channel_action(
             require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
             let req = build_notification_channel_update_request(channel_type, params)?;
             req.validate().map_err(|error| error.to_string())?;
-            let response = crate::queries::notifications::update_channel(
+            let response = uptrakit_web_api_queries::queries::notifications::update_channel(
                 tenant_db, channel_id, &req, plugin_ops,
             )
             .await
@@ -80,9 +81,11 @@ pub(crate) async fn execute_allowlisted_notification_channel_action(
         "delete" => {
             let channel_id = required_uuid_param(params, "id")?;
             require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
-            let deleted = crate::queries::notifications::delete_channel(tenant_db, channel_id)
-                .await
-                .map_err(|error| error.to_string())?;
+            let deleted = uptrakit_web_api_queries::queries::notifications::delete_channel(
+                tenant_db, channel_id,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             if !deleted {
                 return Err("Channel not found".to_string());
             }
@@ -119,9 +122,11 @@ async fn execute_notification_channel_test_action(
         .transport(&channel_type_id)
         .ok_or_else(|| format!("Unsupported channel type: {}", channel.channel_type))?;
 
-    let settings_bag =
-        crate::notifications::dispatcher::build_settings_bag(tenant_db.db(), tenant_db.tenant_id)
-            .await;
+    let settings_bag = uptrakit_web_api_queries::notification_settings::build_settings_bag(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+    )
+    .await;
     let test_msg = uptrakit_plugin_infrastructure_registry::DeliveryMessage::new(
         "Test Notification",
         "This is a test notification from Uptrakit.",

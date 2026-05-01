@@ -7,6 +7,7 @@
 //! The crate has no dependency on Axum or any HTTP framework, allowing it to
 //! compile in parallel with `uptrakit-web-api-auth`.
 
+pub mod notification_settings;
 pub mod notifier;
 pub mod queries;
 pub mod settings_version;
