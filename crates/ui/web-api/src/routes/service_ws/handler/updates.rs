@@ -1841,7 +1841,7 @@ async fn dispatch_next_batch_update_with_notifier(
 
 /// Handle a completed batch: emit progress events, send completion, and
 /// dispatch a notification if the batch finished or partially finished.
-async fn handle_batch_completion(
+pub(super) async fn handle_batch_completion(
     state: &Arc<AppState>,
     batch_id: uuid::Uuid,
     completion: &crate::queries::update_batches::BatchCompletionInfo,
@@ -2082,7 +2082,7 @@ async fn dispatch_next_queued_update_with_notifier(
 // ---------------------------------------------------------------------------
 
 /// Send a batch progress event to all SSE subscribers.
-async fn emit_batch_progress_event(
+pub(super) async fn emit_batch_progress_event(
     state: &Arc<AppState>,
     batch_id: uuid::Uuid,
     event: crate::batch_progress_broadcaster::BatchProgressEvent,
@@ -2095,7 +2095,7 @@ async fn emit_batch_progress_event(
 }
 
 /// Compute and emit a progress summary from the DB for an in-progress batch.
-async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id: uuid::Uuid) {
+pub(super) async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id: uuid::Uuid) {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let batch = match update_history::Entity::find()
@@ -2140,7 +2140,10 @@ async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id: uuid::Uuid
 }
 
 /// Resolve a software item name by ID (for batch progress events).
-async fn resolve_software_item_name(state: &Arc<AppState>, item_id: uuid::Uuid) -> String {
+pub(super) async fn resolve_software_item_name(
+    state: &Arc<AppState>,
+    item_id: uuid::Uuid,
+) -> String {
     software_item::Entity::find_by_id(item_id)
         .one(state.db())
         .await
@@ -2151,7 +2154,7 @@ async fn resolve_software_item_name(state: &Arc<AppState>, item_id: uuid::Uuid) 
 }
 
 /// Resolve a host name by ID (for batch progress events).
-async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String {
+pub(super) async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String {
     host::Entity::find_by_id(host_id)
         .one(state.db())
         .await
