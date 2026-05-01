@@ -36,7 +36,10 @@ pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
 pub mod mcp_compat;
-pub use mcp_compat::{McpAuthError, McpRequestContext, validate_api_token_for_mcp};
+pub use mcp_compat::{
+    McpAuthError, McpRequestContext, McpTriggerError, mcp_trigger_update,
+    validate_api_token_for_mcp,
+};
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod tenant_db;
