@@ -7,6 +7,12 @@ Move the MCP server out of `uptrakit-web-api` into a dedicated crate `uptrakit-m
 API concerns (routing, middleware, validation), with business logic extracted into
 focused satellite crates.
 
+**Scope of benefit:** This extraction is an _organizational_ improvement, not a
+compile-time one. `uptrakit-mcp` depends on `uptrakit-web-api` unconditionally, so
+the full `web-api` graph still compiles when building `mcp`. The wins are: MCP code has
+a clear home, the OAuth 2.1 auth layer can be rewritten without touching HTTP routes,
+and the pattern is established for further `web-api` decomposition.
+
 ## Motivation
 
 - `web-api` is growing too large; MCP is a coherent subsystem that can stand alone.
@@ -42,14 +48,41 @@ are needed, `web-api` exposes a single clean bridge function that wraps them.
 | `mcp/auth.rs`               | `src/auth.rs`                | `McpAuthLayer`, `McpAuthService` — rewritten to call bridge fn |
 | `mcp/terminal.rs`           | `src/terminal.rs`            | No changes needed                                              |
 | `mcp/tools/mod.rs`          | `src/tools/mod.rs`           | `McpHandler`, `mcp_error`                                      |
-| `mcp/tools/history.rs`      | `src/tools/history.rs`       | No changes needed                                              |
-| `mcp/tools/user.rs`         | `src/tools/user.rs`          | No changes needed                                              |
+| `mcp/tools/history.rs`      | `src/tools/history.rs`       | Import path updates (see below)                                |
+| `mcp/tools/user.rs`         | `src/tools/user.rs`          | Import path updates (see below)                                |
 | `mcp/tools/update.rs`       | `src/tools/update.rs`        | Rewritten to call `mcp_trigger_update` bridge fn               |
 
 `McpRequestContext` is the exception: it stays in `web-api` (moved to
 `src/mcp_compat.rs`, promoted to unconditional `pub`). The new crate imports it from
 `uptrakit_web_api::McpRequestContext`. This avoids a circular dependency while keeping
 the type accessible to both the bridge functions and the MCP crate.
+
+### Import path changes for moved files
+
+Files where `crate::` references must be rewritten when moving to `uptrakit-mcp`:
+
+**`history.rs`:**
+
+- `crate::mcp::auth::McpRequestContext` → `uptrakit_web_api::McpRequestContext`
+- `crate::auth::permissions::Permission` → `uptrakit_web_api::auth::permissions::Permission`
+- `crate::mcp::terminal::render_terminal_output` → `crate::terminal::render_terminal_output`
+- `crate::mcp::tools::{McpHandler, mcp_error}` → `crate::tools::{McpHandler, mcp_error}`
+- `crate::queries` → `uptrakit_web_api::queries`
+
+**`user.rs`:**
+
+- `crate::mcp::auth::McpRequestContext` → `uptrakit_web_api::McpRequestContext`
+- `crate::mcp::tools::{McpHandler, mcp_error}` → `crate::tools::{McpHandler, mcp_error}`
+- `crate::auth::permissions::Permission` → `uptrakit_web_api::auth::permissions::Permission`
+  _(test module only)_
+
+**`auth.rs`** (McpAuthLayer — after Phase 1 bridge migration):
+
+- `crate::AppState` → `uptrakit_web_api::AppState`
+- `crate::auth::permissions::Permission` → `uptrakit_web_api::auth::permissions::Permission`
+- `crate::middleware::require_auth::{AuthFailure, authenticate_api_token, emit_api_token_auth_audit}`
+  → replaced entirely by `uptrakit_web_api::{validate_api_token_for_mcp, McpAuthError}`
+  (Phase 1 migration removes direct use of these `pub(crate)` items)
 
 ---
 
@@ -63,6 +96,10 @@ unconditional (no feature gate). Neither references any type from `uptrakit-mcp`
 ```rust
 /// Per-request auth context injected into MCP request extensions.
 /// Imported by uptrakit-mcp; defined here to avoid a circular dependency.
+///
+/// `#[non_exhaustive]` because OAuth 2.1 will add fields (scope claims, sub, etc.).
+/// External code must use `McpRequestContext::new(...)`.
+#[non_exhaustive]
 pub struct McpRequestContext {
     pub user_id: Uuid,
     pub token_id: Uuid,
@@ -74,6 +111,7 @@ pub struct McpRequestContext {
 ### Auth bridge
 
 ```rust
+#[non_exhaustive]
 pub enum McpAuthError {
     Unauthorized,
     Forbidden,
@@ -101,7 +139,21 @@ Internally calls `authenticate_api_token` + `emit_api_token_auth_audit` and maps
 /// Error type for the update bridge. Variants finalized during implementation;
 /// wraps permission failures, not-found cases, and internal dispatch errors
 /// sourced from the existing `trigger_update` action.
-pub enum McpTriggerError { /* variants during impl */ }
+#[non_exhaustive]
+pub enum McpTriggerError {
+    PermissionDenied,
+    HostNotFound,
+    SoftwareItemNotFound,
+    /// Host exists but has no assignment for this software item, or no execute
+    /// plugin is configured for the pair (covers HostNotAssigned,
+    /// NoExecuteUpdatePlugin, PluginConfigNotFound, UnknownPluginType).
+    NotConfigured,
+    /// Host has no linked agent, or agent is not in Approved status
+    /// (covers NoAgent, AgentNotApproved).
+    AgentUnavailable,
+    AlreadyInProgress,
+    Internal,
+}
 
 pub async fn mcp_trigger_update(
     state: Arc<AppState>,
@@ -163,9 +215,10 @@ Key dependencies:
 ```toml
 [dependencies]
 uptrakit-web-api     = { workspace = true }
-rmcp                 = { version = "1.5", features = ["transport-streamable-http-server"] }
-vt100                = { workspace = true }
-schemars             = { workspace = true }
+rmcp                   = { workspace = true }
+vt100                  = { workspace = true }
+schemars               = { workspace = true }
+sea-orm                = { workspace = true }
 axum                 = { workspace = true }
 tower                = { workspace = true }
 uuid                 = { workspace = true }
@@ -175,6 +228,11 @@ uptrakit-shared-db   = { workspace = true }
 ```
 
 No feature flags needed — the crate is unconditionally MCP.
+
+**Note:** `rmcp`, `vt100`, and `schemars` are currently bare-version deps in
+`web-api/Cargo.toml` only — not in `[workspace.dependencies]`. Phase 2 step 1 must
+promote them to the workspace before the new crate's `Cargo.toml` can reference them
+with `{ workspace = true }`.
 
 `uptrakit-audit-log` is **not** a dependency of `uptrakit-mcp`. All audit calls
 (auth audit, update audit) move into the bridge functions in `web-api`, which already
@@ -204,13 +262,21 @@ All changes compile and pass tests before Phase 2 begins.
 
 ### Phase 2 — Create crate and move files
 
-1. Create `crates/ui/mcp/Cargo.toml`; register in workspace `Cargo.toml`
-2. Move `mcp/` files into new crate; rewrite `crate::` imports to
-   `uptrakit_web_api::`
-3. Remove `mcp/` module from `web-api`; drop `rmcp` / `vt100` / `schemars` deps;
-   remove `mcp` feature
-4. Update `controller-runtime` `Cargo.toml` and `server.rs`
-5. **Gate: `cargo check --all-features && cargo test --all-features` — green**
+1. Promote `rmcp`, `vt100`, `schemars` to `[workspace.dependencies]` in root `Cargo.toml`
+   (move from bare version strings in `web-api/Cargo.toml`)
+2. Create `crates/ui/mcp/Cargo.toml`; add `crates/ui/mcp` to `[workspace.members]` and
+   `uptrakit-mcp` to `[workspace.dependencies]` in root `Cargo.toml`
+3. Move `mcp/` files into new crate; rewrite `crate::` imports per the import-path
+   table above
+4. Remove `mcp/` module from `web-api`; drop `rmcp` / `vt100` / `schemars` optional
+   dep entries; remove `mcp` feature from `web-api/Cargo.toml`
+5. **Sub-gate:** `cargo check --all-features` — green before touching `controller-runtime`
+   (catches broken imports in new crate and web-api independently before wiring)
+6. Update `controller-runtime` `Cargo.toml` and `server.rs`
+7. **Gate:**
+   - `cargo check --all-features && cargo test --all-features` — green
+   - `cargo test -p uptrakit-mcp` — green (new crate tests pass in isolation)
+   - `cargo test -p uptrakit-web-api` — green (web-api tests pass without mcp module)
 
 ---
 
