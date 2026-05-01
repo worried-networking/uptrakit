@@ -199,6 +199,12 @@ pub(crate) struct Args {
     #[arg(long)]
     pub reuseport: bool,
 
+    /// Path to the PID file written by this process.
+    /// Required when --reuseport is used so the self-update plugin can signal
+    /// the running process via `kill -USR2 $(cat <pid-file>)` during an update.
+    #[arg(long)]
+    pub pid_file: Option<std::path::PathBuf>,
+
     /// Path to a file containing the master encryption key (64-char hex string).
     /// The key is used for AES-256-GCM encryption of sensitive credentials at rest.
     /// Alternative: set UPTRAKIT_MASTER_KEY environment variable.

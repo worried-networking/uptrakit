@@ -594,6 +594,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         &builtin_host,
         app_dirs.state_dir().to_path_buf(),
         args.reuseport,
+        args.pid_file.clone(),
         #[cfg(feature = "nats")]
         &nats_transport,
     )
@@ -790,6 +791,9 @@ async fn spawn_background_tasks(
     state_dir: std::path::PathBuf,
     #[cfg_attr(not(feature = "embedded-agent"), allow(unused_variables))]
     reuseport_configured: bool,
+    #[cfg_attr(not(feature = "embedded-agent"), allow(unused_variables))] pid_file: Option<
+        std::path::PathBuf,
+    >,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
@@ -859,6 +863,7 @@ async fn spawn_background_tasks(
             controller_installation_id,
             state_dir.clone(),
             reuseport_configured,
+            pid_file.clone(),
         )
         .await
         {

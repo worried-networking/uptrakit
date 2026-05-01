@@ -89,6 +89,7 @@ pub struct DockerTlsConfig {
 ///    `nginx:latest`).
 /// 3. `"latest"` as the fallback default when neither is set.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct DockerConfig {
     /// Docker daemon endpoint override (e.g. `"unix:///var/run/docker.sock"`,
     /// `"tcp://host:2375"`, or `"ssh://user@host"` when the `ssh` feature is
