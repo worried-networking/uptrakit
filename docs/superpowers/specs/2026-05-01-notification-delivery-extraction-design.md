@@ -26,7 +26,10 @@ added without touching the orchestration loop.
 
 ## Commit Sequence
 
-Four self-contained commits, each leaving the codebase green.
+Four self-contained commits, each leaving the codebase green. Commits 2 and 3 must
+be consecutive with no other commits between them — between them `events.rs` and
+`message_builder.rs` exist in both locations simultaneously, which is an intermediate
+state that must never land on `main` in isolation.
 
 ### Commit 1 — Fix `build_settings_bag` settings dependency
 
@@ -34,19 +37,33 @@ Four self-contained commits, each leaving the codebase green.
 
 `build_settings_bag` calls three functions from `uptrakit_web_api_auth::settings_store`:
 `load_typed_settings_by_prefix`, `load_typed_global_settings_by_prefix`, and
-`load_global_settings_by_prefix`. These are already one-line wrappers over
-`uptrakit_shared_db::raw_settings`, which `dispatcher.rs` can reach directly since
-`uptrakit-shared-db` is already a transitive dependency.
+`load_global_settings_by_prefix`. Replace them with direct
+`uptrakit_shared_db::raw_settings` calls — `uptrakit-shared-db` is already a direct
+dep of `web-api`.
 
-Replace all three call sites in `dispatcher.rs` with direct `uptrakit_shared_db::raw_settings`
-calls. Remove the `uptrakit_web_api_auth::settings_store` import. Audit whether
+Expansion detail:
+
+- `load_typed_settings_by_prefix` → one async `load_settings_by_prefix` call + one
+  synchronous `decode_prefixed_settings` call
+- `load_typed_global_settings_by_prefix` → one async `load_global_settings_by_prefix` call + one
+  synchronous `decode_prefixed_settings` call
+- `load_global_settings_by_prefix` → single async raw call, no decode step
+
+The `typed_smtp_settings_or_empty` helper currently takes
+`uptrakit_web_api_auth::auth::Result<EmailSmtpSettings>`. Update its parameter type
+to `uptrakit_shared_db::raw_settings::Result<EmailSmtpSettings>` (wraps
+`RawSettingsError`). Update the existing unit test — it constructs `AuthError::Internal`
+as the error value; replace with `RawSettingsError::Decode("boom".into())`, which is
+the path-of-least-resistance `RawSettingsError` variant constructible in a unit test
+without a live DB.
+
+Remove the `uptrakit_web_api_auth::settings_store` import. Audit whether
 `uptrakit-web-api-auth` remains used elsewhere in `dispatcher.rs`; if not, drop it
 from the imports entirely.
 
 The second call site of `build_settings_bag` lives in
-`surface_proxy/controller_local/notifications.rs` — that file uses the function via
-`crate::notifications::dispatcher::build_settings_bag`, not via `web-api-auth`
-directly, so no change needed there.
+`surface_proxy/controller_local/notifications.rs` — it calls via
+`crate::notifications::dispatcher::build_settings_bag`, so no change needed there.
 
 No behaviour change. All existing tests pass.
 
@@ -54,39 +71,58 @@ No behaviour change. All existing tests pass.
 
 **Goal:** New crate with `events.rs`, `message_builder.rs` moved in; `deliver()` added.
 
-Create `crates/plugins/notifications/delivery/Cargo.toml`. Register the crate in two
-places in the root `Cargo.toml`: add `crates/plugins/notifications/delivery` to
-`[workspace.members]` and add `uptrakit-notification-delivery = { path = "crates/plugins/notifications/delivery", version = "..." }` to `[workspace.dependencies]`.
+Create `crates/plugins/notifications/delivery/Cargo.toml`. The root `Cargo.toml`
+workspace glob already covers `crates/plugins/notifications/*`, so no manual
+`[workspace.members]` edit is needed. Add one entry to `[workspace.dependencies]`:
 
-Move `notifications/events.rs` → `src/event.rs` and
-`notifications/message_builder.rs` → `src/message_builder.rs` into the new crate with
-import path updates only (no logic changes).
+```toml
+uptrakit-notification-delivery = { path = "crates/plugins/notifications/delivery", version = "0.0.1" }
+```
 
-Add `src/deliver.rs` with a new public function:
+Move `notifications/events.rs` → `src/event.rs` (rename from plural to singular) and
+`notifications/message_builder.rs` → `src/message_builder.rs` into the new crate.
+Update `message_builder.rs` imports: replace
+`uptrakit_plugin_infrastructure_registry::{DeliveryMessage, MessageAction, escape_html}`
+with `uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html}`.
+No logic changes.
+
+Add `src/deliver.rs`:
 
 ```rust
-/// Invoke a notification transport for a single channel.
+/// Invoke a transport for a single channel delivery.
 ///
-/// Looks up the transport by `plugin_type_id` via `ops`. Returns
-/// `TransportNotFound` if no plugin is registered for that type.
+/// The caller is responsible for looking up the transport and handling
+/// `TransportNotFound` before calling this function.
 pub async fn deliver(
-    ops: &dyn PluginOps,
-    plugin_type_id: &PluginTypeId,
+    transport: Arc<dyn NotificationTransport>,
     channel_config: &serde_json::Value,
     settings_bag: &serde_json::Value,
     message: &DeliveryMessage,
-) -> Result<(), NotificationDeliveryError>
+) -> Result<(), NotificationDeliveryError> {
+    transport.deliver(channel_config, settings_bag, message).await
+        .map_err(|e| NotificationDeliveryError::DeliveryFailed(e))
+}
 
 #[non_exhaustive]
 pub enum NotificationDeliveryError {
-    TransportNotFound,
     DeliveryFailed(rootcause::Report<NotificationPluginError>),
 }
 ```
 
+`NotificationTransport` comes from `uptrakit-plugin-infrastructure-core`; `DeliveryMessage`
+and `NotificationPluginError` come from `uptrakit-notification-plugin-core`.
+(`uptrakit-plugin-infrastructure-core` has `sea-orm` only under optional feature flags —
+adding it without features pulls no DB deps.) The dispatcher keeps transport lookup
+(`notification_ops.transport(...)`) — `NotificationOps` and `PluginOps` never appear
+in this crate.
+
 `lib.rs` public surface:
 
 ```rust
+mod event;
+mod message_builder;
+mod deliver;
+
 pub use event::{ActionParams, NotificationEvent, NotificationEventDetails};
 pub use message_builder::build_delivery_message;
 pub use deliver::{deliver, NotificationDeliveryError};
@@ -96,16 +132,21 @@ pub use deliver::{deliver, NotificationDeliveryError};
 
 ```toml
 [dependencies]
-uptrakit-plugin-infrastructure-registry = { workspace = true }
-uptrakit-web-api-types                  = { workspace = true }
-rootcause                               = { workspace = true }
-uuid                                    = { workspace = true }
-serde                                   = { workspace = true }
-serde_json                              = { workspace = true }
+uptrakit-notification-plugin-core  = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-web-api-types             = { workspace = true }
+rootcause                          = { workspace = true }
+uuid                               = { workspace = true }
+serde                              = { workspace = true }
+serde_json                         = { workspace = true }
 ```
 
-No `sea-orm`, no `uptrakit-shared-db`, no Axum. This crate does not depend on
-`uptrakit-web-api` or any UI-layer crate.
+Do not add `sea-orm`, `uptrakit-shared-db`, `uptrakit-plugin-infrastructure-registry`,
+or any DB-related dep — the registry has `sea-orm` as a direct dep and must not be
+used here. `uptrakit-plugin-infrastructure-core` is explicitly allowed: its `sea-orm`
+dep is behind optional features (`plugin-ops`, `agent-infra`); adding it with no
+features pulls no DB graph. This crate does not depend on `uptrakit-web-api` or any
+UI-layer crate.
 
 At this point the new crate compiles and its tests pass. `web-api` is not yet updated.
 
@@ -116,26 +157,38 @@ At this point the new crate compiles and its tests pass. `web-api` is not yet up
 
 Delete `notifications/events.rs` and `notifications/message_builder.rs` from `web-api`.
 
-Add re-exports in `notifications/mod.rs` so existing callers (`actions/`, `routes/`)
-are unaffected:
+Replace the `pub mod events;` declaration in `notifications/mod.rs` with an inline shim
+— existing callers that import `crate::notifications::events::NotificationEvent` continue
+to compile unchanged. `pub mod message_builder;` is dropped entirely: `message_builder`
+has no callers outside `dispatcher.rs` itself, so no shim is needed.
+
+Note: `routes/mod.rs` also has a `pub mod events` at a different path
+(`crate::routes::events`) — this is an unrelated module and does not conflict with the
+notification shim. Grepping for `pub mod events` will surface both; only the one in
+`notifications/mod.rs` is being replaced.
+
+The shim:
 
 ```rust
-pub use uptrakit_notification_delivery::{
-    ActionParams, NotificationEvent, NotificationEventDetails,
-};
+pub mod events {
+    pub use uptrakit_notification_delivery::{
+        ActionParams, NotificationEvent, NotificationEventDetails,
+    };
+}
 ```
 
 Update `dispatcher.rs`:
 
-- Replace `super::events::*` import with `uptrakit_notification_delivery::*`
-- Replace `super::message_builder::build_delivery_message` with
-  `uptrakit_notification_delivery::build_delivery_message`
-- Replace inline `transport.deliver(...)` call with
-  `uptrakit_notification_delivery::deliver(&*notification_ops, ...)` — propagate
-  `NotificationDeliveryError` into the existing error logging path
+- Grep for all `super::events::` and `super::message_builder::` references and
+  replace with `uptrakit_notification_delivery::` equivalents.
+- The `dispatch_loop` already looks up `channel_transport: Arc<dyn NotificationTransport>`
+  before the `tokio::spawn` block. Keep that lookup in place. Inside the spawn,
+  replace `channel_transport.deliver(config, settings, message).await` with
+  `uptrakit_notification_delivery::deliver(Arc::clone(&channel_transport), config, settings, message).await`.
+  Map `NotificationDeliveryError::DeliveryFailed(e)` into the existing error-logging
+  path. `TransportNotFound` handling (already in the pre-spawn lookup) is unchanged.
 
-Add `uptrakit-notification-delivery = { workspace = true }` to
-`web-api/Cargo.toml`.
+Add `uptrakit-notification-delivery = { workspace = true }` to `web-api/Cargo.toml`.
 
 Full test suite green: `cargo test -p uptrakit-web-api --all-features` and
 `cargo test -p uptrakit-notification-delivery`.
@@ -168,20 +221,21 @@ uptrakit-notification-delivery          (new crate, no DB, no Axum)
 uptrakit-web-api  (depends on uptrakit-notification-delivery)
   notifications/
     dispatcher.rs   ← queue + dispatch_loop + build_settings_bag (raw_settings)
-    mod.rs          ← re-exports NotificationEvent etc. from delivery crate
+    mod.rs          ← events shim + top-level re-exports
 ```
 
-`dispatch_loop` data flow:
+`dispatch_loop` data flow after:
 
 ```text
 receive NotificationEvent
   → load matching rules (DB)
   → for each rule:
       load channel (DB)
-      build_settings_bag(&db, tenant_id)        ← web-api, raw_settings
-      build_delivery_message(&event, ...)       ← notification-delivery crate
-      deliver(&ops, type_id, config, settings, &message)  ← notification-delivery crate
-      write notification_log (DB)               ← web-api
+      build_settings_bag(&db, tenant_id)                       ← web-api, raw_settings
+      look up transport via notification_ops.transport(...)    ← web-api, PluginOps
+      build_delivery_message(&event, ...)                      ← notification-delivery crate
+      deliver(Arc::clone(&transport), config, settings, &msg)  ← notification-delivery crate
+      write notification_log (DB)                              ← web-api
 ```
 
 ---
@@ -193,9 +247,8 @@ receive NotificationEvent
 - Existing `events.rs` tests move as-is: event type derivation, action params,
   serialization round-trips.
 - Existing `message_builder.rs` tests move as-is: message content, HTML escaping.
-- New `deliver()` tests using a stub `NotificationTransport` impl:
-  - Success path: stub returns `Ok(())`, function returns `Ok(())`
-  - `TransportNotFound`: `NotificationOps::transport()` returns `None`
+- New `deliver()` tests using a stub struct implementing `NotificationTransport`:
+  - Success path: stub returns `Ok(())`, `deliver()` returns `Ok(())`
   - `DeliveryFailed`: stub returns `Err(...)`, error is wrapped and returned
 
 ### `uptrakit-web-api` (unchanged pattern)
