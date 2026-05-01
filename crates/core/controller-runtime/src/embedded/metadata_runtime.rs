@@ -8,11 +8,13 @@ use uptrakit_plugin_infrastructure_core::{
 
 /// A [`HostRuntime`] wrapper that injects a [`ServiceMetadataProvider`] so plugins
 /// running inside the controller can introspect the controller binary itself.
+#[allow(dead_code)] // wired in Task 18 (self-update plugin registration)
 pub(crate) struct MetadataAwareHostRuntime {
     inner: Arc<dyn HostRuntime>,
     provider: Arc<dyn ServiceMetadataProvider>,
 }
 
+#[allow(dead_code)]
 impl MetadataAwareHostRuntime {
     pub(crate) fn new(
         inner: Arc<dyn HostRuntime>,
@@ -42,6 +44,7 @@ impl HostRuntime for MetadataAwareHostRuntime {
 
 /// Implements [`ServiceMetadataProvider`] by reading the running binary path from
 /// [`std::env::current_exe()`].
+#[allow(dead_code)] // wired in Task 18 (self-update plugin registration)
 pub(crate) struct ControllerMetadataProvider {
     service_name: String,
     version: String,
@@ -49,6 +52,7 @@ pub(crate) struct ControllerMetadataProvider {
     pid_file: Option<std::path::PathBuf>,
 }
 
+#[allow(dead_code)]
 impl ControllerMetadataProvider {
     pub(crate) fn new(
         service_name: String,
