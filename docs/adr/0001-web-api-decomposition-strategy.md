@@ -24,11 +24,11 @@ its own crate only when it passes all three of:
 
 Candidates approved by this test:
 
-| Subsystem | Status | Notes |
-| --------- | ------ | ----- |
-| MCP server | Completed — merging | Spec: `docs/superpowers/specs/2026-05-01-extract-mcp-crate-design.md` |
-| Notification dispatcher | Approved — next | No Axum dependency; requires `build_settings_bag` refactor first (see Consequences) |
-| `surface_proxy/` | Approved — after notification | Own test suite; six route callers + two middleware callers + one `AppState` field, all one-way |
+| Subsystem                                                     | Status                        | Notes                                                                                                                                                                                                                         |
+| ------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP server                                                    | Completed — merging           | Spec: `docs/superpowers/specs/2026-05-01-extract-mcp-crate-design.md`                                                                                                                                                         |
+| Notification delivery core (`uptrakit-notification-delivery`) | Completed                     | Spec: `docs/superpowers/specs/2026-05-01-notification-delivery-extraction-design.md`. `dispatch_loop` (queue, rule matching, channel loading, log writing) remains in `web-api` — it is stateful orchestration, not delivery. |
+| `surface_proxy/`                                              | Approved — after notification | Own test suite; six route callers + two middleware callers + one `AppState` field, all one-way                                                                                                                                |
 
 Explicitly rejected: extracting `actions/` as a unit. It covers host, service,
 batch, software item, and settings mutations — no single coherent concept. The real
@@ -48,20 +48,17 @@ and `AuthState` sub-structs already inside `AppState`.
 
 ## Consequences
 
-- **Notification dispatcher pre-condition:** `dispatcher.rs` currently imports
-  `uptrakit_web_api_auth::settings_store` to build SMTP/Telegram settings in
-  `build_settings_bag`. A second call site exists in
-  `surface_proxy/controller_local/notifications.rs`. Before extraction, refactor
-  `build_settings_bag` to accept pre-loaded settings values as parameters rather than
-  loading them internally, decoupling the dispatcher from `web-api-auth` and
-  `uptrakit-shared-db`. Until this refactor is done, extracting the dispatcher
-  carries the full `sea-orm`/`sqlx` compile graph and achieves no compile-time
-  benefit.
+- **Notification delivery pre-condition (fulfilled):** `dispatcher.rs` imported
+  `uptrakit_web_api_auth::settings_store` for three functions that were pure DB reads
+  with no auth logic. These were replaced with direct `uptrakit_shared_db::raw_settings`
+  calls (commit 1 of the extraction). The stateless delivery core (`events.rs`,
+  `message_builder.rs`, `deliver()`) was then extracted into `uptrakit-notification-delivery`
+  (commits 2–3). The `dispatch_loop` (queue, rule matching, channel loading, log writing)
+  remains in `web-api` — it is inherently DB-coupled stateful orchestration.
 - **surface_proxy sequencing note:** `surface_proxy` calls `build_settings_bag`
-  from the notification dispatcher. Extracting the dispatcher first means that when
-  `surface_proxy` is subsequently extracted, it will depend on
-  `uptrakit-notification-dispatch` in addition to `uptrakit-web-api-queries`. Plan
-  for this rather than discovering it mid-extraction.
+  from the notification dispatcher. When `surface_proxy` is subsequently extracted,
+  it will depend on `uptrakit-notification-delivery` in addition to
+  `uptrakit-web-api-queries`. Plan for this rather than discovering it mid-extraction.
 - **AppState sub-state pattern:** Each extraction must introduce a dedicated
   sub-state struct (e.g. `McpDeps`) containing only the `AppState` sub-fields the
   crate needs. The MCP extraction serves as the first concrete example of this
