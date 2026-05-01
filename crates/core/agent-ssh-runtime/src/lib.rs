@@ -666,6 +666,8 @@ where
                                     error = %error,
                                     "failed to send early update result; disconnecting"
                                 );
+                                // Mark sent even on transport failure — recovery is delegated to
+                                // AwaitingRestartExecutor (Task 12), which polls version via detect_version.
                                 update.early_sent = true;
                                 Some(LoopOutcome::Disconnected)
                             } else {

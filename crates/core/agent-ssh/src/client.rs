@@ -519,7 +519,9 @@ pub async fn handle_execute_update_ssh(
             tokio::select! {
                 biased;
                 Some(early) = early_result_rx.recv() => {
-                    let _ = tx.send((host_id.clone(), UpdateEvent::EarlyResult(early))).await;
+                    if tx.send((host_id.clone(), UpdateEvent::EarlyResult(early))).await.is_err() {
+                        break;
+                    }
                 }
                 Some(msg) = output_rx.recv() => {
                     if tx.send((host_id.clone(), UpdateEvent::Output(msg))).await.is_err() {
