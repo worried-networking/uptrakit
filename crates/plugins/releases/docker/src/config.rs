@@ -181,6 +181,19 @@ pub struct DockerConfig {
     /// Auto-detected during discovery from the locally installed image's architecture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
+
+    /// Indicate that a successful update requires a host restart to take effect.
+    ///
+    /// When `true`, the controller transitions the software item to
+    /// `AwaitingRestart` after a successful update instead of marking it
+    /// `UpToDate` immediately. The item moves to `UpToDate` once the agent
+    /// reports a digest that matches the pulled image (i.e. after the host has
+    /// restarted and the new container is running).
+    ///
+    /// Defaults to `false`. Set to `true` for images where the running
+    /// container is only replaced after an explicit restart or reboot.
+    #[serde(default)]
+    pub resumable: bool,
 }
 
 /// Compose an OCI platform string from Bollard image inspect fields.
@@ -392,6 +405,9 @@ impl PluginConfig for DockerConfig {
             FormFieldDescriptor::new("compose_restart.working_dir", "Compose Working Dir")
                 .with_help_text("Working directory for docker compose")
                 .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
+            FormFieldDescriptor::new("resumable", "Resumable (Restart Required)")
+                .with_type(FormFieldType::Toggle)
+                .with_help_text("Mark the update as requiring a host restart to take effect. The item stays in AwaitingRestart until the new container is running after reboot."),
         ]
     }
 
