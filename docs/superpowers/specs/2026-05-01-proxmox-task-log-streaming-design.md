@@ -88,33 +88,56 @@ pub async fn wait_for_task_completion_with_logs(
     let mut next_n: u64 = 0;
 
     loop {
-        if let Ok(entries) = self.task_log(node, upid, next_n).await {
-            for entry in &entries {
-                let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
-            }
-            if let Some(last) = entries.last() {
-                next_n = last.n + 1;
-            }
-        }
-
-        let status = self.task_status(node, upid).await?;
+        // Check status first; log is fetched only on running iterations.
+        // This avoids a redundant log HTTP call on the final (stopped) iteration.
+        let mut status = self.task_status(node, upid).await?;
         if status.status.eq_ignore_ascii_case("stopped") {
-            // Final drain: capture any lines emitted between last log poll and stop detection.
-            if let Ok(entries) = self.task_log(node, upid, next_n).await {
-                for entry in &entries {
-                    let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
+            // Re-poll once if exitstatus is absent. Proxmox sets exitstatus atomically
+            // with the stopped transition, but a brief finalization lag can occur on
+            // busy nodes. One short retry is sufficient.
+            if status.exitstatus.is_none() {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                status = self.task_status(node, upid).await?;
+            }
+
+            // Single drain: fetch all lines since the last poll.
+            match self.task_log(node, upid, next_n).await {
+                Ok(entries) => {
+                    for entry in &entries {
+                        let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(node, upid, error = %e, "final task log drain failed; skipping");
                 }
             }
             if status.exitstatus.as_deref() == Some("OK") {
+                tracing::debug!(node, upid, "Proxmox task completed successfully");
                 return Ok(status);
             }
-            let exit = status
-                .exitstatus
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string());
+            let exit = status.exitstatus.as_deref().unwrap_or("unknown");
             bail!(ProxmoxError::Plugin(format!(
                 "Proxmox task failed with exit status: {exit}"
             )));
+        }
+
+        // Task still running — fetch new log lines and advance cursor.
+        // `n` is a 0-based sequential index guaranteed by the Proxmox API;
+        // `last.n + 1` is the correct next page start. If no lines are returned
+        // (task started but has not written output yet), `next_n` is unchanged
+        // and the next poll re-fetches from the same offset.
+        match self.task_log(node, upid, next_n).await {
+            Ok(entries) => {
+                for entry in &entries {
+                    let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
+                }
+                if let Some(last) = entries.last() {
+                    next_n = last.n + 1;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(node, upid, error = %e, "task log fetch failed; skipping");
+            }
         }
 
         if Instant::now() >= deadline {
@@ -129,10 +152,24 @@ pub async fn wait_for_task_completion_with_logs(
 }
 ```
 
-**Error handling:** `task_log` errors are non-fatal — the `if let Ok(...)` guard silently skips
-the fetch and continues. `task_status` errors remain fatal (existing behaviour). Log fetch
-failures are not separately logged to avoid noise; the existing `tracing::trace!` poll line
-provides cadence visibility.
+**Error handling:** `task_log` errors are non-fatal — the `match` error arm logs at `debug` level
+and continues. `task_status` errors remain fatal (existing behaviour). The debug log makes
+silent log-streaming degradation (e.g. 403, malformed response) diagnosable without polluting
+operator-visible output.
+
+**Accepted risks:**
+
+- *`UnboundedSender` backpressure* — `output_tx` is unbounded; a stalled consumer (blocked
+  WebSocket write) can accumulate buffered messages during a long backup. This is an inherited
+  property of the existing `output_tx` pattern used throughout the protection code and is
+  accepted as-is.
+- *UPID uniqueness* — the loop assumes a UPID is not reassigned to a different task during the
+  polling window. Proxmox UPIDs encode a timestamp and PID and are not reused within a task's
+  lifetime. This assumption holds in all practical deployments.
+- *Single-page final drain* — the drain on task completion fetches one page (max 500 lines)
+  starting at `next_n`. If a burst of completion output exceeds 500 lines in the last polling
+  window, trailing lines are silently dropped. This is not a concern for typical snapshot or
+  backup workloads; the full log is always available in the Proxmox UI.
 
 `wait_for_task_completion` (the existing no-output variant) is untouched. All non-protection
 callers (if any) are unaffected.
@@ -159,7 +196,16 @@ let wait_result = if let Some(tx) = ctx.output_tx.as_ref() {
 ```
 
 The footer (`--- end ---\n\n`) fires unconditionally after the wait, whether it succeeded or
-failed. The existing success/failure status strings and audit persistence follow unchanged.
+failed. The `wait_result` variable then replaces the existing `if let Err(error) =
+client.wait_for_task_completion(...).await` check — the error branch body (audit persistence,
+`output_tx` failure message, early return) is unchanged:
+
+```rust
+if let Err(error) = wait_result {
+    // same audit upsert and output_tx failure send as before
+    return Ok(snapshot_decision_failure()); // or backup equivalent
+}
+```
 
 **Local variables:** `node` and `upid` are already in scope at the call sites as
 `&mapping.proxmox_node` and `&task` respectively. `timeout` comes from
