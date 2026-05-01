@@ -66,9 +66,9 @@ hostname = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"], optional = true }
-rmcp = { version = "1.5", features = ["transport-streamable-http-server"], optional = true }
-schemars = { version = "1", optional = true }
-vt100 = { version = "0.16", optional = true }
+rmcp = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+vt100 = { workspace = true, optional = true }
 x509-ocsp = { workspace = true }
 der = { workspace = true }
 spki = { workspace = true }
