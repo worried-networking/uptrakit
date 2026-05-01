@@ -346,7 +346,6 @@ Add these to the top of `mcp_compat.rs` (after existing imports):
 use std::sync::Arc;
 
 use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
-use uuid::Uuid;
 
 use crate::auth::AuthMethod;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
@@ -950,6 +949,7 @@ Expected: no errors (empty lib).
 - [ ] **Step 4: Commit**
 
 ```bash
+git add Cargo.toml crates/ui/mcp/Cargo.toml crates/ui/mcp/src/lib.rs
 git commit --only Cargo.toml crates/ui/mcp/Cargo.toml crates/ui/mcp/src/lib.rs \
            -m "chore: scaffold uptrakit-mcp crate"
 ```
@@ -1196,6 +1196,7 @@ Expected: no errors.
 - [ ] **Step 9: Commit**
 
 ```bash
+git add crates/ui/mcp/src/
 git commit --only crates/ui/mcp/src/ \
            -m "feat(uptrakit-mcp): move mcp/ files to new crate, rewrite import paths"
 ```
