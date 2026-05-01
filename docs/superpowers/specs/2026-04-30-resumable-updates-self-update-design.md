@@ -113,17 +113,17 @@ Queued
 Pending
   │ (orchestrator picks up)
   ▼
-InProgress ──── UpdateResultPayload { resumable: true } received ──► AwaitingRestart
-  │                                                                        │      │
-  │ agent disconnects (no resumable signal received)                       │      │ awaiting_restart_since
-  ▼                                                                        │      │ + timeout exceeded
-Failed                                                           detect_version   ▼
-                                                                    result:    Failed
-                                                                       │
-                                                               not_ready ──► stay (retry next tick)
-                                                               error    ──► stay (retry next tick)
-                                                               mismatch ──► Failed
-                                                               match    ──► Completed
+InProgress ── UpdateResultPayload { resumable: true } ──► AwaitingRestart ── timeout exceeded ──► Failed
+  │                                                              │
+  │ agent disconnects                                    detect_version dispatch (each scheduler tick)
+  │ (no resumable signal)                                        │
+  ▼                                                    ┌─────────┴──────────────────────────┐
+Failed                                                 │ not_ready        → stay, retry tick │
+                                                       │ error            → stay, retry tick │
+                                                       │ installed_version absent → stay     │
+                                                       │ version mismatch → Failed           │
+                                                       │ version match    → Completed        │
+                                                       └─────────────────────────────────────┘
 ```
 
 All transitions use CAS (`rows_affected == 0` = another controller already acted, skip).
@@ -148,13 +148,19 @@ parse `resumable` as `None` (non-resumable) — backward compatible.
 The resumable check is applied only when `status == UpdateFinalStatus::Completed`.
 
 - `status: Completed, resumable: Some(true)` → call `transition_to_awaiting_restart(db,
-  update_history_id, service_id, runtime_instance_id)` in `web-api-queries/update_dispatch.rs`.
-  This is a CAS UPDATE on the owned `InProgress` row:
-  `status = 'awaiting_restart'`, `awaiting_restart_since = now()`, preserving
+  update_history_id)` in `web-api-queries/update_dispatch.rs`. This is a CAS UPDATE that
+  filters on `id = update_history_id AND status = 'in_progress' AND
+  execution_owner_service_id = <service_id>`, where `<service_id>` is the same `service_id`
+  parameter already present in `handle_update_result` — the value stored as
+  `execution_owner_service_id` when `handle_update_started` transitioned the record to
+  `InProgress`:
+  sets `status = 'awaiting_restart'`, `awaiting_restart_since = now()`, preserves
   `execution_owner_service_id`. On `rows_affected == 0` (race / already claimed), log and return.
   Do not call `dispatch_next_in_batch` yet.
 - `status: Completed, resumable: None | Some(false)` → existing behavior (`Completed`).
 - `status: Failed` → existing behavior (`Failed`), call batch/host progression.
+- `status: Failed, resumable: Some(true)` — `resumable` is ignored when `status != Completed`.
+  The update transitions to `Failed` normally. `resumable` is only meaningful on `Completed`.
 
 ---
 
@@ -248,14 +254,32 @@ if result.resumable && succeeded {
 }
 ```
 
-`UpdateExecutionResult` gains `resumable: bool`. When `resumable == true`, `send_update_result`
-in `client.rs` skips the transport write (early_sent already set true by the select loop).
+`UpdateExecutionResult` gains `resumable: bool`. The `resumable` flag on
+`UpdateExecutionResult` is informational only — `client.rs` does not use it to decide
+whether to skip the transport write. The authoritative guard is `early_sent`: the
+`try_recv` drain inside the JoinHandle arm sets it before the `!early_sent` check runs.
+`resumable` on `UpdateExecutionResult` exists only for documentation clarity.
+`early_sent` is local state on the agent and is never serialized or sent over the wire.
 
 **Why send before post-hooks for resumable updates:** the post-update hook for a resumable
 update typically triggers the restart (e.g., `systemctl restart uptrakit`,
 `shutdown -r now`). If the result were sent after the hook, the process would be dead before
 the payload reaches the controller. Sending first ensures `InProgress → AwaitingRestart`
 is committed before the process exits.
+
+**TCP delivery caveat:** an async TCP write returning successfully means the payload entered
+the kernel send buffer — not that the controller received it or committed the DB write. The
+protocol relies on the window between send and process exit being sufficient for TCP
+delivery + controller DB round-trip. For the SO_REUSEPORT path, the connection drain (step 4)
+keeps the WebSocket connection live while PID A drains; since controller and agent are
+co-located (controller-standalone + embedded agent), loopback RTT is sub-millisecond and
+the DB write completes well within the drain window. For the fallback path, the 10-second
+`systemd-run` delay is an empirical estimate based on co-located loopback + healthy DB
+(typical latency < 100ms). It is NOT a protocol-level guarantee. On loaded systems with
+DB latency > 2 seconds or network-attached databases, 10 seconds may not be sufficient.
+No application-level acknowledgment is implemented in MVP — this is a documented constraint.
+If delivery is not confirmed before process exit, the update falls back to `Failed` (same
+as current behavior), which is safe but negates the resumable benefit for that update.
 
 **Post-hook result ignored for resumable:** once the controller is in `AwaitingRestart`,
 the update outcome is determined by `detect_version` on reconnect — not by whether
@@ -296,33 +320,43 @@ plugin config it creates. Other users of the shell plugin are unaffected (defaul
 pub not_ready: Option<bool>,
 ```
 
-Semantics:
+Semantics (evaluated in this order):
 
-- `not_ready: Some(true)` — software is mid-boot or not yet queryable. Controller stays in
-  `AwaitingRestart` and retries. Does **not** count as a version mismatch.
-- `error: Some(_)` — transient infrastructure failure (plugin crash, timeout). Controller
-  stays in `AwaitingRestart` and retries.
-- `installed_version: Some(v)` where `v != to_version` — genuine failure. Transition to
-  `Failed`.
-- `installed_version: Some(v)` where `v == to_version` — success. Transition to `Completed`.
+1. `not_ready: Some(true)` — software is mid-boot or not yet queryable. Stay in
+   `AwaitingRestart`, retry next tick. Does **not** count as a version mismatch.
+2. `error: Some(_)` — transient infrastructure failure (plugin crash, timeout). Stay,
+   retry next tick.
+3. `installed_version: None` (with `not_ready` absent/false and `error` absent) — old
+   plugin that does not set the version field, or plugin returned an empty result. Treat
+   as `not_ready` — stay, retry next tick. Do **not** treat as mismatch.
+4. `installed_version: Some(v)` where `v != to_version` — genuine failure. Transition to
+   `Failed`.
+5. `installed_version: Some(v)` where `v == to_version` — success. Transition to
+   `Completed`.
 
 Plugin implementations return `not_ready: true` when they can detect the process is starting
-but cannot yet determine its version (e.g., binary executes but service not yet accepting
-connections).
+but cannot yet determine its version (e.g., an HTTP health-endpoint plugin receives a 503
+while the service is booting). The shell `detect_version` plugin does not use `not_ready`
+— it relies on exit codes and output parsing. Transient failures (non-zero exit, timeout,
+malformed output) are reported via `error` or `installed_version: None` (treated as retry
+per rule 3 above). `not_ready` is reserved for plugins with richer service-state semantics.
 
-**Handler location:** `service_ws/handler/messages.rs` processes `VersionCheckResultsPayload`.
-This handler must be extended: after updating the software state for normal version checks,
-also look up any `AwaitingRestart` update_history records for the relevant
-`host_software_item_id` and apply the terminal-transition logic above. The correlation key
-is `VersionCheckResult.host_software_item_id` → `update_history` filtered by
-`host_software_item_id + status = AwaitingRestart`. The full record (including `batch_id`)
-is loaded during the lookup so that the correct progression function can be chosen without
-an additional DB round-trip after the CAS.
+**Handler location:** `service_ws/handler/messages.rs` processes `VersionCheckResultsPayload`
+which contains `results: Vec<VersionCheckResult>`. The handler already iterates the results
+in a loop. The `AwaitingRestart` correlation check runs **inside that same loop, per result**
+— not as a post-loop step. For each `VersionCheckResult` in the payload:
 
-The version comparison uses `VersionCheckResult.installed_version` read directly from the
-incoming payload — not from `host_software_items` after the normal state-update step has
-run. This avoids a TOCTOU ambiguity where a concurrent update to `host_software_items`
-could cause a mismatch.
+1. Run the existing normal version-check state update (writes `installed_version` to
+   `host_software_items`).
+2. Then, in the same iteration, look up `update_history` where
+   `host_software_item_id = result.host_software_item_id AND status = 'awaiting_restart'`.
+   Load the full record including `batch_id` and `to_version` for the comparison.
+3. Apply the terminal-transition logic (evaluation order above).
+
+The version comparison compares `result.installed_version` from the **incoming payload**
+against `update_history.to_version` from the **loaded DB record**. It does not read from
+`host_software_items` after step 1 runs — that avoids TOCTOU where a concurrent write
+could change `host_software_items.installed_version` between steps 1 and 3.
 
 If `host_software_item_id` is absent from the `VersionCheckResult` (old agent, partial
 payload), skip the `AwaitingRestart` correlation — do not attempt an ambiguous host-level
@@ -333,7 +367,14 @@ already receives `&Arc<AppState>`. After a `Completed` or `Failed` transition, i
 a `DispatchContext` from `state` (using `state.controller_update_protection()` and
 `state.notifier()`) and calls either `dispatch_next_in_batch` (if `batch_id` is set on the
 record) or `dispatch_next_queued_for_host` (if standalone). This is the same pattern used
-in `handle_update_result` in `updates.rs`.
+in `handle_update_result` in `updates.rs`. `dispatch_next_in_batch` calls `maybe_complete_batch` unconditionally on every invocation;
+`maybe_complete_batch` is a no-op when non-terminal items remain. No additional call to
+`maybe_complete_batch` is needed at the handler site.
+
+**CAS loser must not dispatch:** when `rows_affected == 0` on any terminal transition CAS
+(another controller already acted), return immediately without calling any dispatch
+progression function. The winning controller is responsible for progression; a duplicate
+call from the loser would dispatch the next update twice.
 
 ---
 
@@ -348,6 +389,18 @@ continues waiting.
 `mark_owned_in_progress_as_failed_on_reconnect` and `mark_all_in_progress_as_failed_for_rollout`
 filter on `status = InProgress` only. `AwaitingRestart` records are not `InProgress` and are
 unaffected by these functions — no extension required.
+
+**service_id stability across execve:** for the SO_REUSEPORT + execve protocol, PID A execs
+itself into the new binary (same PID). The embedded agent in the new binary reconnects and
+re-registers. `provision_embedded_tenant_service` uses `embedded_owner_key` for idempotent
+provisioning — the same key produces the same `service_id` on every start. The
+`execution_owner_service_id` stored on the `AwaitingRestart` record therefore matches the
+reconnecting agent's `service_id`. The `AwaitingRestartExecutor` dispatches `detect_version`
+to the correct service without any update to the stored owner field. This invariant must
+hold: if `provision_embedded_tenant_service` ever generates a new `service_id` for the same
+controller instance (e.g., due to a key rotation), the stored `execution_owner_service_id`
+will become stale and `detect_version` dispatches will be silently dropped. No mechanism
+exists in this spec to detect or recover from that scenario.
 
 ---
 
@@ -378,7 +431,9 @@ same JoinSet used for DB-driven `TaskExecutor`s). TickExecutors are NOT subject 
 `TASK_EXECUTION_TIMEOUT` (2 hours) — they are bounded by a shorter 60-second per-tick
 timeout instead, after which the tick is abandoned and the next poll cycle retries.
 `TickExecutor`s receive the DB connection directly; they use the `SchedulerNotifier` injected
-at construction time.
+at construction time. `JoinSet::join_next` errors — including panics surfaced as
+`JoinError::is_panic()` — are logged and the tick is abandoned; the scheduler continues
+normally on the next poll cycle. Panics in `TickExecutor` must not crash the scheduler.
 
 The `AwaitingRestartExecutor` implements `TickExecutor` and is constructed with
 `(db, notifier)` — the same dependencies as other executors (e.g., `DiscoverSoftwareExecutor`).
@@ -388,15 +443,17 @@ It is registered once in the controller's scheduler setup, not per tenant.
 
 For all `AwaitingRestart` records across all tenants:
 
-- Load records with `status = 'awaiting_restart'`. For each record, use
-  `execution_owner_service_id` (already stored on the row from when the agent claimed
-  the update) as the target `service_id` for `notifier.send_to_service`. Do **not**
-  perform a fresh `service_host` join — the owner is already on the record, and a fresh
-  join could resolve a different (newer) agent connection for the same host.
-  If `execution_owner_service_id IS NULL` on an `AwaitingRestart` record (should not
-  happen given the transition invariant, but defensive programming applies), log a warning
-  and skip — the scheduler will retry on the next tick.
-- Dispatch `detect_version` via the existing plugin assignment for each record.
+- Load records with `status = 'awaiting_restart'`. For each record:
+  1. Use `execution_owner_service_id` (stored on the row) as the target `service_id` for
+     `notifier.send_to_service`. Do **not** perform a fresh `service_host` join — the owner
+     is already on the record, and a fresh join could resolve a different (newer) agent.
+     If `execution_owner_service_id IS NULL`, log a warning and skip.
+  2. Look up the `detect_version` plugin assignment: query `host_software_item_plugin` where
+     `host_software_item_id = record.host_software_item_id AND role = 'detect_version'`.
+     If no assignment exists (plugin config was deleted after the update started), log a
+     warning and skip — the scheduler will retry on the next tick.
+  3. Dispatch `detect_version` using the loaded plugin assignment config via the normal
+     plugin dispatch path.
 - The MQTT/channel layer handles delivery: immediate if agent is connected, queued in
   the outbox if offline (delivered on next reconnect).
 - Handles the case where the agent stays connected after restart but returns `not_ready`
@@ -408,9 +465,16 @@ For all `AwaitingRestart` records across all tenants:
 #### 2. Timeout enforcement
 
 For all `AwaitingRestart` records across all tenants where
-`now > awaiting_restart_since + awaiting_restart_timeout`:
+`awaiting_restart_since IS NOT NULL AND now > awaiting_restart_since + awaiting_restart_timeout`:
 
 - CAS transition to `Failed` with reason "Awaiting restart timed out".
+- The `IS NOT NULL` filter is required: SQL `now > NULL + X` evaluates to NULL (not true),
+  so records with a missing `awaiting_restart_since` would never time out and silently
+  accumulate. The invariant is that `transition_to_awaiting_restart` always sets
+  `awaiting_restart_since = now()` atomically in the same UPDATE — but the filter guards
+  against any future bug that violates this invariant.
+- Records where `awaiting_restart_since IS NULL` (invariant violation) are logged by the
+  executor as warnings on each tick but are otherwise left unchanged.
 - Uses `awaiting_restart_since` as the anchor; `awaiting_restart_timeout` is read from
   the linked `software_item`, falling back to the global default (600 seconds) when NULL.
 - After each terminal transition: signal the controller to trigger batch/host progression
@@ -423,8 +487,9 @@ For all `AwaitingRestart` records across all tenants where
   The method is added to `SchedulerNotifier` in `notifier.rs`. The embedded-controller
   implementation calls `dispatch_next_queued_for_host` directly (it has access to
   `ServiceNotifier` and `DispatchContext`). The NATS-only implementation publishes a
-  `HostProgressionNeeded { host_id, tenant_id }` NATS message on the controller subject;
-  the receiving controller dispatches inline. The `NoopSchedulerNotifier` (test-only, in
+  `HostProgressionNeeded { host_id, tenant_id }` message on the existing internal NATS
+  controller subject (internal-only, same subject used for other cross-controller signals,
+  not part of the agent wire protocol); the receiving controller dispatches inline. The `NoopSchedulerNotifier` (test-only, in
   `notifier.rs` behind `#[cfg(test)]`) also gets a no-op implementation. This keeps
   `scheduler-engine` decoupled from `web-api-queries`.
 - Fires regardless of agent connection state.
@@ -454,6 +519,14 @@ For all `AwaitingRestart` records across all tenants where
    The WS handler has `AppState` and constructs `DispatchContext` directly. The scheduler
    timeout enforcer signals progression via `SchedulerNotifier::signal_host_progression`
    (see Scheduler Changes section).
+
+4. **Unique constraint violation on dispatch insert:** when `dispatch_next_in_batch` or
+   `dispatch_next_queued_for_host` inserts a new `update_history` row and the DB returns a
+   unique constraint violation on `uix_update_history_host_active`, treat this as "another
+   controller already dispatched to this host" — log at debug level and return without
+   error. Do not log as an error. This is the same race-handling pattern applied to the
+   existing `has_active_update_for_host` check: the check is a fast-path optimization;
+   the unique constraint is the authoritative guard.
 
 ---
 
@@ -487,7 +560,9 @@ primary gating mechanism; no binary inspection is required.
 If `std::env::current_exe()` fails at discovery time, `discover_software` logs a warning
 and emits no software items for the affected service. Symlinks are resolved by the
 execute_update script at runtime rather than at discovery time, so `binary_path` may be a
-symlink path — this is acceptable.
+symlink path — this is acceptable. For `DeploymentTopology::UnixBinary`, `binary_path` is
+required — if it is `None` (current_exe failure or incorrect topology detection),
+`discover_software` logs a warning and skips that service.
 
 ```rust
 pub struct ServiceMetadata {
@@ -543,9 +618,16 @@ For each discovered service, the plugin creates assignments:
 
 | Role | Plugin | Config |
 | --- | --- | --- |
-| `detect_version` | Shell | `version_command: "<binary_path> --version"` (binary path embedded literally at discovery time; no `{package_identifier}` substitution) |
+| `detect_version` | Shell | `version_command: "<binary_path> --version"` (binary path embedded literally at discovery time; no `{package_identifier}` substitution); `version_regex: "(?P<version>\d+\.\d+\.\d+)"` to strip the binary name prefix from output like `"uptrakit-controller-standalone 1.2.3"` |
 | `fetch_releases` | `releases_github` | uptrakit GitHub repo; `tag_strip_prefix: "v"`; tag filter per service |
 | `execute_update` | Shell (binary) or Docker plugin | `resumable: true`; binary path or container identity |
+
+`binary --version` output format: `"<service-name> <semver>"` (e.g., `"uptrakit-controller-standalone 1.2.3"`). The
+shell `detect_version` plugin extracts the version using `version_regex`. If the binary ever changes its
+`--version` output format (e.g., adds build metadata like `1.2.3+abc123`), the regex must be updated in
+the discovery plugin. No normalization is applied to the extracted version — the regex capture group must
+return exactly the string stored as `to_version` (bare semver, no `v` prefix, since `tag_strip_prefix: "v"`
+already strips the prefix from release tags).
 
 `package_identifier` for self-update software items is the service name string (e.g.
 `"uptrakit-controller-standalone"`). It is used as the display identifier and for
@@ -564,21 +646,39 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
   **`reuseport_configured = true` (preferred — zero-downtime, supervisor-transparent, no
   dead-control-plane risk):**
 
+  `BINARY_PATH` and `PID_FILE` are embedded literally at discovery time from
+  `ServiceMetadata.binary_path` and `ServiceMetadata.pid_file`. If `pid_file` is `None`
+  on a `UnixBinary` service, `discover_software` logs a warning and skips that service —
+  the takeover protocol requires a PID file.
+
   The script:
 
   ```bash
-  # Download and atomically replace binary (atomic rename — safe while running)
-  curl -L "$RELEASE_URL" -o /tmp/uptrakit-new
-  chmod +x /tmp/uptrakit-new
-  mv /tmp/uptrakit-new "$BINARY_PATH"
+  # Download to a temp file on the same filesystem as the binary (atomic rename requires same FS).
+  # /tmp is typically a separate tmpfs mount — using it causes non-atomic mv across filesystems.
+  BINARY_PATH="<binary_path>"
+  TMP_PATH="${BINARY_PATH}.new-$$"
+  curl -L "$RELEASE_URL" -o "$TMP_PATH"
+  chmod +x "$TMP_PATH"
+  # Ad-hoc codesign required on Apple Silicon; no-op on Linux (codesign absent)
+  command -v codesign >/dev/null 2>&1 && codesign --sign - --force "$TMP_PATH"
+  mv "$TMP_PATH" "$BINARY_PATH"
   # Signal takeover — binary handles the rest
-  kill -USR2 "$(cat "$PID_FILE")"
+  kill -USR2 "$(cat "<pid_file>")"
   ```
 
-  The binary's SIGUSR2 handler executes the combined SO_REUSEPORT + execve protocol:
+  On receiving SIGUSR2, the binary executes the combined SO_REUSEPORT + execve protocol.
+  **Spawning the child process safely in a multi-threaded async runtime:** direct `fork()`
+  from a SIGUSR2 signal handler or from within the Tokio runtime is unsafe — background
+  threads may hold allocator or libc locks, causing the child to deadlock before it reaches
+  `exec()`. The correct approach: the SIGUSR2 handler performs only an async-signal-safe
+  operation (writes one byte to a pre-created pipe). A dedicated Tokio task reads from that
+  pipe and spawns the child via `tokio::process::Command::new()`, which uses a
+  carefully-managed fork+exec path that avoids the multi-threaded lock hazard.
 
-  1. **Fork** a child (PID B). Child execs the new binary at `binary_path` with
-     `--reuseport --post-takeover-child --notify-fd <pipe_write_fd>`.
+  1. **Spawn** PID B via `tokio::process::Command::new(binary_path)` with
+     `--reuseport --post-takeover-child --notify-fd <pipe_write_fd>` and the listening
+     socket fd explicitly inherited (via `CommandExt::pre_exec` to clear `O_CLOEXEC`).
   2. **PID B** (new binary) binds the listening port via `SO_REUSEPORT` alongside the old
      process (PID A). Both are now accepting connections. PID B writes `ready` to the pipe
      when its async runtime is up.
@@ -601,20 +701,61 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
   `InProgress`. The agent then sends a failure result; the controller marks the update
   `Failed` and unblocks the host. No control plane outage.
 
+  **Pipe protocol vocabulary:** three messages are used on the coordination pipe:
+  - `ready` — sent PID B → PID A: new binary is up and accepting connections.
+  - `done` — sent PID A → PID B: execve succeeded; PID B should exit cleanly (exit 0).
+  - `abort` — sent PID A → PID B: takeover failed (execve error); PID B should exit with error (exit 1).
+
+  PID B reads one message and branches on value. Any value that is not `done` is treated as
+  `abort`. If the pipe's write end is closed (PID A crashed before writing), `read()` returns
+  0 bytes (EOF); PID B treats EOF as `abort` and exits with error (exit 1). This is standard
+  POSIX pipe behavior and requires no special handling beyond checking the read length.
+
+  **execve failure recovery:** `execve(2)` is atomic — it either replaces the process image
+  (on success, never returns) or returns an error code with the process unchanged. If step 5
+  fails (e.g., `ENOEXEC`, `ENOMEM`), PID A is still running the old binary. PID A writes
+  `abort` to the pipe and waits for PID B to exit with a 5-second timeout. If PID B does
+  not exit within the timeout, PID A sends `SIGKILL` to PID B and waits for it to be
+  reaped. PID A then logs the error. At this point the
+  controller is already in `AwaitingRestart` (early result was sent in step 3). On the next
+  scheduler tick, `detect_version` detects the old version, sees a mismatch, and transitions
+  the update to `Failed`. The control plane stays live throughout. No special recovery code
+  is needed in the controller.
+
+  **Graceful shutdown during takeover:** if SIGTERM arrives after step 3 (early result sent,
+  early_sent = true) but before step 5 (execve), PID A is mid-drain. Graceful shutdown
+  completes the drain, writes `abort` to the pipe (signaling PID B to exit), and exits. The
+  controller is already in `AwaitingRestart`. On the next scheduler tick, `detect_version`
+  runs: PID B may have started successfully (returns new version → `Completed`) or may have
+  exited with `abort` (returns old version or error → `Failed`). No special recovery code
+  required — the scheduler resolves the race. The early result having been sent before drain
+  ensures `handle_graceful_shutdown` skips the redundant transport write.
+
   **Supervisor interaction:** no MAINPID notification or special unit configuration needed.
   PID A never exits during the protocol — the supervisor always tracks a live process.
   Works with systemd (`Type=simple` or `Type=exec`), s6, runit, supervisord, and any other
   supervisor that tracks a single PID.
 
+  **Drain grace period:** step 4 is bounded by the existing graceful-shutdown timeout
+  (the same value used for `handle_graceful_shutdown` in `client.rs`). When the timeout
+  expires, remaining in-flight connections are force-closed and PID A proceeds to step 5.
+  This prevents a stalled WebSocket session from blocking the takeover indefinitely.
+
   **`reuseport_configured = false` (fallback — requires supervisor + deferred restart):**
 
-  The script downloads and replaces the binary, then issues a deferred supervisor restart:
+  The script downloads and replaces the binary, then issues a deferred supervisor restart.
+  `SERVICE_NAME` and `BINARY_PATH` are embedded literally at discovery time from
+  `ServiceMetadata.service_name` and `ServiceMetadata.binary_path`:
 
   ```bash
-  curl -L "$RELEASE_URL" -o /tmp/uptrakit-new
-  chmod +x /tmp/uptrakit-new
-  mv /tmp/uptrakit-new "$BINARY_PATH"
-  systemd-run --on-active=10s systemctl restart "$SERVICE_NAME"
+  # Download to a temp file on the same filesystem as the binary.
+  BINARY_PATH="<binary_path>"
+  TMP_PATH="${BINARY_PATH}.new-$$"
+  curl -L "$RELEASE_URL" -o "$TMP_PATH"
+  chmod +x "$TMP_PATH"
+  command -v codesign >/dev/null 2>&1 && codesign --sign - --force "$TMP_PATH"
+  mv "$TMP_PATH" "$BINARY_PATH"
+  systemd-run --on-active=10s systemctl restart "<service_name>"
   ```
 
   The 10-second delay ensures the embedded agent sends the early result payload and the
@@ -629,12 +770,14 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
   discovery plugin generates the appropriate `update_command` inline in the shell plugin
   config; no separate template files are needed.
 
-- **`DockerContainer`**: execute_update = existing Docker plugin with `resumable: true`.
-  The correct operation sequence is: pull new image → stop container → remove container →
-  start new container with the new image tag. `docker restart` alone does not change the
-  image and must not be used — it causes `detect_version` to return the old version and
-  transition the update to `Failed`. The container name and image repository are sourced
-  from `ServiceMetadata`.
+- **`DockerContainer`**: execute_update = existing Docker plugin. The Docker plugin gains
+  the same `#[serde(default)] pub resumable: bool` config field as the shell plugin. The
+  self-update discovery plugin sets it `true` in the generated Docker plugin config. The
+  correct operation sequence is: pull new image → stop container → remove container → start
+  new container with the new image tag. `docker restart` alone does not change the image
+  and must not be used — it causes `detect_version` to return the old version and transition
+  the update to `Failed`. The container name and image repository are sourced from
+  `ServiceMetadata`.
 
 ### Version Normalization
 
@@ -667,10 +810,23 @@ async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
     Ok(results)
 }
 
+fn build_software_item(&self, metadata: &ServiceMetadata) -> DiscoveredSoftware {
+    // ... plugin assignment matrix as described in Plugin Assignment Matrix section ...
+    // MUST set awaiting_restart_timeout: Some(120) — 2 minutes.
+    // The global default (600 seconds) is too long for self-update: if the controller dies
+    // mid-update, the scheduler must time out quickly on the next restart, not after 10 minutes.
+    DiscoveredSoftware {
+        // ...
+        awaiting_restart_timeout: Some(120),
+        // ...
+    }
+}
+
 async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-    // Returns Compatible only when running as embedded agent in controller-standalone.
-    // Returns Incompatible otherwise.
-    // Future: also Compatible when any uptrakit service is detected locally.
+    // Returns Incompatible when enabled == false.
+    // Returns Incompatible when metadata_provider is None (not embedded agent).
+    // Returns Compatible only when enabled == true AND running as embedded agent.
+    // Future (enabled == true only): also Compatible when other local uptrakit services detected.
 }
 ```
 
@@ -684,12 +840,17 @@ pub struct UptrakitSelfUpdateConfig {
     /// Enable self-update discovery. Defaults to false.
     ///
     /// Self-update auto-discovery can trigger unattended updates via
-    /// scheduled batch tasks. Opt-in required; the controller-standalone
-    /// enables it explicitly in its default plugin config for this plugin.
+    /// scheduled batch tasks. Opt-in required — operators must explicitly
+    /// set `enabled: true` to activate this plugin.
     #[serde(default)]
     pub enabled: bool,
 }
 ```
+
+The default shipped config for this plugin sets `enabled: false`. Operators must explicitly
+set `enabled: true` to activate self-update discovery. This applies to controller-standalone
+as well — it ships with `enabled: false` in the bundled default plugin config for this plugin;
+no deployment has self-update enabled by default.
 
 `discover_software` returns `Ok(vec![])` immediately when `enabled == false`.
 `detect_host_compatibility` returns `Incompatible("self-update disabled by config")` when
@@ -735,8 +896,9 @@ Three migrations required:
    `'awaiting_restart'` in its filter:
 
    ```sql
-   -- current:  WHERE status IN ('pending', 'in_progress')
-   -- new:       WHERE status IN ('pending', 'in_progress', 'awaiting_restart')
+   DROP INDEX IF EXISTS uix_update_history_host_active;
+   CREATE UNIQUE INDEX uix_update_history_host_active ON update_history (host_id)
+     WHERE status IN ('pending', 'in_progress', 'awaiting_restart');
    ```
 
    Without this, the DB-level "at most one active update per host" guarantee does not
@@ -844,20 +1006,31 @@ these in the accept backlog; they are served once PID B's accept loop starts. No
 issue in practice but documented for completeness.
 
 **macOS Apple Silicon — ad-hoc signing required in update script:** On Apple Silicon,
-the kernel refuses to load an unsigned binary (`SIGKILL` at exec time, not a user-visible
-error dialog). The generated `update_command` shell script must include
-`codesign --sign - --force "$BINARY_PATH"` after download and before the atomic `mv`.
-On Intel macOS and Linux this line is a no-op (the command is available via Xcode CLI
-tools on macOS; on Linux it is absent and the script must skip it via OS detection). The
-releases pipeline does not need a Developer ID or notarization for self-update — ad-hoc
-signing (`-` identity) is sufficient. Notarization matters only for initial
-browser-based distribution (Gatekeeper), which is outside this spec's scope.
+the kernel refuses to load an unsigned binary (`SIGKILL` at exec time). Both generated
+scripts include `command -v codesign >/dev/null 2>&1 && codesign --sign - --force "$TMP_PATH"`
+before the atomic `mv`. `command -v codesign` is false on Linux (codesign not present),
+making this a portable no-op on non-macOS hosts. No Developer ID or notarization needed
+for self-update — ad-hoc signing is sufficient. Notarization is only required for initial
+browser-based distribution (Gatekeeper), outside this spec.
+
+**`tag_strip_prefix: "v"` assumption:** the self-update discovery plugin hardcodes
+`tag_strip_prefix: "v"` in the generated `releases_github` config. If uptrakit ever
+adopts a tag scheme without a `v` prefix (CalVer, bare numbers), `to_version` will carry
+a `v` prefix that `detect_version` (which runs `binary --version`) will not return —
+every `AwaitingRestart → Completed` check will see a mismatch and fail. This assumption
+is acceptable for MVP; revisit if the release tag format changes.
 
 **Windows — not supported:** The `UnixBinary` topology relies on `fork()`, `execve()`,
 `SO_REUSEPORT`, and `SIGUSR2`, none of which exist on Windows. `detect_host_compatibility`
 returns `Incompatible("Windows is not supported")` when the target OS is Windows.
 A future `WindowsService` topology variant will use `CreateProcess()` with an inherited
 socket handle and named-pipe coordination in place of the Unix protocol.
+
+**Stale plugin assignment after config deletion:** if the `detect_version` plugin assignment
+is deleted and recreated while an update is in `AwaitingRestart`, the executor may dispatch
+with the old config (or skip entirely if deleted without replacement). This resolves itself
+at `awaiting_restart_timeout`. No mitigation in MVP. Future: record the assignment ID on
+`update_history` at dispatch time so the executor uses a stable reference.
 
 **`ServiceMetadata` extensibility:** The in-process metadata query works only for the
 embedded agent. Future support for external services (agent, mqtt, scheduler) requires a
@@ -889,5 +1062,14 @@ Standard gates apply. Additionally:
 - Unit test for `AwaitingRestartExecutor` skipping records where `execution_owner_service_id IS NULL`.
 - Unit test for self-update plugin's generated `releases_github` assignment config: asserts
   `tag_strip_prefix == "v"` is present (guards against the most common version-mismatch failure).
+- Unit test for `transition_to_awaiting_restart` CAS: UPDATE is a no-op when
+  `execution_owner_service_id` does not match the calling service_id (prevents cross-service
+  hijack — a different controller must not be able to claim another's in-flight update).
+- Unit test for `AwaitingRestartExecutor` skipping records where no `detect_version` plugin
+  assignment exists (plugin config deleted after update started); verifies warning is logged
+  and scheduler retries next tick.
+- Unit test verifying that receiving `UpdateResultPayload { resumable: true }` does not call
+  `dispatch_next_in_batch` or `dispatch_next_queued_for_host` — the `InProgress →
+  AwaitingRestart` transition must not trigger host/batch progression.
 - The self-update discovery plugin integration test requires a running controller-standalone
   instance; mark `#[ignore]` and document in testing.md.
