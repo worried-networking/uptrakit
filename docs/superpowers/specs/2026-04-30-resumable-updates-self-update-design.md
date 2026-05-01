@@ -500,7 +500,8 @@ pub struct ServiceMetadata {
 }
 
 pub enum DeploymentTopology {
-    StandaloneBinary,
+    /// Unix only (Linux + macOS). Windows deferred — see MVP Scope.
+    UnixBinary,
     DockerContainer { image: String, container_name: String },
 }
 
@@ -555,7 +556,7 @@ binary path is embedded literally in `version_command`).
 
 The discovery plugin uses `DeploymentTopology` from the metadata interface:
 
-- **`StandaloneBinary`**: execute_update = shell plugin with `resumable: true`. The update
+- **`UnixBinary`**: execute_update = shell plugin with `resumable: true`. The update
   script is generated at discovery time from `ServiceMetadata` and branches on
   `reuseport_configured`. The takeover protocol itself is implemented inside the binary —
   the script's job is just to replace the binary on disk and signal the running process.
@@ -698,14 +699,29 @@ feature is intentionally disabled.
 
 ### MVP Scope
 
-MVP covers controller-standalone only. The `detect_host_compatibility` check returns
-`Incompatible(reason)` on hosts where no supported uptrakit service is detected.
+MVP covers controller-standalone on **Linux and macOS (Intel + Apple Silicon)** only.
+The `detect_host_compatibility` check returns `Incompatible(reason)` on hosts where no
+supported uptrakit service is detected.
+
+The `UnixBinary` topology uses `fork()`, `execve()`, `SO_REUSEPORT`, and `SIGUSR2` — all
+POSIX primitives unavailable or semantically different on Windows. Windows is explicitly
+out of scope for this spec.
+
+**macOS Apple Silicon note:** binaries downloaded by the update script via `curl` do not
+receive the quarantine flag and do not require notarization. However, all binaries on
+Apple Silicon must carry at minimum an ad-hoc signature to execute — the OS kills unsigned
+binaries at load time. The update script must call `codesign --sign - --force <binary>`
+after download and before `mv`. This is a documentation and script-generation requirement
+only; no changes to the binary build pipeline are in scope for this spec. Release pipeline
+codesigning (Developer ID, notarization) is a separate concern outside this spec's scope.
 
 Future iterations (not in this spec):
 
 - agent, agent-ssh, mqtt, scheduler as additional software items
 - Multi-service coordination (e.g., update ordering when controller and agent are separate)
-- Windows service topology
+- Windows service topology: requires `CreateProcess()` + named-pipe coordination +
+  `SO_REUSEADDR`-based hand-off; no `execve()` equivalent; SCM manages service identity
+  by name rather than PID so supervisor-transparency is not a concern
 
 ---
 
@@ -826,6 +842,22 @@ brief window where both PID A (draining) and PID B (starting) may drop a new con
 that arrives between PID B's bind and its first `accept()` call. In practice the OS queues
 these in the accept backlog; they are served once PID B's accept loop starts. Not a known
 issue in practice but documented for completeness.
+
+**macOS Apple Silicon — ad-hoc signing required in update script:** On Apple Silicon,
+the kernel refuses to load an unsigned binary (`SIGKILL` at exec time, not a user-visible
+error dialog). The generated `update_command` shell script must include
+`codesign --sign - --force "$BINARY_PATH"` after download and before the atomic `mv`.
+On Intel macOS and Linux this line is a no-op (the command is available via Xcode CLI
+tools on macOS; on Linux it is absent and the script must skip it via OS detection). The
+releases pipeline does not need a Developer ID or notarization for self-update — ad-hoc
+signing (`-` identity) is sufficient. Notarization matters only for initial
+browser-based distribution (Gatekeeper), which is outside this spec's scope.
+
+**Windows — not supported:** The `UnixBinary` topology relies on `fork()`, `execve()`,
+`SO_REUSEPORT`, and `SIGUSR2`, none of which exist on Windows. `detect_host_compatibility`
+returns `Incompatible("Windows is not supported")` when the target OS is Windows.
+A future `WindowsService` topology variant will use `CreateProcess()` with an inherited
+socket handle and named-pipe coordination in place of the Unix protocol.
 
 **`ServiceMetadata` extensibility:** The in-process metadata query works only for the
 embedded agent. Future support for external services (agent, mqtt, scheduler) requires a
