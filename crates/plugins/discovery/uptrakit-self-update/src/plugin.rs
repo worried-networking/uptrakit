@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, DiscoveredSoftware, HostCompatibility, HostRequirements,
-    HostRuntime, PluginFamily, ServiceMetadataProvider, declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily,
+    ServiceMetadataProvider, declare_plugin,
 };
 
 use crate::config::UptrakitSelfUpdateConfig;
@@ -15,10 +14,14 @@ use crate::config::UptrakitSelfUpdateConfig;
 /// returns `Incompatible` immediately — no I/O is performed. This allows
 /// controller-standalone to ship with the plugin registered but inert unless
 /// the operator explicitly opts in by setting `enabled = true`.
+///
+/// When `enabled` is `true` but the plugin is not constructed with a
+/// `metadata_provider` (i.e., not running as the embedded agent inside a
+/// controller-standalone), `detect_host_compatibility` returns `Incompatible`
+/// with a reason explaining that a controller is required.
 pub struct UptrakitSelfUpdatePlugin {
-    config: UptrakitSelfUpdateConfig,
-    #[allow(dead_code)]
-    metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>,
+    pub(crate) config: UptrakitSelfUpdateConfig,
+    pub(crate) metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>,
 }
 
 impl UptrakitSelfUpdatePlugin {
@@ -49,39 +52,16 @@ declare_plugin!(UptrakitSelfUpdatePlugin, UptrakitSelfUpdateConfig, "discovery_u
     roles: [Discoverer],
 });
 
-// ── Discoverer implementation ────────────────────────────────────────────
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::Discoverer for UptrakitSelfUpdatePlugin {
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(
-        &self,
-    ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
-        if !self.config.enabled {
-            return Ok(HostCompatibility::Incompatible(
-                "uptrakit self-update is disabled — set `enabled = true` to opt in".to_string(),
-            ));
-        }
-
-        // When enabled, the plugin is always compatible — it runs on the controller
-        // itself, not on a managed host.
-        Ok(HostCompatibility::Compatible)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn discover_software(
-        &self,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
-        Ok(vec![])
-    }
-}
+// ── Discoverer implementation is in discovery.rs ─────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta,
-        StandardHostRuntime, command::CommandExecutor,
+        DeploymentTopology, Discoverer, HostCapabilities, HostCompatibility, LocalCommandExecutor,
+        PluginCapability, PluginMeta, ServiceMetadata, StandardHostRuntime,
+        command::CommandExecutor,
     };
 
     fn test_plugin_with_config(config: UptrakitSelfUpdateConfig) -> UptrakitSelfUpdatePlugin {
@@ -93,6 +73,48 @@ mod tests {
 
     fn test_plugin() -> UptrakitSelfUpdatePlugin {
         test_plugin_with_config(UptrakitSelfUpdateConfig::default())
+    }
+
+    /// A fake `ServiceMetadataProvider` for unit tests.
+    struct FakeMetadataProvider {
+        service_name: String,
+        binary_path: Option<PathBuf>,
+        version: String,
+        reuseport_configured: bool,
+        pid_file: Option<PathBuf>,
+    }
+
+    impl uptrakit_plugin_infrastructure_core::ServiceMetadataProvider for FakeMetadataProvider {
+        fn get_metadata(&self) -> ServiceMetadata {
+            ServiceMetadata::new(
+                self.service_name.clone(),
+                self.binary_path.clone(),
+                self.version.clone(),
+                DeploymentTopology::UnixBinary,
+                self.reuseport_configured,
+                self.pid_file.clone(),
+            )
+        }
+    }
+
+    fn make_test_metadata_provider(version: &str) -> Arc<dyn ServiceMetadataProvider> {
+        Arc::new(FakeMetadataProvider {
+            service_name: "uptrakit-controller".to_string(),
+            binary_path: Some(PathBuf::from("/usr/bin/uptrakit")),
+            version: version.to_string(),
+            reuseport_configured: false,
+            pid_file: None,
+        })
+    }
+
+    fn test_plugin_with_provider(
+        config: UptrakitSelfUpdateConfig,
+        provider: Arc<dyn ServiceMetadataProvider>,
+    ) -> UptrakitSelfUpdatePlugin {
+        UptrakitSelfUpdatePlugin {
+            config,
+            metadata_provider: Some(provider),
+        }
     }
 
     // ── config ──────────────────────────────────────────────────────────
@@ -180,25 +202,130 @@ mod tests {
         }
     }
 
+    /// When `enabled = true` but `metadata_provider` is `None` (i.e., not
+    /// running as embedded agent inside controller-standalone), the plugin
+    /// must return `Incompatible`.
     #[tokio::test]
-    async fn detect_host_compatibility_enabled_returns_compatible() {
+    async fn detect_host_compatibility_enabled_no_provider_returns_incompatible() {
         let config = UptrakitSelfUpdateConfig { enabled: true };
-        let plugin = test_plugin_with_config(config);
+        let plugin = test_plugin_with_config(config); // StandardHostRuntime → None provider
+        let result = plugin.detect_host_compatibility().await;
+        assert!(result.is_ok());
+        assert!(
+            matches!(result.unwrap(), HostCompatibility::Incompatible(_)),
+            "enabled plugin without metadata provider must report Incompatible"
+        );
+    }
+
+    /// When `enabled = true` AND `metadata_provider` is set, the plugin must
+    /// report `Compatible`.
+    #[tokio::test]
+    async fn detect_host_compatibility_enabled_with_provider_returns_compatible() {
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let provider = make_test_metadata_provider("1.0.0");
+        let plugin = test_plugin_with_provider(config, provider);
         let result = plugin.detect_host_compatibility().await;
         assert!(result.is_ok());
         assert!(
             matches!(result.unwrap(), HostCompatibility::Compatible),
-            "enabled plugin must report Compatible"
+            "enabled plugin with metadata provider must report Compatible"
         );
     }
 
     // ── discovery ───────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_returns_empty_stub() {
-        let plugin = test_plugin();
+    async fn discover_software_disabled_returns_empty() {
+        let plugin = test_plugin(); // enabled = false
         let result = plugin.discover_software().await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn discover_software_enabled_no_provider_returns_empty() {
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let plugin = test_plugin_with_config(config); // no metadata_provider
+        let result = plugin.discover_software().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    // ── new discovery tests (Task 17) ────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compatibility_disabled() {
+        let config = UptrakitSelfUpdateConfig { enabled: false };
+        let provider = make_test_metadata_provider("1.0.0");
+        let plugin = test_plugin_with_provider(config, provider);
+        let result = plugin.detect_host_compatibility().await;
+        assert!(result.is_ok());
+        assert!(
+            matches!(result.unwrap(), HostCompatibility::Incompatible(_)),
+            "disabled plugin must return Incompatible"
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_no_metadata_provider() {
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let plugin = UptrakitSelfUpdatePlugin {
+            config,
+            metadata_provider: None,
+        };
+        let result = plugin.detect_host_compatibility().await;
+        assert!(result.is_ok());
+        if let Ok(HostCompatibility::Incompatible(reason)) = result {
+            assert!(
+                reason.contains("controller") || reason.contains("embedded"),
+                "reason should mention 'controller' or 'embedded': {reason}"
+            );
+        } else {
+            panic!("expected Incompatible when no metadata_provider");
+        }
+    }
+
+    #[tokio::test]
+    async fn build_software_item_sets_tag_strip_prefix() {
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let provider = make_test_metadata_provider("1.2.3");
+        let plugin = test_plugin_with_provider(config, provider);
+        let result = plugin.discover_software().await.expect("discover_software");
+        assert_eq!(
+            result.len(),
+            1,
+            "expected exactly one discovered software item"
+        );
+        let item = &result[0];
+        let github_target = item
+            .targets
+            .iter()
+            .find(|t| t.plugin_type.as_str() == "releases_github");
+        let github_target = github_target.expect("releases_github target must be present");
+        let strip_prefix = github_target
+            .plugin_config
+            .get("tag_strip_prefix")
+            .and_then(|v| v.as_str());
+        assert_eq!(strip_prefix, Some("v"), "tag_strip_prefix must be 'v'");
+    }
+
+    #[tokio::test]
+    async fn build_software_item_awaiting_restart_timeout_is_120() {
+        let config = UptrakitSelfUpdateConfig { enabled: true };
+        let provider = make_test_metadata_provider("1.2.3");
+        let plugin = test_plugin_with_provider(config, provider);
+        let result = plugin.discover_software().await.expect("discover_software");
+        assert_eq!(
+            result.len(),
+            1,
+            "expected exactly one discovered software item"
+        );
+        let item = &result[0];
+        let timeout = item
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("awaiting_restart_timeout"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(timeout, Some(120), "awaiting_restart_timeout must be 120");
     }
 }
