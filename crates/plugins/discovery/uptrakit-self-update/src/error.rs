@@ -5,6 +5,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the uptrakit self-update discovery plugin.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SelfUpdateError {
     #[error("metadata provider not available")]
     NoMetadataProvider,

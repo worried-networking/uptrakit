@@ -17,7 +17,6 @@ use crate::config::UptrakitSelfUpdateConfig;
 /// the operator explicitly opts in by setting `enabled = true`.
 pub struct UptrakitSelfUpdatePlugin {
     config: UptrakitSelfUpdateConfig,
-    // Populated at construction time; used in Task 17 for discovery.
     #[allow(dead_code)]
     metadata_provider: Option<Arc<dyn ServiceMetadataProvider>>,
 }
@@ -73,10 +72,6 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UptrakitSelfUpdatePlugi
     async fn discover_software(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
-        // Full implementation comes in Task 17.
-        // When disabled this path is unreachable (detect_host_compatibility returns
-        // Incompatible), but we return empty rather than panicking so the stub is
-        // safe to call in tests.
         Ok(vec![])
     }
 }
@@ -166,7 +161,10 @@ mod tests {
         let plugin = test_plugin(); // default: enabled = false
         let result = plugin.detect_host_compatibility().await;
         assert!(result.is_ok(), "must not error");
-        matches!(result.unwrap(), HostCompatibility::Incompatible(_));
+        assert!(matches!(
+            result.unwrap(),
+            HostCompatibility::Incompatible(_)
+        ));
     }
 
     #[tokio::test]

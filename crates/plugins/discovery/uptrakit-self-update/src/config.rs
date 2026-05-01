@@ -7,6 +7,7 @@ use uptrakit_plugin_infrastructure_core::PluginConfig;
 /// `Incompatible` immediately — no I/O is performed and no sudoers entries are
 /// installed. Set `enabled = true` in the controller-standalone config to opt in.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct UptrakitSelfUpdateConfig {
     /// Enable self-update discovery. Defaults to `false`.
     ///
