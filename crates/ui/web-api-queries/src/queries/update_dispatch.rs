@@ -1140,6 +1140,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         execution_owner_instance_id: Set(None),
         started_at: Set(Some(now)),
         completed_at: Set(None),
+        awaiting_restart_since: Set(None),
         created_at: Set(now),
         update_category: Set(params.update_category.to_string()),
         batch_id: Set(params.batch_id),

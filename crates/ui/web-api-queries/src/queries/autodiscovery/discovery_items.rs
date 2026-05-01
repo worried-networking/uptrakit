@@ -391,6 +391,7 @@ async fn find_or_create_software_item(
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            awaiting_restart_timeout: Set(None),
         };
         match SoftwareItem::insert(new_item).exec(db).await {
             Ok(_) => {
