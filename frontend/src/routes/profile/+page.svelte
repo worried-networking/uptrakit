@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Copy } from 'lucide-svelte';
 	import { getUser, getAuthMethod, initialize } from '$lib/auth.svelte';
 	import {
 		listApiTokens,
@@ -442,6 +443,11 @@
 			<div class="relative">
 				<pre
 					class="rounded-panel bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
+				<div class="absolute top-2 right-2">
+					<Button variant="ghost" size="sm" ariaLabel="Copy token" onclick={() => copyToken(createdToken!)}>
+						<Copy size={14} />
+					</Button>
+				</div>
 			</div>
 		{:else}
 			<FormFieldRow label="Token Name" inputId="new-token-name">
