@@ -22,6 +22,7 @@ pub use dispatch::{
     mark_all_in_progress_as_failed_for_rollout,
     mark_orchestrator_inprogress_as_failed_on_reconnect,
     mark_owned_in_progress_as_failed_on_reconnect, touch_stdin_attention_if_owned,
+    transition_to_awaiting_restart,
 };
 pub use queries::{get_batch_with_items, list_batches};
 
