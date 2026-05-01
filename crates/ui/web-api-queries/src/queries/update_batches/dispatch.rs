@@ -2208,6 +2208,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_awaiting_restart_does_not_trigger_dispatch() {
+        // When a record transitions to AwaitingRestart, the record must remain
+        // present and non-terminal so that dispatch is blocked for the host.
+        // (has_active_update_for_host will be extended to include AwaitingRestart
+        // in Task 9; here we verify the precondition: the record is AwaitingRestart
+        // and is not in a terminal state that would allow a new dispatch to proceed.)
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let runtime_instance_id = Uuid::now_v7();
@@ -2219,9 +2224,20 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 1);
 
-        // The CAS path itself MUST NOT create a follow-up Pending record for
-        // the host — dispatch progression is the caller's responsibility, and
-        // the resumable branch in the WS handler skips it.
+        // Verify AwaitingRestart record exists and is not Completed/Failed (still blocking).
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, update_history::UpdateStatus::AwaitingRestart);
+        assert!(
+            after.completed_at.is_none(),
+            "AwaitingRestart record must not have completed_at set"
+        );
+
+        // The transition must not have created any spurious Pending records for
+        // the host — dispatch progression is the caller's responsibility.
         let pending_for_host = UpdateHistory::find()
             .filter(update_history::Column::HostId.eq(f.host_id))
             .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
