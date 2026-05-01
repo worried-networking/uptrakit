@@ -269,6 +269,58 @@ describe('Button Migrations', () => {
 	});
 });
 
+describe('Create Token Modal — Post-reveal', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(user);
+		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
+		vi.mocked(api.listApiTokens).mockResolvedValue({
+			tokens: [
+				{
+					id: 'existing-token',
+					name: 'Existing',
+					created_at: '2026-03-10T12:00:00Z',
+					revoked_at: null
+				}
+			]
+		});
+		vi.mocked(api.createApiToken).mockResolvedValue({
+			id: 'token-1',
+			token: 'secret-token-abc'
+		});
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	async function revealToken() {
+		await waitFor(() => expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('tab', { name: 'API Tokens' }));
+		const newTokenBtn = await screen.findByRole('button', {
+			name: 'New Token'
+		});
+		await userEvent.click(newTokenBtn);
+		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
+		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
+		await userEvent.type(nameInput, 'test');
+		const createBtn = screen.getByRole('button', { name: 'Create' });
+		await userEvent.click(createBtn);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument());
+	}
+
+	it('inline copy icon button is present in post-reveal state', async () => {
+		render(ProfilePage);
+		await revealToken();
+		expect(screen.getByRole('button', { name: 'Copy token' })).toBeInTheDocument();
+	});
+
+	it('footer Copy button is present in post-reveal state', async () => {
+		render(ProfilePage);
+		await revealToken();
+		expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+	});
+});
+
 describe('API Tokens Tab', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
