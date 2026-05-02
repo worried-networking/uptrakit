@@ -4,6 +4,7 @@
 )]
 #![expect(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
     reason = "feature-conditional #[allow] for unused_mut; #[expect] would be unfulfilled when interactive feature is enabled"
 )]
 
@@ -494,10 +495,7 @@ pub async fn handle_execute_update_ssh(
     let host_machine_id = payload.host_machine_id.clone();
     let update_history_id = payload.update_history_id;
 
-    #[allow(
-        unused_mut,
-        reason = "mut is required when the interactive feature is enabled to call .take() on channel fields"
-    )]
+    #[allow(unused_mut)]
     let mut in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
 
     // Extract interactive channels before moving InFlightUpdate into the forwarder.

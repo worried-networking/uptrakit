@@ -14,7 +14,10 @@ mod durations;
         feature = "embedded-ssh-agent",
         feature = "embedded-mqtt"
     )),
-    allow(dead_code) // Infrastructure types used by follow-up service embeddings.
+    expect(
+        dead_code,
+        reason = "infrastructure types used only when at least one embedded service feature is enabled"
+    )
 )]
 mod embedded;
 #[cfg(feature = "embedded-frontend")]
@@ -181,7 +184,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
     #[cfg_attr(
         not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
-        allow(unused_variables)
+        expect(
+            unused_variables,
+            reason = "only read inside the embedded-scheduler and embedded-agent feature blocks below"
+        )
     )]
     let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
@@ -824,7 +830,10 @@ async fn spawn_background_tasks(
             feature = "embedded-agent",
             feature = "embedded-mqtt"
         )),
-        allow(unused_variables)
+        expect(
+            unused_variables,
+            reason = "only read inside embedded-scheduler/embedded-agent/embedded-mqtt feature blocks"
+        )
     )]
     controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,

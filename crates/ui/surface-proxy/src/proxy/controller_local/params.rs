@@ -1,11 +1,6 @@
 // All helpers in this module are consumed only by sibling modules (`notifications.rs`,
 // `proxmox_add_config.rs`) which are themselves pending wiring via `local_executor.rs`.
-// Until `local_executor.rs` is incorporated, these helpers have no compiled entry point,
-// triggering dead_code. Remove this allow once `local_executor.rs` is wired in.
-#![allow(
-    dead_code,
-    reason = "all helpers are consumed by sibling modules pending wiring via local_executor.rs"
-)]
+// Remove this comment once `local_executor.rs` is wired in.
 
 use uuid::Uuid;
 

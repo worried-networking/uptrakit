@@ -60,7 +60,10 @@ pub(crate) struct BuiltinServiceHost {
             feature = "embedded-ssh-agent",
             feature = "embedded-mqtt"
         )),
-        allow(dead_code)
+        expect(
+            dead_code,
+            reason = "field only accessed when at least one embedded service feature is enabled"
+        )
     )]
     embedded: Arc<crate::embedded::EmbeddedServiceHost>,
 }
