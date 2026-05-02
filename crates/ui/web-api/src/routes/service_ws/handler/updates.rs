@@ -358,7 +358,7 @@ pub(super) async fn load_pending_update_records(
     //    Ordered by ID (UUIDv7 = chronological) so batch-aware filtering
     //    below picks the oldest pending update per (batch_id, host_id).
     let pending_updates = update_history::Entity::find()
-        .filter(update_history::Column::HostId.is_in(host_ids.clone()))
+        .filter(update_history::Column::HostId.is_in(host_ids.iter().copied()))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
         .order_by_asc(update_history::Column::Id)
         .all(state.db())
@@ -379,7 +379,7 @@ pub(super) async fn load_pending_update_records(
 
     // Batch 1: software items.
     let sw_items_map: HashMap<uuid::Uuid, software_item::Model> = software_item::Entity::find()
-        .filter(software_item::Column::Id.is_in(sw_ids.clone()))
+        .filter(software_item::Column::Id.is_in(sw_ids.iter().copied()))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .all(state.db())
         .await
@@ -390,7 +390,7 @@ pub(super) async fn load_pending_update_records(
 
     // Batch 2: hosts.
     let hosts_map: HashMap<uuid::Uuid, host::Model> = host::Entity::find()
-        .filter(host::Column::Id.is_in(host_ids.clone()))
+        .filter(host::Column::Id.is_in(host_ids.iter().copied()))
         .all(state.db())
         .await
         .context_to::<HandlerError>()?
@@ -404,8 +404,8 @@ pub(super) async fn load_pending_update_records(
     // pending_updates; those are silently ignored during the join below.
     let assignments: Vec<host_software_item_plugin::Model> =
         host_software_item_plugin::Entity::find()
-            .filter(host_software_item_plugin::Column::HostId.is_in(host_ids.clone()))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids.clone()))
+            .filter(host_software_item_plugin::Column::HostId.is_in(host_ids.iter().copied()))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids.iter().copied()))
             .filter(host_software_item_plugin::Column::Role.is_in([
                 "execute_update",
                 "detect_version",
@@ -469,7 +469,7 @@ pub(super) async fn load_pending_update_records(
     // `release_info` for plugins like GitHub that require asset download URLs.
     let hsi_metadata_map: HashMap<(uuid::Uuid, uuid::Uuid), Option<serde_json::Value>> =
         host_software_item::Entity::find()
-            .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
+            .filter(host_software_item::Column::HostId.is_in(host_ids.iter().copied()))
             .filter(host_software_item::Column::SoftwareItemId.is_in(sw_ids))
             .all(state.db())
             .await
