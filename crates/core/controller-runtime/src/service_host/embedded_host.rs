@@ -76,7 +76,10 @@ impl BuiltinServiceHost {
         feature = "embedded-ssh-agent",
         feature = "embedded-mqtt"
     ))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each parameter drives a distinct aspect of builtin service registration"
+    )]
     pub(crate) async fn add(
         &self,
         registration: &BuiltinRegistration,

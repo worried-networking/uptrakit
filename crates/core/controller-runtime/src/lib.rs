@@ -89,7 +89,12 @@ async fn async_main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    #[allow(unused_mut)] // mutated inside #[cfg(feature = "journald")] block
+    #[expect(
+        clippy::allow_attributes,
+        clippy::allow_attributes_without_reason,
+        reason = "feature-conditional: unused_mut fires only when the journald feature is disabled"
+    )]
+    #[allow(unused_mut)]
     let mut builder = uptrakit_tracing_init::TracingBuilder::new()
         .verbosity(args.verbose)
         .max_verbosity(3)
@@ -277,7 +282,13 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let controller_id = uuid::Uuid::now_v7();
     let workload_claim_registry =
         Arc::new(uptrakit_web_api::workload_claims::WorkloadClaimRegistry::new());
-    #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(
+            unused_mut,
+            reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
+        )
+    )]
     let mut notification_service =
         uptrakit_web_api::notification_service::NotificationService::new(
             service_connections.clone(),
@@ -324,7 +335,13 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Build the admin event broadcaster with NATS for cross-instance SSE fan-out.
     // When NATS is not configured the broadcaster operates in single-instance mode.
-    #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(
+            unused_mut,
+            reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
+        )
+    )]
     let mut event_broadcaster = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
     #[cfg(feature = "nats")]
     if let Some(ref nats) = nats_transport {
@@ -377,7 +394,13 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Build credential sources for external services that need direct infrastructure access.
     let credential_sources = {
-        #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+        #[cfg_attr(
+            not(feature = "nats"),
+            expect(
+                unused_mut,
+                reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
+            )
+        )]
         let mut sources = uptrakit_web_api::ServiceCredentialSources {
             db_url: Some(db_url),
             nats_url: None,
@@ -774,10 +797,18 @@ async fn build_audit_logger(
 
 /// Spawn all background tasks: CRL manager, denylist cleanup, settings reload,
 /// CA reload/rotation, scheduler, server cert renewal, and NATS consumer.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "spawns all background service tasks; each parameter drives a distinct lifecycle phase"
+)]
 // `controller_installation_id` is only used behind `embedded-scheduler`
 // and `embedded-agent` feature flags; `has_external_tls_cert` is only used
 // behind the `nats` feature flag.
+#[expect(
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    reason = "feature-conditional: some parameters only used inside embedded-scheduler/embedded-agent feature blocks"
+)]
 #[allow(unused_variables)]
 async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
@@ -800,11 +831,22 @@ async fn spawn_background_tasks(
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     builtin_host: &service_host::BuiltinServiceHost,
     state_dir: std::path::PathBuf,
-    #[cfg_attr(not(feature = "embedded-agent"), allow(unused_variables))]
+    #[cfg_attr(
+        not(feature = "embedded-agent"),
+        expect(
+            unused_variables,
+            reason = "only used inside the #[cfg(feature = \"embedded-agent\")] block"
+        )
+    )]
     reuseport_configured: bool,
-    #[cfg_attr(not(feature = "embedded-agent"), allow(unused_variables))] pid_file: Option<
-        std::path::PathBuf,
-    >,
+    #[cfg_attr(
+        not(feature = "embedded-agent"),
+        expect(
+            unused_variables,
+            reason = "only used inside the #[cfg(feature = \"embedded-agent\")] block"
+        )
+    )]
+    pid_file: Option<std::path::PathBuf>,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,

@@ -14,7 +14,10 @@
 pub(crate) mod bridge;
 pub(crate) mod metadata_runtime;
 pub(crate) mod provision;
-#[allow(dead_code)] // Infrastructure types used by follow-up service embeddings.
+#[expect(
+    dead_code,
+    reason = "infrastructure types used only when embedded service features are enabled"
+)]
 pub(crate) mod types;
 
 use std::collections::{BTreeSet, HashSet};
@@ -41,7 +44,10 @@ pub(crate) struct EmbeddedShutdownTokens {
     /// Cancel to stop claiming new work. In-flight work completes naturally.
     #[cfg_attr(
         not(any(feature = "embedded-scheduler", feature = "embedded-ssh-agent")),
-        allow(dead_code)
+        expect(
+            dead_code,
+            reason = "only read inside embedded-scheduler or embedded-ssh-agent feature blocks"
+        )
     )]
     pub drain: CancellationToken,
     /// Cancel to abort in-flight work immediately.
@@ -49,7 +55,6 @@ pub(crate) struct EmbeddedShutdownTokens {
 }
 
 /// Result of registering an embedded service via [`EmbeddedServiceHost::add()`].
-#[allow(dead_code)] // Fields used by follow-up service embeddings (agent).
 pub(crate) struct AddResult {
     /// The provisioned service ID.
     pub service_id: Uuid,
@@ -113,7 +118,10 @@ impl EmbeddedServiceHost {
     ///
     /// `tenant_id` is required when `!is_system_service` — it determines which
     /// tenant the embedded service record belongs to.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument drives a distinct aspect of embedded service registration"
+    )]
     pub(crate) async fn add(
         &self,
         label: &'static str,
