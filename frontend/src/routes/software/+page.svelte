@@ -527,6 +527,7 @@
 
 	async function executeEdit() {
 		if (!editItem || editSubmitting) return;
+		if (editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())) return;
 		editSubmitting = true;
 		try {
 			const trimmedIcon = editForm.icon_url.trim();
@@ -1434,7 +1435,7 @@
 
 		<FormFieldRow
 			label="Icon URL"
-			hint="Optional, HTTPS"
+			hint="Optional. Must be HTTPS when provided."
 			inputId="software-edit-icon-url"
 			error={editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())
 				? 'Icon URL must be a valid HTTPS URL.'
@@ -1442,9 +1443,12 @@
 		>
 			<Input
 				id="software-edit-icon-url"
-				type="text"
+				type="url"
 				bind:value={editForm.icon_url}
 				placeholder="https://example.com/icon.png"
+				error={editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())
+					? 'Icon URL must be a valid HTTPS URL.'
+					: undefined}
 			/>
 		</FormFieldRow>
 
