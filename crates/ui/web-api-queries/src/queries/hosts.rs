@@ -422,12 +422,12 @@ pub async fn batch_deactivate_hosts(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, h) in &found {
-        let mut active: host::ActiveModel = h.clone().into();
+    for (id, h) in found {
+        let mut active: host::ActiveModel = h.into();
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
