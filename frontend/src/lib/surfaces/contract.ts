@@ -147,6 +147,7 @@ export interface SurfaceDescriptor {
 	required_capabilities: SurfaceCapability[];
 	root_node: SurfaceNode;
 	context_selector?: SurfaceContextSelector;
+	nav_icon?: string;
 }
 
 export type DataSourceKind =
