@@ -549,16 +549,16 @@ pub async fn batch_approve_services(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.status != service::ServiceStatus::Pending {
-            failed.push((*id, "service is not in pending status".to_string()));
+            failed.push((id, "service is not in pending status".to_string()));
             continue;
         }
-        let mut active: service::ActiveModel = svc.clone().into();
+        let mut active: service::ActiveModel = svc.into();
         active.status = Set(service::ServiceStatus::Approved);
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
@@ -743,17 +743,17 @@ pub async fn batch_reject_services(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.status != service::ServiceStatus::Pending {
-            failed.push((*id, "service is not in pending status".to_string()));
+            failed.push((id, "service is not in pending status".to_string()));
             continue;
         }
-        let mut active: service::ActiveModel = svc.clone().into();
+        let mut active: service::ActiveModel = svc.into();
         active.status = Set(service::ServiceStatus::Rejected);
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
@@ -794,15 +794,15 @@ pub async fn batch_deactivate_services(
 
     // Deactivate each service in its own transaction so that individual
     // failures don't block the rest of the batch.
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.is_embedded {
-            failed.push((*id, "embedded services cannot be deactivated".to_string()));
+            failed.push((id, "embedded services cannot be deactivated".to_string()));
             continue;
         }
 
         let txn = tenant_db.db().begin().await.context_to()?;
 
-        let mut active: service::ActiveModel = svc.clone().into();
+        let mut active: service::ActiveModel = svc.into();
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
@@ -816,7 +816,7 @@ pub async fn batch_deactivate_services(
                 service_certificate::Column::RevocationReason,
                 Expr::value(Some(RevocationReason::ServiceDeactivated)),
             )
-            .filter(service_certificate::Column::ServiceId.eq(*id))
+            .filter(service_certificate::Column::ServiceId.eq(id))
             .filter(service_certificate::Column::RevokedAt.is_null())
             .exec(&txn)
             .await
@@ -827,7 +827,7 @@ pub async fn batch_deactivate_services(
             .map_err(|e| report!(ServiceQueryError::Db(e)))?;
 
         txn.commit().await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
