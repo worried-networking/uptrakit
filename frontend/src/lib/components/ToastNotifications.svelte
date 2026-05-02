@@ -4,6 +4,7 @@
 	import { clearError, clearSuccess, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from './Button.svelte';
+	import { X } from 'lucide-svelte';
 	import type { SystemAlert } from '$lib/types';
 
 	let { alerts, onDismiss }: { alerts: SystemAlert[]; onDismiss: (id: string) => void } = $props();
@@ -403,7 +404,11 @@
 			<SectionCard>
 				{#snippet actions()}
 					<StatusBadge tone={badgeToneForToast(item.tone)} label={badgeLabelForToast(item)} />
-					<Button variant="ghost" size="sm" onclick={() => dismissToast(item)}>Dismiss</Button>
+					<Button variant="ghost" size="sm" ariaLabel="Dismiss" onclick={() => dismissToast(item)}>
+						{#snippet leadingIcon()}
+							<X size={14} aria-hidden="true" />
+						{/snippet}
+					</Button>
 				{/snippet}
 				<div class="space-y-2">
 					<Callout tone={item.tone} title={item.kind === 'system' ? item.title : undefined} message={item.message} />
