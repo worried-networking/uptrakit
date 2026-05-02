@@ -520,12 +520,11 @@ pub async fn merge_service(
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found or not in `Pending` status are reported as failed.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_approve_services(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = tenant_db
         .find::<service::Entity>()
         .filter(service::Column::Id.is_in(ids.iter().copied()))
@@ -720,12 +719,11 @@ mod tests {
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found or not in `Pending` status are reported as failed.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_reject_services(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = tenant_db
         .find::<service::Entity>()
         .filter(service::Column::Id.is_in(ids.iter().copied()))
@@ -768,13 +766,12 @@ pub async fn batch_reject_services(
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found are reported as failed.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_services(
     tenant_db: &TenantDb,
     ids: &[Uuid],
     default_tenant_id: Uuid,
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = tenant_db
         .find::<service::Entity>()
         .filter(service::Column::Id.is_in(ids.iter().copied()))

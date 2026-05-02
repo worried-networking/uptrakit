@@ -363,12 +363,11 @@ pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Res
 // ---------------------------------------------------------------------------
 
 /// Approve multiple pending system services.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_approve_system_services(
     db: &DatabaseConnection,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = system_service::Entity::find()
         .filter(system_service::Column::Id.is_in(ids.iter().copied()))
         .filter(system_service::Column::DeactivatedAt.is_null())
@@ -406,12 +405,11 @@ pub async fn batch_approve_system_services(
 }
 
 /// Reject multiple pending system services.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_reject_system_services(
     db: &DatabaseConnection,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = system_service::Entity::find()
         .filter(system_service::Column::Id.is_in(ids.iter().copied()))
         .filter(system_service::Column::DeactivatedAt.is_null())
@@ -450,12 +448,11 @@ pub async fn batch_reject_system_services(
 }
 
 /// Deactivate multiple system services (soft-delete with certificate revocation).
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_system_services(
     db: &DatabaseConnection,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let services = system_service::Entity::find()
         .filter(system_service::Column::Id.is_in(ids.iter().copied()))
         .filter(system_service::Column::DeactivatedAt.is_null())

@@ -260,12 +260,11 @@ pub async fn update_plugin_config(
 // ---------------------------------------------------------------------------
 
 /// Soft-delete multiple plugin configs.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_plugin_configs(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<super::BatchOutcome> {
     let configs = tenant_db
         .find::<plugin_config::Entity>()
         .filter(plugin_config::Column::Id.is_in(ids.iter().copied()))
