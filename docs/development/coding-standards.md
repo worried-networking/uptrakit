@@ -41,6 +41,44 @@ https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0))
 https_addr: "[::]:8443".parse().unwrap(),
 ```
 
+## Lint Suppression
+
+Use `#[expect(lint_name, reason = "...")]`, never `#[allow(lint_name)]`. The `reason` field is
+mandatory (`allow_attributes_without_reason = "deny"`). When the lint stops firing at a site,
+the `#[expect]` becomes a compile error via `unfulfilled_lint_expectations` (promoted to error by
+`warnings = "deny"`), so stale suppressions are caught automatically.
+
+```rust
+// ✓ Correct
+#[expect(clippy::too_many_arguments, reason = "mirrors the eight DB columns of Update")]
+fn create_update_record(…) { … }
+
+// ✗ Wrong — no reason, and will silently persist if the lint is fixed
+#[allow(clippy::too_many_arguments)]
+fn create_update_record(…) { … }
+```
+
+When two lints fire on the same expression, list both in one attribute:
+
+```rust
+#[expect(clippy::unwrap_used, clippy::unwrap_in_result, reason = "infallible: regex compiled from a literal")]
+let re = Regex::new(PATTERN).unwrap();
+```
+
+**Feature-conditional sites** (where a lint fires only when a specific feature is disabled)
+cannot use `#[expect]` because the lint is unfulfilled under the other feature variant. Wrap
+them instead:
+
+```rust
+#[expect(
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    reason = "feature-conditional: unused_mut fires only when the nats feature is disabled"
+)]
+#[allow(unused_mut)]
+let mut x = ...;
+```
+
 ## Shared Contract Crates
 
 - Public fallible APIs in shared or reusable contract crates should document a `# Errors` section.
