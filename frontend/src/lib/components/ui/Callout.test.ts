@@ -19,4 +19,24 @@ describe('Callout', () => {
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.getByText('This provider is currently offline.')).toBeInTheDocument();
 	});
+
+	it('renders a tone icon inside the callout', () => {
+		const { container } = render(Callout, {
+			tone: 'warning',
+			title: 'Watch out',
+			message: 'Something needs your attention.'
+		});
+
+		const callout = container.querySelector('[data-ui="callout"]');
+		expect(callout?.querySelector('svg')).toBeInTheDocument();
+	});
+
+	it('renders a danger callout with its icon', () => {
+		const { container } = render(Callout, {
+			tone: 'danger',
+			message: 'Critical error.'
+		});
+		const callout = container.querySelector('[data-ui="callout"]');
+		expect(callout?.querySelector('svg')).toBeInTheDocument();
+	});
 });
