@@ -631,10 +631,25 @@ async fn prepare_backup_protection(
 
     tracing::debug!(node = %mapping.proxmox_node, vmid = mapping.proxmox_vmid, upid = %task, "backup task started — waiting for completion");
 
-    if let Err(error) = client
-        .wait_for_task_completion(&mapping.proxmox_node, &task, backup_wait_timeout(policy))
-        .await
-    {
+    let wait_result = if let Some(tx) = ctx.output_tx.as_ref() {
+        let _ = tx.send(b"\n--- Proxmox backup log ---\n".to_vec());
+        let result = client
+            .wait_for_task_completion_with_logs(
+                &mapping.proxmox_node,
+                &task,
+                backup_wait_timeout(policy),
+                tx,
+            )
+            .await;
+        let _ = tx.send(b"--- end ---\n\n".to_vec());
+        result
+    } else {
+        client
+            .wait_for_task_completion(&mapping.proxmox_node, &task, backup_wait_timeout(policy))
+            .await
+    };
+
+    if let Err(error) = wait_result {
         tracing::warn!(
             node = %mapping.proxmox_node,
             vmid = mapping.proxmox_vmid,
