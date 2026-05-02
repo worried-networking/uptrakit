@@ -503,6 +503,105 @@ impl ProxmoxClient {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
+
+    /// Poll a Proxmox task until completion, streaming log lines to `output_tx` as they appear.
+    ///
+    /// Polls status first each iteration (avoids redundant log call on the final stopped
+    /// iteration). Log fetch errors are non-fatal and logged at `debug` level. `task_status`
+    /// errors remain fatal.
+    pub async fn wait_for_task_completion_with_logs(
+        &self,
+        node: &str,
+        upid: &str,
+        timeout: Duration,
+        output_tx: &tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    ) -> Result<PveTaskStatus> {
+        tracing::debug!(
+            node,
+            upid,
+            timeout_secs = timeout.as_secs(),
+            "waiting for Proxmox task completion with log streaming"
+        );
+        let deadline = Instant::now() + timeout;
+        let mut next_n: u64 = 0;
+
+        loop {
+            // Check status first; log is fetched only on running iterations.
+            // This avoids a redundant log HTTP call on the final (stopped) iteration.
+            let status = self.task_status(node, upid).await?;
+            // Re-poll once if exitstatus is absent. Proxmox sets exitstatus atomically
+            // with the stopped transition, but a brief finalization lag can occur on
+            // busy nodes. One short retry is sufficient.
+            // NOTE: shadow form used here to satisfy Clippy's `unused_mut` /
+            // `needless_late_init` lints. Do NOT revert to `let mut` form.
+            let status =
+                if status.status.eq_ignore_ascii_case("stopped") && status.exitstatus.is_none() {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    self.task_status(node, upid).await?
+                } else {
+                    status
+                };
+            if status.status.eq_ignore_ascii_case("stopped") {
+                // Single drain: fetch all lines since the last poll.
+                match self.task_log(node, upid, next_n).await {
+                    Ok(entries) => {
+                        for entry in &entries {
+                            let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            node,
+                            upid,
+                            error = %e,
+                            "final task log drain failed; skipping"
+                        );
+                    }
+                }
+
+                if status.exitstatus.as_deref() == Some("OK") {
+                    tracing::debug!(node, upid, "Proxmox task completed successfully");
+                    return Ok(status);
+                }
+                let exit = status.exitstatus.as_deref().unwrap_or("unknown");
+                bail!(ProxmoxError::Plugin(format!(
+                    "Proxmox task {upid} on {node} failed with exit status: {exit}"
+                )));
+            }
+
+            // Task still running — fetch new log lines and advance cursor.
+            // `n` is a 0-based sequential index guaranteed by the Proxmox API;
+            // `last.n + 1` is the correct next page start. If no lines are returned
+            // (task started but has not written output yet), `next_n` is unchanged
+            // and the next poll re-fetches from the same offset.
+            match self.task_log(node, upid, next_n).await {
+                Ok(entries) => {
+                    for entry in &entries {
+                        let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
+                    }
+                    if let Some(last) = entries.last() {
+                        next_n = last.n + 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(node, upid, error = %e, "task log fetch failed; skipping");
+                }
+            }
+
+            if Instant::now() >= deadline {
+                bail!(ProxmoxError::Plugin(format!(
+                    "Timed out waiting for Proxmox task {upid} on {node} to complete"
+                )));
+            }
+
+            tracing::trace!(
+                node,
+                upid,
+                "Proxmox task still running; polling again in 2s"
+            );
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
 }
 
 #[cfg(test)]
