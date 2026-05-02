@@ -26,6 +26,9 @@
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import type { ComponentType, SvelteComponent } from 'svelte';
+	import { History, HardDrive, House, Package, ScrollText, Server, ServerCog, Settings, Tags } from 'lucide-svelte';
+	import { resolveNavIcon } from '$lib/nav-icons';
 	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
@@ -66,6 +69,7 @@
 		origin: NavItemOrigin;
 		stableId: string;
 		badge?: string;
+		icon?: ComponentType<SvelteComponent>;
 	};
 
 	function formatBadge(count: number | null): string | undefined {
@@ -147,19 +151,56 @@
 	const publicRoutes = new Set(['/login', '/register', '/device']);
 
 	// Built-in nav items with priority values for unified sorting.
-	const builtInNavItems: { href: string; label: string; priority: number; permission?: Permission | Permission[] }[] = [
-		{ href: '/', label: 'Home', priority: 100 },
-		{ href: '/services', label: 'Services', priority: 200 },
-		{ href: '/system-services', label: 'System Services', priority: 300, permission: Permission.ViewSystemServices },
-		{ href: '/hosts', label: 'Hosts', priority: 400 },
-		{ href: '/host-tags', label: 'Tags', priority: 450, permission: Permission.ViewHosts },
-		{ href: '/software', label: 'Software', priority: 500, permission: Permission.ViewSoftware },
-		{ href: '/history', label: 'History', priority: 800, permission: Permission.ViewSoftware },
-		{ href: '/audit-logs', label: 'Audit Logs', priority: 900, permission: Permission.ViewAuditLogs },
+	const builtInNavItems: {
+		href: string;
+		label: string;
+		priority: number;
+		icon: ComponentType<SvelteComponent>;
+		permission?: Permission | Permission[];
+	}[] = [
+		{ href: '/', label: 'Home', priority: 100, icon: House },
+		{ href: '/services', label: 'Services', priority: 200, icon: Server },
+		{
+			href: '/system-services',
+			label: 'System Services',
+			priority: 300,
+			icon: ServerCog,
+			permission: Permission.ViewSystemServices
+		},
+		{ href: '/hosts', label: 'Hosts', priority: 400, icon: HardDrive },
+		{
+			href: '/host-tags',
+			label: 'Tags',
+			priority: 450,
+			icon: Tags,
+			permission: Permission.ViewHosts
+		},
+		{
+			href: '/software',
+			label: 'Software',
+			priority: 500,
+			icon: Package,
+			permission: Permission.ViewSoftware
+		},
+		{
+			href: '/history',
+			label: 'History',
+			priority: 800,
+			icon: History,
+			permission: Permission.ViewSoftware
+		},
+		{
+			href: '/audit-logs',
+			label: 'Audit Logs',
+			priority: 900,
+			icon: ScrollText,
+			permission: Permission.ViewAuditLogs
+		},
 		{
 			href: '/settings',
 			label: 'Settings',
 			priority: 1000,
+			icon: Settings,
 			permission: [
 				Permission.ViewSettings,
 				Permission.ManageAuthSettings,
@@ -182,7 +223,8 @@
 			id: item.id,
 			href: item.href,
 			label: item.label,
-			priority: item.priority
+			priority: item.priority,
+			icon: item.icon
 		}))
 	);
 
@@ -203,6 +245,7 @@
 						priority: item.priority,
 						origin: 'built-in',
 						stableId: item.href,
+						icon: item.icon,
 						badge: item.href === '/software' ? formatBadge(getUpdatableSoftwareCount()) : undefined
 					})
 				),
@@ -212,7 +255,8 @@
 					label: item.label,
 					priority: item.priority,
 					origin: 'surface.page',
-					stableId: item.id
+					stableId: item.id,
+					icon: resolveNavIcon(item.icon)
 				})
 			)
 		].sort(compareShellNavItems)
