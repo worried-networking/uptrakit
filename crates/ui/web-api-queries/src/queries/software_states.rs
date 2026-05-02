@@ -95,7 +95,7 @@ pub async fn load_software_states_for_tenant(
         .column(host_software_item::Column::LatestVersion)
         .column(host_software_item::Column::LatestReleaseMetadata)
         .column(host_software_item::Column::UpdateCategory)
-        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.iter().copied()))
         .filter(host_software_item::Column::DeactivatedAt.is_null())
         .into_model::<HostSoftwareItemRow>()
         .all(db)
@@ -133,7 +133,7 @@ pub async fn load_software_states_for_tenant(
         .select_only()
         .column(update_history::Column::HostId)
         .column(update_history::Column::SoftwareItemId)
-        .filter(update_history::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(update_history::Column::SoftwareItemId.is_in(item_ids.iter().copied()))
         .filter(
             Condition::any()
                 .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
@@ -366,7 +366,7 @@ pub async fn load_software_states_page_for_tenant(
         .column(host_software_item::Column::LatestVersion)
         .column(host_software_item::Column::LatestReleaseMetadata)
         .column(host_software_item::Column::UpdateCategory)
-        .filter(host_software_item::Column::HostId.is_in(page_host_ids.clone()))
+        .filter(host_software_item::Column::HostId.is_in(page_host_ids.iter().copied()))
         .filter(host_software_item::Column::DeactivatedAt.is_null())
         .into_model::<HostSoftwareItemRow>()
         .all(db)
@@ -401,7 +401,7 @@ pub async fn load_software_states_page_for_tenant(
         .select_only()
         .column(update_history::Column::HostId)
         .column(update_history::Column::SoftwareItemId)
-        .filter(update_history::Column::HostId.is_in(page_host_ids.clone()))
+        .filter(update_history::Column::HostId.is_in(page_host_ids.iter().copied()))
         .filter(
             Condition::any()
                 .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
@@ -601,7 +601,7 @@ async fn build_host_metadata(
             JoinType::InnerJoin,
             host_tag_assignment::Relation::HostTag.def(),
         )
-        .filter(host_tag_assignment::Column::HostId.is_in(host_ids.clone()))
+        .filter(host_tag_assignment::Column::HostId.is_in(host_ids.iter().copied()))
         // Exclude deactivated tags.
         .filter(host_tag::Column::DeactivatedAt.is_null())
         .into_model::<HostTagRow>()
