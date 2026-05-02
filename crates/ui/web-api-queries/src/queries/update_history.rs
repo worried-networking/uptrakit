@@ -114,7 +114,7 @@ async fn load_actor_names(
     }
 
     let user_entries = User::find()
-        .filter(user::Column::Id.is_in(actor_ids.clone()))
+        .filter(user::Column::Id.is_in(actor_ids.iter().copied()))
         .all(tenant_db.db())
         .await?
         .into_iter()
@@ -123,7 +123,7 @@ async fn load_actor_names(
 
     let service_entries = Service::find()
         .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(service::Column::Id.is_in(actor_ids.clone()))
+        .filter(service::Column::Id.is_in(actor_ids.iter().copied()))
         .all(tenant_db.db())
         .await?
         .into_iter()
