@@ -7,7 +7,7 @@ All primitives are exported from `frontend/src/lib/components/ui/index.ts`.
 Import pattern:
 
 ```typescript
-import { Button, Callout, StatusBadge } from '$lib/components/ui';
+import { Button, Callout, StatusBadge } from "$lib/components/ui";
 ```
 
 Non-UI-barrel components (`Button`, `Input`, `Textarea`, `Checkbox`, `Modal`, `ContextMenu`) are in
@@ -170,12 +170,12 @@ Usage:
 
 Tone → token mapping:
 
-| Tone | Text | Background | Border |
-| --- | --- | --- | --- |
-| `info` | `--color-info` | `--color-info-bg` | `--color-info-border` |
+| Tone      | Text              | Background           | Border                   |
+| --------- | ----------------- | -------------------- | ------------------------ |
+| `info`    | `--color-info`    | `--color-info-bg`    | `--color-info-border`    |
 | `success` | `--color-success` | `--color-success-bg` | `--color-success-border` |
 | `warning` | `--color-warning` | `--color-warning-bg` | `--color-warning-border` |
-| `danger` | `--color-danger` | `--color-danger-bg` | `--color-danger-border` |
+| `danger`  | `--color-danger`  | `--color-danger-bg`  | `--color-danger-border`  |
 
 Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utilities. Always use
 `<Callout>`.
@@ -240,13 +240,13 @@ Usage:
 
 Tone → token mapping:
 
-| Tone | Text | Background | Border |
-| --- | --- | --- | --- |
-| `neutral` | `--text-secondary` | `--bg-raised` | `--border-default` |
-| `info` | `--color-info` | `--color-info-bg` | `--color-info-border` |
-| `success` | `--color-success` | `--color-success-bg` | `--color-success-border` |
-| `warning` | `--color-warning` | `--color-warning-bg` | `--color-warning-border` |
-| `danger` | `--color-danger` | `--color-danger-bg` | `--color-danger-border` |
+| Tone      | Text               | Background           | Border                   |
+| --------- | ------------------ | -------------------- | ------------------------ |
+| `neutral` | `--text-secondary` | `--bg-raised`        | `--border-default`       |
+| `info`    | `--color-info`     | `--color-info-bg`    | `--color-info-border`    |
+| `success` | `--color-success`  | `--color-success-bg` | `--color-success-border` |
+| `warning` | `--color-warning`  | `--color-warning-bg` | `--color-warning-border` |
+| `danger`  | `--color-danger`   | `--color-danger-bg`  | `--color-danger-border`  |
 
 Dimensions: `min-h-[14px]`, `2px` radius, `7.5px` bold uppercase text with 1px border.
 
@@ -676,19 +676,19 @@ Usage:
 
 Variants:
 
-| Variant | Background | Border | Text |
-| --- | --- | --- | --- |
-| `primary` | accent gradient (`--accent-deep` → `--accent`) | none | `--text-inverted` |
-| `ghost` | transparent | `--border-default` | `--text-primary` |
-| `danger` | `--color-danger-bg` | `--color-danger-border` | `--color-danger` |
-| `secondary` | `--bg-raised` | `--border-default` | `--text-primary` |
+| Variant     | Background                                     | Border                  | Text              |
+| ----------- | ---------------------------------------------- | ----------------------- | ----------------- |
+| `primary`   | accent gradient (`--accent-deep` → `--accent`) | none                    | `--text-inverted` |
+| `ghost`     | transparent                                    | `--border-default`      | `--text-primary`  |
+| `danger`    | `--color-danger-bg`                            | `--color-danger-border` | `--color-danger`  |
+| `secondary` | `--bg-raised`                                  | `--border-default`      | `--text-primary`  |
 
 Sizes:
 
-| Size | Height | Padding | Font |
-| --- | --- | --- | --- |
-| `md` | `23px` | `px-3` | `9px` |
-| `sm` | `19px` | `px-2` | `8.5px` |
+| Size | Height | Padding | Font    |
+| ---- | ------ | ------- | ------- |
+| `md` | `23px` | `px-3`  | `9px`   |
+| `sm` | `19px` | `px-2`  | `8.5px` |
 
 Loading state: replaces leading icon with a `9px` spinning border ring; sets `aria-busy`. Disabled
 state: `opacity-40 pointer-events-none` (also `aria-disabled` on link form).
@@ -735,7 +735,7 @@ Usage:
 Not in the UI barrel — import directly:
 
 ```typescript
-import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
 ```
 
 ---
@@ -814,13 +814,13 @@ Used in the dashboard summary grid.
 
 ```typescript
 // frontend/src/lib/components/ui/StatCard.svelte
-export type StatCardTone = 'muted' | 'success' | 'info' | 'warning' | 'danger';
+export type StatCardTone = "muted" | "success" | "info" | "warning" | "danger";
 
 let {
   href,
   label,
   value,
-  valueTone = 'muted',
+  valueTone = "muted",
   subLabel,
 }: {
   href: string;
@@ -833,13 +833,13 @@ let {
 
 Tone → value color mapping:
 
-| Tone | CSS token |
-| --- | --- |
-| `muted` | `--text-muted` |
+| Tone      | CSS token         |
+| --------- | ----------------- |
+| `muted`   | `--text-muted`    |
 | `success` | `--color-success` |
-| `info` | `--color-info` |
+| `info`    | `--color-info`    |
 | `warning` | `--color-warning` |
-| `danger` | `--color-danger` |
+| `danger`  | `--color-danger`  |
 
 Usage:
 
@@ -863,6 +863,85 @@ Rules:
 - Sub-label: `10px`, `--text-secondary`.
 - Standard transition and focus ring applied per `tokens.md`.
 - Wrap in a grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4`) inside a `SectionCard`.
+
+---
+
+## Icons
+
+The Dashboard uses [lucide-svelte](https://lucide.dev) (v1.0.1) for all icons.
+
+### Importing icons
+
+Always use named static imports. Tree-shaking keeps unused icons out of the bundle.
+
+```typescript
+import { Package, Server, Settings } from "lucide-svelte";
+```
+
+Do **not** use `<Icon name="string">` to render icons — the `name` prop on the `Icon`
+wrapper only sets a CSS class and does not render SVG paths. Always use the named
+component directly.
+
+### Standard usage
+
+```svelte
+<!-- Standalone decorative icon -->
+<Package size={16} aria-hidden="true" />
+
+<!-- Leading icon in a Button -->
+<Button variant="primary">
+  {#snippet leadingIcon()}
+    <Package size={14} aria-hidden="true" />
+  {/snippet}
+  Install
+</Button>
+
+<!-- Icon in EmptyState -->
+<EmptyState title="No software items" icon={Package} />
+```
+
+### Sizing conventions
+
+| Context                         | Size |
+| ------------------------------- | ---- |
+| Inline with body text / button  | `14` |
+| Nav sidebar item                | `16` |
+| Standalone decorative / callout | `16` |
+| Mobile bottom nav               | `20` |
+| EmptyState hero                 | `32` |
+| Theme toggle / header controls  | `20` |
+
+### Icon component type
+
+When accepting a lucide icon as a prop, use `ComponentType<SvelteComponent>` from `'svelte'`
+(the Svelte 4–compatible class-constructor type, matching lucide-svelte 1.0.1's exports):
+
+```typescript
+import type { ComponentType, SvelteComponent } from "svelte";
+
+let { icon: IconComponent }: { icon?: ComponentType<SvelteComponent> } =
+  $props();
+```
+
+Render with a **capitalized** variable name — Svelte treats lowercase tags as HTML elements:
+
+```svelte
+{#if IconComponent}
+  <IconComponent size={16} aria-hidden="true" />
+{/if}
+```
+
+When `lucide-svelte` ships runes-native exports, migrate to `Component<IconProps>` from `'svelte'`.
+
+### Surface nav icon allowlist
+
+Plugins that declare a `nav_icon` on their `SurfaceDescriptor` must use a key from
+`SURFACE_NAV_ICONS` in `frontend/src/lib/nav-icons.ts`. Unknown names fall back to `Box`.
+Use `resolveNavIcon(name)` to resolve a string to a component at render time.
+
+Permitted keys: `Box`, `Cpu`, `Database`, `FileText`, `Globe`, `HardDrive`, `History`,
+`Layers`, `Package`, `Puzzle`, `ScrollText`, `Server`, `ServerCog`, `Settings`, `Shield`,
+`Tag`, `Tags`, `Wrench`.
 
 ---
 

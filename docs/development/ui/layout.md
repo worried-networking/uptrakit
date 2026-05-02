@@ -9,26 +9,28 @@
 **Status:** `Implemented` for shell measurements  
 **Status:** `Target` for responsive shell behavior
 
-| Region | Value |
-| --- | --- |
-| Sidebar width | `180px` |
-| Top bar height | `40px` |
+| Region          | Value       |
+| --------------- | ----------- |
+| Sidebar width   | `180px`     |
+| Top bar height  | `40px`      |
 | Content padding | `12px 14px` |
 
 ---
 
 ## Sidebar
 
-| Property | Value |
-| --- | --- |
-| Background | `--bg-surface` |
-| Right border | `--border-subtle` |
+| Property            | Value                  |
+| ------------------- | ---------------------- |
+| Background          | `--bg-surface`         |
+| Right border        | `--border-subtle`      |
 | Nav section headers | `7.5px` bold uppercase |
-| Nav item height | `28px` |
-| Nav item radius | `3px` |
-| Nav item font | `10px` |
+| Nav item height     | `28px`                 |
+| Nav item radius     | `3px`                  |
+| Nav item font       | `10px`                 |
 
 Active nav item state: accent tint background, accent text, colored nav icon.
+Nav items include a lucide icon to the left of the label (sidebar) or above the label (mobile bottom
+nav). See the Icons section in `primitives.md` for sizing and component type conventions.
 
 ![Sidebar navigation showing built-in items alongside a surface.page entry](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
 
@@ -36,12 +38,12 @@ Active nav item state: accent tint background, accent text, colored nav icon.
 
 ## Top Bar
 
-| Property | Value |
-| --- | --- |
-| Height | `40px` |
-| Title | `12px` bold |
-| Optional chip | item count |
-| Right side | search input and primary action |
+| Property      | Value                           |
+| ------------- | ------------------------------- |
+| Height        | `40px`                          |
+| Title         | `12px` bold                     |
+| Optional chip | item count                      |
+| Right side    | search input and primary action |
 
 ---
 
@@ -65,7 +67,7 @@ Props:
 For form layout inside the shell, use the exported constant:
 
 ```typescript
-import { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+import { PUBLIC_ENTRY_FORM_CLASS } from "$lib/components/ui/PublicEntryShell.svelte";
 // PUBLIC_ENTRY_FORM_CLASS = 'space-y-4'
 ```
 
@@ -85,11 +87,11 @@ Rules:
 
 **Status:** `Implemented`
 
-| Breakpoint | Range | Layout |
-| --- | --- | --- |
-| Desktop | `>= 1024px` | Full sidebar |
-| Tablet | `640–1023px` | Overlay sidebar drawer |
-| Mobile | `< 640px` | Bottom navigation bar |
+| Breakpoint | Range        | Layout                 |
+| ---------- | ------------ | ---------------------- |
+| Desktop    | `>= 1024px`  | Full sidebar           |
+| Tablet     | `640–1023px` | Overlay sidebar drawer |
+| Mobile     | `< 640px`    | Bottom navigation bar  |
 
 Implemented:
 
@@ -122,9 +124,9 @@ helper. The Software item currently shows a count badge from the
 `frontend/src/lib/stores/software-updates.svelte.ts` store:
 
 ```typescript
-badge: item.href === '/software'
+badge: item.href === "/software"
   ? formatBadge(getUpdatableSoftwareCount())
-  : undefined
+  : undefined;
 ```
 
 `formatBadge` returns `undefined` for null/0, `String(count)` for 1–99, and `"99+"` for ≥100.
@@ -139,17 +141,17 @@ SSE live-update of the count can be added inside the store by subscribing to
 
 Built-in nav priorities (lower number = higher priority = shown first on mobile):
 
-| Item | Priority |
-| --- | --- |
-| Home | `100` |
-| Services | `200` |
-| System Services | `300` |
-| Hosts | `400` |
-| Tags | `450` |
-| Software | `500` |
-| History | `800` |
-| Audit Logs | `900` |
-| Settings | `1000` |
+| Item            | Priority |
+| --------------- | -------- |
+| Home            | `100`    |
+| Services        | `200`    |
+| System Services | `300`    |
+| Hosts           | `400`    |
+| Tags            | `450`    |
+| Software        | `500`    |
+| History         | `800`    |
+| Audit Logs      | `900`    |
+| Settings        | `1000`   |
 
 Visual regression fixtures:
 `frontend/tests/e2e/ui-parity-responsive.test.ts` captures tablet sidebar overlay and mobile
@@ -166,11 +168,11 @@ step body. The `SurfaceWorkflow` component implements this pattern for surface-b
 
 Step indicator chip states:
 
-| State | Visual |
-| --- | --- |
-| Completed | `--color-success` tint |
-| Active | `--accent` tint, `--accent-bright` text |
-| Upcoming | `--bg-raised` background, `--text-secondary` text |
+| State     | Visual                                            |
+| --------- | ------------------------------------------------- |
+| Completed | `--color-success` tint                            |
+| Active    | `--accent` tint, `--accent-bright` text           |
+| Upcoming  | `--bg-raised` background, `--text-secondary` text |
 
 Rules:
 
@@ -187,16 +189,16 @@ Rules:
 
 One shared terminal-shell component serves History and Software Detail. Terminal behavior:
 
-| Property | Value |
-| --- | --- |
-| Backdrop | `rgba(0,0,0,.78)` |
-| Default size | `580px × 380px` |
-| Titlebar height | `36px` |
-| Status bar height | `28px` |
-| Default radius | `6px` |
-| Maximized size | `92vw × 88vh` |
-| Maximized radius | `4px` |
-| Mobile | Full-screen, no maximize affordance |
+| Property          | Value                               |
+| ----------------- | ----------------------------------- |
+| Backdrop          | `rgba(0,0,0,.78)`                   |
+| Default size      | `580px × 380px`                     |
+| Titlebar height   | `36px`                              |
+| Status bar height | `28px`                              |
+| Default radius    | `6px`                               |
+| Maximized size    | `92vw × 88vh`                       |
+| Maximized radius  | `4px`                               |
+| Mobile            | Full-screen, no maximize affordance |
 
 Traffic lights:
 

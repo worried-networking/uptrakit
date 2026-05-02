@@ -10,17 +10,18 @@ secondary targets are the `Callout`, `EmptyState`, and toast/header chrome.
 
 ## Scope
 
-| Area                            | Change                                                   |
-| ------------------------------- | -------------------------------------------------------- |
-| Nav sidebar (desktop + tablet)  | Icon + label inline on every nav item                    |
-| Mobile bottom nav               | Icon stacked above label on primary items                |
-| Mobile overflow sheet           | Icon + label inline (matches sidebar)                    |
-| Inline SVGs in layout           | Replace hamburger and theme-toggle SVGs with lucide      |
-| `Callout` component             | Always-on tone icon, no new API                          |
-| `EmptyState` component          | New optional `icon` prop                                 |
-| Toast dismiss button            | Replace text "Dismiss" with `X` icon                     |
-| Header logout button            | Add `LogOut` leading icon                                |
-| `SurfaceDescriptor` (Rust + TS) | New optional `nav_icon` field; renders via `<Icon name>` |
+| Area                            | Change                                                             |
+| ------------------------------- | ------------------------------------------------------------------ |
+| Nav sidebar (desktop + tablet)  | Icon + label inline on every nav item                              |
+| Mobile bottom nav               | Icon stacked above label on primary items                          |
+| Mobile overflow sheet           | Icon + label inline (matches sidebar)                              |
+| Inline SVGs in layout           | Replace hamburger and theme-toggle SVGs with lucide                |
+| `Callout` component             | Always-on tone icon, no new API                                    |
+| `EmptyState` component          | New optional `icon` prop                                           |
+| Toast dismiss button            | Replace text "Dismiss" with `X` icon                               |
+| Header logout button            | Add `LogOut` leading icon                                          |
+| `SurfaceDescriptor` (Rust + TS) | New optional `nav_icon` field; resolved via frontend allowlist map |
+| `frontend/src/lib/nav-icons.ts` | New: curated allowlist + `resolveNavIcon(name)` helper             |
 
 ---
 
@@ -42,9 +43,13 @@ secondary targets are the `Callout`, `EmptyState`, and toast/header chrome.
 
 ### Surface-supplied items
 
-Surface items carry an optional `nav_icon` string (lucide icon name). When
-present the Dashboard renders it via `<Icon name={nav_icon} size={16} />`. When
-absent the Dashboard falls back to `Box`.
+Surface items carry an optional `nav_icon` string (a key from the `SURFACE_NAV_ICONS`
+allowlist). At render time the string is resolved to a Svelte component via
+`resolveNavIcon(name)` — falls back to `Box` for unknown or absent values.
+
+> **Note:** `<Icon name="string">` from lucide-svelte only sets a CSS class and does
+> **not** render SVG paths. All icon rendering — including surface items — must go
+> through a statically-imported component, not the `Icon` wrapper's `name` prop.
 
 ---
 
@@ -52,18 +57,13 @@ absent the Dashboard falls back to `Box`.
 
 ### `ShellNavItem` (frontend, `+layout.svelte`)
 
-Add an optional `icon` field. Built-in items carry a statically-imported
-Svelte component; surface items carry the resolved icon name as a string to be
-rendered with `<Icon name>`.
-
-Because the two sources need different rendering paths, split `icon` into:
+Add an optional `icon` field typed as `ComponentType<SvelteComponent>`. Both
+built-in and surface items store a resolved component — no discriminated union needed.
+Surface items are resolved via `resolveNavIcon` (see below) at the point they are
+mapped into `ShellNavItem`.
 
 ```ts
-import type { Component } from "svelte";
-
-type ShellNavIcon =
-  | { kind: "component"; component: Component }
-  | { kind: "named"; name: string };
+import type { ComponentType, SvelteComponent } from "svelte";
 
 type ShellNavItem = {
   href: string;
@@ -72,32 +72,109 @@ type ShellNavItem = {
   origin: NavItemOrigin;
   stableId: string;
   badge?: string;
-  icon?: ShellNavIcon;
+  icon?: ComponentType<SvelteComponent>;
 };
 ```
 
-Built-in items set `icon: { kind: 'component', component: House }` etc.
-Surface items set `icon: { kind: 'named', name: navIcon }` where `navIcon`
-defaults to `'Box'` when `nav_icon` is absent on the descriptor.
+Built-in items set `icon: House` etc. (static import).
+Surface items set `icon: resolveNavIcon(item.icon)`.
 
-A single `NavIcon` helper snippet renders both:
+A `navIcon` helper snippet renders any item icon. The parameter is capitalized so
+Svelte treats it as a component reference, not an HTML element:
 
 ```svelte
-{#snippet navIcon(icon: ShellNavIcon | undefined)}
-  {#if icon?.kind === 'component'}
-    <svelte:component this={icon.component} size={16} aria-hidden="true" />
-  {:else if icon?.kind === 'named'}
-    <Icon name={icon.name} size={16} aria-hidden="true" />
+{#snippet navIcon(NavIcon: ComponentType<SvelteComponent> | undefined)}
+  {#if NavIcon}
+    <NavIcon size={16} aria-hidden="true" />
   {/if}
 {/snippet}
 ```
 
-`Icon` is imported from `lucide-svelte` (re-exported from the main bundle).
+Two intermediate `.map()` calls in `+layout.svelte` must also be updated:
+
+1. The `surfacePageNavItems` derived (lines ~182–186) maps `resolveSurfacePageNavItems(...)` results
+   into `{ id, href, label, priority }` — add `icon: item.icon`. `item.icon` is always a
+   non-optional `string` because `resolveSurfacePageNavItems` already applies the `?? "Box"` default.
+2. The `navItems` derived (lines ~209–218) maps surface items into `ShellNavItem` — add
+   `icon: resolveNavIcon(item.icon)` to resolve the string to a component.
+
+### `nav-icons.ts` (new file, `frontend/src/lib/nav-icons.ts`)
+
+A curated allowlist of icons plugin authors may declare as `nav_icon`. Exposes
+a resolver function used at both render time (frontend) and optionally at
+surface registration validation.
+
+```ts
+import type { ComponentType, SvelteComponent } from "svelte";
+import {
+  Box,
+  Cpu,
+  Database,
+  FileText,
+  Globe,
+  HardDrive,
+  History,
+  Layers,
+  Package,
+  Puzzle,
+  ScrollText,
+  Server,
+  ServerCog,
+  Settings,
+  Shield,
+  Tag,
+  Tags,
+  Wrench,
+} from "lucide-svelte";
+
+export const SURFACE_NAV_ICONS: Record<
+  string,
+  ComponentType<SvelteComponent>
+> = {
+  Box,
+  Cpu,
+  Database,
+  FileText,
+  Globe,
+  HardDrive,
+  History,
+  Layers,
+  Package,
+  Puzzle,
+  ScrollText,
+  Server,
+  ServerCog,
+  Settings,
+  Shield,
+  Tag,
+  Tags,
+  Wrench,
+};
+
+export function resolveNavIcon(name: string): ComponentType<SvelteComponent> {
+  return SURFACE_NAV_ICONS[name] ?? Box;
+}
+```
+
+The list is intentionally small (~18 icons). Expanding it is a non-breaking
+frontend-only change. Plugin authors must pick from this list; unknown names
+silently fall back to `Box`.
+
+`SURFACE_NAV_ICONS` is not imported into the main nav bundle on every page — only
+the icons actually referenced in the bundle are tree-shaken in. The import of the
+full map is contained to `nav-icons.ts`; SvelteKit's bundler will include all listed
+icons as a minor one-time cost.
+
+`ComponentType<SvelteComponent>` is used because lucide-svelte 1.0.1 exports class-based
+`SvelteComponentTyped` icons (Svelte 4 API). Both types are Svelte-deprecated in favour of
+the Svelte 5 `Component` interface, but are the correct pragmatic choice for this library
+version. When lucide-svelte ships runes-native exports, migrate the map type to
+`Component<IconProps>`.
 
 ### `SurfacePageNavItem` (frontend, `registry.svelte.ts`)
 
-Add `icon?: string` to the type. `resolveSurfacePageNavItems` populates it from
-`surface.nav_icon`, defaulting to `'Box'` when absent:
+Add `icon: string` to the type (non-optional — always provided). `resolveSurfacePageNavItems`
+populates it from `surface.nav_icon`, defaulting to `'Box'` when absent:
 
 ```ts
 export interface SurfacePageNavItem {
@@ -105,7 +182,7 @@ export interface SurfacePageNavItem {
   href: string;
   label: string;
   priority: number;
-  icon?: string;
+  icon: string;
 }
 ```
 
@@ -148,6 +225,11 @@ Add `nav_icon: Option<String>` to `SurfaceDescriptorBuilder`, a builder setter
 `nav_icon(impl Into<String>) -> Self`, and wire it in `build()` as
 `nav_icon: self.nav_icon`. The field is purely optional — `build()` does not
 require it.
+
+Add a wire validation rule in `crates/shared/wire/src/wire_validate_impls.rs` for
+`SurfaceDescriptor::nav_icon`: when `Some`, reject empty strings and strings
+longer than 64 characters. Full icon-name validation is intentionally kept in the
+frontend allowlist; the Rust layer enforces only format constraints.
 
 ---
 
@@ -218,17 +300,17 @@ The `role="alert"` / `role="status"` assignment is unchanged.
 
 ## `EmptyState` Component
 
-Add an optional `icon` prop typed as `Component` (from `'svelte'`). When
+Add an optional `icon` prop typed as `ComponentType<SvelteComponent>` (from `'svelte'`). When
 provided, the icon renders above the title at 32 px in the secondary text colour:
 
 ```svelte
-import type { Component } from 'svelte';
+import type { ComponentType, SvelteComponent } from 'svelte';
 
 let { title, description, actions, icon: IconComponent }: {
   title: string;
   description?: string;
   actions?: Snippet;
-  icon?: Component;
+  icon?: ComponentType<SvelteComponent>;
 } = $props();
 ```
 
