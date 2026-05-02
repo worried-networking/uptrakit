@@ -288,13 +288,13 @@ pub async fn batch_delete_plugin_configs(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, config) in &found {
-        let mut active: plugin_config::ActiveModel = config.clone().into();
+    for (id, config) in found {
+        let mut active: plugin_config::ActiveModel = config.into();
         active.deactivated_at = Set(Some(now));
         active.enabled = Set(false);
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))

@@ -686,12 +686,12 @@ pub async fn batch_feature_software_items(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, item) in &found {
-        let mut active: software_item::ActiveModel = item.clone().into();
+    for (id, item) in found {
+        let mut active: software_item::ActiveModel = item.into();
         active.featured = Set(true);
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
@@ -726,12 +726,12 @@ pub async fn batch_delete_software_items(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, item) in &found {
-        let mut active: software_item::ActiveModel = item.clone().into();
+    for (id, item) in found {
+        let mut active: software_item::ActiveModel = item.into();
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
