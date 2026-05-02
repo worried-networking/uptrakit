@@ -440,6 +440,23 @@ impl ProxmoxClient {
             .await
     }
 
+    /// Fetch a page of log lines for a Proxmox task.
+    ///
+    /// `start` is the 0-based index of the first line to return. Page size is fixed at 500 —
+    /// sufficient for any single 2-second poll interval. Returns an empty `Vec` when no new
+    /// lines have been written since `start`.
+    pub async fn task_log(
+        &self,
+        node: &str,
+        upid: &str,
+        start: u64,
+    ) -> Result<Vec<PveTaskLogEntry>> {
+        self.get::<Vec<PveTaskLogEntry>>(&format!(
+            "/nodes/{node}/tasks/{upid}/log?start={start}&limit=500"
+        ))
+        .await
+    }
+
     /// Poll a Proxmox task until it succeeds/fails or timeout is reached.
     pub async fn wait_for_task_completion(
         &self,
