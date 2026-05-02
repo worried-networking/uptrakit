@@ -7,6 +7,7 @@ use uptrakit_shared_types::Permission;
 use uptrakit_wire::surfaces;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
 pub enum SurfaceProviderRejectionCode {
     UnsupportedGeneration,
     MissingCapability,
@@ -16,19 +17,53 @@ pub enum SurfaceProviderRejectionCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
 pub struct SurfaceProviderRejectionReason {
     pub code: SurfaceProviderRejectionCode,
     pub message: String,
     pub surface_id: Option<String>,
 }
 
+impl SurfaceProviderRejectionReason {
+    /// Constructs a new [`SurfaceProviderRejectionReason`].
+    ///
+    /// External crates must use this constructor rather than a struct literal
+    /// because the type is `#[non_exhaustive]`.
+    pub fn new(
+        code: SurfaceProviderRejectionCode,
+        message: String,
+        surface_id: Option<String>,
+    ) -> Self {
+        Self {
+            code,
+            message,
+            surface_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
 pub struct SurfaceProviderRejection {
     pub provider_id: String,
     pub reasons: Vec<SurfaceProviderRejectionReason>,
 }
 
+impl SurfaceProviderRejection {
+    /// Constructs a new [`SurfaceProviderRejection`].
+    ///
+    /// External crates must use this constructor rather than a struct literal
+    /// because the type is `#[non_exhaustive]`.
+    pub fn new(provider_id: String, reasons: Vec<SurfaceProviderRejectionReason>) -> Self {
+        Self {
+            provider_id,
+            reasons,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SurfaceRegistryError {
     ProviderRejected(SurfaceProviderRejection),
     ProviderConflict(String),
@@ -51,6 +86,7 @@ impl std::fmt::Display for SurfaceRegistryError {
 impl std::error::Error for SurfaceRegistryError {}
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceRegistryConfig {
     pub supported_generation: surfaces::FrameworkGenerationRange,
     pub required_capabilities: surfaces::CapabilitySet,
@@ -85,6 +121,7 @@ impl Default for SurfaceRegistryConfig {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceCatalogItem {
     pub surface_id: String,
     pub slot: String,
@@ -93,7 +130,30 @@ pub struct SurfaceCatalogItem {
     pub descriptor: surfaces::SurfaceDescriptor,
 }
 
+impl SurfaceCatalogItem {
+    /// Constructs a new [`SurfaceCatalogItem`].
+    ///
+    /// External crates must use this constructor rather than a struct literal
+    /// because the type is `#[non_exhaustive]`.
+    pub fn new(
+        surface_id: String,
+        slot: String,
+        provider_id: String,
+        targeting: surfaces::Targeting,
+        descriptor: surfaces::SurfaceDescriptor,
+    ) -> Self {
+        Self {
+            surface_id,
+            slot,
+            provider_id,
+            targeting,
+            descriptor,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceProviderSummary {
     pub provider_id: String,
     pub provider_kind: surfaces::ProviderKind,
@@ -877,6 +937,7 @@ impl SurfaceRegistry {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedSurfaceAction {
     pub provider_id: String,
     pub provider_kind: surfaces::ProviderKind,
@@ -888,6 +949,7 @@ pub struct ResolvedSurfaceAction {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedSurfaceRead {
     pub descriptor: surfaces::SurfaceDescriptor,
     pub interactions: Vec<surfaces::InteractionDescriptor>,
@@ -895,6 +957,7 @@ pub struct ResolvedSurfaceRead {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SurfaceRegistryLookupError {
     SurfaceNotFound,
     InteractionNotFound,

@@ -35,6 +35,7 @@ const PLUGIN_TYPE_RELEASES_DOCKER: &str = "releases_docker";
 const PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX: &str = "infrastructure_proxmox";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SurfaceProxyError {
     NoProvider,
     TargetProviderRequired,
@@ -84,6 +85,7 @@ impl std::fmt::Display for SurfaceProxyError {
 impl std::error::Error for SurfaceProxyError {}
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum SurfaceCallerOrigin {
     UserSession { user_id: Uuid, session_id: String },
     BuiltInSystem { principal: String },
@@ -91,6 +93,7 @@ pub enum SurfaceCallerOrigin {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceInvokeRequest {
     pub tenant_id: Uuid,
     pub surface_id: String,
@@ -100,6 +103,35 @@ pub struct SurfaceInvokeRequest {
     pub caller_origin: SurfaceCallerOrigin,
     pub params: serde_json::Map<String, serde_json::Value>,
     pub encrypted_sensitive_params: Option<surfaces::EncryptedSensitiveParams>,
+}
+
+impl SurfaceInvokeRequest {
+    /// Constructs a new [`SurfaceInvokeRequest`].
+    ///
+    /// External crates must use this constructor rather than a struct literal
+    /// because the type is `#[non_exhaustive]`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        tenant_id: Uuid,
+        surface_id: String,
+        interaction_id: String,
+        idempotency_key: String,
+        target_provider_id: Option<String>,
+        caller_origin: SurfaceCallerOrigin,
+        params: serde_json::Map<String, serde_json::Value>,
+        encrypted_sensitive_params: Option<surfaces::EncryptedSensitiveParams>,
+    ) -> Self {
+        Self {
+            tenant_id,
+            surface_id,
+            interaction_id,
+            idempotency_key,
+            target_provider_id,
+            caller_origin,
+            params,
+            encrypted_sensitive_params,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1848,6 +1880,7 @@ impl SurfaceLocalActionExecutor for NoopSurfaceLocalExecutor {
     }
 }
 
+#[non_exhaustive]
 pub struct SurfaceProxy {
     pending: Arc<Mutex<PendingState>>,
     local_executor: Arc<dyn SurfaceLocalActionExecutor>,

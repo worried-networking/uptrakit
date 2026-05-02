@@ -275,19 +275,19 @@ pub async fn invoke_surface_interaction(
         crate::auth::AuthMethod::Oidc { provider_id } => format!("oidc:{provider_id}"),
     };
 
-    let request = SurfaceInvokeRequest {
-        tenant_id: tenant_ctx.tenant_id,
-        surface_id: surface_id.clone(),
-        interaction_id: interaction_id.clone(),
+    let request = SurfaceInvokeRequest::new(
+        tenant_ctx.tenant_id,
+        surface_id.clone(),
+        interaction_id.clone(),
         idempotency_key,
-        target_provider_id: body.target_provider_id.clone(),
-        caller_origin: SurfaceCallerOrigin::UserSession {
+        body.target_provider_id.clone(),
+        SurfaceCallerOrigin::UserSession {
             user_id: auth_user.user_id,
             session_id,
         },
-        params: body.params.clone(),
-        encrypted_sensitive_params: body.encrypted_sensitive_params.clone(),
-    };
+        body.params.clone(),
+        body.encrypted_sensitive_params.clone(),
+    );
     let timeout_override = body
         .timeout_seconds
         .map(|seconds| Duration::from_secs(u64::from(seconds)));
@@ -388,6 +388,14 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
             "No tenant-compatible provider available",
             "no_provider",
         ),
+        unknown => {
+            tracing::warn!(?unknown, "unhandled SurfaceRegistryLookupError variant");
+            error_response_with_code(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Surface lookup error",
+                "surface_lookup_error",
+            )
+        }
     }
 }
 
@@ -445,6 +453,14 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
             "Surface action timed out",
             "timeout",
         ),
+        unknown => {
+            tracing::warn!(?unknown, "unhandled SurfaceProxyError variant");
+            error_response_with_code(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Surface proxy error",
+                "proxy_error",
+            )
+        }
     }
 }
 
@@ -606,6 +622,16 @@ fn classify_surface_lookup_error_for_audit(
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
         }
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceRegistryLookupError variant in audit classification"
+            );
+            (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "surface_lookup_error",
+            )
+        }
     }
 }
 
@@ -684,6 +710,13 @@ fn classify_surface_proxy_error_for_audit(
             "provider_unavailable",
         ),
         SurfaceProxyError::Timeout => (uptrakit_audit_log::AuditOutcome::Failed, "timeout"),
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceProxyError variant in audit classification"
+            );
+            (uptrakit_audit_log::AuditOutcome::Failed, "proxy_error")
+        }
     }
 }
 
@@ -782,12 +815,12 @@ mod tests {
     }
 
     fn catalog_item(surface_id: &str, label: &str, provider_id: &str) -> SurfaceCatalogItem {
-        SurfaceCatalogItem {
-            surface_id: surface_id.to_string(),
-            slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
-            provider_id: provider_id.to_string(),
-            targeting: surfaces::Targeting::Targeted,
-            descriptor: surfaces::SurfaceDescriptor::builder()
+        SurfaceCatalogItem::new(
+            surface_id.to_string(),
+            surfaces::SLOT_SOFTWARE_TABS.to_string(),
+            provider_id.to_string(),
+            surfaces::Targeting::Targeted,
+            surfaces::SurfaceDescriptor::builder()
                 .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
                 .label(label)
                 .priority(100)
@@ -804,7 +837,7 @@ mod tests {
                     text: "ok".to_string(),
                 })
                 .build(),
-        }
+        )
     }
 
     #[test]

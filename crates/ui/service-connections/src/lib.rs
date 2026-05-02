@@ -54,12 +54,14 @@ impl RegistryInner {
 /// unregisters them on disconnect. Admin actions (approve/reject) use
 /// `send()` to push messages to connected services in real time.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ServiceConnectionRegistry {
     inner: Arc<RwLock<RegistryInner>>,
 }
 
 /// Handle returned to a registered service connection.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct ServiceConnectionHandle {
     connection_id: Uuid,
     cancel_token: CancellationToken,

@@ -186,6 +186,10 @@ fn surface_registration_rejection_reason_code(
         crate::surface_registry::SurfaceProviderRejectionCode::SchemaOrLimitFailure => {
             "schema_or_limit_failure"
         }
+        _ => {
+            tracing::warn!(?code, "unhandled SurfaceProviderRejectionCode variant");
+            "unknown_rejection_code"
+        }
     }
 }
 
@@ -199,6 +203,13 @@ fn classify_surface_registration_error_for_audit(
             .map(|reason| surface_registration_rejection_reason_code(&reason.code))
             .unwrap_or("provider_rejected"),
         crate::surface_registry::SurfaceRegistryError::ProviderConflict(_) => "provider_conflict",
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceRegistryError variant in audit classification"
+            );
+            "registration_error"
+        }
     }
 }
 
@@ -482,6 +493,13 @@ fn classify_surface_proxy_error_for_audit(
         crate::surface_proxy::SurfaceProxyError::Timeout => {
             (uptrakit_audit_log::AuditOutcome::Failed, "timeout")
         }
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceProxyError variant in audit classification"
+            );
+            (uptrakit_audit_log::AuditOutcome::Failed, "proxy_error")
+        }
     }
 }
 
@@ -507,6 +525,16 @@ fn classify_surface_lookup_error_for_audit(
         ),
         crate::surface_registry::SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
+        }
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceRegistryLookupError variant in audit classification"
+            );
+            (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "surface_lookup_error",
+            )
         }
     }
 }
@@ -1604,18 +1632,18 @@ impl MessageProcessor {
             ));
         }
 
-        let invoke_request = crate::surface_proxy::SurfaceInvokeRequest {
-            tenant_id: request_tenant_id,
-            surface_id: payload.surface_id.to_string(),
-            interaction_id: payload.interaction_id.to_string(),
-            idempotency_key: payload.idempotency_key.clone(),
-            target_provider_id: payload.target_provider_id.clone(),
-            caller_origin: crate::surface_proxy::SurfaceCallerOrigin::Provider {
+        let invoke_request = crate::surface_proxy::SurfaceInvokeRequest::new(
+            request_tenant_id,
+            payload.surface_id.to_string(),
+            payload.interaction_id.to_string(),
+            payload.idempotency_key.clone(),
+            payload.target_provider_id.clone(),
+            crate::surface_proxy::SurfaceCallerOrigin::Provider {
                 service_id: self.service_id,
             },
-            params: payload.params.clone(),
-            encrypted_sensitive_params: payload.encrypted_sensitive_params.clone(),
-        };
+            payload.params.clone(),
+            payload.encrypted_sensitive_params.clone(),
+        );
         let resolved = match self
             .state
             .surface_proxy_deps
@@ -1738,6 +1766,13 @@ fn surface_registration_error_message(
             serde_json::to_string(rejection).unwrap_or_else(|_| error.to_string())
         }
         crate::surface_registry::SurfaceRegistryError::ProviderConflict(_) => error.to_string(),
+        _ => {
+            tracing::warn!(
+                ?error,
+                "unhandled SurfaceRegistryError variant in error message"
+            );
+            error.to_string()
+        }
     }
 }
 
@@ -1791,6 +1826,16 @@ fn surface_proxy_error_to_wire(
             uptrakit_wire::surfaces::SurfaceActionErrorCode::Timeout,
             "surface action timed out".to_string(),
         ),
+        unknown => {
+            tracing::warn!(
+                ?unknown,
+                "unhandled SurfaceProxyError variant in wire conversion"
+            );
+            (
+                uptrakit_wire::surfaces::SurfaceActionErrorCode::InternalError,
+                "surface proxy error".to_string(),
+            )
+        }
     };
 
     uptrakit_wire::surfaces::SurfaceActionError {
@@ -1824,6 +1869,16 @@ fn surface_registry_lookup_error_to_wire(
             uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
         ),
+        unknown => {
+            tracing::warn!(
+                ?unknown,
+                "unhandled SurfaceRegistryLookupError variant in wire conversion"
+            );
+            (
+                uptrakit_wire::surfaces::SurfaceActionErrorCode::InternalError,
+                "surface lookup error".to_string(),
+            )
+        }
     };
 
     uptrakit_wire::surfaces::SurfaceActionError {
@@ -3523,19 +3578,19 @@ mod tests {
 
     #[test]
     fn surface_registration_error_message_serializes_structured_rejection_reasons() {
-        let message = surface_registration_error_message(
-            &crate::surface_registry::SurfaceRegistryError::ProviderRejected(
-                crate::surface_registry::SurfaceProviderRejection {
-                    provider_id: "provider-a".to_string(),
-                    reasons: vec![crate::surface_registry::SurfaceProviderRejectionReason {
-                        code:
-                            crate::surface_registry::SurfaceProviderRejectionCode::InvalidTransport,
-                        message: "invalid transport".to_string(),
-                        surface_id: Some("ssh.guest.panel".to_string()),
-                    }],
-                },
-            ),
-        );
+        let message =
+            surface_registration_error_message(
+                &crate::surface_registry::SurfaceRegistryError::ProviderRejected(
+                    crate::surface_registry::SurfaceProviderRejection::new(
+                        "provider-a".to_string(),
+                        vec![crate::surface_registry::SurfaceProviderRejectionReason::new(
+                        crate::surface_registry::SurfaceProviderRejectionCode::InvalidTransport,
+                        "invalid transport".to_string(),
+                        Some("ssh.guest.panel".to_string()),
+                    )],
+                    ),
+                ),
+            );
 
         let parsed: serde_json::Value =
             serde_json::from_str(&message).expect("expected JSON rejection payload");
@@ -5720,19 +5775,19 @@ mod tests {
                     .invoke(
                         &state_for_invoke.service_connections,
                         &state_for_invoke.surface_proxy_deps.registry,
-                        crate::surface_proxy::SurfaceInvokeRequest {
+                        crate::surface_proxy::SurfaceInvokeRequest::new(
                             tenant_id,
-                            surface_id: "ssh.guest.panel".to_string(),
-                            interaction_id: "refresh".to_string(),
-                            idempotency_key: "rotate-provider".to_string(),
-                            target_provider_id: Some("provider-a".to_string()),
-                            caller_origin: crate::surface_proxy::SurfaceCallerOrigin::UserSession {
+                            "ssh.guest.panel".to_string(),
+                            "refresh".to_string(),
+                            "rotate-provider".to_string(),
+                            Some("provider-a".to_string()),
+                            crate::surface_proxy::SurfaceCallerOrigin::UserSession {
                                 user_id: Uuid::now_v7(),
                                 session_id: "session-1".to_string(),
                             },
-                            params: serde_json::Map::new(),
-                            encrypted_sensitive_params: None,
-                        },
+                            serde_json::Map::new(),
+                            None,
+                        ),
                         Some(std::time::Duration::from_secs(30)),
                     )
                     .await
