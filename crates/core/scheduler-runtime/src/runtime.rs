@@ -170,6 +170,10 @@ where
 }
 
 impl RunningScheduler {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "let _ = handle.await: JoinHandle result discarded after abort; we don't care if the task panicked"
+    )]
     async fn stop(self, mode: SchedulerStopMode) {
         let mut handle = self.handle;
 

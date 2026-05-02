@@ -479,6 +479,11 @@ impl OidcRegistrationStore {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test helpers — ignoring Result from init_master_key and register_column_aad which may already be initialized"
+    )]
+
     use super::*;
     use sea_orm::{ConnectOptions, Database};
 

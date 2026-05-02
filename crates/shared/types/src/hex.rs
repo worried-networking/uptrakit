@@ -5,12 +5,16 @@
 use std::fmt::Write;
 
 /// Hex-encode a byte slice into a lowercase hex string.
+#[expect(
+    clippy::unused_result_ok,
+    reason = "writing to a String via fmt::Write is infallible; .ok() discards a Result that is always Ok(())"
+)]
 pub fn encode(bytes: impl AsRef<[u8]>) -> String {
     let bytes = bytes.as_ref();
     let mut s = String::with_capacity(bytes.len() * 2);
     for &b in bytes {
-        // Writing to a `String` is infallible.
-        let _ = write!(s, "{b:02x}");
+        // Writing to a `String` via `fmt::Write` is infallible.
+        write!(s, "{b:02x}").ok();
     }
     s
 }
@@ -43,6 +47,14 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     if !s.len().is_multiple_of(2) {
         return Err(DecodeError::OddLength);
     }
+    #[expect(
+        clippy::string_slice,
+        reason = "boundary is safe: s.is_ascii() is checked above, so every byte is a single-char boundary"
+    )]
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "ParseIntError carries no additional context beyond 'invalid hex digit'; the domain error is sufficient"
+    )]
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| DecodeError::InvalidChar))

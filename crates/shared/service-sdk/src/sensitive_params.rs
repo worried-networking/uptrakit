@@ -11,6 +11,11 @@ const P256_UNCOMPRESSED_PUBLIC_KEY_LEN: usize = 65;
 const NONCE_LEN: usize = 12;
 const MIN_SEALED_LEN: usize = P256_UNCOMPRESSED_PUBLIC_KEY_LEN + NONCE_LEN + 16;
 
+#[expect(
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: sealed.len() < MIN_SEALED_LEN bails before any slice; TryFromSliceError and ring errors carry no additional context"
+)]
 fn sealed_box_decrypt(sealed: &[u8], private_key_pkcs8_der: &[u8]) -> Result<Vec<u8>, String> {
     if sealed.len() < MIN_SEALED_LEN {
         return Err("ciphertext too short".to_string());

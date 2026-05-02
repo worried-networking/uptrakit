@@ -77,6 +77,11 @@ mod integration_tests;
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in test setup drop results intentionally"
+    )]
+
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
 

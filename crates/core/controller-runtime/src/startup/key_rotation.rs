@@ -34,7 +34,12 @@ pub(crate) async fn rotate_master_key(
     let new_kek_fp = {
         use sha2::{Digest, Sha256};
         let hash = Sha256::digest(new_kek.as_slice());
-        uptrakit_shared_types::hex::encode(&hash[..8])
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "infallible: `Sha256::digest` always returns 32 bytes, so `hash[..8]` is always in range"
+        )]
+        let prefix = &hash[..8];
+        uptrakit_shared_types::hex::encode(prefix)
     };
 
     let current_kek_fp = uptrakit_crypto::master_key_fingerprint().context_to()?;

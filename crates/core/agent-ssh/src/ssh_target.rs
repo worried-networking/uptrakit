@@ -115,6 +115,10 @@ fn parse_ssh_url(s: &str) -> Result<SshTarget, ParseSshTargetError> {
 /// Parse `[user@]host[:port]` with support for IPv6 bracket notation.
 fn parse_plain(s: &str) -> Result<SshTarget, ParseSshTargetError> {
     // Split optional `user@` prefix.
+    #[expect(
+        clippy::string_slice,
+        reason = "char-boundary safe: `at_pos` is the byte index of `@` (ASCII) returned by `str::find`, so both halves fall on UTF-8 boundaries"
+    )]
     let (username, host_port) = if let Some(at_pos) = find_user_at(s) {
         let user = &s[..at_pos];
         if user.is_empty() {
@@ -161,7 +165,15 @@ fn parse_host_port(s: &str) -> Result<(String, Option<u16>), ParseSshTargetError
         let close = s.find(']').ok_or_else(|| {
             ParseSshTargetError::InvalidUrl("missing closing bracket for IPv6 address".to_string())
         })?;
+        #[expect(
+            clippy::string_slice,
+            reason = "char-boundary safe: `close` is the byte index of `]` (ASCII) returned by `str::find`; `s.starts_with('[')` ensures byte 0 is also a boundary"
+        )]
         let host = &s[1..close];
+        #[expect(
+            clippy::string_slice,
+            reason = "char-boundary safe: `close + 1` follows the ASCII `]` returned by `str::find`, so it lies on a UTF-8 boundary"
+        )]
         let rest = &s[close + 1..];
 
         if rest.is_empty() {

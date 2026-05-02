@@ -163,6 +163,11 @@ fn sign_agent_csr(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: discarding `install_default` result is idiomatic — it returns `Err` once the provider is already installed"
+    )]
+
     use super::*;
     use crate::pki;
 

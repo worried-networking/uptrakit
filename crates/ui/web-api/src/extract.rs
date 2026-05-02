@@ -1,3 +1,8 @@
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated ASCII boundary"
+)]
+
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::ops::Deref;

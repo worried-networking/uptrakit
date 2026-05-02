@@ -1,3 +1,8 @@
+#![expect(
+    clippy::assertions_on_result_states,
+    reason = "test assertions use assert!(result.is_ok()) pattern"
+)]
+
 use super::*;
 use clap::Parser;
 use uptrakit_openapi_client::Uuid;

@@ -64,6 +64,10 @@ impl FromStr for MaskedEmail {
         // Minimal validation: must contain exactly one `@` with non-empty parts.
         let at_pos = s.find('@').ok_or(ParseMaskedEmailError)?;
         let (local, domain) = s.split_at(at_pos);
+        #[expect(
+            clippy::string_slice,
+            reason = "safe: skipping '@' which is ASCII (1 byte), so index 1 is always a valid boundary"
+        )]
         let domain = &domain[1..]; // skip '@'
         if local.is_empty() || domain.is_empty() || domain.find('@').is_some() {
             return Err(ParseMaskedEmailError);
@@ -92,6 +96,10 @@ fn mask_email(email: &str) -> String {
         return mask_segment(email);
     };
     let (local, rest) = email.split_at(at_pos);
+    #[expect(
+        clippy::string_slice,
+        reason = "safe: skipping '@' which is ASCII (1 byte), so index 1 is always a valid boundary"
+    )]
     let domain = &rest[1..]; // skip '@'
 
     let mut result = String::with_capacity(email.len() + 8);
@@ -100,12 +108,23 @@ fn mask_email(email: &str) -> String {
     for (i, ch) in local.char_indices() {
         if ch == '.' || ch == '_' || ch == '+' || ch == '-' {
             // Mask the segment before the delimiter.
+            // SAFETY for string_slice: `i` comes from `char_indices()` (always a valid
+            // char boundary); `segment_start` is always `i + ch.len_utf8()` from a prior
+            // iteration or 0, so both indices are valid UTF-8 char boundaries.
+            #[expect(
+                clippy::string_slice,
+                reason = "both bounds come from char_indices() and ch.len_utf8(), guaranteeing valid char boundaries"
+            )]
             result.push_str(&mask_segment(&local[segment_start..i]));
             result.push(ch);
             segment_start = i + ch.len_utf8();
         }
     }
     // Mask the final segment.
+    #[expect(
+        clippy::string_slice,
+        reason = "segment_start is always set to i + ch.len_utf8() from char_indices(), guaranteeing a valid char boundary"
+    )]
     result.push_str(&mask_segment(&local[segment_start..]));
 
     result.push('@');
@@ -177,6 +196,10 @@ mod sea_orm_impl {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     #[test]

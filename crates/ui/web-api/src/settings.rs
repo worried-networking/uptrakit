@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel send intentionally drops the result"
+)]
+
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};

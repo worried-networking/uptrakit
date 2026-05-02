@@ -140,9 +140,9 @@ mod sea_orm_impl {
             index: I,
         ) -> std::result::Result<Self, TryGetError> {
             match <Option<String> as TryGetable>::try_get_by(res, index) {
-                Ok(Some(val)) => val.parse::<BatchStatus>().map_err(|_| {
+                Ok(Some(val)) => val.parse::<BatchStatus>().map_err(|e| {
                     TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                        "unexpected BatchStatus value in database: {val:?}"
+                        "unexpected BatchStatus value in database: {val:?}: {e}"
                     )))
                 }),
                 Ok(None) => Err(TryGetError::Null(index.as_str().unwrap_or("").to_string())),
@@ -154,6 +154,10 @@ mod sea_orm_impl {
     impl ValueType for BatchStatus {
         fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
             match v {
+                #[expect(
+                    clippy::map_err_ignore,
+                    reason = "ValueTypeErr is a unit struct that carries no additional context"
+                )]
                 Value::String(Some(s)) => s
                     .parse::<BatchStatus>()
                     .map_err(|_| sea_orm::sea_query::ValueTypeErr),
@@ -183,6 +187,10 @@ mod sea_orm_impl {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     #[test]

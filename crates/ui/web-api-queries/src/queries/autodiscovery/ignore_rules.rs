@@ -99,7 +99,7 @@ pub async fn delete_ignore_rule(
 /// Hard-delete multiple autodiscovery ignore rules.
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn batch_delete_ignore_rules(
     db: &sea_orm::DatabaseConnection,

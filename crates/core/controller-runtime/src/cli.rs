@@ -503,6 +503,11 @@ impl Args {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_err())` is idiomatic in tests where the error variant is not inspected"
+    )]
+
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use clap::Parser;

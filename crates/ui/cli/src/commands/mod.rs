@@ -52,6 +52,10 @@ pub fn resolve_ca_pem(
 }
 
 /// Parse a registration mode string into the typed enum.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "original parse error carries no useful message; replaced with contextual hint"
+)]
 pub fn parse_registration_mode(
     s: &str,
 ) -> std::result::Result<uptrakit_openapi_client::types::registration::RegistrationMode, String> {

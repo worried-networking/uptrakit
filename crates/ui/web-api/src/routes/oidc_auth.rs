@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget cleanup sends on error paths intentionally drop results"
+)]
+
 use crate::AppState;
 use crate::auth::authentication::{
     OidcUserParams, OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
@@ -870,7 +875,10 @@ async fn resolve_or_create_oidc_user(
 ///
 /// Returns the response to send to the client. The caller is responsible for
 /// beginning and committing the transaction.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters are required; decomposing into structs would add complexity without clarity"
+)]
 async fn execute_oidc_resolution(
     state: &AppState,
     txn: sea_orm::DatabaseTransaction,
@@ -971,7 +979,10 @@ async fn execute_oidc_resolution(
 /// If neither exists and a registration token is required, store a pending
 /// registration and return a redirect response. Returns `None` when the
 /// normal flow should continue.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters are required; decomposing into structs would add complexity without clarity"
+)]
 async fn check_registration_eligibility(
     state: &AppState,
     provider_id: Uuid,
@@ -1185,7 +1196,10 @@ async fn handle_new_user(
 
 /// Handle the `LinkViaPasswordRequired` resolution: store a pending link and
 /// redirect to the frontend password-confirmation form.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters are required; decomposing into structs would add complexity without clarity"
+)]
 async fn handle_link_via_password(
     state: &AppState,
     provider_id: Uuid,
@@ -1233,7 +1247,10 @@ async fn handle_link_via_password(
 
 /// Handle the `LinkViaOidcRequired` resolution: store a pending link and
 /// redirect to the frontend OIDC re-authentication form.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters are required; decomposing into structs would add complexity without clarity"
+)]
 async fn handle_link_via_oidc(
     state: &AppState,
     provider_id: Uuid,
@@ -2200,6 +2217,12 @@ mod tests {
 
 #[cfg(all(test, feature = "db-sqlite", feature = "oidc"))]
 mod audit_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use crate::auth::oidc_state::PendingAccountLinkParams;
     use crate::auth::oidc_state::PendingOidcRegistrationParams;
     use crate::auth::password;

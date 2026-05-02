@@ -188,7 +188,11 @@ async fn main() {
         match db::init_db(&state_dir).await {
             Ok(host_db) => {
                 init_ssh_data_key_ring(&host_db).await;
-                host_db.close().await.ok();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort cleanup on subcommand exit; failures here are non-actionable"
+                )]
+                let _ = host_db.close().await;
             }
             Err(error) => {
                 tracing::error!(error = %error, "could not init DEK ring for host subcommand");
@@ -243,6 +247,10 @@ async fn main() {
 
     let infra_bundles = {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        #[expect(
+            clippy::expect_used,
+            reason = "infallible at startup: catalog construction failures are static configuration errors that must abort process initialization"
+        )]
         let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
             .expect("plugin catalog must build successfully");
         Arc::new(catalog.create_infra_bundles(&catalog_config))
@@ -294,6 +302,8 @@ fn init_master_key(
     allow_plaintext_secrets: bool,
 ) -> InitResult<()> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
+    // SAFETY: called early in `main` before any other thread is spawned, so no concurrent
+    // reads or writes to the process environment can race with this removal.
     unsafe { std::env::remove_var("UPTRAKIT_MASTER_KEY") };
     let key_hex = read_master_key_hex(master_key_file.as_deref(), env_val.as_deref())?;
 
@@ -400,7 +410,12 @@ async fn rotate_ssh_master_key(db: &sea_orm::DatabaseConnection, new_key_path: &
     let new_kek_fp = {
         use sha2::{Digest, Sha256};
         let hash = Sha256::digest(new_kek.as_slice());
-        uptrakit_shared_types::hex::encode(&hash[..8])
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "infallible: `Sha256::digest` always returns 32 bytes, so `hash[..8]` is always in range"
+        )]
+        let prefix = &hash[..8];
+        uptrakit_shared_types::hex::encode(prefix)
     };
 
     let current_kek_fp = match uptrakit_crypto::master_key_fingerprint() {
@@ -474,6 +489,11 @@ async fn rotate_ssh_master_key(db: &sea_orm::DatabaseConnection, new_key_path: &
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_err())` is idiomatic in tests where the error variant is not inspected"
+    )]
+
     use super::{parse_master_key_hex, read_master_key_hex};
     use std::io::Write;
 

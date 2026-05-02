@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original parse errors carry no useful context; replaced with contextual messages"
+)]
+
 use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
 use crate::queries::enrollment_tokens as et_queries;

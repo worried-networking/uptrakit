@@ -124,6 +124,11 @@ pub fn sealed_box_encrypt(plaintext: &[u8], recipient_public_key: &[u8]) -> Resu
 ///
 /// Returns [`CryptoError::Decryption`] on any failure (wrong key, tampered data,
 /// truncated input).
+#[expect(
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: sealed.len() < MIN_SEALED_LEN bails before any slice; TryFromSliceError/ring error carry no additional context"
+)]
 pub fn sealed_box_decrypt(sealed: &[u8], private_key_pkcs8_der: &[u8]) -> Result<Vec<u8>> {
     if sealed.len() < MIN_SEALED_LEN {
         bail!(CryptoError::CiphertextTooShort);
@@ -224,6 +229,10 @@ pub fn sealed_box_decrypt_base64(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err checks are idiomatic in tests"
+    )]
     use super::*;
 
     /// Generate a P-256 keypair for testing using rcgen (same as mTLS keys).

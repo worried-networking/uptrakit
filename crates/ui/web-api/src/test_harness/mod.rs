@@ -7,6 +7,15 @@
 //!
 //! Gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test fixture: panics on setup failure are acceptable"
+)]
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget sends in test setup drop results intentionally"
+)]
+
 pub(crate) mod fixtures;
 pub(crate) mod http_client;
 
@@ -20,7 +29,6 @@ use crate::settings::Settings;
 use crate::{AppState, ServiceCredentialSources, build_router};
 
 /// Self-contained test fixture for integration tests.
-#[allow(dead_code)]
 pub(crate) struct TestApp {
     /// The shared application state.
     pub state: Arc<AppState>,

@@ -34,6 +34,10 @@ pub fn shell_escape(s: &str) -> String {
 }
 
 /// Send an output line to the channel.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "channel send failure (receiver dropped) is intentionally ignored — caller cannot do anything useful with it"
+)]
 pub async fn send_output(
     output_tx: &mpsc::Sender<UpdateOutputLine>,
     text: &str,
@@ -51,6 +55,10 @@ pub async fn send_output(
 ///
 /// When `output_tx` is `Some`, each line is sent to the channel.
 /// When `None`, lines are still accumulated but not streamed.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "channel send failures inside spawned tasks are intentionally ignored — receiver may have been dropped"
+)]
 pub(crate) async fn run_command_exec_impl(
     program: &str,
     args: &[String],
@@ -295,6 +303,11 @@ pub async fn run_command_quiet(cmd: &str) -> crate::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_err()) are idiomatic in tests"
+    )]
+
     use super::*;
 
     // -- Shell escape tests --

@@ -663,6 +663,11 @@ fn is_forbidden_response(err: &Report<DockerError>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
     use crate::api_types::OciPlatform;
 

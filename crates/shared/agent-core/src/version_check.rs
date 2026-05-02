@@ -527,6 +527,10 @@ pub async fn batch_check_versions(
 /// `true`. On each transient failure, sleeps an exponentially increasing delay
 /// and logs a debug message. Returns the first successful result or an error
 /// string if all attempts fail.
+#[expect(
+    clippy::expect_used,
+    reason = "last_error is always Some when the loop exhausts retries; the expect is a programming-error guard"
+)]
 async fn run_with_retry<'a, T>(
     label: &'static str,
     max_retries: u32,
@@ -674,6 +678,11 @@ async fn fetch_latest(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::unreachable,
+        reason = "test stub methods use unreachable! to signal unexpected calls"
+    )]
+
     use super::*;
     use async_trait::async_trait;
     use uptrakit_command::LocalCommandExecutor;

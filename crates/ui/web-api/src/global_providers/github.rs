@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original parse errors carry no useful context; replaced with contextual messages"
+)]
+
 use std::any::Any;
 use std::sync::Arc;
 use std::time::Duration;
@@ -146,7 +151,6 @@ impl RuntimeMetrics {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     fn snapshot(&self) -> TestMetricsSnapshot {
         TestMetricsSnapshot {
             requests: self.requests.load(std::sync::atomic::Ordering::Relaxed),
@@ -383,19 +387,24 @@ impl GitHubProviderRuntime {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "test-only helper; not always called from every test"
+    )]
     pub(crate) fn cooldown_until_for_tests(&self) -> Option<Instant> {
         *self.cooldown_until.lock()
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn metrics_snapshot_for_tests(&self) -> TestMetricsSnapshot {
         self.metrics.snapshot()
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "test-only helper; not always called from every test"
+    )]
     pub(crate) async fn replace_defaults_for_tests(&self, defaults: GitHubProviderDefaults) {
         uptrakit_shared_db::provider_settings::upsert_github_provider_defaults(
             &self.db,
@@ -407,7 +416,6 @@ impl GitHubProviderRuntime {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn last_sleep_for_tests(&self) -> Option<Duration> {
         self.sleeper.last_sleep()
     }
@@ -623,7 +631,6 @@ trait RuntimeSleeper: Send + Sync {
     async fn sleep(&self, duration: Duration);
 
     #[cfg(test)]
-    #[allow(dead_code)]
     fn last_sleep(&self) -> Option<Duration> {
         None
     }

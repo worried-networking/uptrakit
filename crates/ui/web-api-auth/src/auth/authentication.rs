@@ -240,6 +240,10 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
             role_id: Set(user_role_entity.id),
             assigned_at: Set(now),
         };
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort default role assignment; failure is not fatal for user creation"
+        )]
         let _ = user_role_model.insert(db).await;
     }
 
@@ -370,6 +374,11 @@ pub fn navigate_json_path<'a>(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test helper — ignoring Result from init_master_key which may already be initialized"
+    )]
+
     use super::*;
     use std::collections::HashMap;
 

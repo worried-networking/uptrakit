@@ -48,12 +48,20 @@ impl MockApiServer {
 
     /// Return a client pre-configured with a dummy bearer token and the mock
     /// server URL. TLS verification is disabled since the mock uses plain HTTP.
+    #[expect(
+        clippy::expect_used,
+        reason = "mock helper — client construction failure would be a programming error in test setup; panic is acceptable"
+    )]
     pub fn client(&self) -> UptrakitClient {
         UptrakitClient::with_token(&self.server.base_url(), "test-token", false)
             .expect("mock client creation")
     }
 
     /// Return an unauthenticated client pointing at the mock server.
+    #[expect(
+        clippy::expect_used,
+        reason = "mock helper — client construction failure would be a programming error in test setup; panic is acceptable"
+    )]
     pub fn client_unauth(&self) -> UptrakitClient {
         UptrakitClient::new(&self.server.base_url(), None, false, None)
             .expect("mock client creation")
@@ -204,6 +212,10 @@ impl<'a> MockEndpoint<'a> {
     }
 
     /// Respond [`StatusCode::OK`] with a JSON-serialised body.
+    #[expect(
+        clippy::expect_used,
+        reason = "mock helper — serde_json serialization of a Serialize type is infallible for well-formed types; panic is acceptable in test setup"
+    )]
     pub fn ok<T: Serialize>(self, body: &T) -> Mock<'a> {
         let json = serde_json::to_string(body).expect("mock body serialization");
         self.respond_raw(StatusCode::OK, json)
@@ -228,6 +240,10 @@ impl<'a> MockEndpoint<'a> {
     }
 
     /// Respond [`StatusCode::NOT_FOUND`] with an error message.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "mock helper — serde_json serialization of &str is infallible; panic is acceptable in test setup"
+    )]
     pub fn not_found(self, message: &str) -> Mock<'a> {
         let json = format!(r#"{{"error":{}}}"#, serde_json::to_string(message).unwrap());
         self.respond_raw(StatusCode::NOT_FOUND, json)
@@ -255,12 +271,20 @@ impl<'a> MockEndpoint<'a> {
     }
 
     /// Respond [`StatusCode::INTERNAL_SERVER_ERROR`] with an error message.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "mock helper — serde_json serialization of &str is infallible; panic is acceptable in test setup"
+    )]
     pub fn internal_error(self, message: &str) -> Mock<'a> {
         let json = format!(r#"{{"error":{}}}"#, serde_json::to_string(message).unwrap());
         self.respond_raw(StatusCode::INTERNAL_SERVER_ERROR, json)
     }
 
     /// Respond with the given [`StatusCode`] and a JSON-serialised body.
+    #[expect(
+        clippy::expect_used,
+        reason = "mock helper — serde_json serialization of a Serialize type is infallible for well-formed types; panic is acceptable in test setup"
+    )]
     pub fn respond<T: Serialize>(self, status: StatusCode, body: &T) -> Mock<'a> {
         let json = serde_json::to_string(body).expect("mock body serialization");
         self.respond_raw(status, json)

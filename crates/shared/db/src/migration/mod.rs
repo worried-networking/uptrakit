@@ -191,6 +191,10 @@ pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm
                     .map(|m| m.name().to_string())
                     .unwrap_or_else(|| format!("migration #{i}"));
                 // Try to clear the aborted transaction state by rolling back.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort ROLLBACK to clear aborted transaction state; failure is intentionally ignored"
+                )]
                 let _ = db.execute_unprepared("ROLLBACK").await;
                 return Err(sea_orm::DbErr::Custom(format!(
                     "migration {name} (#{}) failed: {e}",

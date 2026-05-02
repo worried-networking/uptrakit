@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
@@ -102,7 +106,6 @@ impl DockerPlugin {
     /// which is the case for plugins constructed via [`Self::new_for_test_with_registry`]
     /// or [`Self::init`] (both of which supply a fully-initialised client).
     #[cfg(feature = "daemon")]
-    #[allow(dead_code)]
     pub(crate) async fn ensure_daemon_client(&self) -> Result<()> {
         use std::sync::atomic::Ordering;
 
@@ -134,7 +137,14 @@ impl DockerPlugin {
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
-        #[cfg_attr(not(feature = "daemon"), allow(unused_variables))] proxy_handle: OpaqueHandle,
+        #[cfg_attr(
+            not(feature = "daemon"),
+            expect(
+                unused_variables,
+                reason = "proxy_handle is only used in daemon feature builds"
+            )
+        )]
+        proxy_handle: OpaqueHandle,
     ) -> Result<Self> {
         config.validate_inner()?;
 
@@ -163,7 +173,10 @@ impl DockerPlugin {
     ///
     /// Retained for backward compatibility with code paths that need a fully
     /// initialized daemon connection at construction time.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "backward-compatibility constructor; callers prefer lazy init via new()"
+    )]
     pub(crate) async fn new_async(
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,

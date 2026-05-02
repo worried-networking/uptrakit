@@ -341,7 +341,10 @@ impl ControllerUpdateProtectionOps for PluginCatalog {
 }
 
 #[cfg(test)]
-#[allow(dead_code, unreachable_pub)]
+#[expect(
+    unreachable_pub,
+    reason = "test module — pub items are not accessible from outside this crate"
+)]
 mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
 
@@ -389,7 +392,10 @@ mod tests {
 
     impl crate::PluginConfig for TestGlobalProviderConfig {}
 
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "constructed by declare_plugin! generated code; not directly instantiated in tests"
+    )]
     struct TestGlobalProviderPlugin;
 
     const TEST_GLOBAL_PROVIDER_PLUGIN_TYPE_ID: &str = "__test_global_provider_plugin";

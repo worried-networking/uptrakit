@@ -255,6 +255,10 @@ async fn dispatch_channels(command: ChannelsCommands, ctx: &CliContext) -> Resul
     Ok(())
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "parse errors carry no useful message; replaced with contextual hints including valid values"
+)]
 async fn dispatch_rules(command: RulesCommands, ctx: &CliContext) -> Result<()> {
     match command {
         RulesCommands::List { page, per_page } => {

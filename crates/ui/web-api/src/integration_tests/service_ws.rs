@@ -1,3 +1,12 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends in tests drop results intentionally"
+)]
+
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;

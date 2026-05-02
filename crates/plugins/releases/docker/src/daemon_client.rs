@@ -64,7 +64,13 @@ impl DockerPlugin {
     /// Explicit `Docker`/`Podman` config always wins. In `Auto` mode the
     /// previously detected runtime is used (defaulting to `docker` if
     /// detection has not yet run).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only called in tests; retained for integration verification"
+        )
+    )]
     pub(crate) fn effective_dial_stdio_command(&self) -> &'static str {
         match self.config.container_runtime {
             ContainerRuntime::Docker => "docker system dial-stdio",

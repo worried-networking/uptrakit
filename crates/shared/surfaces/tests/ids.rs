@@ -1,3 +1,8 @@
+#![expect(
+    clippy::assertions_on_result_states,
+    reason = "test assertions — is_ok/is_err provides readable failure messages"
+)]
+
 use uptrakit_surfaces::{
     BuiltInApiOperationId, CalloutLevel, Capability, ControllerQueryId, ControllerSseTopicId,
     DataSourceId, DataSourceValidationError, FrameworkGeneration, FrameworkGenerationRange,

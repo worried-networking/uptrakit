@@ -272,6 +272,11 @@ fn build_server_tls_config(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use super::*;
     #[cfg(feature = "db-sqlite")]
     use crate::auth::AuthMethod;

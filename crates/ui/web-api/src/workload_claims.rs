@@ -8,6 +8,12 @@
 //! The registry is shared across all WebSocket handlers on a single controller
 //! instance and synchronized across controllers via NATS announcements.
 
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+#![expect(
+    clippy::unwrap_used,
+    reason = "unwrap on value checked to be Some in preceding logic"
+)]
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use time::OffsetDateTime;

@@ -363,7 +363,7 @@ pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Res
 // ---------------------------------------------------------------------------
 
 /// Approve multiple pending system services.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_approve_system_services(
     db: &DatabaseConnection,
@@ -406,7 +406,7 @@ pub async fn batch_approve_system_services(
 }
 
 /// Reject multiple pending system services.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_reject_system_services(
     db: &DatabaseConnection,
@@ -450,7 +450,7 @@ pub async fn batch_reject_system_services(
 }
 
 /// Deactivate multiple system services (soft-delete with certificate revocation).
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_system_services(
     db: &DatabaseConnection,

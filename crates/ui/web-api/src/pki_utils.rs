@@ -1,3 +1,12 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original ASN.1/DER parse errors carry no useful context; wrapped with domain error"
+)]
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated ASCII boundary"
+)]
+
 use std::net::IpAddr;
 
 use rootcause::prelude::*;
@@ -120,6 +129,15 @@ pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
+    #![expect(
+        clippy::unwrap_in_result,
+        reason = "test functions returning Result use expect/? for setup; acceptable in tests"
+    )]
+
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::*;

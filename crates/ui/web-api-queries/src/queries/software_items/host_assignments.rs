@@ -274,7 +274,10 @@ fn validate_host_compatibility(
 }
 
 /// Validate, resolve, and upsert a single role assignment for a host-software-item pair.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "query function requires all filter parameters"
+)]
 async fn upsert_role_assignment(
     ops: &dyn PluginConfigOps,
     txn: &sea_orm::DatabaseTransaction,

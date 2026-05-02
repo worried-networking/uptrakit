@@ -36,6 +36,10 @@ fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
 /// output is returned as-is (it was already capped at write time).
 const UPDATE_OUTPUT_BYTES_CAP: usize = 52_428_800;
 
+#[expect(
+    clippy::string_slice,
+    reason = "boundary is walked back to a valid UTF-8 char boundary; slice is always valid"
+)]
 fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> (&str, bool) {
     if output.len() <= max_bytes {
         return (output, false);

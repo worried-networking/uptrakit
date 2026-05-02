@@ -497,6 +497,12 @@ pub struct ListIgnoresParams {
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
     use http::StatusCode;

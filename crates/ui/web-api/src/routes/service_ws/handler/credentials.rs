@@ -3,6 +3,12 @@
 //! Contains [`deliver_service_credentials`], which sends DB URL, NATS URL,
 //! and master-key hex to services that carry the corresponding capabilities.
 
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

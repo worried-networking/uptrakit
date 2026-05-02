@@ -260,7 +260,7 @@ pub async fn update_plugin_config(
 // ---------------------------------------------------------------------------
 
 /// Soft-delete multiple plugin configs.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_plugin_configs(
     tenant_db: &TenantDb,

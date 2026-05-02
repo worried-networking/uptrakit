@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 //! Email notification plugin implementation and `declare_plugin!` invocation.
 
 use std::collections::BTreeSet;
@@ -1280,6 +1284,11 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
         PluginCapability, PluginConfigValidationError, PluginMeta as _, surfaces,

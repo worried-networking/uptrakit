@@ -411,6 +411,10 @@ fn to_link_summary(row: MergeLinkRow) -> MergeSoftwareItemLinkSummary {
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "HashMap keys are built from the same candidates slice; all keys are guaranteed to exist"
+)]
 async fn build_merge_plan<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
@@ -777,6 +781,11 @@ pub async fn execute_merge_software_items(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::string_slice,
+        reason = "test helper: UUID slicing is ASCII-safe and test-only"
+    )]
+
     use super::{equivalent_merge_link, group_transfer_plan, preview_merge_software_items};
     use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;

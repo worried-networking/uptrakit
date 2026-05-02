@@ -31,6 +31,10 @@ const LIST_DEFAULT_PAGE: u64 = 1;
 const LIST_DEFAULT_PER_PAGE: u64 = 50;
 const LIST_MAX_PER_PAGE: u64 = 200;
 
+#[expect(
+    clippy::expect_used,
+    reason = "infallible: all IDs and interaction IDs are compile-time-valid constants; a parse failure indicates a programming error"
+)]
 pub(crate) fn build_surface_registration_with_ids(
     encryption_public_key: Option<String>,
     service_id: Option<uuid::Uuid>,
@@ -282,7 +286,10 @@ pub(crate) async fn send_error_response(
 }
 
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "items after mod tests are required by the surface_runtime module structure"
+)]
 mod tests {
     use super::*;
     use crate::client_manager::ParsedMqttClientConfig;
@@ -661,6 +668,10 @@ mod tests {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "infallible: all interaction IDs are compile-time-valid constants"
+)]
 fn build_interactions() -> Vec<InteractionDescriptor> {
     vec![
         InteractionDescriptor {
@@ -742,6 +753,10 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
     ]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "infallible: interaction ID is a compile-time-valid constant"
+)]
 fn build_client_form_ui(pre_load: bool) -> surfaces::FormUiDescriptor {
     let mut form_ui = surfaces::FormUiDescriptor {
         fields: vec![

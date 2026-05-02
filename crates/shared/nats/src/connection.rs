@@ -74,6 +74,12 @@ impl NatsConnection {
                 }
             }
             // All attempts exhausted — propagate the last error.
+            // SAFETY invariant: MAX_ATTEMPTS >= 1, so the loop always runs at least once,
+            // guaranteeing last_err is Some.
+            #[expect(
+                clippy::expect_used,
+                reason = "invariant: loop runs at least MAX_ATTEMPTS times so last_err is always Some when we reach this point"
+            )]
             return Err(last_err.expect("loop ran at least once")).context_to::<NatsError>();
         };
 

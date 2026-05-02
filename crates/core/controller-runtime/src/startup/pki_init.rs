@@ -109,6 +109,10 @@ pub(crate) async fn init_pki_runtime(
     };
 
     // Install the default crypto provider for rustls
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "install_default returns Err only if a provider was already installed; that is acceptable for an idempotent process-wide initialization"
+    )]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());

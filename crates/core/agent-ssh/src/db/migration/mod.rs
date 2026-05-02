@@ -24,6 +24,11 @@ impl MigratorTrait for Migrator {
         // databases already have it recorded in `seaql_migrations` and the
         // Proxmox plugin's own `CreateProxmoxPendingMatches` migration handles
         // the rename + data migration from the old table on first run.
+        #[expect(
+            clippy::allow_attributes,
+            clippy::allow_attributes_without_reason,
+            reason = "feature-conditional: `mut` is needed when plugin migrations are appended below; `#[expect]` would fail under feature variants where the binding is never mutated"
+        )]
         #[allow(unused_mut)]
         let mut migrations: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20260215_000001_initial::Migration),

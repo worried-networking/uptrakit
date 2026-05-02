@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original parse errors carry no useful context; replaced with contextual messages"
+)]
+
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
@@ -438,6 +443,11 @@ fn extract_bearer_token(req: &Request) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::jwt::JwtManager;

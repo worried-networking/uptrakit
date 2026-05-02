@@ -343,6 +343,10 @@ pub(crate) fn spawn_ca_reload(
 
             // Update the shared key store
             *ca_key_store.write().await = new_key_store;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "broadcast `send` returns `Err` only when there are no active receivers; that is expected during startup and shutdown windows"
+            )]
             let _ = ca_tx.send(snapshot);
 
             if let Err(e) = crl_manager.reload_tls_config().await {
@@ -430,6 +434,10 @@ pub(crate) fn spawn_ca_rotation(
                                 ))
                                 .await;
 
+                            #[expect(
+                                clippy::let_underscore_must_use,
+                                reason = "broadcast `send` returns `Err` only when there are no active receivers; that is expected during startup and shutdown windows"
+                            )]
                             let _ = ca_tx.send(new_snapshot);
 
                             if let Err(e) = crl_manager.reload_tls_config().await {

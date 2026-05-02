@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

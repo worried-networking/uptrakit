@@ -1,3 +1,7 @@
+#![expect(
+    clippy::indexing_slicing,
+    reason = "array and slice indices are bounded by construction or derived from known-valid positions"
+)]
 //! Surface manifests and action handler dispatch for the Proxmox VE plugin.
 
 use std::future::Future;
@@ -1688,6 +1692,10 @@ fn parse_uuid_param_with_fallback(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
     use time::OffsetDateTime;

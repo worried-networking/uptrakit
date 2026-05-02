@@ -131,6 +131,10 @@ fn extract_bearer_token<B>(req: &axum::extract::Request<B>) -> Option<String> {
 }
 
 fn plain(status: StatusCode, body: &'static str) -> Response {
+    #[expect(
+        clippy::expect_used,
+        reason = "infallible: `Response::builder()` with a static MIME type and a `&'static str` body cannot fail"
+    )]
     axum::http::Response::builder()
         .status(status)
         .header(

@@ -144,6 +144,10 @@ impl fmt::Display for EncryptedString {
 
 #[cfg(feature = "sea-orm")]
 impl sea_orm::sea_query::ValueType for EncryptedString {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "ValueTypeErr is a unit struct that carries no additional context; the original CryptoError is discarded intentionally"
+    )]
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
             sea_orm::Value::String(Some(s)) => {

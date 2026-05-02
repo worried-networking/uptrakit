@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
+#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
     insert_host, insert_service, link_service_host, register_and_get_token,
@@ -127,7 +133,10 @@ async fn insert_plugin_row(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper mirrors full plugin row schema; all parameters required"
+)]
 async fn insert_plugin_row_with_details(
     app: &TestApp,
     plugin_row_id: Uuid,

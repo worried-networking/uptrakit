@@ -126,6 +126,10 @@ impl Resolve for SsrfSafeResolver {
 /// The function constructs a fresh `CryptoProvider` via
 /// `rustls::crypto::aws_lc_rs::default_provider()` so it does not depend on a
 /// process-wide default provider being installed.
+#[expect(
+    clippy::expect_used,
+    reason = "infallible: with_safe_default_protocol_versions() only fails for unknown protocol versions, which cannot happen with the bundled provider"
+)]
 pub fn webpki_client_config() -> rustls::ClientConfig {
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -150,6 +154,10 @@ pub fn webpki_client_config() -> rustls::ClientConfig {
 /// Pass the returned config to [`reqwest::ClientBuilder::use_preconfigured_tls`]
 /// in place of [`reqwest::ClientBuilder::danger_accept_invalid_certs`], which is
 /// silently ignored when `use_preconfigured_tls` is also set.
+#[expect(
+    clippy::expect_used,
+    reason = "infallible: with_safe_default_protocol_versions() only fails for unknown protocol versions, which cannot happen with the bundled provider"
+)]
 pub fn danger_accept_any_cert_client_config() -> rustls::ClientConfig {
     #[derive(Debug)]
     struct AcceptAnyServerCert;

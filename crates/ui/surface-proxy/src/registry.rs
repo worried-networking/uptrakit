@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use parking_lot::Mutex;

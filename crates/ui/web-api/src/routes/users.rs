@@ -3,6 +3,15 @@
 //! All endpoints require the [`Permission::ManageUsers`] permission via the
 //! [`CanManageUsers`] extractor.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget cleanup sends on error paths intentionally drop results"
+)]
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated char boundary"
+)]
+
 use std::sync::Arc;
 
 use axum::{
@@ -1327,6 +1336,12 @@ fn mask_email(email: &str) -> String {
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures;

@@ -5,6 +5,12 @@
 //! loop is responsible for serializing and writing the reply to the WebSocket
 //! sink.
 
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -1725,6 +1731,8 @@ async fn enrich_discovered_items(state: &AppState, service_model: &service::Mode
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, QueryFilter, QueryOrder, Set};
     use serde::Deserialize;

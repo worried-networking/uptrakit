@@ -1,3 +1,9 @@
+#![expect(
+    clippy::assertions_on_result_states,
+    clippy::let_underscore_must_use,
+    clippy::string_slice,
+    reason = "test helpers and assertions — is_ok/is_err checks, let _ = result, and string slices are idiomatic in tests"
+)]
 use super::*;
 use std::collections::HashMap;
 use std::sync::Mutex;

@@ -182,7 +182,13 @@ impl DockerClient for NoopDockerClient {
 /// Returns `None` when no socket is found (falls back to
 /// `bollard::Docker::connect_with_defaults`).
 #[cfg(all(unix, feature = "daemon"))]
-#[cfg_attr(test, allow(dead_code))]
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "used only in non-test daemon connection path; unreachable in test builds"
+    )
+)]
 fn probe_local_socket_path() -> Option<String> {
     use std::os::unix::fs::FileTypeExt;
 
@@ -247,6 +253,10 @@ impl BollardDockerClient {
         Ok(Self { docker })
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "slice uses fixed-length ASCII prefix len; 'unix://' is 7 ASCII bytes so the offset is always a valid char boundary"
+    )]
     fn connect(
         docker_host: Option<&str>,
         ssh_key_path: Option<&str>,
@@ -831,6 +841,10 @@ impl PullProgressTracker {
     }
 
     /// Build an ANSI frame that redraws all layer lines in-place.
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "write! to String always succeeds; .ok() is used to discard the infallible fmt::Error"
+    )]
     fn build_frame(&mut self) -> String {
         let layer_count = self.layer_order.len();
         let mut out = String::with_capacity(layer_count * 80);

@@ -16,6 +16,10 @@ use crate::shared_types::ServiceHandler;
 ///
 /// Safe to call multiple times — the second call is a no-op.
 pub fn init_crypto() {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "install_default() returns Err if a provider is already installed; second call is intentionally ignored"
+    )]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 

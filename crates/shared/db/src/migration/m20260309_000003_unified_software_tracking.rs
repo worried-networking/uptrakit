@@ -53,9 +53,7 @@ enum SoftwareItems {
     TenantId,
     Name,
     Featured,
-    #[allow(dead_code)]
     Enabled,
-    #[allow(dead_code)]
     DiscoveryState,
     LastCheckedAt,
     CreatedAt,
@@ -167,7 +165,10 @@ enum Tenants {
 enum Hosts {
     Table,
     Id,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "DeriveIden variant; field is part of the DB schema but not used in this migration"
+    )]
     TenantId,
 }
 

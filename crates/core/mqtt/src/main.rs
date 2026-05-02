@@ -26,6 +26,10 @@ impl ServiceHandler for StandaloneMqttHandler {
 
     type ServiceEvent = Option<uptrakit_mqtt_runtime::MqttServiceEvent>;
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "internal runtime errors are mapped to LoopError::Other(String) with a descriptive message; the original error type is not part of the public interface"
+    )]
     async fn on_connected(
         &mut self,
         conn: &mut ControllerConnection,
@@ -46,6 +50,10 @@ impl ServiceHandler for StandaloneMqttHandler {
             .map_err(|_| report!(LoopError::Other("failed to send MQTT register".to_string())))
     }
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "internal runtime errors are mapped to LoopError::Other(String) with a descriptive message; the original error type is not part of the public interface"
+    )]
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
@@ -111,6 +119,10 @@ impl ServiceHandler for StandaloneMqttHandler {
         self.runtime.on_service_config_ack(ack);
     }
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "internal runtime errors are mapped to LoopError::Other(String) with a descriptive message; the original error type is not part of the public interface"
+    )]
     async fn on_surface_action_request(
         &mut self,
         request: uptrakit_wire::surfaces::SurfaceActionRequest,

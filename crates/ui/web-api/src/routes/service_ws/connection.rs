@@ -3,6 +3,16 @@
 //! Establishes a session (validates certificates, checks status, handles
 //! enrollment) and then hands off to the handler loops.
 
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget sends to WS connection intentionally drop results"
+)]
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original WS framing errors carry no useful context"
+)]
+
 use std::net::IpAddr;
 use std::sync::Arc;
 

@@ -42,6 +42,10 @@ const PIPE_SHELL_PREFIXES: &[&str] = &["sudo", "env", "doas", "run0"];
 ///
 /// Returns a list of `(pattern, description)` for each match found.
 /// Matching is case-insensitive. An empty return means no patterns matched.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "bounds checked: as_bytes()[after] is guarded by `after >= lower.len()` check above; pipe_segments[1..] checked by `pipe_segments.len() >= 2`"
+)]
 pub fn detect_dangerous_patterns(command: &str) -> Vec<(&'static str, &'static str)> {
     let lower = command.to_lowercase();
     let mut matches: Vec<(&str, &str)> = DANGEROUS_PATTERNS

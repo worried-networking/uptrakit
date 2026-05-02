@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original parse errors carry no useful context; replaced with contextual messages"
+)]
+
 use std::sync::Arc;
 
 use axum::Json;

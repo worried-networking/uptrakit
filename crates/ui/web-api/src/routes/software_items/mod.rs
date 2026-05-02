@@ -1648,6 +1648,15 @@ async fn load_agent_service(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod audit_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(
+        clippy::string_slice,
+        reason = "test code: slice indexes are at validated boundaries"
+    )]
+
     use super::load_agent_service;
     use crate::tenant_db::TenantDb;
     use crate::test_harness::TestApp;
@@ -2192,6 +2201,11 @@ async fn fire_software_item_lifecycle(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;

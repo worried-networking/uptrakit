@@ -1,3 +1,12 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends; errors mean the receiver is gone and we must not block"
+)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional #[allow] for unused_mut; #[expect] would be unfulfilled when interactive feature is enabled"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -485,7 +494,10 @@ pub async fn handle_execute_update_ssh(
     let host_machine_id = payload.host_machine_id.clone();
     let update_history_id = payload.update_history_id;
 
-    #[allow(unused_mut)]
+    #[allow(
+        unused_mut,
+        reason = "mut is required when the interactive feature is enabled to call .take() on channel fields"
+    )]
     let mut in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
 
     // Extract interactive channels before moving InFlightUpdate into the forwarder.

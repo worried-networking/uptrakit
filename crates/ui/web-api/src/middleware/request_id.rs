@@ -56,6 +56,11 @@ pub async fn request_id(mut req: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
+
     use super::*;
     use axum::Router;
     use axum::body::Body;

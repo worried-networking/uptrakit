@@ -76,6 +76,10 @@ pub fn default_featured() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use crate::auth::{AuthResponse, UserResponse};
     use crate::device_auth::DeviceAuthPollResponse;
     use crate::error::ErrorResponse;

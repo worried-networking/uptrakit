@@ -233,6 +233,10 @@ impl ControllerConnection {
     /// frame into the write channel. The actual WebSocket write happens
     /// asynchronously in the writer task.
     #[tracing::instrument(skip_all)]
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "tokio::sync::mpsc::error::SendError carries the unsent message which is not useful for error reporting here"
+    )]
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
         self.check_write_error()?;
         let envelope = self
@@ -292,6 +296,10 @@ impl ControllerConnection {
                 RecvAction::Message(Message::Binary(data)) => {
                     return self.decode_binary_message(&data);
                 }
+                #[expect(
+                    clippy::unreachable,
+                    reason = "classify_ws_frame only wraps Text and Binary frames in RecvAction::Message; all other frame types produce RecvAction::Control or RecvAction::Closed"
+                )]
                 RecvAction::Message(_) => {
                     unreachable!("classify_ws_frame returns Message only for Text/Binary")
                 }
@@ -461,9 +469,17 @@ impl ControllerConnection {
     /// task to finish. Tolerates a dead writer (error flag already set).
     pub async fn close(&mut self) -> Result<()> {
         // Push close frame (best-effort — writer may already be dead).
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "send failure means the writer task already exited; close is best-effort"
+        )]
         let _ = self.write_tx.send(OutboundFrame::Close).await;
         // Wait for the writer task to finish.
         if let Some(handle) = self.writer_handle.take() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "JoinHandle result is not needed; we only wait for task completion"
+            )]
             let _ = handle.await;
         }
         Ok(())
@@ -550,6 +566,10 @@ fn close_reason_to_policy(reason: Option<&CloseReason>) -> crate::wire_api::Tran
 /// `EnrollmentError` information.
 #[async_trait::async_trait]
 impl crate::wire_api::ServiceTransport for ControllerConnection {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TransportError is a unit struct; the underlying error has already been logged at the send site"
+    )]
     async fn transport_send(
         &mut self,
         msg: crate::wire_api::ServiceMessage,
@@ -563,6 +583,10 @@ impl crate::wire_api::ServiceTransport for ControllerConnection {
         self.send_best_effort(msg).await;
     }
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TransportError is a unit struct; the underlying error has already been logged at the send site"
+    )]
     async fn transport_send_auto_paginate(
         &mut self,
         msg: crate::wire_api::ServiceMessage,
@@ -615,6 +639,10 @@ async fn writer_task(
             }
             OutboundFrame::Close => {
                 // Best-effort close — ignore errors (peer may have already gone).
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "sink.close() is best-effort; peer may already be gone; error is intentionally ignored"
+                )]
                 let _ = sink.close().await;
                 return;
             }
@@ -637,11 +665,21 @@ async fn writer_task(
         }
     }
     // Channel closed (connection dropped) — clean up.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "sink.close() at end of writer task loop is best-effort cleanup; errors are not actionable here"
+    )]
     let _ = sink.close().await;
 }
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        clippy::string_slice,
+        reason = "test assertions — assert!(result.is_ok/err()) and source-scanning string slices are idiomatic in tests"
+    )]
+
     use super::{RecvAction, classify_ws_frame, close_reason_to_policy};
     use crate::wire_api::{CloseReason, TransportClosePolicy};
     use std::pin::Pin;

@@ -256,6 +256,10 @@ impl DeviceFlowStore {
 }
 
 /// Generate a user-friendly code: 8 uppercase consonants, formatted as XXXX-XXXX.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "idx is bounded by USER_CODE_ALPHABET.len(); chars is always exactly 8 elements, so [..4] and [4..] are safe"
+)]
 fn generate_user_code() -> String {
     let mut rng = rand::rng();
     let chars: Vec<u8> = (0..8)
@@ -273,6 +277,11 @@ fn generate_user_code() -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::string_slice,
+        reason = "test assertions — ASCII-safe string slice in test assertions is idiomatic in tests"
+    )]
+
     use super::*;
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema};
 

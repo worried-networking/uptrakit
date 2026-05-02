@@ -46,6 +46,12 @@ pub(crate) fn encrypt_value_v3(ring: &DataKeyRing, plaintext: &str, aad: &str) -
 }
 
 /// Decrypt a `ENC:v3:<key_id>:<hex>` ciphertext using the provided data key ring.
+#[expect(
+    clippy::string_slice,
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: colon_pos from str::find is a valid char boundary; raw.len() < 12+16 bails before slice; TryFromSliceError/ring error carry no additional context"
+)]
 pub(crate) fn decrypt_value_v3(ring: &DataKeyRing, stored: &str, aad: &str) -> Result<String> {
     let after_prefix = stored
         .strip_prefix(ENC_V3_PREFIX)

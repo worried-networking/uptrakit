@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 //! Webhook notification plugin implementation and `declare_plugin!` invocation.
 
 use std::collections::BTreeSet;
@@ -43,7 +47,10 @@ fn check_header_allowed_delivery(key: &str) -> Result<()> {
 /// header as `sha256=<hex>`.
 pub struct WebhookPlugin {
     http: reqwest::Client,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "retained for potential SSRF-bypass logic; field read path not yet implemented"
+    )]
     allow_private_urls: bool,
 }
 
@@ -656,6 +663,10 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta, surfaces};
 

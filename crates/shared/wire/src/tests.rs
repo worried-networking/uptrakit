@@ -1,3 +1,7 @@
+#![expect(
+    clippy::assertions_on_result_states,
+    reason = "test assertions — assert!(result.is_ok/err()) are idiomatic in tests"
+)]
 use std::collections::{BTreeSet, HashSet};
 
 use time::UtcDateTime;

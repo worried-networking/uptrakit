@@ -1,3 +1,10 @@
+#![expect(
+    clippy::expect_used,
+    clippy::let_underscore_must_use,
+    clippy::string_slice,
+    reason = "integration test infrastructure: panics are acceptable in PKI test helper"
+)]
+
 use rcgen::{
     BasicConstraints, CertificateParams, CertificateRevocationListParams, DistinguishedName,
     DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyIdMethod, KeyPair, KeyUsagePurpose,

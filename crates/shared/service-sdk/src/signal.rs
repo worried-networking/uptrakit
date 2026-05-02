@@ -175,6 +175,11 @@ impl SignalWatcher {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok()) is idiomatic in tests"
+    )]
+
     use super::*;
     #[cfg(unix)]
     use nix::sys::signal::{self as nix_signal, Signal as NixSignal};

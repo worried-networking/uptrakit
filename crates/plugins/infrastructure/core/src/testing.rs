@@ -59,7 +59,10 @@ impl FixedOutputExecutor {
     /// Equivalent to [`success`] when `exit_code == 0`.
     ///
     /// [`success`]: FixedOutputExecutor::success
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(
+        clippy::new_ret_no_self,
+        reason = "constructor returns an Arc<dyn CommandExecutor> to hide the concrete type from callers"
+    )]
     pub fn new(output: impl Into<String>, exit_code: i32) -> Arc<dyn CommandExecutor> {
         Arc::new(Self {
             output: output.into(),
@@ -131,7 +134,10 @@ impl RoutedOutputExecutor {
     }
 
     /// Build from `(program, stdout, exit_code)` triples.
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(
+        clippy::new_ret_no_self,
+        reason = "constructor returns an Arc<dyn CommandExecutor> to hide the concrete type from callers"
+    )]
     pub fn new(
         routes: impl IntoIterator<Item = (&'static str, &'static str, i32)>,
     ) -> Arc<dyn CommandExecutor> {

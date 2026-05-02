@@ -216,6 +216,12 @@ fn build_webpki_root_store() -> RootCertStore {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        clippy::let_underscore_must_use,
+        reason = "test assertions — assert!(result.is_err()) and let _ = install_default() (idempotent) are idiomatic in tests"
+    )]
+
     use super::*;
 
     /// Install the aws-lc-rs crypto provider (idempotent, safe to call multiple times).

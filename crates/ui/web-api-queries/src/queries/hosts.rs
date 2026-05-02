@@ -395,7 +395,10 @@ pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
 // ---------------------------------------------------------------------------
 
 /// Deactivate multiple hosts (soft-delete).
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "complex SeaORM query return type; extracting aliases would increase verbosity"
+)]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_hosts(
     tenant_db: &TenantDb,
@@ -435,6 +438,11 @@ pub async fn batch_deactivate_hosts(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helpers: panics on setup failure are acceptable"
+    )]
+
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
     use uptrakit_shared_db::entity::{host, service, service_host, tenant};

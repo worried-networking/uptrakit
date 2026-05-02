@@ -8,6 +8,10 @@ use time::OffsetDateTime;
 pub struct RoleMapping(pub HashMap<String, String>);
 
 impl sea_orm::sea_query::ValueType for RoleMapping {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "ValueTypeErr is a unit struct that carries no additional context; the serde_json error is intentionally discarded"
+    )]
     fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
             sea_orm::Value::Json(Some(json)) => {
@@ -126,6 +130,11 @@ impl ActiveModelBehavior for ActiveModel {}
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_err()) are idiomatic in tests"
+    )]
+
     use super::*;
 
     #[test]

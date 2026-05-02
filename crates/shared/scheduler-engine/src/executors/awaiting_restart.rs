@@ -524,7 +524,10 @@ mod tests {
         .unwrap();
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper mirrors the full update_history schema; extracting a builder struct would obscure the test setup"
+    )]
     async fn insert_update_history(
         db: &DatabaseConnection,
         tenant_id: Uuid,

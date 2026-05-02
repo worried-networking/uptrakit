@@ -693,6 +693,12 @@ pub async fn set_host_tags(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures;

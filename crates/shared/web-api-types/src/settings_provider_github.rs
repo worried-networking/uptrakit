@@ -56,6 +56,10 @@ impl Validate for UpdateGitHubProviderSettingsRequest {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     #[test]

@@ -88,6 +88,15 @@ pub(crate) async fn trigger_host_batch(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(
+        clippy::string_slice,
+        reason = "test code: slice indexes are at validated boundaries"
+    )]
+
     use sea_orm::{ActiveModelTrait, Set};
     use tokio::sync::broadcast::error::TryRecvError;
     use uptrakit_shared_db::entity::{host, software_item};

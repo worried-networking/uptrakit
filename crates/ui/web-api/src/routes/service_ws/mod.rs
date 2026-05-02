@@ -1,3 +1,9 @@
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+#![expect(
+    clippy::large_futures,
+    reason = "large future is acceptable in this WS handler path"
+)]
+
 mod connection;
 pub(crate) mod handler;
 mod protocol;
@@ -377,6 +383,12 @@ async fn handle_connection(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::protocol::{
         MessageRateLimiter, ServiceWsError, WS_MESSAGE_RATE_WINDOW, deserialize_service_msg,
         record_service_activity,

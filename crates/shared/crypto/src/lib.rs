@@ -147,6 +147,10 @@ const ENC_V3_PREFIX: &str = "ENC:v3:";
 ///
 /// Must be called once at startup after DEKs have been loaded and unwrapped
 /// from the database.  Returns `Err` if the ring has already been initialized.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "OnceLock::set() error is the original value; discarding it is intentional — AlreadyInitialized conveys the problem"
+)]
 pub fn init_data_key_ring(ring: DataKeyRing) -> Result<()> {
     let active_key_id = ring.active_key_id().to_string();
     let key_count = ring.len();
@@ -168,6 +172,10 @@ pub fn data_key_ring_available() -> bool {
 ///
 /// Used to tag DEK rows with the KEK that wrapped them, enabling detection
 /// of KEK mismatches during startup.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "safe: Sha256 output is always 32 bytes; slicing [..8] is always in-bounds"
+)]
 pub fn master_key_fingerprint() -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
@@ -182,6 +190,10 @@ pub fn master_key_fingerprint() -> Result<String> {
 /// is scrubbed when dropped.
 ///
 /// Returns `Err` if the key has already been initialized.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "OnceLock::set() error is the original value; discarding it is intentional — AlreadyInitialized conveys the problem"
+)]
 pub fn init_master_key(key: Zeroizing<[u8; 32]>) -> Result<()> {
     MASTER_KEY
         .set(key)
@@ -285,6 +297,10 @@ pub struct ColumnAadEntry {
 /// - [`CryptoError::DuplicateColumnAad`] if two entries share a column name.
 /// - [`CryptoError::AlreadyInitialized`] if the registry has already been
 ///   initialized.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "OnceLock::set() error is the original value; discarding it is intentional — AlreadyInitialized conveys the problem"
+)]
 pub fn register_column_aad(entries: &[ColumnAadEntry]) -> Result<()> {
     let mut map = HashMap::with_capacity(entries.len());
     for entry in entries {

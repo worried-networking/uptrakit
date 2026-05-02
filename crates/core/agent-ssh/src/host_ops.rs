@@ -330,6 +330,11 @@ pub(crate) async fn find_host_by_machine_id(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: discarding `init_master_key` and `register_column_aad` results is idiomatic — they are no-ops on subsequent calls"
+    )]
+
     use super::*;
     use crate::db::init_db;
 

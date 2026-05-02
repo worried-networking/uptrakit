@@ -128,6 +128,12 @@ impl ActiveModelBehavior for ActiveModel {}
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        clippy::let_underscore_must_use,
+        reason = "test code: `assert!(r.is_err())` and discarding `init_master_key` results are idiomatic in tests"
+    )]
+
     use uptrakit_command::SudoPolicy;
 
     use super::*;

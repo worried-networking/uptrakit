@@ -552,6 +552,11 @@ use rootcause::prelude::*;
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::string_slice,
+        reason = "test code: bounded via `.min(40)` but the result is still a byte slice; the prefix is ASCII PEM header so UTF-8 boundary is safe"
+    )]
+
     use super::*;
 
     #[test]

@@ -1,3 +1,12 @@
+#![expect(
+    clippy::indexing_slicing,
+    reason = "index is computed or validated to be in bounds"
+)]
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget send intentionally drops the result"
+)]
+
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -1908,7 +1917,6 @@ impl SurfaceProxy {
         self
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn invoke(
         &self,
         service_connections: &ServiceConnectionRegistry,
@@ -2629,6 +2637,10 @@ fn schema_matches(schema: &surfaces::SchemaContract, value: &serde_json::Value) 
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::unreachable,
+        reason = "test stubs use unreachable! to signal unexpected call paths"
+    )]
     use std::collections::{BTreeSet, HashSet};
     use std::sync::Arc as StdArc;
     use std::sync::Once;

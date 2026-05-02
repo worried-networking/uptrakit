@@ -1,3 +1,7 @@
+#![expect(
+    clippy::string_slice,
+    reason = "string slices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety is guaranteed by construction"
+)]
 use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 

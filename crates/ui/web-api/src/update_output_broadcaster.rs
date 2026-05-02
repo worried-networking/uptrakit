@@ -5,6 +5,11 @@
 //! receives `UpdateOutput` messages, it calls [`UpdateOutputBroadcaster::send_line`]
 //! to fan out the line to all SSE subscribers.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends intentionally drop results"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

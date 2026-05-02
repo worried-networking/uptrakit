@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::let_underscore_must_use,
+    reason = "integration test infrastructure: panics are acceptable in setup helpers"
+)]
+
 use std::sync::Arc;
 
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};

@@ -24,6 +24,27 @@
 //! - [`trigger_discovery_for_agent_host`] -- send `DiscoverSoftware` to an
 //!   agent for a specific host (also used by `hosts.rs`).
 
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget sends in WS handler intentionally drop results"
+)]
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original WS parse errors carry no useful context"
+)]
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated char boundary"
+)]
+#![expect(
+    clippy::unreachable,
+    reason = "branch is statically unreachable given surrounding protocol invariants"
+)]
+
 mod cert;
 mod credentials;
 mod discovery;
@@ -2307,7 +2328,6 @@ async fn cleanup_embedded_service_session(
 /// - The first message was not `ServiceMessage::Register`.
 ///
 /// On failure the connection is closed with [`CloseReason::ProtocolError`].
-#[allow(clippy::too_many_arguments)]
 async fn receive_register_message(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
@@ -2401,7 +2421,10 @@ async fn receive_register_message(
 /// handshake or write failure).
 // All parameters originate from the caller's `AuthenticatedContext` and cannot
 // be meaningfully grouped without introducing a wrapper that duplicates it.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters originate from caller context and cannot be meaningfully grouped without wrapper duplication"
+)]
 async fn setup_authenticated_session(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
@@ -2696,7 +2719,10 @@ enum TextAction {
 /// everything else to the processor.
 // All parameters originate from the main event loop and cannot be meaningfully
 // grouped without duplicating the AuthenticatedSessionState struct.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all parameters originate from caller context and cannot be meaningfully grouped without wrapper duplication"
+)]
 async fn handle_incoming_text(
     text: &str,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,

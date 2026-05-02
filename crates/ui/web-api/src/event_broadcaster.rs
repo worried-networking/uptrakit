@@ -12,6 +12,15 @@
 //! [`UpdateOutputBroadcaster`]: crate::update_output_broadcaster::UpdateOutputBroadcaster
 //! [`BatchProgressBroadcaster`]: crate::batch_progress_broadcaster::BatchProgressBroadcaster
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends intentionally drop the send result"
+)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional #[allow] for unused_variables; #[expect] would be unfulfilled when nats feature is enabled"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -128,7 +137,10 @@ impl EventBroadcaster {
     /// Publish an `AdminEvent` to NATS so other controller instances can
     /// relay it to their local SSE subscribers.  No-op when NATS is not
     /// configured or the `nats` feature is disabled.
-    #[allow(unused_variables)]
+    #[allow(
+        unused_variables,
+        reason = "tenant_id and event are used only when nats feature is enabled"
+    )]
     async fn maybe_publish_nats(&self, tenant_id: Option<Uuid>, event: AdminEvent) {
         #[cfg(feature = "nats")]
         if let (Some(nats), Ok(event_json)) = (&self.nats, serde_json::to_string(&event)) {
@@ -191,6 +203,11 @@ impl Default for EventBroadcaster {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
+
     use super::*;
 
     #[tokio::test]

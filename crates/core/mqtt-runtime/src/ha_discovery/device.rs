@@ -21,6 +21,10 @@ use super::{HostOsInfo, ReleaseInfo, unique_id};
 /// every entity for a host groups under a single HA device. When `os_info`
 /// fields are present the `model`, `sw_version`, and `hw_version` fields are
 /// included.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "device is always a serde_json::Value::Object (constructed via json!({...})); string indexing on Object inserts/updates and never panics"
+)]
 fn build_device_block(
     tenant_id: Uuid,
     host_id: Uuid,
@@ -81,7 +85,11 @@ fn build_device_block(
 /// assert_eq!(v["payload_install"], "install");
 /// assert_eq!(v["title"], "Software Update (My App)");
 /// ```
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    clippy::indexing_slicing,
+    reason = "all parameters are required to build the HA discovery config; config is a serde_json::Value::Object so string indexing is safe"
+)]
 pub(crate) fn build_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,

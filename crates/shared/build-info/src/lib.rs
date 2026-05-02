@@ -54,6 +54,10 @@ impl BuildInfo {
         }
     }
 
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "writing to a String via fmt::Write is infallible; .ok() discards a Result that is always Ok(())"
+    )]
     pub fn render_human(&self) -> String {
         let mut output = String::new();
         let features = if self.features.is_empty() {
@@ -62,20 +66,22 @@ impl BuildInfo {
             self.features.join(",")
         };
 
-        let _ = writeln!(output, "binary: {}", self.binary);
-        let _ = writeln!(output, "version: {}", self.version);
-        let _ = writeln!(output, "features: {features}");
-        let _ = writeln!(output, "target.os: {}", self.target.os);
-        let _ = writeln!(output, "target.arch: {}", self.target.arch);
-        let _ = writeln!(output, "target.env: {}", self.target.env);
-        let _ = writeln!(output, "target.family: {}", self.target.family);
-        let _ = writeln!(
+        // Writing to a `String` via `fmt::Write` is infallible.
+        writeln!(output, "binary: {}", self.binary).ok();
+        writeln!(output, "version: {}", self.version).ok();
+        writeln!(output, "features: {features}").ok();
+        writeln!(output, "target.os: {}", self.target.os).ok();
+        writeln!(output, "target.arch: {}", self.target.arch).ok();
+        writeln!(output, "target.env: {}", self.target.env).ok();
+        writeln!(output, "target.family: {}", self.target.family).ok();
+        writeln!(
             output,
             "cfg.debug_assertions: {}",
             self.cfg.debug_assertions
-        );
-        let _ = writeln!(output, "cfg.panic_abort: {}", self.cfg.panic_abort);
-        let _ = writeln!(output, "profile: {}", self.profile);
+        )
+        .ok();
+        writeln!(output, "cfg.panic_abort: {}", self.cfg.panic_abort).ok();
+        writeln!(output, "profile: {}", self.profile).ok();
 
         output
     }

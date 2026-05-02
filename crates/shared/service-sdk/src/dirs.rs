@@ -407,6 +407,10 @@ async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
 
     // On write failure, attempt to clean up the temp file.
     if let Err(e) = write_result {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "remove_file is best-effort cleanup after a write failure; the original error is returned"
+        )]
         let _ = tokio::fs::remove_file(&temp_path).await;
         return Err(e);
     }
@@ -416,6 +420,10 @@ async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
         // Best-effort cleanup on rename failure.
         let temp = temp_path.clone();
         tokio::spawn(async move {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "remove_file is best-effort cleanup spawned after a rename failure; error is not actionable"
+            )]
             let _ = tokio::fs::remove_file(&temp).await;
         });
         report!(DirectoryError::WriteFile {

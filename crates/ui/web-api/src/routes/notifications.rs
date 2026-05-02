@@ -1197,6 +1197,12 @@ pub async fn notification_callback(
 
 #[cfg(all(test, feature = "db-sqlite", feature = "notifications-telegram"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
 
     use crate::test_harness::TestApp;

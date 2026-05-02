@@ -24,14 +24,20 @@ pub(crate) async fn verify_master_key(db: &sea_orm::DatabaseConnection) -> crate
             if let Some(token_str) = value.as_str()
                 && uptrakit_crypto::is_encrypted(token_str)
             {
-                uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
-                    report!(AppError::Config(
-                        "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
-                             decrypt data encrypted by a previous instance. Ensure all \
-                             controller instances use the same master key."
-                            .into()
-                    ))
-                })?;
+                #[expect(
+                    clippy::map_err_ignore,
+                    reason = "the underlying crypto error reveals only internal AAD/key details; the user-facing `master key mismatch` message provides actionable guidance"
+                )]
+                let verified =
+                    uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
+                        report!(AppError::Config(
+                            "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
+                                 decrypt data encrypted by a previous instance. Ensure all \
+                                 controller instances use the same master key."
+                                .into()
+                        ))
+                    });
+                verified?;
                 tracing::info!("master key verification succeeded");
             }
         }
@@ -59,15 +65,21 @@ pub(crate) async fn verify_master_key(db: &sea_orm::DatabaseConnection) -> crate
                     && let Some(token_str) = value.as_str()
                     && uptrakit_crypto::is_encrypted(token_str)
                 {
-                    uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
-                        report!(AppError::Config(
-                            "master key mismatch: another controller instance stored a \
-                                 verification token first, and the current UPTRAKIT_MASTER_KEY \
-                                 cannot decrypt it. Ensure all controller instances use the \
-                                 same master key."
-                                .into()
-                        ))
-                    })?;
+                    #[expect(
+                        clippy::map_err_ignore,
+                        reason = "the underlying crypto error reveals only internal AAD/key details; the user-facing `master key mismatch` message provides actionable guidance"
+                    )]
+                    let verified = uptrakit_crypto::verify_key_verification_token(token_str)
+                        .map_err(|_| {
+                            report!(AppError::Config(
+                                "master key mismatch: another controller instance stored a \
+                                     verification token first, and the current UPTRAKIT_MASTER_KEY \
+                                     cannot decrypt it. Ensure all controller instances use the \
+                                     same master key."
+                                    .into()
+                            ))
+                        });
+                    verified?;
                     tracing::info!(
                         "master key verification succeeded (raced with another instance)"
                     );

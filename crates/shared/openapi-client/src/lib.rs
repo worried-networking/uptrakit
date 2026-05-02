@@ -50,8 +50,8 @@ pub(crate) mod types_impl {
     pub(crate) use uptrakit_web_api_types::*;
 }
 
+#[cfg(test)]
 pub(crate) mod shared_types_impl {
-    #[allow(unused_imports)]
     pub(crate) use uptrakit_shared_types::*;
 }
 
@@ -367,7 +367,6 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
-    #[allow(dead_code)]
     async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.delete(&url).bearer_auth(self.token_or_err()?);
@@ -386,7 +385,10 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "HTTP helper — not yet called by any route but retained for API completeness"
+    )]
     async fn delete_with_query_json<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -527,6 +529,10 @@ fn parse_retry_after(resp: &reqwest::Response) -> Option<u64> {
 
 /// Extract an error message from a JSON response body, falling back to
 /// the raw text when the body is not JSON or has no `error` field.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "serde_json::Value index operator returns Value::Null for missing keys rather than panicking; this is safe"
+)]
 pub(crate) fn extract_error_message(text: &str) -> String {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
@@ -542,6 +548,11 @@ pub(crate) fn extract_error_message(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
 
     #[test]

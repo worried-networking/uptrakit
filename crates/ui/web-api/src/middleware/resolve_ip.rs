@@ -109,6 +109,11 @@ fn extract_real_ip(headers: &HeaderMap, header_name: &str) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::Arc;
 

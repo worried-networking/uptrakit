@@ -2,6 +2,11 @@
 //!
 //! Wraps [`UptrakitClient`](uptrakit_openapi_client::UptrakitClient) from the
 //! `uptrakit-openapi-client` crate, adding polling helpers used by system tests.
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "integration test infrastructure: panics are acceptable in API test helpers"
+)]
 
 use std::time::Duration;
 

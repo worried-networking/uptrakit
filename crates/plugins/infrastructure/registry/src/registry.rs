@@ -5,6 +5,14 @@
 //! - Descriptor-based plugin creation for agent-side use
 //! - Sudo command collection from descriptors
 
+// `#[allow(unused_mut)]` is used for variables that are conditionally mutated
+// by feature-gated push calls; `#[expect]` cannot be used because the lint
+// fires only when ALL features are disabled.
+#![expect(
+    clippy::allow_attributes,
+    reason = "unused_mut suppressions are conditionally needed depending on enabled features"
+)]
+
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::{
@@ -17,7 +25,10 @@ use uptrakit_shared_types::plugin_ids;
 /// This is the single source of truth — no hardcoded lists elsewhere.
 /// Feature-gated plugins are included only when the corresponding feature is enabled.
 pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
-    #[allow(unused_mut)]
+    #[allow(
+        unused_mut,
+        reason = "mut required when any notification/enhancement feature is enabled"
+    )]
     let mut descs: Vec<&'static PluginDescriptor> = vec![
         // Software — Release plugins
         &uptrakit_plugin_releases_github::DESCRIPTOR,
@@ -215,7 +226,10 @@ mod tests {
     #[test]
     fn descriptors_subset_of_known_ids() {
         let descs = all_descriptors();
-        #[allow(unused_mut)]
+        #[allow(
+            unused_mut,
+            reason = "mut required when test-support feature is enabled"
+        )]
         let mut known: BTreeSet<String> = plugin_ids::ALL
             .iter()
             .map(|id| id.as_str().to_owned())

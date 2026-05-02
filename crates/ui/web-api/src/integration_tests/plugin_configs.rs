@@ -1,3 +1,13 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
+#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+#![expect(
+    clippy::string_slice,
+    reason = "test code: slice indexes are at validated boundaries"
+)]
+
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{insert_host, link_service_host, register_and_get_token};
 #[cfg(feature = "dashboard-icons")]

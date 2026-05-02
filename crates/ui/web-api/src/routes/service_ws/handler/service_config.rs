@@ -6,6 +6,12 @@
 //! - [`handle_store_service_config`]: upsert handler for `StoreServiceConfig`.
 //! - [`handle_delete_service_config`]: delete handler for `DeleteServiceConfig`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -490,6 +496,8 @@ pub(super) async fn handle_delete_service_config(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
 
     use std::pin::Pin;

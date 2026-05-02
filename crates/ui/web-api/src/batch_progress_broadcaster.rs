@@ -16,6 +16,15 @@
 //! Core NATS publish/subscribe (not JetStream) is used intentionally — batch
 //! progress events are transient and must not be persisted.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends intentionally drop the send result"
+)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional #[allow] for unreachable_code; #[expect] would be unfulfilled when nats feature is enabled"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -107,7 +116,10 @@ impl BatchProgressBroadcaster {
     }
 
     /// Returns `true` when a NATS client has been attached.
-    #[allow(unreachable_code)]
+    #[allow(
+        unreachable_code,
+        reason = "fallback false is unreachable when nats feature is enabled"
+    )]
     pub fn has_nats(&self) -> bool {
         #[cfg(feature = "nats")]
         {

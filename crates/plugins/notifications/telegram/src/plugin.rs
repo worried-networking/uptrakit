@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest; array and slice indices are bounded by construction or derived from known-valid positions"
+)]
 //! Telegram notification plugin — `declare_plugin!` descriptor and role impl.
 
 use std::collections::BTreeSet;
@@ -712,6 +717,10 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use uptrakit_plugin_infrastructure_core::{PluginMeta, surfaces};
 

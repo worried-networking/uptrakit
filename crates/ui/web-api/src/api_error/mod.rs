@@ -5,6 +5,11 @@
 //! JSON `{ error, code }` body and emits a structured `tracing::error!` event
 //! when `internal_detail` is `Some` (5xx errors only).
 
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated char boundary"
+)]
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use rootcause::Report;

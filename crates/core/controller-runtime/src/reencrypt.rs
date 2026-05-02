@@ -457,6 +457,11 @@ async fn upgrade_setting(db: &DatabaseConnection, key: &str, aad: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: discarding `init_master_key` is idiomatic — it is a no-op on subsequent calls"
+    )]
+
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, EntityTrait, Set};
     use time::OffsetDateTime;

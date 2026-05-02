@@ -359,6 +359,10 @@ pub async fn invoke(params: InvokeParams<'_>) -> Result<InvokeOutput> {
     Ok(InvokeOutput(result))
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "args[0] is safe: the function returns early above if args.is_empty()"
+)]
 pub async fn dynamic_invoke(
     args: Vec<OsString>,
     server: Option<&str>,
@@ -554,6 +558,10 @@ fn raw_params_arg() -> clap::Arg {
         .default_value("{}")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "caller contract: only called for fields where typed_field_kind returns Some"
+)]
 fn build_field_arg(field: &FormFieldDescriptor) -> clap::Arg {
     let mut arg = clap::Arg::new(field.key.clone()).long(field.key.clone());
 

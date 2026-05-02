@@ -100,6 +100,12 @@ pub async fn reset_data(
 
 #[cfg(all(test, feature = "db-sqlite", feature = "reset-data"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;

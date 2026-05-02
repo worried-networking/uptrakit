@@ -933,6 +933,11 @@ pub async fn batch_services(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::AuthMethod;

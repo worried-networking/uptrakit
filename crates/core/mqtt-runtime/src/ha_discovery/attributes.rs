@@ -33,6 +33,10 @@
 /// assert_eq!(payload["release_date"], "2025-01-15");
 /// assert!(payload.get("last_checked_at").is_none());
 /// ```
+#[expect(
+    clippy::indexing_slicing,
+    reason = "v is always a serde_json::Value::Object (constructed via json!({...})); string indexing on Object inserts/updates and never panics"
+)]
 pub(crate) fn build_attributes_payload(
     in_progress: bool,
     update_category: Option<&str>,

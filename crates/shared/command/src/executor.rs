@@ -133,6 +133,10 @@ pub fn build_remote_command_string(spec: &CommandSpec) -> crate::Result<String> 
 /// If `timeout` is `Some(dur)`, the future is wrapped with
 /// [`tokio::time::timeout`]. On expiry a [`CommandError::TimedOut`] is
 /// returned. If `timeout` is `None` the future is awaited directly.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "tokio::time::error::Elapsed carries no additional context beyond the fact that the timeout expired"
+)]
 async fn apply_timeout(
     fut: impl std::future::Future<Output = crate::Result<(String, i32)>>,
     timeout: Option<std::time::Duration>,
@@ -234,6 +238,10 @@ impl CommandExecutor for LocalCommandExecutor {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err checks are idiomatic in tests"
+    )]
     use super::*;
     use std::time::Duration;
     use uptrakit_shared_types::HookShell;

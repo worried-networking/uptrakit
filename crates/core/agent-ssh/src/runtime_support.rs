@@ -54,6 +54,10 @@ impl AgentSshRuntimeSupport {
 
     fn build_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        #[expect(
+            clippy::expect_used,
+            reason = "infallible at startup: catalog construction failures are static configuration errors that must abort process initialization"
+        )]
         uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
             .expect("plugin catalog must build successfully")
     }

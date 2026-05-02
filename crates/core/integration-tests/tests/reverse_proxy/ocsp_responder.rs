@@ -1,3 +1,12 @@
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::let_underscore_must_use,
+    clippy::panic,
+    clippy::unused_result_ok,
+    reason = "integration test infrastructure: panics are acceptable in OCSP responder test helper"
+)]
+
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
