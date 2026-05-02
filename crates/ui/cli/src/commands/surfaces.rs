@@ -359,10 +359,6 @@ pub async fn invoke(params: InvokeParams<'_>) -> Result<InvokeOutput> {
     Ok(InvokeOutput(result))
 }
 
-#[expect(
-    clippy::indexing_slicing,
-    reason = "args[0] is safe: the function returns early above if args.is_empty()"
-)]
 pub async fn dynamic_invoke(
     args: Vec<OsString>,
     server: Option<&str>,
@@ -372,13 +368,13 @@ pub async fn dynamic_invoke(
 ) -> Result<InvokeOutput> {
     use crate::error::CliError;
 
-    if args.is_empty() {
+    let Some(first_arg) = args.first() else {
         return Err(report!(CliError::Other(
             "surface ID is required (e.g. `surfaces ssh-agent.hosts list-hosts`)".to_string()
         )));
-    }
+    };
 
-    let surface_id = args[0]
+    let surface_id = first_arg
         .to_str()
         .ok_or_else(|| {
             report!(CliError::Other(

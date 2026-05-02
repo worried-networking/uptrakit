@@ -256,21 +256,16 @@ impl DeviceFlowStore {
 }
 
 /// Generate a user-friendly code: 8 uppercase consonants, formatted as XXXX-XXXX.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "idx is bounded by USER_CODE_ALPHABET.len(); chars is always exactly 8 elements, so [..4] and [4..] are safe"
-)]
 fn generate_user_code() -> String {
     let mut rng = rand::rng();
-    let chars: Vec<u8> = (0..8)
-        .map(|_| {
-            let idx = rng.random_range(0..USER_CODE_ALPHABET.len());
-            USER_CODE_ALPHABET[idx]
-        })
-        .collect();
+    let chars: [u8; 8] = std::array::from_fn(|_| {
+        let idx = rng.random_range(0..USER_CODE_ALPHABET.len());
+        USER_CODE_ALPHABET.get(idx).copied().unwrap_or(b'B')
+    });
 
-    let first: String = chars[..4].iter().map(|&b| b as char).collect();
-    let second: String = chars[4..].iter().map(|&b| b as char).collect();
+    let (first_half, second_half) = chars.split_at(4);
+    let first: String = first_half.iter().map(|&b| b as char).collect();
+    let second: String = second_half.iter().map(|&b| b as char).collect();
 
     format!("{first}-{second}")
 }
