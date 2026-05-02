@@ -390,16 +390,16 @@ pub async fn batch_approve_system_services(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.status != SystemServiceStatus::Pending {
-            failed.push((*id, "system service is not in pending status".to_string()));
+            failed.push((id, "system service is not in pending status".to_string()));
             continue;
         }
-        let mut active: system_service::ActiveModel = svc.clone().into();
+        let mut active: system_service::ActiveModel = svc.into();
         active.status = Set(SystemServiceStatus::Approved);
         active.updated_at = Set(now);
         active.update(db).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
@@ -433,17 +433,17 @@ pub async fn batch_reject_system_services(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.status != SystemServiceStatus::Pending {
-            failed.push((*id, "system service is not in pending status".to_string()));
+            failed.push((id, "system service is not in pending status".to_string()));
             continue;
         }
-        let mut active: system_service::ActiveModel = svc.clone().into();
+        let mut active: system_service::ActiveModel = svc.into();
         active.status = Set(SystemServiceStatus::Rejected);
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(db).await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
@@ -477,15 +477,15 @@ pub async fn batch_deactivate_system_services(
 
     let now = OffsetDateTime::now_utc();
 
-    for (id, svc) in &found {
+    for (id, svc) in found {
         if svc.is_embedded {
-            failed.push((*id, "embedded services cannot be deactivated".to_string()));
+            failed.push((id, "embedded services cannot be deactivated".to_string()));
             continue;
         }
 
         let txn = db.begin().await.context_to()?;
 
-        let mut active: system_service::ActiveModel = svc.clone().into();
+        let mut active: system_service::ActiveModel = svc.into();
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
@@ -499,14 +499,14 @@ pub async fn batch_deactivate_system_services(
                 system_service_certificate::Column::RevocationReason,
                 Expr::value(Some(SystemRevocationReason::ServiceDeactivated)),
             )
-            .filter(system_service_certificate::Column::SystemServiceId.eq(*id))
+            .filter(system_service_certificate::Column::SystemServiceId.eq(id))
             .filter(system_service_certificate::Column::RevokedAt.is_null())
             .exec(&txn)
             .await
             .context_to()?;
 
         txn.commit().await.context_to()?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     Ok((succeeded, failed))
