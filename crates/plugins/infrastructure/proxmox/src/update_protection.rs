@@ -469,11 +469,7 @@ async fn prepare_snapshot_protection(
     );
     if let Some(tx) = ctx.output_tx.as_ref() {
         let _ = tx.send(
-            format!(
-                "Proxmox snapshot '{}' created successfully.\n",
-                snapshot_name
-            )
-            .into_bytes(),
+            format!("Proxmox snapshot '{snapshot_name}' created successfully.\n").into_bytes(),
         );
     }
 
