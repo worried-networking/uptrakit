@@ -363,6 +363,7 @@
 
 	async function executeEdit() {
 		if (!item || editSubmitting) return;
+		if (editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())) return;
 		editSubmitting = true;
 		try {
 			const trimmedIcon = editForm.icon_url.trim();
@@ -1174,16 +1175,23 @@
 		<FormFieldRow label="Name" inputId="software-detail-edit-name">
 			<Input id="software-detail-edit-name" type="text" bind:value={editForm.name} />
 		</FormFieldRow>
-		<FormFieldRow label="Icon URL" inputId="software-detail-edit-icon-url" hint="optional, HTTPS">
+		<FormFieldRow
+			label="Icon URL"
+			inputId="software-detail-edit-icon-url"
+			hint="Optional. Must be HTTPS when provided."
+			error={editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())
+				? 'Icon URL must be a valid HTTPS URL.'
+				: undefined}
+		>
 			<Input
 				id="software-detail-edit-icon-url"
-				type="text"
+				type="url"
 				bind:value={editForm.icon_url}
 				placeholder="https://example.com/icon.png"
+				error={editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())
+					? 'Icon URL must be a valid HTTPS URL.'
+					: undefined}
 			/>
-			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
-				<p class="text-[var(--color-warning)] text-xs">Icon URL must be a valid HTTPS URL.</p>
-			{/if}
 		</FormFieldRow>
 		<FormFieldRow label="Featured" inputId="software-detail-edit-featured">
 			<Checkbox id="software-detail-edit-featured" bind:checked={editForm.featured} />

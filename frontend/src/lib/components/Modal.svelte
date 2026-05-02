@@ -5,7 +5,7 @@
 	let {
 		onclose,
 		title,
-		maxWidth = 'max-w-[380px]',
+		maxWidth = 'max-w-lg',
 		children,
 		footer
 	}: {
