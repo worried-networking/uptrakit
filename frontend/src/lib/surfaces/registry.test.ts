@@ -24,13 +24,15 @@ function makeSurface({
 	label,
 	priority,
 	slot,
-	targeting
+	targeting,
+	nav_icon
 }: {
 	surfaceId: string;
 	label: string;
 	priority: number;
 	slot: string;
 	targeting: 'universal' | 'targeted';
+	nav_icon?: string;
 }): SurfaceResponse {
 	return {
 		surface_id: surfaceId,
@@ -45,7 +47,8 @@ function makeSurface({
 			kind: 'text_block',
 			text: label
 		},
-		provider_count: targeting === 'targeted' ? 2 : 1
+		provider_count: targeting === 'targeted' ? 2 : 1,
+		nav_icon
 	};
 }
 
@@ -224,15 +227,44 @@ describe('surface registry', () => {
 				id: 'surface.only',
 				href: '/surfaces/surface.only',
 				label: 'Surface Only',
-				priority: 50
+				priority: 50,
+				icon: 'Box'
 			},
 			{
 				id: 'surface.settings',
 				href: '/surfaces/surface.settings',
 				label: 'Surface Settings',
-				priority: 100
+				priority: 100,
+				icon: 'Box'
 			}
 		]);
+	});
+
+	it('passes nav_icon through as icon when set', () => {
+		const slotSurfaces = [
+			makeSurface({
+				surfaceId: 'surface.plugin',
+				label: 'Plugin',
+				priority: 100,
+				slot: 'surface.page',
+				targeting: 'universal',
+				nav_icon: 'Package'
+			})
+		];
+		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('Package');
+	});
+
+	it('defaults icon to Box when nav_icon is absent', () => {
+		const slotSurfaces = [
+			makeSurface({
+				surfaceId: 'surface.plugin',
+				label: 'Plugin',
+				priority: 100,
+				slot: 'surface.page',
+				targeting: 'universal'
+			})
+		];
+		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('Box');
 	});
 
 	it('keeps canonical ordering stable when duplicate surface ids are present', () => {

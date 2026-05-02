@@ -36,6 +36,7 @@ export interface SurfacePageNavItem {
 	href: string;
 	label: string;
 	priority: number;
+	icon: string;
 }
 
 export function resolveSurfacePageNavItems(slotSurfaces: SurfaceResponse[]): SurfacePageNavItem[] {
@@ -50,7 +51,8 @@ export function resolveSurfacePageNavItems(slotSurfaces: SurfaceResponse[]): Sur
 			id: surface.surface_id,
 			href: `/surfaces/${surface.surface_id}`,
 			label: surface.label,
-			priority: surface.priority
+			priority: surface.priority,
+			icon: surface.nav_icon ?? 'Box'
 		});
 	}
 	return navItems;
