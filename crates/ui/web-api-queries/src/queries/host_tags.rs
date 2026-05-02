@@ -387,19 +387,19 @@ pub async fn batch_delete_host_tags(
     let now = OffsetDateTime::now_utc();
     let txn = tenant_db.db().begin().await?;
 
-    for (id, tag) in &found {
+    for (id, tag) in found {
         // Hard-delete assignments.
         host_tag_assignment::Entity::delete_many()
-            .filter(host_tag_assignment::Column::HostTagId.eq(*id))
+            .filter(host_tag_assignment::Column::HostTagId.eq(id))
             .exec(&txn)
             .await?;
 
         // Soft-delete the tag.
-        let mut active: host_tag::ActiveModel = tag.clone().into();
+        let mut active: host_tag::ActiveModel = tag.into();
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await?;
-        succeeded.push(*id);
+        succeeded.push(id);
     }
 
     txn.commit().await?;
