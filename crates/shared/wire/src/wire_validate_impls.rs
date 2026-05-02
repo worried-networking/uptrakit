@@ -730,6 +730,23 @@ impl WireValidate for surfaces::SurfaceRegistration {
                 MAX_SHORT_STRING_LEN,
                 "surfaces[].descriptor.required_permission",
             )?;
+            if let Some(nav_icon) = &surface.descriptor.nav_icon {
+                if nav_icon.is_empty() {
+                    return Err(WireValidationError {
+                        field: "surfaces[].descriptor.nav_icon",
+                        message: "must not be empty".to_string(),
+                    });
+                }
+                if nav_icon.len() > MAX_NAV_ICON_LEN {
+                    return Err(WireValidationError {
+                        field: "surfaces[].descriptor.nav_icon",
+                        message: format!(
+                            "string is {} bytes, max {MAX_NAV_ICON_LEN}",
+                            nav_icon.len()
+                        ),
+                    });
+                }
+            }
             check_vec_len(
                 &surface.interactions,
                 MAX_SURFACE_ACTIONS,
@@ -1860,6 +1877,29 @@ mod tests {
 
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].interactions[].confirmation.message");
+    }
+
+    #[test]
+    fn surface_registration_rejects_empty_nav_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.nav_icon = Some(String::new());
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].descriptor.nav_icon");
+    }
+
+    #[test]
+    fn surface_registration_rejects_oversized_nav_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.nav_icon = Some("x".repeat(65));
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].descriptor.nav_icon");
+    }
+
+    #[test]
+    fn surface_registration_accepts_valid_nav_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.nav_icon = Some("Package".to_string());
+        assert!(payload.wire_validate().is_ok());
     }
 
     #[test]

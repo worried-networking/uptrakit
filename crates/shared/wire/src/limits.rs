@@ -195,6 +195,9 @@ pub const MAX_SPAN_ID_LEN: usize = 16;
 /// Maximum length for short strings (identifiers, names, versions).
 pub const MAX_SHORT_STRING_LEN: usize = 1_024;
 
+/// Maximum byte length for surface nav icon names.
+pub const MAX_NAV_ICON_LEN: usize = 64;
+
 /// Maximum length for medium strings (hostnames, error messages).
 pub const MAX_MEDIUM_STRING_LEN: usize = 4_096;
 
