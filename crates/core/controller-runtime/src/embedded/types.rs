@@ -30,7 +30,6 @@ use uuid::Uuid;
 /// flow, the shutdown signal resolves before channel closure. The host
 /// cancels and joins tasks before releasing senders. If `None` is reached,
 /// the embedded service loop exits without reconnection.
-#[allow(dead_code)] // Transport methods are used by service closures, not directly by the host.
 pub(crate) struct EmbeddedTransport {
     tx: mpsc::Sender<ServiceMessage>,
     rx: mpsc::Receiver<ControllerMessage>,

@@ -59,7 +59,10 @@ impl SurfaceProxy {
         Ok(response)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each parameter represents a distinct aspect of surface proxy invocation"
+    )]
     pub(super) async fn execute_proxied_invocation(
         &self,
         service_connections: &ServiceConnectionRegistry,

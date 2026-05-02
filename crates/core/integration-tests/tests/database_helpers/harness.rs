@@ -17,7 +17,10 @@ use super::http_client::TestClient;
 /// Mirrors the `TestApp` from `web-api/src/test_harness/mod.rs` but
 /// constructs `AppState` via the public builder API so it can be used
 /// from an external crate. Supports SQLite and PostgreSQL.
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "test harness fields accessed through test helper methods, not directly"
+)]
 pub(crate) struct TestHarness {
     pub state: Arc<AppState>,
     pub router: axum::Router,
