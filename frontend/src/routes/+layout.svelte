@@ -537,10 +537,11 @@
 					<nav data-ui="app-shell-nav">
 						<ul class="space-y-0.5">
 							{#each navItems as item (item.href)}
+								{@const NavIcon = item.icon}
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
+										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -548,7 +549,8 @@
 										aria-current={isNavItemActive(item) ? 'page' : undefined}
 										data-ui="app-shell-nav-item"
 									>
-										{item.label}
+										{#if NavIcon}<NavIcon size={16} aria-hidden="true" />{/if}
+										<span>{item.label}</span>
 										{#if item.badge}
 											<span class="ml-auto pl-1.5">
 												<StatusBadge tone="info" label={item.badge} />
@@ -586,10 +588,11 @@
 					<nav data-ui="app-shell-nav">
 						<ul class="space-y-0.5">
 							{#each navItems as item (item.href)}
+								{@const NavIcon = item.icon}
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
+										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -598,7 +601,8 @@
 										data-ui="app-shell-nav-item"
 										onclick={() => (sidebarOverlayOpen = false)}
 									>
-										{item.label}
+										{#if NavIcon}<NavIcon size={16} aria-hidden="true" />{/if}
+										<span>{item.label}</span>
 										{#if item.badge}
 											<span class="ml-auto pl-1.5">
 												<StatusBadge tone="info" label={item.badge} />
@@ -633,9 +637,10 @@
 			>
 				<div class="mx-auto flex max-w-5xl items-stretch gap-1">
 					{#each mobilePrimaryNavItems as item (item.href)}
+						{@const NavIcon = item.icon}
 						<a
 							href={item.href}
-							class={`flex min-w-0 flex-1 items-center justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
+							class={`flex min-w-0 flex-1 flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 								isNavItemActive(item)
 									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -644,9 +649,10 @@
 							data-ui="app-shell-mobile-nav-item"
 							onclick={closeTransientNavigation}
 						>
+							{#if NavIcon}<NavIcon size={20} aria-hidden="true" />{/if}
 							<span class="truncate">{item.label}</span>
 							{#if item.badge}
-								<span class="shrink-0 pl-1.5">
+								<span class="mt-0.5 shrink-0 pl-1.5">
 									<StatusBadge tone="info" label={item.badge} />
 								</span>
 							{/if}
@@ -689,10 +695,11 @@
 					<nav data-ui="app-shell-nav">
 						<ul class="space-y-0.5">
 							{#each mobileOverflowNavItems as item (item.href)}
+								{@const NavIcon = item.icon}
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
+										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -701,7 +708,8 @@
 										data-ui="app-shell-nav-item"
 										onclick={() => (mobileOverflowOpen = false)}
 									>
-										{item.label}
+										{#if NavIcon}<NavIcon size={16} aria-hidden="true" />{/if}
+										<span>{item.label}</span>
 										{#if item.badge}
 											<span class="ml-auto pl-1.5">
 												<StatusBadge tone="info" label={item.badge} />
