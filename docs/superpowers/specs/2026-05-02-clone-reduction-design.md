@@ -51,8 +51,10 @@ for (id, h) in found {
 }
 ```
 
-**Per-site rule:** apply only when `found` is not accessed after the loop. If it is, leave the
-`clone().into()` unchanged. Verify each site before changing.
+**Per-site rule:** apply only when `found` is not accessed **after** the consuming loop. Access
+**before** the consuming loop (e.g. a `contains_key` validation pass that runs first) is not a
+blocking condition — those borrows complete before the move. Do not restructure two-pass patterns
+into a single loop; that changes behavior and is out of scope.
 
 **Known sites (verify each):**
 
@@ -74,16 +76,22 @@ for (id, h) in found {
 
 ### Pattern 2: Vec\<Uuid\> cloned for .is_in() → iter().copied()
 
-`is_in` accepts `I: IntoIterator<Item = V>`. Since `Uuid: Copy`, a `Vec<Uuid>` can be iterated
-without cloning by using `.iter().copied()` for intermediate uses. Last uses drop the `.clone()`
-entirely.
+`is_in` accepts `I: IntoIterator<Item = V>` where `V: Into<Expr>`. `Uuid: Copy` and
+`Uuid: Into<Expr>`, so `iter().copied()` yields owned `Uuid` values without allocating a new `Vec`.
+Note: `.iter()` alone yields `&Uuid`, which does **not** satisfy `V: Into<Expr>` — it would be a
+compile error. Use `.iter().copied()`.
+
+The simplest mechanical approach: replace every `.is_in(x.clone())` with
+`.is_in(x.iter().copied())`. This is safe for both intermediate and last-use sites. For last uses
+the owned form `.is_in(x)` also works (and is marginally cheaper), but the distinction is an
+optimisation, not a requirement — the compiler will catch any mistakes.
 
 ```rust
-// intermediate use (vec needed again later)
+// works for all sites
 .filter(col.is_in(item_ids.iter().copied()))
 
-// last use
-.filter(col.is_in(item_ids))   // remove .clone()
+// equivalent for last use (optional optimisation)
+.filter(col.is_in(item_ids))
 ```
 
 **Rule:** only apply to `Vec<Uuid>` (or other `Copy` element types). Leave `Vec<String>` sites
@@ -91,19 +99,14 @@ unchanged — `.iter().cloned()` is no improvement over `.clone()`.
 
 **Known sites:**
 
-| File                                   | Line                    | Variable        | Type                             |
-| -------------------------------------- | ----------------------- | --------------- | -------------------------------- |
-| `queries/software_states.rs`           | 98                      | `item_ids`      | intermediate → `iter().copied()` |
-| `queries/software_states.rs`           | 136                     | `item_ids`      | last use → remove `.clone()`     |
-| `queries/software_states.rs`           | 369                     | `page_host_ids` | intermediate → `iter().copied()` |
-| `queries/software_states.rs`           | 404                     | `page_host_ids` | last use → remove `.clone()`     |
-| `queries/software_states.rs`           | 604                     | `host_ids`      | verify intermediate vs last      |
-| `queries/update_history.rs`            | 117                     | verify          | verify                           |
-| `queries/update_history.rs`            | 126                     | verify          | verify                           |
-| `routes/service_ws/handler/updates.rs` | 361, 382, 393, 407, 408 | verify          | verify                           |
+| File                                   | Lines                        | Notes                                              |
+| -------------------------------------- | ---------------------------- | -------------------------------------------------- |
+| `queries/software_states.rs`           | 98, 136, 369, 404, 604       | line 625 is already a bare last-use — leave it     |
+| `queries/update_history.rs`            | 117, 126                     | line 134 is already bare — leave it                |
+| `routes/service_ws/handler/updates.rs` | 361, 382, 393, 407, 408, 472 | in `crates/ui/web-api`, included here for cohesion |
 
-Note: `routes/service_ws/handler/updates.rs` is in `crates/ui/web-api`, not `web-api-queries`.
-Include in this plan for cohesion.
+Apply `.iter().copied()` to all listed sites. Optionally use the bare owned form for confirmed
+last-use lines (98→136, 369→404, 604→625 for `software_states.rs`; 117→126 for `update_history.rs`).
 
 ### Quality gates
 
@@ -133,12 +136,17 @@ cargo test --all-features
 .or_else(|| requested_name.clone())
 ```
 
-**Known sites (approx lines):** 1014, 1182, 1187, 1195, 1207, 1212, 1366, 1372.
+**Known sites (approx lines):** 1014, 1182, 1187, 1207, 1212, 1366, 1372.
 
 Scan the full file for `.or(` with a `.clone()` argument to catch any additional sites before
-applying the fix.
+applying the fix. Some adjacent lines already use `or_else` — normalise to `or_else` consistently
+throughout the file to avoid mixed idioms.
 
-No behavioral change. The cloned value is identical; only the allocation is deferred.
+No behavioral change. The cloned value is identical; only the allocation is deferred. The values
+being cloned are `Option<String>` fields extracted from request params — the clone on the `None`
+path is unavoidable since the downstream audit struct requires owned `String`. `or_else` is
+already optimal for this type. All 7 sites are in plain `match` arms in synchronous functions —
+no `move` closures or `async` blocks involved, so the borrow in `|| x.clone()` is trivially safe.
 
 ### Quality gates
 
