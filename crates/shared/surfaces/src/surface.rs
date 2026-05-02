@@ -254,6 +254,8 @@ pub struct SurfaceDescriptor {
     pub root_node: SurfaceNode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_selector: Option<SurfaceContextSelectorDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_icon: Option<String>,
 }
 
 impl SurfaceDescriptor {
@@ -304,6 +306,7 @@ pub struct SurfaceDescriptorBuilder {
     required_capabilities: Option<CapabilitySet>,
     root_node: Option<SurfaceNode>,
     context_selector: Option<SurfaceContextSelectorDescriptor>,
+    nav_icon: Option<String>,
 }
 
 impl SurfaceDescriptorBuilder {
@@ -384,6 +387,13 @@ impl SurfaceDescriptorBuilder {
         self
     }
 
+    /// Sets the nav icon name (optional; must match a key in the frontend `SURFACE_NAV_ICONS` allowlist).
+    #[must_use]
+    pub fn nav_icon(mut self, nav_icon: impl Into<String>) -> Self {
+        self.nav_icon = Some(nav_icon.into());
+        self
+    }
+
     /// Consumes the builder and returns the [`SurfaceDescriptor`].
     ///
     /// # Panics
@@ -416,6 +426,7 @@ impl SurfaceDescriptorBuilder {
                 .root_node
                 .expect("SurfaceDescriptorBuilder: root_node not set"),
             context_selector: self.context_selector,
+            nav_icon: self.nav_icon,
         }
     }
 }
@@ -586,6 +597,7 @@ mod tests {
                 label_field: "name".to_string(),
                 required_for_interactions: vec![crate::InteractionId::new("discover").unwrap()],
             }),
+            nav_icon: None,
         };
 
         let json = serde_json::to_string(&descriptor).expect("serialize");
@@ -617,6 +629,7 @@ mod tests {
                 children: vec![],
             },
             context_selector: None,
+            nav_icon: None,
         };
 
         let json = serde_json::to_string(&descriptor).expect("serialize");
