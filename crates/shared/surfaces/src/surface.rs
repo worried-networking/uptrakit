@@ -432,7 +432,7 @@ impl FrameworkGeneration {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameworkGenerationRange {
     pub min: FrameworkGeneration,
     pub max: FrameworkGeneration,
