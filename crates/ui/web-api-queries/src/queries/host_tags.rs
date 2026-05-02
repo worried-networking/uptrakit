@@ -364,12 +364,11 @@ async fn batch_count_hosts(
 }
 
 /// Batch delete multiple host tags (soft-delete + hard-delete assignments).
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_host_tags(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>), sea_orm::DbErr> {
+) -> Result<super::BatchOutcome, sea_orm::DbErr> {
     let tags = tenant_db
         .find::<host_tag::Entity>()
         .filter(host_tag::Column::Id.is_in(ids.iter().copied()))

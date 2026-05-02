@@ -99,13 +99,12 @@ pub async fn delete_ignore_rule(
 /// Hard-delete multiple autodiscovery ignore rules.
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn batch_delete_ignore_rules(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> Result<crate::queries::BatchOutcome> {
     // Load existing rules to determine which IDs are valid.
     let rules = SoftwareIgnore::find()
         .filter(software_ignore::Column::Id.is_in(ids.iter().copied()))

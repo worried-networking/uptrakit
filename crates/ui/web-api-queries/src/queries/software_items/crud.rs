@@ -658,12 +658,11 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> super::Resu
 // ---------------------------------------------------------------------------
 
 /// Feature multiple software items (set `featured = true`).
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_feature_software_items(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> super::Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> super::Result<crate::queries::BatchOutcome> {
     let items = software_item::Entity::find()
         .filter(software_item::Column::Id.is_in(ids.iter().copied()))
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
@@ -698,12 +697,11 @@ pub async fn batch_feature_software_items(
 }
 
 /// Soft-delete multiple software items.
-#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_software_items(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> super::Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+) -> super::Result<crate::queries::BatchOutcome> {
     let items = software_item::Entity::find()
         .filter(software_item::Column::Id.is_in(ids.iter().copied()))
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))

@@ -395,15 +395,11 @@ pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
 // ---------------------------------------------------------------------------
 
 /// Deactivate multiple hosts (soft-delete).
-#[expect(
-    clippy::type_complexity,
-    reason = "complex SeaORM query return type; extracting aliases would increase verbosity"
-)]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_hosts(
     tenant_db: &TenantDb,
     ids: &[Uuid],
-) -> std::result::Result<(Vec<Uuid>, Vec<(Uuid, String)>), sea_orm::DbErr> {
+) -> std::result::Result<super::BatchOutcome, sea_orm::DbErr> {
     let hosts = tenant_db
         .find::<host::Entity>()
         .filter(host::Column::Id.is_in(ids.iter().copied()))
