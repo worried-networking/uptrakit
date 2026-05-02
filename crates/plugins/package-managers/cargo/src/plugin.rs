@@ -1,3 +1,7 @@
+#![expect(
+    clippy::string_slice,
+    reason = "string slices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety is guaranteed by construction"
+)]
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -241,6 +245,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for CargoPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use std::sync::Arc;
 

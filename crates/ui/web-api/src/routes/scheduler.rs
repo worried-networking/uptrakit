@@ -293,6 +293,12 @@ pub async fn trigger_scheduled_task(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures;

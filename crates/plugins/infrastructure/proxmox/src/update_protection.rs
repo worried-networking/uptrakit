@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    clippy::expect_used,
+    reason = "best-effort fire-and-forget operations where failure is intentionally ignored; infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 //! Controller-side pre/post update protection for Proxmox-backed hosts.
 
 use std::sync::Arc;
@@ -728,6 +733,11 @@ pub fn snapshot_name_for_update_history(update_history_id: Uuid) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::unreachable,
+        reason = "test stub methods use unreachable! to signal unexpected calls"
+    )]
+
     use super::*;
     use async_trait::async_trait;
     use sea_orm::{ColumnTrait, DbBackend, EntityTrait, MockDatabase, MockExecResult, QueryFilter};

@@ -1,5 +1,14 @@
 //! Reusable data-insertion helpers and HTTP convenience wrappers for tests.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test fixture: panics on setup failure are acceptable"
+)]
+#![expect(
+    clippy::string_slice,
+    reason = "test code: slice indexes are at validated boundaries"
+)]
+
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uptrakit_shared_db::entity::{host, permission, role, role_permission, service, service_host};
 use uptrakit_web_api_types::SecretString;

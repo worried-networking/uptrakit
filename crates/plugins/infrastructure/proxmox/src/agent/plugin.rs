@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+)]
 //! Proxmox VE agent infrastructure plugin — subtrait implementations.
 //!
 //! Implements infrastructure subtraits (`HostLifecycle`,

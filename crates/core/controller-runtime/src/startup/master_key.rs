@@ -111,6 +111,11 @@ pub(crate) fn parse_master_key_hex(key_hex: &str) -> crate::Result<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_err())` is idiomatic in tests where the error variant is not inspected"
+    )]
+
     use super::{parse_master_key_hex, read_master_key_hex};
     use std::io::Write;
 

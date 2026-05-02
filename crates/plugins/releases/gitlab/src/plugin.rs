@@ -354,6 +354,10 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitLabPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use crate::api_types::{GitLabRelease, GitLabReleaseAssets, GitLabReleaseLink};
     use uptrakit_plugin_infrastructure_core::{

@@ -12,6 +12,11 @@
 //! [`BatchProgressBroadcaster`]: crate::batch_progress_broadcaster::BatchProgressBroadcaster
 //! [`notify_status_changed`]: DeviceFlowBroadcaster::notify_status_changed
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends intentionally drop the send result"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

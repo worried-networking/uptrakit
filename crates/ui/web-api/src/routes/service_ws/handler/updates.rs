@@ -4,6 +4,12 @@
 //! and the per-message handlers
 //! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+#![expect(
+    clippy::string_slice,
+    reason = "slice index is at a validated char boundary"
+)]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -2519,6 +2525,12 @@ pub(crate) async fn handle_stdin_attention(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+    #![expect(
+        clippy::unwrap_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+
     use super::*;
     use async_trait::async_trait;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};

@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::string_slice,
+    reason = "integration test infrastructure: panics are acceptable in fixture helpers"
+)]
+
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uptrakit_shared_db::entity::{host, permission, role, role_permission, service, service_host};
 use uptrakit_web_api_types::SecretString;

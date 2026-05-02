@@ -368,6 +368,11 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget oneshot sends in test helpers; receivers may drop before send completes"
+    )]
+
     use super::*;
     use sea_orm::{
         ActiveModelTrait, ActiveValue, ConnectOptions, ConnectionTrait, Database, EntityTrait,

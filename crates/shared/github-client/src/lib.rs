@@ -40,6 +40,10 @@ pub enum GitHubEndpoint {
 }
 
 impl GitHubEndpoint {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "url::PathSegmentsMutError is a unit struct that carries no information"
+    )]
     pub fn build_request(
         &self,
         config: &GitHubClientConfig,

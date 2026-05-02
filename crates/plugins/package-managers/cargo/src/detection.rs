@@ -112,6 +112,10 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for CargoPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use std::sync::Arc;
 
     use async_trait::async_trait;

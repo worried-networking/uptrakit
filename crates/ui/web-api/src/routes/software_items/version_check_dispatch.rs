@@ -4,6 +4,8 @@
 //! software item, then separates controller-side fetch jobs from agent-side
 //! [`CheckVersions`] messages.
 
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

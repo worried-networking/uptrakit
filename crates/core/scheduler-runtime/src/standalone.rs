@@ -182,6 +182,10 @@ impl ServiceHandler for StandaloneSchedulerHandler {
         }
     }
 
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget Disconnecting message; send result ignored during shutdown where the connection may already be closing"
+    )]
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,

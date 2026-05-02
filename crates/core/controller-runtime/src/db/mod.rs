@@ -67,7 +67,15 @@ pub(crate) fn sanitize_url(url: &str) -> String {
     if let Some(at_pos) = url.find('@')
         && let Some(proto_end) = url.find("://")
     {
+        #[expect(
+            clippy::string_slice,
+            reason = "char-boundary safe: `proto_end` and `at_pos` are byte indices of ASCII `:`/`@` returned by `str::find`, so the slices land on UTF-8 boundaries"
+        )]
         let protocol = &url[..proto_end + 3];
+        #[expect(
+            clippy::string_slice,
+            reason = "char-boundary safe: `at_pos` is the byte index of ASCII `@` returned by `str::find`"
+        )]
         let rest = &url[at_pos..];
         return format!("{protocol}***{rest}");
     }
@@ -76,6 +84,11 @@ pub(crate) fn sanitize_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_ok())` is idiomatic in tests where the success value is not inspected"
+    )]
+
     use super::*;
 
     #[tokio::test]

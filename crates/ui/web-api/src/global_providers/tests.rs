@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends in tests drop results intentionally"
+)]
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;

@@ -33,6 +33,10 @@ pub fn validate_command_length(command: &str, field_name: &str) -> Result<(), St
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     #[test]

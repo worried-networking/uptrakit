@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    clippy::string_slice,
+    reason = "let _ = used for intentional fire-and-forget of channel sends and JoinHandles; string_slice used with pre-validated byte positions"
+)]
 //! Update execution module for Uptrakit agents.
 //!
 //! Handles the complete update flow:
@@ -1199,6 +1204,11 @@ pub async fn execute_update_interactive(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_ok())` is idiomatic in tests where the success value is not inspected"
+    )]
+
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
     use uptrakit_wire::plugin_ids;

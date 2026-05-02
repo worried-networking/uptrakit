@@ -53,7 +53,20 @@ struct ResolvedConnection {
 }
 
 /// Resolve the controller connection from CLI args or mDNS discovery.
-#[allow(unused_variables)]
+#[cfg_attr(
+    not(feature = "zeroconf"),
+    expect(
+        unused_variables,
+        reason = "args and state_dir are used only when the zeroconf feature is compiled in; without it the parameters are unused"
+    )
+)]
+#[cfg_attr(
+    feature = "zeroconf",
+    expect(
+        clippy::needless_return,
+        reason = "return inside #[cfg(feature)] block is needed so the unconditional fallback compiles correctly when zeroconf is disabled"
+    )
+)]
 async fn resolve_connection(
     args: &CommonServiceArgs,
     state_dir: &std::path::Path,
@@ -125,11 +138,9 @@ async fn resolve_connection(
         };
     }
 
-    // Reached only when the zeroconf feature is absent (the block above is
-    // compiled out and the compiler eliminates the dead path). Without
-    // discovery, --url is required. The allow suppresses the unreachable-code
-    // lint when zeroconf is compiled in.
-    #[allow(unreachable_code)]
+    // Reached only when the zeroconf feature is absent (the `#[cfg(feature = "zeroconf")]`
+    // block above is compiled out). Without discovery, --url is required.
+    #[cfg(not(feature = "zeroconf"))]
     Err("--url is required when zeroconf is not available".to_string())
 }
 

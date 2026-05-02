@@ -348,6 +348,10 @@ pub async fn write_secure_file_str(path: &Path, data: &str) -> Result<()> {
 ///
 /// The rename is atomic on the same filesystem, preventing partial writes
 /// from leaving private keys or certificates in a corrupted state.
+#[expect(
+    clippy::unused_result_ok,
+    reason = "remove_file().ok() is intentional best-effort cleanup on error paths; the removal error is irrelevant"
+)]
 async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
     use tokio::io::AsyncWriteExt;
 
@@ -407,7 +411,8 @@ async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
 
     // On write failure, attempt to clean up the temp file.
     if let Err(e) = write_result {
-        let _ = tokio::fs::remove_file(&temp_path).await;
+        // Best-effort cleanup — ignore any removal error.
+        tokio::fs::remove_file(&temp_path).await.ok();
         return Err(e);
     }
 
@@ -416,7 +421,8 @@ async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
         // Best-effort cleanup on rename failure.
         let temp = temp_path.clone();
         tokio::spawn(async move {
-            let _ = tokio::fs::remove_file(&temp).await;
+            // Intentionally ignore the removal error — this is cleanup on an error path.
+            tokio::fs::remove_file(&temp).await.ok();
         });
         report!(DirectoryError::WriteFile {
             path: path.to_path_buf(),
@@ -484,6 +490,10 @@ pub async fn set_file_permissions(path: &Path) -> Result<()> {
 #[cfg(unix)]
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
@@ -837,6 +847,7 @@ mod tests {
         // With `directories::BaseDirs`, home_dir() resolves via the system
         // password database (getpwuid_r on Unix) even when $HOME is unset.
         let original = std::env::var_os("HOME");
+        // SAFETY: single-threaded test; no other threads access `HOME` concurrently.
         unsafe { std::env::remove_var("HOME") };
 
         let result = expand_tilde(Path::new("~"));
@@ -845,6 +856,7 @@ mod tests {
 
         // Restore HOME.
         if let Some(val) = original {
+            // SAFETY: single-threaded test; restoring `HOME` to its original value.
             unsafe { std::env::set_var("HOME", val) };
         }
     }

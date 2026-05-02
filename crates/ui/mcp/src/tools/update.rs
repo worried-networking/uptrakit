@@ -50,10 +50,18 @@ impl McpHandler {
             ));
         }
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "uuid::Error carries no contextual information beyond what the formatted message conveys"
+        )]
         let host_id = input.host_id.parse::<Uuid>().map_err(|_| {
             ErrorData::invalid_params(format!("invalid host_id UUID: {}", input.host_id), None)
         })?;
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "uuid::Error carries no contextual information beyond what the formatted message conveys"
+        )]
         let software_item_id = input.software_item_id.parse::<Uuid>().map_err(|_| {
             ErrorData::invalid_params(
                 format!("invalid software_item_id UUID: {}", input.software_item_id),

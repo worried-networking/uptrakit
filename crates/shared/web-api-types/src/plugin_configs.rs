@@ -246,6 +246,10 @@ impl Validate for CreatePluginConfigRequest {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
     use uptrakit_shared_types::{PluginCapability, plugin_ids};
 

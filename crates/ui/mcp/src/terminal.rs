@@ -32,7 +32,14 @@ pub fn render_terminal_output(raw: &[u8]) -> String {
         .collect();
 
     match lines.iter().rposition(|l| !l.is_empty()) {
-        Some(idx) => lines[..=idx].join("\n"),
+        Some(idx) => {
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "bound-checked: `idx` came from `lines.iter().rposition(...)`, so it is a valid index into `lines`"
+            )]
+            let slice = &lines[..=idx];
+            slice.join("\n")
+        }
         None => String::new(),
     }
 }

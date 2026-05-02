@@ -182,6 +182,11 @@ fn decrypt_config(config: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "let _ = init_master_key() is idempotent test setup; error means key already initialized"
+    )]
+
     use super::*;
     use serde_json::json;
     use uptrakit_wire::{plugin_ids, *};

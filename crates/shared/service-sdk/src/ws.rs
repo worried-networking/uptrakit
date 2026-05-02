@@ -58,6 +58,10 @@ pub(crate) fn split_ws_stream(ws: WsStream) -> (WsSink, WsRead) {
 /// parameter to the WebSocket URL. The controller uses this to narrow the
 /// enrollment-secret lookup to the specific service, preventing cross-tenant
 /// secret collisions during the narrow pre-certificate window.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
+)]
 pub(crate) async fn connect_ws(
     host: &str,
     port: u16,
@@ -131,6 +135,10 @@ pub(crate) async fn connect_ws(
 /// Send Enroll message and read Enrolled response.
 ///
 /// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
+#[expect(
+    clippy::map_err_ignore,
+    reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
+)]
 pub(crate) async fn send_enroll(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,
@@ -207,6 +215,10 @@ pub(crate) async fn send_enroll(
 ///
 /// Returns `Ok(())` on `Approved`, errors on `Rejected`.
 /// Times out after [`APPROVAL_TIMEOUT`] (30 minutes).
+#[expect(
+    clippy::map_err_ignore,
+    reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
+)]
 pub(crate) async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
     tracing::info!("waiting for approval...");
 
@@ -281,6 +293,10 @@ pub(crate) async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSe
 /// Send `RequestCertificate` with a CSR and read `Certificate` response.
 ///
 /// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
+#[expect(
+    clippy::map_err_ignore,
+    reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
+)]
 pub(crate) async fn request_certificate_ws(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,

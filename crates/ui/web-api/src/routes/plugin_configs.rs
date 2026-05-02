@@ -1,3 +1,12 @@
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(
+    clippy::indexing_slicing,
+    reason = "index is computed or validated to be in bounds"
+)]
+
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
@@ -1293,6 +1302,11 @@ pub async fn test_plugin_config(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
+
     #[cfg(feature = "db-sqlite")]
     use super::batch_plugin_configs;
     #[cfg(feature = "db-sqlite")]

@@ -220,6 +220,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for HomebrewPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::{
         FixedOutputExecutor, test_runtime, test_runtime_with_executor,

@@ -75,6 +75,11 @@ macro_rules! declare_plugin {
 
         // ── 3. Private module with generated functions ──────────────────
         #[doc(hidden)]
+        #[expect(
+            clippy::allow_attributes,
+            clippy::allow_attributes_without_reason,
+            reason = "feature-conditional: macro-generated module — not all config functions are called by every plugin invocation; #[expect] would fail when all are referenced"
+        )]
         #[allow(unused_imports, dead_code)]
         mod __descriptor_impl {
             use super::*;
@@ -184,10 +189,20 @@ macro_rules! declare_plugin {
                 validate_identifier: __descriptor_impl::validate_identifier,
             },
             roles: {
+                #[expect(
+                    clippy::allow_attributes,
+                    clippy::allow_attributes_without_reason,
+                    reason = "feature-conditional: only referenced when role entries with per-role host_requirements are specified; #[expect] would fail when at least one such role is present"
+                )]
                 #[allow(unused)]
                 const __DEFAULT_HR: $crate::HostRequirements =
                     $crate::__default_hr_value!( $( $default_hr )? );
 
+                #[expect(
+                    clippy::allow_attributes,
+                    clippy::allow_attributes_without_reason,
+                    reason = "feature-conditional: `mut` is required when role entries are specified; without roles this binding is never mutated and #[expect] would fail in that variant"
+                )]
                 #[allow(unused_mut)]
                 let mut rc = $crate::RoleCreators {
                     discoverer: None,

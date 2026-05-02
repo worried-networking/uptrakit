@@ -195,6 +195,10 @@ impl McpHandler {
             ));
         }
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "uuid::Error and the parse error from `UpdateStatus::FromStr` carry no contextual information beyond what the formatted message conveys"
+        )]
         let host_id = input
             .host_id
             .as_deref()
@@ -205,6 +209,10 @@ impl McpHandler {
             })
             .transpose()?;
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "uuid::Error carries no contextual information beyond what the formatted message conveys"
+        )]
         let software_item_id = input
             .software_item_id
             .as_deref()
@@ -215,6 +223,10 @@ impl McpHandler {
             })
             .transpose()?;
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "the parse error from `UpdateStatus::FromStr` carries no contextual information beyond what the formatted message conveys"
+        )]
         let status = input
             .status
             .as_deref()
@@ -256,6 +268,10 @@ impl McpHandler {
             ));
         }
 
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "uuid::Error carries no contextual information beyond what the formatted message conveys"
+        )]
         let id = input.id.parse::<Uuid>().map_err(|_| {
             ErrorData::invalid_params(format!("invalid id UUID: {}", input.id), None)
         })?;

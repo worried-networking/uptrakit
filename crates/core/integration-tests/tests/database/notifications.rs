@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "integration test code: panics are acceptable in test helpers (db_test! macro means functions are not annotated #[test])"
+)]
+
 use crate::database_helpers::fixtures::{register_and_get_token, seed_permissions_for_owner};
 use crate::database_helpers::harness::TestHarness;
 use crate::database_helpers::macros::db_test;

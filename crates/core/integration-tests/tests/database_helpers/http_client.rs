@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "integration test infrastructure: panics are acceptable in HTTP test helpers"
+)]
+
 use axum::Router;
 use axum::body::Body;
 use http::Request;

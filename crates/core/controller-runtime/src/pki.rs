@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "x509-parser/PEM errors carry only parser internals; the public `PkiError::PemParse` variant communicates the failure mode to callers without leaking internal details"
+)]
+
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -1181,6 +1186,12 @@ pub(crate) fn build_rustls_config_with_client_auth_and_crls(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        clippy::let_underscore_must_use,
+        reason = "test code: idiomatic test patterns — discarding init results and asserting Result variants directly"
+    )]
+
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::*;

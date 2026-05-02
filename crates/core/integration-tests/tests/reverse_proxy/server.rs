@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "integration test infrastructure: panics are acceptable in test server helper"
+)]
+
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 

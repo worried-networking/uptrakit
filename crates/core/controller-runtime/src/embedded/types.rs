@@ -81,13 +81,23 @@ impl uptrakit_wire::ServiceTransport for EmbeddedTransport {
         &mut self,
         msg: ServiceMessage,
     ) -> Result<(), uptrakit_wire::TransportError> {
-        self.tx
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "tokio mpsc SendError carries the dropped message but no actionable context; `TransportError` is a unit-variant marker for transport failures"
+        )]
+        let result = self
+            .tx
             .send(msg)
             .await
-            .map_err(|_| uptrakit_wire::TransportError)
+            .map_err(|_| uptrakit_wire::TransportError);
+        result
     }
 
     async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort send: full or closed channel is acceptable for opportunistic notifications"
+        )]
         let _ = self.tx.try_send(msg);
     }
 

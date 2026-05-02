@@ -4,6 +4,13 @@
 //! corresponding CLI command function with the mock server's URL and a dummy
 //! token, and asserts the result.
 
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::assertions_on_result_states,
+    reason = "integration test file: panics on failure are acceptable, assert!(result.is_ok()) pattern used"
+)]
+
 use std::ffi::OsString;
 
 use base64::Engine as _;

@@ -1,3 +1,11 @@
+// `#[allow(unused_assignments, unused_mut)]` is used for a variable that is
+// conditionally assigned inside `#[cfg(feature = "interactive")]` blocks;
+// `#[expect]` cannot be used because the lint fires only without that feature.
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional suppression of unused_assignments/unused_mut; #[expect] is incompatible with conditional use"
+)]
+
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
@@ -261,6 +269,10 @@ pub async fn handle_graceful_shutdown(
 /// loop and causes the controller's WebSocket write timeout to fire. This
 /// helper clones the sender, spawns the future on the Tokio runtime, and
 /// forwards the result through the channel for the event loop to pick up.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel send inside spawn; receiver may already be dropped on shutdown"
+)]
 pub fn spawn_background(
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     future: impl std::future::Future<Output = ServiceMessage> + Send + 'static,
@@ -363,7 +375,11 @@ pub async fn start_update(
 
     // Confirmed PTY allocation: stdin_tx is Some only when execute_update_interactive
     // successfully allocated a PTY and delivered channels via the oneshot.
-    #[allow(unused_assignments, unused_mut)]
+    #[allow(
+        unused_assignments,
+        unused_mut,
+        reason = "only assigned when `interactive` feature is enabled"
+    )]
     let mut confirmed_interactive = false;
     #[cfg(feature = "interactive")]
     {

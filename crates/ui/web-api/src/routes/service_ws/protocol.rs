@@ -3,6 +3,11 @@
 //! Types, serialization helpers, rate limiting, and error types consumed by
 //! `connection`, `handler`, and external modules.
 
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original WS protocol errors carry no useful context"
+)]
+
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
@@ -91,7 +96,6 @@ impl MessageRateLimiter {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)] // Used by tests in mod.rs
     pub(crate) fn set_window_start(&mut self, start: std::time::Instant) {
         self.window_start = start;
     }

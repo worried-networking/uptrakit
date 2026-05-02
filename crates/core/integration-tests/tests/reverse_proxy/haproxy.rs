@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "integration test infrastructure: panics are acceptable in reverse-proxy test helpers"
+)]
+
 use tempfile::TempDir;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;

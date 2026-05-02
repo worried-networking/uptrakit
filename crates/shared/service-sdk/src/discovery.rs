@@ -172,7 +172,15 @@ pub async fn browse_mdns() -> Result<Option<DiscoveryCache>, String> {
     };
 
     // Best-effort shutdown
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "stop_browse and shutdown failures are not actionable; the result is already stored"
+    )]
     let _ = mdns.stop_browse(SERVICE_TYPE);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "stop_browse and shutdown failures are not actionable; the result is already stored"
+    )]
     let _ = mdns.shutdown();
 
     Ok(result)
@@ -209,6 +217,11 @@ pub async fn discover(state_dir: &Path) -> Result<DiscoveryResult, String> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok()) are idiomatic in tests"
+    )]
+
     use super::*;
 
     #[test]

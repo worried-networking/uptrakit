@@ -1,3 +1,12 @@
+#![expect(
+    clippy::indexing_slicing,
+    reason = "index is computed to be in bounds for DER/ASN.1 structures"
+)]
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original ASN.1 parse errors carry no useful context"
+)]
+
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
 use rootcause::prelude::*;
@@ -424,6 +433,11 @@ fn pem_to_der_key(pem: &str) -> OcspResult<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use super::*;
 
     #[test]

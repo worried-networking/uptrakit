@@ -15,6 +15,10 @@ pub enum ProviderValidationError {
 
 /// Validate provider API base URL.
 pub fn validate_provider_api_base_url(value: &str) -> Result<(), ProviderValidationError> {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "url::ParseError details are not useful to callers; InvalidUrl conveys the same information"
+    )]
     let parsed = url::Url::parse(value).map_err(|_| ProviderValidationError::InvalidUrl)?;
     if parsed.scheme() != "https" {
         return Err(ProviderValidationError::MustUseHttps);
@@ -30,6 +34,10 @@ pub fn validate_provider_api_base_url(value: &str) -> Result<(), ProviderValidat
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     #[test]

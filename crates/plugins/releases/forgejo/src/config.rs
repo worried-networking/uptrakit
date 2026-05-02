@@ -165,6 +165,10 @@ impl PluginConfig for ForgejoConfig {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
 
     #[test]

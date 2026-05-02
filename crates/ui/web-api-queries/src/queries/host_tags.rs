@@ -42,6 +42,10 @@ fn model_to_summary(m: &host_tag::Model) -> HostTagSummary {
 }
 
 /// Pick a color from the palette based on the count of existing active tags.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "index is computed as count % palette.len() so it is always in bounds"
+)]
 async fn auto_color(tenant_db: &TenantDb) -> String {
     let count = tenant_db
         .find::<host_tag::Entity>()
@@ -360,7 +364,7 @@ async fn batch_count_hosts(
 }
 
 /// Batch delete multiple host tags (soft-delete + hard-delete assignments).
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_host_tags(
     tenant_db: &TenantDb,
@@ -408,6 +412,11 @@ pub async fn batch_delete_host_tags(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helpers: panics on setup failure are acceptable"
+    )]
+
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection, Set};
     use uptrakit_shared_db::entity::{host, tenant};

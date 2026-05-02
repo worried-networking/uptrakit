@@ -88,6 +88,11 @@ pub async fn load_agent_connectivity_for_tenant(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::unwrap_used,
+        reason = "test helpers: panics on setup failure are acceptable"
+    )]
+
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;

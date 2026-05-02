@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends in tests drop results intentionally"
+)]
+
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
 use uptrakit_web_api_types::permissions::Permission;

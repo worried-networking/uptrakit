@@ -1,5 +1,14 @@
 //! Ergonomic HTTP client for integration tests, built on `tower::ServiceExt::oneshot`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test fixture: panics on setup failure are acceptable"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test fixture: panics on setup failure are acceptable"
+)]
+
 use axum::Router;
 use axum::body::Body;
 use http::Request;

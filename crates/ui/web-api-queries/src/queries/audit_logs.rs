@@ -86,6 +86,10 @@ fn system_audit_log_to_response(m: system_audit_log::Model) -> SystemAuditLogRes
 
 /// List tenant-scoped audit log entries with optional filters and pagination.
 #[tracing::instrument(skip_all)]
+#[expect(
+    clippy::map_err_ignore,
+    reason = "RFC3339 parse errors carry no actionable detail; replaced with contextual message including the invalid value"
+)]
 pub async fn list_tenant_audit_logs(
     tenant_db: &TenantDb,
     params: &AuditLogListParams,
@@ -152,6 +156,10 @@ pub async fn list_tenant_audit_logs(
 
 /// List system-level audit log entries with optional filters and pagination.
 #[tracing::instrument(skip_all)]
+#[expect(
+    clippy::map_err_ignore,
+    reason = "RFC3339 parse errors carry no actionable detail; replaced with contextual message including the invalid value"
+)]
 pub async fn list_system_audit_logs(
     db: &DatabaseConnection,
     params: &AuditLogListParams,

@@ -240,6 +240,12 @@ pub async fn update_zeroconf_settings(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;

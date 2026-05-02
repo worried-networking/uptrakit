@@ -10,6 +10,11 @@
 //! 7. `MAPPING_REVIEW.md` consistency tests
 //! 8. `DYNAMIC_DISPLAY_ALLOWLIST` annotation test
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends in tests drop results intentionally"
+)]
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};

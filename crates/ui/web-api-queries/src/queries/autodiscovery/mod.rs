@@ -91,7 +91,14 @@ pub async fn process_discovery_results(
 // -- Shared test helpers --
 
 #[cfg(all(test, feature = "db-sqlite"))]
-#[allow(unreachable_pub)]
+#[expect(
+    unreachable_pub,
+    reason = "publicly visible for cross-module test access but not crate-public"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "test helpers: panics on setup failure are acceptable"
+)]
 pub(crate) mod tests_common {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,

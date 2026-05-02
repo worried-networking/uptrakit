@@ -3,6 +3,11 @@
 //! Returns all infrastructure-scoped settings in a single response, avoiding
 //! the need for the global-settings UI page to issue multiple parallel requests.
 
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional #[allow] for unused_assignments/unused_mut; #[expect] would be unfulfilled when nats feature is enabled"
+)]
+
 use std::sync::Arc;
 
 use axum::{
@@ -60,7 +65,11 @@ pub async fn get_global_combined_settings(
         cert_regenerated: None,
     };
 
-    #[allow(unused_assignments, unused_mut)]
+    #[allow(
+        unused_assignments,
+        unused_mut,
+        reason = "nats is only assigned when the nats feature is enabled"
+    )]
     let mut nats: Option<NatsSettingsResponse> = None;
     #[cfg(feature = "nats")]
     {

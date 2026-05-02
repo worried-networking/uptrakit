@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "expect is used for infallible operations documented by invariants"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 

@@ -277,6 +277,10 @@ pub async fn get_rule(
 }
 
 #[tracing::instrument(skip_all, fields(%id))]
+#[expect(
+    clippy::map_err_ignore,
+    reason = "UUID parse errors carry no actionable detail; replaced with typed field error"
+)]
 pub async fn update_rule(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -557,6 +561,10 @@ fn json_object_map_from_value_or_empty(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "empty JSON object {} is always a valid conversion; failure is a programming error"
+)]
 fn empty_json_object_map() -> JsonObjectMap {
     JsonObjectMap::try_from(serde_json::json!({}))
         .expect("empty JSON object should always convert to JsonObjectMap")

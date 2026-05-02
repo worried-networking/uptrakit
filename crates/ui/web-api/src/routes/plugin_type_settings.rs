@@ -32,7 +32,10 @@ fn model_to_response(
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(
+    clippy::result_large_err,
+    reason = "error variant carries a Response which is large but unavoidable at this API boundary"
+)]
 fn validate_type_settings_payload(
     plugin_ops: &dyn PluginOps,
     plugin_type: &PluginTypeId,
@@ -365,6 +368,12 @@ pub async fn delete_plugin_type_settings(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures;

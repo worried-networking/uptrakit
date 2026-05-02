@@ -1,3 +1,11 @@
+// `#[allow(unused_variables)]` is used for `auth` which is shadowed inside
+// `#[cfg(feature = "daemon")]`; `#[expect]` cannot be used because the lint
+// fires only when the feature is disabled.
+#![expect(
+    clippy::allow_attributes,
+    reason = "feature-conditional suppression of unused_variables; #[expect] incompatible with conditional use"
+)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -89,7 +97,10 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
         // Use daemon-sourced credentials when the daemon feature is enabled
         // (queries the Docker credential store at runtime); otherwise fall back
         // to the static auth configured in the plugin config.
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "shadowed by daemon feature; used as fallback when daemon feature is disabled"
+        )]
         let auth: Option<crate::config::DockerAuth> = self.config.auth.clone();
         #[cfg(feature = "daemon")]
         let auth = self.effective_auth(image).await;

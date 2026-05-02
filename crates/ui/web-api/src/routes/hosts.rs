@@ -552,6 +552,12 @@ pub async fn batch_hosts(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod route_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures::{insert_host, register_and_get_token};

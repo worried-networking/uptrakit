@@ -69,6 +69,10 @@ impl DataKeyRing {
     /// The invariant that `active_key_id` is present in `keys` is established
     /// at construction time by [`DataKeyRing::new`]. This `.expect()` can never
     /// be reached in practice.
+    #[expect(
+        clippy::expect_used,
+        reason = "invariant: active_key_id is always present in keys, established at construction time"
+    )]
     pub(crate) fn active_key(&self) -> &Zeroizing<[u8; 32]> {
         self.keys
             .get(&self.active_key_id)
@@ -87,6 +91,10 @@ impl DataKeyRing {
 }
 
 /// Compute the key_id for a raw DEK: first 8 hex chars of SHA-256(dek).
+#[expect(
+    clippy::indexing_slicing,
+    reason = "safe: Sha256 output is always 32 bytes; slicing [..4] is always in-bounds"
+)]
 pub fn compute_key_id(dek_bytes: &[u8; 32]) -> String {
     let hash = Sha256::digest(dek_bytes);
     uptrakit_shared_types::hex::encode(&hash[..4])
@@ -137,6 +145,11 @@ pub fn wrap_data_key_with(kek: &Zeroizing<[u8; 32]>, dek: &DataKey) -> Result<St
 ///
 /// The `wrapped_hex` is the hex-encoded `nonce || ciphertext || tag` produced
 /// by [`wrap_data_key_with`].  The `key_id` is used to reconstruct the AAD.
+#[expect(
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: raw.len() < 12+16 bails before any slice; TryFromSliceError/ring error carry no additional context"
+)]
 pub fn unwrap_data_key_with(
     kek: &Zeroizing<[u8; 32]>,
     wrapped_hex: &str,

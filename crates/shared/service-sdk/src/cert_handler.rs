@@ -248,6 +248,11 @@ impl Default for CertificateRenewalHandler {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_err()) are idiomatic in tests"
+    )]
+
     use super::*;
     use tempfile::TempDir;
 

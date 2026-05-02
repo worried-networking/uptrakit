@@ -207,6 +207,10 @@ async fn connect_and_create_executors(
 )> {
     let pve_key = pve_host.private_key.expose_secret();
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TryFromIntError carries no contextual information beyond what the formatted error message conveys"
+    )]
     let port = u16::try_from(pve_host.port).map_err(|_| {
         report!(Error::InvalidInput(format!(
             "PVE host port must be 0-65535, got {}",

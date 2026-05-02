@@ -112,6 +112,10 @@ impl ReportTracker {
 
             if existing.pages_received.len() == existing.total_pages as usize {
                 // All pages received — remove from tracker and return Final.
+                #[expect(
+                    clippy::expect_used,
+                    reason = "infallible: we are inside a branch that already accessed this key via get_mut; the entry is guaranteed to exist"
+                )]
                 let report = self
                     .pending
                     .remove(&report_id)

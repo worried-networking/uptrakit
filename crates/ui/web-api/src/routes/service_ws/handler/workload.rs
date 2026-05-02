@@ -4,6 +4,12 @@
 //! and `WorkloadRelease` to voluntarily relinquish them. The controller
 //! arbitrates and responds with `WorkloadClaimResult`.
 
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible operations; message documents the invariant"
+)]
+#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -538,6 +544,8 @@ pub(super) async fn release_all_claims_on_disconnect(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
 
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};

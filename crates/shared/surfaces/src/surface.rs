@@ -401,6 +401,10 @@ impl SurfaceDescriptorBuilder {
     /// Panics if any required field (`surface_id`, `label`, `priority`, `slot`, `scope`,
     /// `targeting`, `provider_kind`, `required_capabilities`, `root_node`) has not been set.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "builder pattern — panicking on missing required fields is intentional and documented"
+    )]
     pub fn build(self) -> SurfaceDescriptor {
         SurfaceDescriptor {
             surface_id: self

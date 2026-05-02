@@ -106,6 +106,10 @@ impl DashboardIconCache {
 
         #[async_trait::async_trait]
         impl GitHubProviderClient for UnusedProvider {
+            #[expect(
+                clippy::unreachable,
+                reason = "test-only stub; fetch_repository_tree must never be called in new_with_paths tests"
+            )]
             async fn fetch_repository_tree(
                 &self,
                 _consumer: GlobalProviderConsumerId,

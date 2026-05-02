@@ -44,17 +44,19 @@ impl SshCommandExecutor {
         let fut = self.session.exec_command_streaming(&remote_cmd, output_tx);
 
         let result = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut)
-                .await
-                .map_err(|_| {
-                    tracing::warn!(timeout = ?dur, "SSH command timed out");
-                    report!(CommandError::TimedOut)
-                })?
-                .map_err(|e| {
-                    report!(CommandError::CommandSpawn(std::io::Error::other(
-                        e.to_string()
-                    )))
-                })?
+            #[expect(
+                clippy::map_err_ignore,
+                reason = "tokio Elapsed carries no additional context beyond the timeout duration already logged"
+            )]
+            let timed = tokio::time::timeout(dur, fut).await.map_err(|_| {
+                tracing::warn!(timeout = ?dur, "SSH command timed out");
+                report!(CommandError::TimedOut)
+            })?;
+            timed.map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
+            })?
         } else {
             fut.await.map_err(|e| {
                 report!(CommandError::CommandSpawn(std::io::Error::other(

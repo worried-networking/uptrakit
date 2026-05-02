@@ -40,6 +40,11 @@ pub async fn audit_log(State(_state): State<Arc<AppState>>, req: Request, next: 
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+
     use std::sync::Arc;
 
     use axum::body::Body;

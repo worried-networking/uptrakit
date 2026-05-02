@@ -520,7 +520,7 @@ pub async fn merge_service(
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found or not in `Pending` status are reported as failed.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_approve_services(
     tenant_db: &TenantDb,
@@ -566,6 +566,11 @@ pub async fn batch_approve_services(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::unwrap_used,
+        reason = "test helpers: panics on setup failure are acceptable"
+    )]
+
     use super::*;
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
@@ -715,7 +720,7 @@ mod tests {
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found or not in `Pending` status are reported as failed.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_reject_services(
     tenant_db: &TenantDb,
@@ -763,7 +768,7 @@ pub async fn batch_reject_services(
 ///
 /// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
 /// Services that are not found are reported as failed.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_deactivate_services(
     tenant_db: &TenantDb,

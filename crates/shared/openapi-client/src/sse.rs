@@ -31,6 +31,10 @@ pub enum SseError {
 ///
 /// Uses `reqwest::Response::chunk()` for incremental reads, which does not
 /// require the `stream` cargo feature on reqwest.
+#[expect(
+    clippy::string_slice,
+    reason = "pos is sourced from find_event_boundary which searches for ASCII byte sequences; all slice boundaries are ASCII-safe"
+)]
 pub fn parse_sse_stream(
     response: reqwest::Response,
 ) -> impl futures_util::Stream<Item = Result<RawSseEvent, SseError>> {

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "expect used for infallible parse; Permission::from_str uses Infallible error"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -756,7 +761,6 @@ fn enforce_required_permission(
 ) -> Option<Response> {
     let required_permission = required_permission?;
     // Permission::from_str uses Infallible error; unwrap is always safe.
-    #[allow(clippy::unwrap_used)]
     let permission = required_permission.parse::<Permission>().unwrap();
     if auth_user.has_permission(permission) {
         return None;
@@ -770,6 +774,11 @@ fn enforce_required_permission(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "fire-and-forget sends in tests drop results intentionally"
+    )]
+
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission as AuthPermission;

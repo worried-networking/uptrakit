@@ -68,6 +68,10 @@ fn detect_openssh_key_type(pem: &str) -> crate::error::Result<SshKeyType> {
 
     // Check for OpenSSH magic: "openssh-key-v1\0"
     const MAGIC: &[u8] = b"openssh-key-v1\0";
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "bound-checked: `decoded.len() < MAGIC.len()` short-circuits before the slice index"
+    )]
     if decoded.len() < MAGIC.len() || &decoded[..MAGIC.len()] != MAGIC {
         bail!(Error::UnsupportedKeyType(
             "not a valid OpenSSH key".to_string()
@@ -167,6 +171,10 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "private helper: callers (`skip_openssh_string`, `read_openssh_string`) verify `pos + 4 <= data.len()` before invoking"
+)]
 fn read_u32_be(data: &[u8], pos: usize) -> u32 {
     u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
 }
@@ -201,7 +209,12 @@ fn read_openssh_string(data: &[u8], pos: usize) -> crate::error::Result<String> 
             "truncated OpenSSH key".to_string()
         ));
     }
-    String::from_utf8(data[start..end].to_vec()).map_err(|e| {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "bound-checked: `end > data.len()` guard above ensures `data[start..end]` is in range"
+    )]
+    let bytes = data[start..end].to_vec();
+    String::from_utf8(bytes).map_err(|e| {
         report!(Error::UnsupportedKeyType(format!(
             "key type string is not UTF-8: {e}"
         )))
@@ -252,6 +265,11 @@ pub(crate) fn extract_public_key_openssh(pem_content: &str) -> crate::error::Res
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_err())` is idiomatic in tests where the error variant is not inspected"
+    )]
+
     use super::*;
 
     #[test]

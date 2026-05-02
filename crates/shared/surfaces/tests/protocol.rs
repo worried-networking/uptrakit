@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "integration test helpers — expect() on compile-time-valid IDs and schemas is the idiomatic way to construct test values in non-#[test] helper functions"
+)]
+
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 

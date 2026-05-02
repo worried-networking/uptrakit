@@ -118,6 +118,10 @@ async fn async_main() -> std::process::ExitCode {
         .audit_log_backend
         .contains(&cli::AuditLogBackendArg::Journald)
     {
+        #[expect(
+            clippy::expect_used,
+            reason = "infallible at startup: journald layer construction failures are unrecoverable for the requested audit backend and must abort initialization"
+        )]
         let journald = tracing_journald::layer()
             .expect("failed to connect to journald")
             .with_filter(tracing_subscriber::EnvFilter::new("uptrakit_audit=info"));
@@ -743,7 +747,14 @@ async fn build_audit_logger(
 
     let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> = match backends.len() {
         0 => std::sync::Arc::new(NoopBackend),
-        1 => backends.into_iter().next().expect("one backend"),
+        1 => {
+            #[expect(
+                clippy::expect_used,
+                reason = "guaranteed by match arm: `backends.len() == 1` ensures the iterator yields exactly one element"
+            )]
+            let only = backends.into_iter().next().expect("one backend");
+            only
+        }
         _ => std::sync::Arc::new(uptrakit_audit_log::MultiplexBackend::new(backends)),
     };
 
@@ -1020,6 +1031,10 @@ fn spawn_pki_http(
 }
 
 #[doc(hidden)]
+#[expect(
+    clippy::expect_used,
+    reason = "infallible at startup: tokio runtime construction failures are unrecoverable and must abort process initialization"
+)]
 pub fn run() -> std::process::ExitCode {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -1,3 +1,7 @@
+#![expect(
+    clippy::string_slice,
+    reason = "string slices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety is guaranteed by construction"
+)]
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::{
     PluginConfig, PluginConfigValidationError, TypeSettings,
@@ -146,6 +150,10 @@ impl SnapConfig {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
 
     // ── effective_channel ─────────────────────────────────────────────────────

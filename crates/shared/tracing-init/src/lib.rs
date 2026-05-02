@@ -133,8 +133,12 @@ impl TracingBuilder {
         if let Some(directives) = self.directives.get(&clamped) {
             for (target, level) in directives {
                 let s = format!("{target}={level}");
-                filter =
-                    filter.add_directive(s.parse().expect("BUG: invalid compile-time directive"));
+                #[expect(
+                    clippy::expect_used,
+                    reason = "infallible: directive string is constructed from compile-time constants"
+                )]
+                let directive = s.parse().expect("BUG: invalid compile-time directive");
+                filter = filter.add_directive(directive);
             }
         }
 
@@ -222,7 +226,12 @@ pub fn init_cli_tracing(verbosity: u8) {
 pub fn init_test_tracing() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut filter = EnvFilter::new("").add_directive("warn".parse().expect("valid directive"));
+        #[expect(
+            clippy::expect_used,
+            reason = "infallible: \"warn\" is a valid compile-time tracing directive"
+        )]
+        let mut filter =
+            EnvFilter::new("").add_directive("warn".parse().expect("valid directive"));
         if let Ok(rust_log) = std::env::var("RUST_LOG") {
             for part in rust_log.split(',') {
                 let part = part.trim();
@@ -239,10 +248,17 @@ pub fn init_test_tracing() {
                 }
             }
         }
-        let _ = tracing_subscriber::fmt()
+        // `try_init` returns an error when a global subscriber is already installed
+        // (e.g. another test ran first). That is expected — ignore the result.
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "try_init() fails only when a global subscriber is already installed; that is expected in tests"
+        )]
+        tracing_subscriber::fmt()
             .with_test_writer()
             .with_env_filter(filter)
-            .try_init();
+            .try_init()
+            .ok();
     });
 }
 
@@ -260,6 +276,10 @@ mod tests {
     struct BufWriter(Arc<Mutex<Vec<u8>>>);
 
     impl std::io::Write for BufWriter {
+        #[expect(
+            clippy::unwrap_in_result,
+            reason = "test helper: Mutex::lock() is infallible in single-threaded tests and parking_lot is not a dep here"
+        )]
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(buf);
             Ok(buf.len())

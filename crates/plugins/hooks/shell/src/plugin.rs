@@ -17,7 +17,10 @@ use crate::config::ShellHookConfig;
 ///   errors are logged but non-fatal.
 pub struct ShellHookPlugin {
     config: ShellHookConfig,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "retained for future use; executor held to extend lifetime"
+    )]
     executor: Arc<dyn CommandExecutor>,
 }
 
@@ -149,6 +152,10 @@ impl LifecycleHook for ShellHookPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
         HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,

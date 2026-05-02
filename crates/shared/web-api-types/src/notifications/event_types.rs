@@ -53,6 +53,10 @@ wire_safe_enum! {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     /// All known (non-Other) `NotificationEventType` variants for iteration in tests.

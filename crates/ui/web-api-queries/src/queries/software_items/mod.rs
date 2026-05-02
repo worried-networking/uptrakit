@@ -168,7 +168,10 @@ pub(super) struct HostAssignmentData {
 // Shared private helper functions — used by crud, host_assignments, plugin_assignments
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "query function requires all filter parameters; extracting a struct would obscure the call site"
+)]
 pub(super) fn build_list_response(
     item: &software_item::Model,
     plugins: Vec<String>,

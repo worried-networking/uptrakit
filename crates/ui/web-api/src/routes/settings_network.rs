@@ -1,3 +1,8 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original parse errors carry no useful context"
+)]
+
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
@@ -523,6 +528,12 @@ async fn update_network_settings_inner(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;

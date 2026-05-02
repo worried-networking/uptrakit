@@ -192,6 +192,11 @@ pub async fn upsert_github_provider_defaults(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test setup — ignoring Result from init_master_key which may already be initialized"
+    )]
+
     use super::*;
     use crate::entity::global_setting;
     use sea_orm::{

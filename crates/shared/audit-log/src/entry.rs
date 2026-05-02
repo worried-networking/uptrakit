@@ -118,6 +118,10 @@ impl AuditEntry {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test helper — both parse and build are infallible for well-formed action type strings; panic is acceptable in test setup"
+    )]
     pub fn test_stub(action_type: &str) -> Self {
         Self::builder(
             action_type
@@ -298,6 +302,11 @@ impl AuditEntryBuilder {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
 
     #[test]

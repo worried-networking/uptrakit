@@ -5,6 +5,11 @@
 //!
 //! This entire module is gated on the `interactive` feature.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel sends intentionally drop results"
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -633,6 +633,16 @@ pub async fn batch_system_services(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+    #![expect(
+        clippy::string_slice,
+        reason = "test code: slice indexes are at validated boundaries"
+    )]
+
     use super::*;
     use crate::auth::AuthMethod;
     use sea_orm::{

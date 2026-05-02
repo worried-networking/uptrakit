@@ -260,7 +260,6 @@ enum SshHosts {
 }
 
 #[derive(DeriveIden)]
-#[allow(clippy::enum_variant_names)]
 enum SshHostsNew {
     Table,
     Id,

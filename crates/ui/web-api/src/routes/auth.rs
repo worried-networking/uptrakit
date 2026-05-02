@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget cleanup sends on error paths intentionally drop results"
+)]
+
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::auth::refresh_cookie::{
@@ -754,6 +759,11 @@ pub async fn logout(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
+
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::permissions::Permission;

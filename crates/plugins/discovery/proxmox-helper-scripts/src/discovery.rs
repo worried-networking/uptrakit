@@ -1,3 +1,8 @@
+#![expect(
+    clippy::string_slice,
+    clippy::indexing_slicing,
+    reason = "string slices and array indices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety and index bounds are guaranteed by construction"
+)]
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::PluginError;
 
@@ -839,6 +844,10 @@ pub(crate) fn is_valid_slug(slug: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
 
     // ── analyze_phs_script ──────────────────────────────────────────

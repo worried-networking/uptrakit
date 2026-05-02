@@ -164,6 +164,11 @@ impl AuditLogBackend for JournaldBackend {
 
 #[cfg(all(test, feature = "db"))]
 mod db_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helpers — expect is used in setup functions and mock implementations; panic is acceptable in test context"
+    )]
+
     use super::*;
     use sea_orm::{
         ConnectOptions, ConnectionTrait as _, Database, DatabaseConnection, EntityTrait as _,
@@ -264,6 +269,11 @@ mod db_tests {
 
 #[cfg(all(test, feature = "journald"))]
 mod journald_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helper — Mutex lock is expected to succeed; panic on poisoned lock is acceptable in test context"
+    )]
+
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 

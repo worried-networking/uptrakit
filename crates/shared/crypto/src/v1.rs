@@ -48,6 +48,11 @@ pub(crate) fn encrypt_value_v1(key_bytes: &Zeroizing<[u8; 32]>, plaintext: &str)
 /// Decrypt a `ENC:v1:` ciphertext using the provided key bytes.
 ///
 /// v1 ciphertexts were produced with empty AAD, so no AAD parameter is needed.
+#[expect(
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: raw.len() < 12+16 bails before any slice; TryFromSliceError/ring error carry no additional context"
+)]
 pub(crate) fn decrypt_value_v1_legacy(
     key_bytes: &Zeroizing<[u8; 32]>,
     stored: &str,

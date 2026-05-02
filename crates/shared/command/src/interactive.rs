@@ -86,39 +86,55 @@ pub async fn run_command_interactive(
 
 /// Allocate a PTY master/slave pair.
 fn allocate_pty() -> crate::Result<(OwnedFd, OwnedFd)> {
+    // SAFETY: posix_openpt is a standard POSIX call; flags are valid constants.
+    // Return value is checked before use.
     let master_raw = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
     if master_raw < 0 {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
+    // SAFETY: master_raw is a valid, non-negative fd returned by posix_openpt above.
+    // OwnedFd takes ownership and will close it on drop.
     let master_fd = unsafe { OwnedFd::from_raw_fd(master_raw) };
 
+    // SAFETY: master_fd is a valid PTY master fd; grantpt sets slave ownership.
     if unsafe { libc::grantpt(master_fd.as_raw_fd()) } != 0 {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
+    // SAFETY: master_fd is a valid PTY master fd; unlockpt unlocks the slave side.
     if unsafe { libc::unlockpt(master_fd.as_raw_fd()) } != 0 {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
 
+    // SAFETY: master_fd is a valid, unlocked PTY master fd; ptsname returns a
+    // pointer to a static buffer valid until the next ptsname call on this thread.
+    // Null check follows immediately.
     let slave_path_ptr = unsafe { libc::ptsname(master_fd.as_raw_fd()) };
     if slave_path_ptr.is_null() {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
+    // SAFETY: slave_path_ptr is non-null and points to a valid, NUL-terminated
+    // C string returned by ptsname. Lifetime is bounded to before the next
+    // ptsname call on this thread; we copy out the path before any further calls.
     let slave_path = unsafe { std::ffi::CStr::from_ptr(slave_path_ptr) };
 
+    // SAFETY: slave_path is a valid NUL-terminated path string from ptsname;
+    // flags are valid constants. Return value is checked before use.
     let slave_raw = unsafe { libc::open(slave_path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
     if slave_raw < 0 {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
+    // SAFETY: slave_raw is a valid, non-negative fd returned by open above.
+    // OwnedFd takes ownership and will close it on drop.
     let slave_fd = unsafe { OwnedFd::from_raw_fd(slave_raw) };
 
     Ok((master_fd, slave_fd))
@@ -146,8 +162,15 @@ fn spawn_child_with_pty(
         cmd.env(name, value);
     }
 
-    // SAFETY: pre_exec runs in the forked child before exec.
-    // All operations are async-signal-safe: setsid, ioctl, dup2, close.
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "pre_exec closure requires all libc calls in one unsafe block; splitting is not possible as the closure body is a single expression"
+    )]
+    // SAFETY: pre_exec runs in the forked child process after fork, before exec.
+    // All libc calls here are async-signal-safe as required by POSIX: setsid(2),
+    // ioctl(2), dup2(2), and close(2) are all on the approved list. slave_raw is
+    // a captured raw fd that is valid in the child (fds survive fork). The closure
+    // is `move` so slave_raw is not a dangling reference.
     unsafe {
         cmd.pre_exec(move || {
             libc::setsid();
@@ -196,12 +219,15 @@ async fn drive_interactive_session(
         output_tx,
     } = channels;
     // Duplicate the master fd for the reader thread
+    // SAFETY: master_fd is a valid open file descriptor; dup returns a new fd or -1.
     let dup_raw = unsafe { libc::dup(master_fd.as_raw_fd()) };
     if dup_raw < 0 {
         return Err(report!(CommandError::PtyAllocationFailed(
             io::Error::last_os_error()
         )));
     }
+    // SAFETY: dup_raw is a valid, non-negative fd returned by libc::dup above.
+    // File takes ownership and will close it on drop.
     let reader_file = unsafe { std::fs::File::from_raw_fd(dup_raw) };
     let writer_file = std::fs::File::from(master_fd);
 
@@ -216,13 +242,23 @@ async fn drive_interactive_session(
             match file.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if chunk_tx.blocking_send(Ok(buf[..n].to_vec())).is_err() {
+                    // n <= buf.len() is guaranteed by the Read::read contract.
+                    #[expect(
+                        clippy::indexing_slicing,
+                        reason = "n <= buf.len() is guaranteed by Read::read; indexing cannot panic here"
+                    )]
+                    let chunk = buf[..n].to_vec();
+                    if chunk_tx.blocking_send(Ok(chunk)).is_err() {
                         break;
                     }
                 }
                 Err(e) => {
                     // EIO is expected when the slave side closes
                     if e.raw_os_error() != Some(libc::EIO) {
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "blocking_send error means receiver dropped; we're already breaking out of the loop"
+                        )]
                         let _ = chunk_tx.blocking_send(Err(e));
                     }
                     break;
@@ -271,6 +307,10 @@ async fn drive_interactive_session(
             _ = deadline_sleep, if deadline.is_some() => {
                 tracing::warn!("interactive command timed out");
                 kill_process_group(child_pid);
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "wait() after kill; we're returning an error immediately and don't need the exit status"
+                )]
                 let _ = child.wait().await;
                 return Err(report!(CommandError::TimedOut));
             }
@@ -302,6 +342,10 @@ async fn drive_interactive_session(
             }
 
             Some(data) = stdin_rx.recv() => {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "send failure means writer task exited (PTY closed); the next chunk_rx.recv() will also fail and break the loop"
+                )]
                 let _ = write_tx.send(data).await;
             }
 
@@ -311,6 +355,10 @@ async fn drive_interactive_session(
 
             _ = attention_sleep => {
                 if !attention_sent {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "try_send failure means the attention channel is full or closed; attention is best-effort and dropping is intentional"
+                    )]
                     let _ = attention_tx.try_send(());
                     attention_sent = true;
                 }
@@ -342,6 +390,9 @@ fn send_signal(pid: i32, signal: i32) {
         return;
     }
     // Send to the process group (negative pid targets the group)
+    // SAFETY: pid > 0 (checked above), so -pid is a valid process group id.
+    // signal is a caller-supplied signal number; invalid values cause kill to return EINVAL,
+    // which we handle by logging the error below.
     let result = unsafe { libc::kill(-pid, signal) };
     if result != 0 {
         let err = io::Error::last_os_error();
@@ -354,6 +405,8 @@ fn kill_process_group(pid: i32) {
     if pid <= 0 {
         return;
     }
+    // SAFETY: pid > 0 (checked above), so -pid is a valid process group id.
+    // SIGKILL is a well-known constant; kill with SIGKILL cannot be caught or ignored.
     unsafe {
         libc::kill(-pid, libc::SIGKILL);
     }
@@ -363,6 +416,7 @@ pub use run_command_interactive as run_interactive;
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[tokio::test]

@@ -3,6 +3,15 @@
 //! Contains the `sign_renewal_csr` and `record_renewal_certificate` functions
 //! extracted from the unified handler module.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget sends in renewal handler intentionally drop results"
+)]
+#![expect(
+    clippy::map_err_ignore,
+    reason = "original renewal errors carry no useful context"
+)]
+
 use sea_orm::{ActiveModelTrait, Set};
 
 use rootcause::prelude::*;

@@ -87,6 +87,10 @@ impl AppendUpdateOutputOutcome {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "boundary is walked back to a valid UTF-8 char boundary; slice is always valid"
+)]
 fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
     if output.len() <= max_bytes {
         return output;

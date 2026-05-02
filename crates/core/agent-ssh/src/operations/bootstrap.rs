@@ -152,6 +152,10 @@ pub(crate) async fn bootstrap_connect(
     }
 
     // 3. CONNECT & AUTHENTICATE (as auth_username)
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TryFromIntError carries no contextual information beyond what the formatted error message conveys"
+    )]
     let port = u16::try_from(params.port).map_err(|_| {
         report!(Error::InvalidInput(format!(
             "port must be 0-65535, got {}",
@@ -458,6 +462,10 @@ pub(crate) async fn bootstrap_execute(
     })?;
 
     // Connect via SSH.
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TryFromIntError carries no contextual information beyond what the formatted error message conveys"
+    )]
     let port = u16::try_from(params.port).map_err(|_| {
         report!(Error::InvalidInput(format!(
             "port must be 0-65535, got {}",
@@ -723,7 +731,10 @@ async fn prepare_bootstrap_connection(
 ///
 /// Handles same-service key auto-removal, stale key cleanup (when
 /// `remove_stale_keys` is set), and atomic rewrite vs. simple append.
-#[allow(clippy::too_many_arguments)] // mirrors the distinct pieces of key deployment state
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the distinct pieces of key deployment state; extracting a struct would add boilerplate without clarity"
+)]
 async fn deploy_authorized_keys(
     session: &SshSession,
     home_dir: &str,

@@ -50,6 +50,10 @@ pub(crate) async fn run_embedded_ssh_agent(
 
     let infra_bundles = {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        #[expect(
+            clippy::expect_used,
+            reason = "infallible at startup: catalog construction failures are static configuration errors that must abort process initialization"
+        )]
         let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
             .expect("plugin catalog must build successfully");
         Arc::new(catalog.create_infra_bundles(&catalog_config))

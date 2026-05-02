@@ -273,6 +273,11 @@ fn parse_typed_event(event: RawSseEvent) -> std::result::Result<AdminSseEvent, S
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
     use crate::sse::RawSseEvent;
 

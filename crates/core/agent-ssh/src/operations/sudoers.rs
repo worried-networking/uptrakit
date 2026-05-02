@@ -315,6 +315,11 @@ pub(crate) async fn write_sudoers_file(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test code: `assert!(r.is_ok())` is idiomatic in tests where the success value is not inspected"
+    )]
+
     use super::*;
 
     // ── generate_sudoers_content ─────────────────────────────────────────

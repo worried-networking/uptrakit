@@ -149,6 +149,10 @@ impl EmbeddedServiceHost {
             )
             .await?
         } else {
+            #[expect(
+                clippy::expect_used,
+                reason = "guaranteed by branch: the surrounding `if !is_system` branch is taken precisely when `tenant_id` is `Some`"
+            )]
             let tid = tenant_id.expect("tenant_id is required for non-system embedded services");
             provision::provision_embedded_tenant_service(
                 state.db(),
@@ -497,6 +501,11 @@ async fn clear_yield_state(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::unused_result_ok,
+        reason = "test code: `OnceCell::set(...).ok()` is the canonical idiom for ignoring the case where the cell is already initialized"
+    )]
+
     use super::*;
     use crate::service_host::yielding::matches_yield_policy;
     use uptrakit_service_platform::YieldPolicy;

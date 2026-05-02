@@ -338,7 +338,6 @@ pub struct PluginDescriptor {
     // ── Migrations (controller-only) ──
     // Always present so `declare_plugin!` macro expansions always see the field.
     // The actual type is only meaningful when `migrations` feature is active.
-    #[allow(clippy::type_complexity)]
     pub migrations: Option<MigrationsFn>,
 }
 
@@ -440,7 +439,10 @@ impl std::fmt::Debug for CatalogConfig {
     }
 }
 
-#[allow(clippy::derivable_impls)] // cfg-gated fields prevent derive
+#[expect(
+    clippy::derivable_impls,
+    reason = "cfg-gated fields prevent the Default derive macro from working correctly"
+)]
 impl Default for CatalogConfig {
     fn default() -> Self {
         Self {

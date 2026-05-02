@@ -52,6 +52,10 @@ impl AuditLogDispatcher {
     pub fn dispatch(&self, entry: AuditEntry) {
         // UnboundedSender::send only fails when the receiver is dropped (shutdown).
         // Silently discard on shutdown — there is nothing meaningful to do at that point.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "send fails only when the receiver is dropped (shutdown); silently discarding on shutdown is intentional"
+        )]
         let _ = self.tx.send(entry);
     }
 }

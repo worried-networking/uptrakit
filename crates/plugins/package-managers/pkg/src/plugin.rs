@@ -543,6 +543,10 @@ fn build_discovered(name: String, version: String) -> DiscoveredSoftware {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use std::sync::Arc;
 
     use super::*;

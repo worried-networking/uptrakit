@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "integration test infrastructure: panics are acceptable in reverse-proxy test helpers"
+)]
+
 use std::sync::OnceLock;
 
 use tempfile::TempDir;

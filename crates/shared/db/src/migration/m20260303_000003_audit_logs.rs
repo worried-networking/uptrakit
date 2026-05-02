@@ -166,6 +166,10 @@ impl MigrationTrait for Migration {
             let now = time::OffsetDateTime::now_utc();
             // Calculate next run: 03:00 UTC tomorrow.
             let tomorrow = now.date() + time::Duration::days(1);
+            #[expect(
+                clippy::expect_used,
+                reason = "03:00:00 is a statically-known valid time; construction failure would indicate a programming error in this migration"
+            )]
             let next_run = tomorrow
                 .with_hms(3, 0, 0)
                 .expect("03:00:00 is valid")

@@ -140,6 +140,10 @@ pub struct ListHostTagsQuery {
     pub search: Option<String>,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "safe: '#' is ASCII (1 byte), so color[1..] is always on a char boundary; starts_with('#') is checked above"
+)]
 fn validate_hex_color(color: &str) -> Result<(), ValidationError> {
     if color.len() != 7
         || !color.starts_with('#')
@@ -155,6 +159,10 @@ fn validate_hex_color(color: &str) -> Result<(), ValidationError> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
     use super::*;
 
     fn sample_uuid() -> Uuid {

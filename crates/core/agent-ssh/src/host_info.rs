@@ -364,6 +364,10 @@ mod tests {
             fallback.starts_with("unknown-"),
             "fallback must start with 'unknown-', got: {fallback}"
         );
+        #[expect(
+            clippy::string_slice,
+            reason = "char-boundary safe: `\"unknown-\".len()` is the byte length of an ASCII prefix `fallback` was just constructed with"
+        )]
         let suffix = &fallback["unknown-".len()..];
         assert!(
             !suffix.is_empty(),

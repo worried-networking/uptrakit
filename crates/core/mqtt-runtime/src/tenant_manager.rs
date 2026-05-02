@@ -40,6 +40,10 @@ impl PartialSoftwareStates {
     /// Featured items with the same `software_item_id` across pages have their
     /// `hosts` lists merged so that the final state contains all per-host
     /// entries regardless of which page they appeared in.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "invariant: idx is stored in items_index at the time items.push() runs, so idx < items.len() always holds"
+    )]
     fn extend(&mut self, page: uptrakit_wire::SoftwareStatesPayload) {
         self.host_summaries.extend(page.host_summaries);
         self.hosts.extend(page.hosts);

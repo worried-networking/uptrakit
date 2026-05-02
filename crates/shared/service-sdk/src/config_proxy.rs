@@ -186,6 +186,10 @@ impl ServiceConfigProxy {
         };
 
         if let Some(tx) = sender {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "send failure means the caller's future was dropped (timeout/cancel); ack delivery is best-effort"
+            )]
             let _ = tx.send(ack);
         }
     }

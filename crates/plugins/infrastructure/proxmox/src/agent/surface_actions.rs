@@ -1,3 +1,7 @@
+#![expect(
+    clippy::indexing_slicing,
+    reason = "array and slice indices are bounded by construction or derived from known-valid positions"
+)]
 //! Surface action handlers for the Proxmox agent infrastructure plugin.
 //!
 //! Handles: `list-discovered-guests`, `bootstrap-proxmox-guest`.
@@ -283,7 +287,6 @@ fn parse_discovered_guests(params: &serde_json::Map<String, serde_json::Value>) 
 /// On success returns `(mapping_id, display_name, GuestBootstrapParams)`.
 /// On failure returns a JSON error object suitable for inclusion in the
 /// results array.
-#[allow(clippy::too_many_arguments)] // mirrors the many fields needed for bootstrap
 fn validate_and_resolve_guest(
     guest_id: &str,
     options: &[serde_json::Value],

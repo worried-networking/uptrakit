@@ -1,3 +1,7 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort fire-and-forget operations where failure is intentionally ignored"
+)]
 //! Unix-socket proxy for tunnelling the Docker API over a stdio tunnel.
 //!
 //! [`DockerSocketProxy`] accepts local Unix-socket connections and bridges

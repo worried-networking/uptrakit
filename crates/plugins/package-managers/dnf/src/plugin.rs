@@ -1,3 +1,7 @@
+#![expect(
+    clippy::string_slice,
+    reason = "string slices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety is guaranteed by construction"
+)]
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -725,6 +729,10 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions use assert!(result.is_ok()) pattern"
+    )]
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::{
         FixedOutputExecutor, RoutedOutputExecutor, test_runtime, test_runtime_with_executor,

@@ -52,7 +52,10 @@ pub struct GuestBootstrapParams {
 
 impl GuestBootstrapParams {
     /// Create a new [`GuestBootstrapParams`] with all required fields.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all fields are required for bootstrapping a guest; splitting into a builder would obscure call-site semantics"
+    )]
     pub fn new(
         gateway_host_id: impl Into<String>,
         guest_id: u32,

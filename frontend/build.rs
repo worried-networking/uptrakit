@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[expect(
+    clippy::expect_used,
+    reason = "build script — panicking on missing environment variables or I/O errors is the correct behaviour"
+)]
 fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));

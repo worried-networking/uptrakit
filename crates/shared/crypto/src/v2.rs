@@ -52,6 +52,11 @@ pub(crate) fn encrypt_value_v2(
 /// Decrypt a `ENC:v2:` ciphertext using the provided key bytes and AAD.
 ///
 /// The AAD must match the AAD used during encryption.
+#[expect(
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    reason = "bounds validated: raw.len() < 12+16 bails before any slice; TryFromSliceError/ring error carry no additional context"
+)]
 pub(crate) fn decrypt_value_v2(
     key_bytes: &Zeroizing<[u8; 32]>,
     stored: &str,

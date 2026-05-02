@@ -158,7 +158,10 @@ pub struct UpdateHistoryResponse {
 
 impl UpdateHistoryResponse {
     /// Creates a new `UpdateHistoryResponse` with all fields explicitly set.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all fields are required for a fully-typed constructor; splitting would obscure the call-site semantics"
+    )]
     pub fn new(
         id: Uuid,
         host_id: Uuid,

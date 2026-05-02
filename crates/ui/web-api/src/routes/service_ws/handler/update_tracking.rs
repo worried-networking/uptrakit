@@ -342,6 +342,8 @@ pub(super) async fn handle_service_trigger_host_batch_update(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
 
     use async_trait::async_trait;

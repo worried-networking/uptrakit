@@ -658,7 +658,7 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> super::Resu
 // ---------------------------------------------------------------------------
 
 /// Feature multiple software items (set `featured = true`).
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_feature_software_items(
     tenant_db: &TenantDb,
@@ -698,7 +698,7 @@ pub async fn batch_feature_software_items(
 }
 
 /// Soft-delete multiple software items.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "complex SeaORM query return type")]
 #[tracing::instrument(skip_all)]
 pub async fn batch_delete_software_items(
     tenant_db: &TenantDb,
@@ -743,6 +743,11 @@ pub async fn batch_delete_software_items(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "assert!(result.is_ok()) pattern intentional in tests for readable failure messages"
+    )]
+
     use super::*;
     use time::OffsetDateTime;
     use uptrakit_web_api_types::PluginRole;

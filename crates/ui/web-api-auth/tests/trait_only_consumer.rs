@@ -4,6 +4,11 @@
 //!
 //! Compilation is the primary assertion. If this file compiles and the test
 //! runs, the trait-only dependency boundary holds.
+#![expect(
+    clippy::unimplemented,
+    clippy::assertions_on_result_states,
+    reason = "integration test stubs — unimplemented! in trait stub methods and assert!(result.is_ok()) are idiomatic in integration tests"
+)]
 
 use async_trait::async_trait;
 use std::sync::Arc;

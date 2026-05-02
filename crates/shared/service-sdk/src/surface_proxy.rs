@@ -119,7 +119,10 @@ impl ServiceSurfaceProxy {
     }
 
     /// Prepare a surface action invocation.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all parameters are required for a surface action invocation; splitting would obscure the call-site semantics"
+    )]
     pub fn invoke(
         &self,
         tenant_id: uuid::Uuid,
@@ -168,6 +171,10 @@ impl ServiceSurfaceProxy {
         };
 
         if let Some(tx) = sender {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "send failure means the caller's future was dropped (timeout/cancel); response delivery is best-effort"
+            )]
             let _ = tx.send(response);
         }
     }

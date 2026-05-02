@@ -1018,6 +1018,10 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
 ///
 /// Iterates all registered infra plugins; the first one to return `Some`
 /// wins. If no plugin handles the action, an error response is sent.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
+)]
 fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
@@ -1343,6 +1347,10 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
 }
 
 /// Spawn the sync-connect (plan) step as a background task.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
+)]
 fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
@@ -1403,6 +1411,10 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
 }
 
 /// Spawn the sync-execute step as a background task.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
+)]
 fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
@@ -1458,6 +1470,10 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
                 // Send any plugin config reports generated during sync (e.g.
                 // a recreated PVE API token).
                 for report in &plugin_config_reports {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "infallible: payload constructed from a static JSON literal whose schema matches `ReportPluginConfigPayload` exactly; deserialization cannot fail"
+                    )]
                     let payload: uptrakit_wire::ReportPluginConfigPayload =
                         serde_json::from_value(serde_json::json!({
                             "request_id": uuid::Uuid::now_v7().to_string(),
@@ -1725,7 +1741,13 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionR
             let any_infra = result.infra_results.iter().any(|r| r.detected);
             let mut data = json!({ "host_id": host_id.to_string() });
             if any_infra {
-                data["has_infrastructure"] = json!(true);
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "guaranteed object: `data` was just constructed from `json!({ ... })`, so `IndexMut<&str>` cannot panic"
+                )]
+                {
+                    data["has_infrastructure"] = json!(true);
+                }
             }
             make_surface_success_response(request_id, data)
         }
@@ -1825,6 +1847,10 @@ async fn send_infra_plugin_reports(
 ) {
     for infra in infra_results {
         if let Some(report) = &infra.report_plugin_config {
+            #[expect(
+                clippy::expect_used,
+                reason = "infallible: payload constructed from a static JSON literal whose schema matches `ReportPluginConfigPayload` exactly; deserialization cannot fail"
+            )]
             let payload: uptrakit_wire::ReportPluginConfigPayload = serde_json::from_value(json!({
                 "request_id": uuid::Uuid::now_v7().to_string(),
                 "plugin_type": report.plugin_type,
@@ -1953,8 +1979,12 @@ fn surface_mutation_target_id(
                 })
                 .collect();
             if successful.len() == 1 {
-                successful[0]
-                    .get("host_id")
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "bound-checked: `successful.len() == 1` ensures `successful[0]` is in range"
+                )]
+                let head = successful[0];
+                head.get("host_id")
                     .and_then(|value| value.as_str())
                     .map(str::to_string)
             } else {
@@ -2010,6 +2040,10 @@ fn surface_mutation_target_display(
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "guaranteed object: each `details` value is constructed inline from `json!({ ... })`, so `IndexMut<&str>` on it cannot panic"
+)]
 fn build_surface_mutation_details(
     interaction_id: &str,
     params: &serde_json::Value,
@@ -2142,6 +2176,10 @@ async fn emit_surface_mutation_audit(
 /// This is the common setup for both `spawn_sync_connect` and
 /// `spawn_sync_execute`. On any failure, a `SurfaceActionResponse` error is sent
 /// via `bg_tx` and `None` is returned so the caller can bail early.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
+)]
 async fn resolve_sync_auth(
     params: &serde_json::Value,
     sensitive_params_sealed: Option<&str>,
@@ -2227,6 +2265,11 @@ async fn send_response(conn: &mut dyn ServiceTransport, response: SurfaceActionR
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: discarding `init_master_key` and `register_column_aad` results is idiomatic — they are no-ops on subsequent calls"
+    )]
+
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
 

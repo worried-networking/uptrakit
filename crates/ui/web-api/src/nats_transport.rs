@@ -21,6 +21,11 @@
 //! - Max age: 24 hours
 //! - Storage: File
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget NATS publish results intentionally dropped"
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

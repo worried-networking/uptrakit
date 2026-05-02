@@ -102,7 +102,11 @@ pub(crate) async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()>
         eprintln!("  Target: {}", crate::db::sanitize_url(dst_url));
         eprintln!();
         eprint!("Type \"yes\" to continue: ");
-        std::io::stderr().flush().ok();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort flush before reading user input; failure here cannot be acted on and the read_line below still proceeds"
+        )]
+        let _ = std::io::stderr().flush();
 
         let mut line = String::new();
         std::io::stdin().read_line(&mut line).map_err(|e| {

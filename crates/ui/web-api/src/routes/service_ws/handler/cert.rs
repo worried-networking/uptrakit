@@ -5,6 +5,11 @@
 //! [`sign_service_csr`] helper that deduplicates the system / regular service
 //! CSR-signing branches.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget sends in cert handler intentionally drop results"
+)]
+
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{Sink, SinkExt};
 use sea_orm::EntityTrait;
@@ -395,6 +400,8 @@ pub(super) async fn poll_approval_status(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
 
     use std::pin::Pin;

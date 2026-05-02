@@ -3,6 +3,11 @@
 //! Provides [`ControllerContainer`] and [`ServiceContainer`] that wrap
 //! testcontainers to manage the lifecycle of Uptrakit binaries running in
 //! Docker containers on a shared network.
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "integration test infrastructure: panics are acceptable in container test helpers"
+)]
 
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;

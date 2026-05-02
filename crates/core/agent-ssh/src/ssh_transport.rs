@@ -135,6 +135,10 @@ impl LineBuffer {
             if ch == '\n' {
                 // Complete line — send and accumulate.
                 if let Some(ref tx) = self.sender {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "send failures are expected when the receiver is dropped (subscriber disconnected); recovery is impossible and the loss is harmless"
+                    )]
                     let _ = tx
                         .send(UpdateOutputLine {
                             text: self.partial.clone(),
@@ -166,6 +170,10 @@ impl LineBuffer {
     async fn flush(&mut self) {
         if !self.partial.is_empty() {
             if let Some(ref tx) = self.sender {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "send failures are expected when the receiver is dropped (subscriber disconnected); recovery is impossible and the loss is harmless"
+                )]
                 let _ = tx
                     .send(UpdateOutputLine {
                         text: self.partial.clone(),
@@ -451,6 +459,10 @@ impl SshSession {
 
                 _ = attention_sleep => {
                     if !state.attention_sent {
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "best-effort attention signal; receiver drop or full channel both indicate the consumer no longer needs the heads-up"
+                        )]
                         let _ = attention_tx.try_send(());
                         state.attention_sent = true;
                     }
@@ -483,6 +495,10 @@ impl SshSession {
 
     /// Disconnect the SSH session.
     pub(crate) async fn disconnect(self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort disconnect on shutdown path; failures here cannot be acted upon and the connection will be closed regardless"
+        )]
         let _ = self
             .handle
             .disconnect(Disconnect::ByApplication, "bootstrap complete", "en")
@@ -671,6 +687,10 @@ pub(crate) async fn connect_and_authenticate(
     let ssh_config = Arc::new(client::Config::default());
     let addr = format!("{}:{}", config.hostname, config.port);
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "tokio Elapsed carries no contextual information beyond the timeout duration already reported"
+    )]
     let mut handle = tokio::time::timeout(
         config.connect_timeout,
         client::connect(ssh_config, &addr, handler),

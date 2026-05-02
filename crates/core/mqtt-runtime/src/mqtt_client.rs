@@ -133,6 +133,10 @@ impl MqttHandle {
 
     /// Publish a retained `offline` message, disconnect, and wait for the
     /// event-loop task to finish.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "shutdown is best-effort: publish, disconnect, and timeout results are all intentionally ignored"
+    )]
     pub(crate) async fn shutdown(self) {
         // Use a timeout for the offline publish and disconnect so that
         // shutdown is not blocked indefinitely when the broker connection is

@@ -74,6 +74,10 @@ impl<'de> Deserialize<'de> for MaskedUrl {
 ///
 /// Handles the `scheme://user:password@host` pattern. If the URL has no
 /// embedded password, the string is returned unchanged.
+#[expect(
+    clippy::string_slice,
+    reason = "all indices come from str::find() which guarantees char-boundary alignment; slicing is safe"
+)]
 fn mask_url_password(url: &str) -> String {
     // Find the scheme separator "://"
     let Some(after_scheme) = url.find("://").map(|i| i + 3) else {

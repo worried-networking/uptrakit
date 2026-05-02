@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    clippy::string_slice,
+    reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest; string slices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety is guaranteed by construction"
+)]
 //! Centralised Docker image reference parsing.
 //!
 //! An [`ImageRef`] represents a fully-parsed Docker/OCI image reference,
@@ -316,6 +321,11 @@ fn resolve_repository(image: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
 
     fn parse(s: &str) -> ImageRef {

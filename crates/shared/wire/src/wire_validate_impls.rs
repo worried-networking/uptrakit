@@ -1480,6 +1480,11 @@ impl WireValidate for TestPluginConfigResultPayload {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok()) are idiomatic in tests"
+    )]
+
     use super::*;
 
     #[test]

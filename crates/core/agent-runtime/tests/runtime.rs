@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "integration test helper: panic is acceptable in test infrastructure helpers, even outside #[test] functions"
+)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

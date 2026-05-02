@@ -10,6 +10,11 @@
 //! `TestPluginConfigResult` message, it calls [`ConfigTestProxy::complete`]
 //! to deliver the response to the waiting REST handler.
 
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget channel send intentionally drops the result"
+)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;

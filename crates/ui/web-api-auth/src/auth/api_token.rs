@@ -164,6 +164,11 @@ impl ApiTokenOps for ApiTokenService {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use super::*;
     use sea_orm::{ConnectOptions, Database};
     use uptrakit_shared_db::entity::user;
@@ -272,6 +277,12 @@ mod tests {
 
 #[cfg(test)]
 mod controller_di_tests {
+    #![expect(
+        clippy::unimplemented,
+        clippy::assertions_on_result_states,
+        reason = "test stubs — unimplemented! in unused mock methods and assert!(result.is_ok()) are idiomatic in test stubs"
+    )]
+
     use super::*;
     use async_trait::async_trait;
     use std::sync::Arc;

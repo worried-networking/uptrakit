@@ -419,6 +419,11 @@ pub async fn refresh_package_index_command(
 
 #[cfg(all(test, feature = "testing"))]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok()) is idiomatic in tests"
+    )]
+
     use tokio::sync::mpsc;
 
     use super::*;

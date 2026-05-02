@@ -44,6 +44,11 @@ pub async fn deliver(
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
+    )]
+
     use std::sync::Arc;
 
     use async_trait::async_trait;

@@ -258,6 +258,15 @@ pub(crate) async fn batch_deactivate(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(
+        clippy::string_slice,
+        reason = "test code: slice indexes are at validated boundaries"
+    )]
+
     use std::sync::Arc;
 
     use tokio::sync::broadcast::error::TryRecvError;
