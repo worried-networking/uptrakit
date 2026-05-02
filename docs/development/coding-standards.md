@@ -490,7 +490,7 @@ branch is eliminated by the optimizer), but every code path still compiles under
 feature combination — which is what "additive" means.
 
 **Exception:** `#[cfg(feature = "X")]` (without `not`) is allowed for blocks that are
-*purely additive* — they add code only when the feature is enabled and are never present
+_purely additive_ — they add code only when the feature is enabled and are never present
 in the base build. Only `#[cfg(not(feature = "X"))]` is prohibited.
 
 ### Additive patterns in tests
@@ -509,7 +509,7 @@ This keeps a single test that compiles and runs correctly under every feature co
 ### Additive route registration
 
 When a route is only meaningful with a specific feature (e.g. Swagger UI), use
-`#[cfg(feature = "swagger-ui")]` on the *additive* registration block only — never to
+`#[cfg(feature = "swagger-ui")]` on the _additive_ registration block only — never to
 remove an existing route:
 
 ```rust
@@ -657,7 +657,7 @@ See also: [Security — Secure Development](../security/secure-development.md).
 
 ### Lint suppressions for feature-gated items
 
-When a function, type, field, or constant is *only reachable* via a `#[cfg(feature = "X")]`
+When a function, type, field, or constant is _only reachable_ via a `#[cfg(feature = "X")]`
 additive block, the compiler may emit `dead_code` (or a related lint) when that feature is
 disabled. Because `#[cfg(not(feature = "X"))]` is prohibited and the item is genuinely needed
 under the feature, suppressing the lint with `#[allow(dead_code)]` is the approved solution.
@@ -958,19 +958,19 @@ if let Err(e) = req.validate() {
 
 ### Currently validated request types
 
-| Type | Key validations |
-| --- | --- |
-| `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8–1024 chars |
-| `LoginRequest` | email format, password non-empty |
-| `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens, 1–64), issuer_url scheme, client_id non-empty |
-| `UpdateScheduledTaskRequest` | interval_seconds > 0, jitter_seconds >= 0 |
-| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format |
-| `CreateSoftwareItemRequest` | name non-empty, exactly one of plugin_config_id/plugin_config |
-| `CreatePluginConfigRequest` | name non-empty |
-| `CreateApiTokenRequest` | `name` non-empty (after trim) |
-| `CreateEnrollmentTokenRequest` | `name` non-empty; `max_uses` if present must be > 0; `expires_in_seconds` if present must be > 0 |
-| `UpdateServiceRequest` | `ping_interval_seconds` if present must be 0 (sentinel: clear override) or ≥ 5 |
-| `CreateSoftwareIgnoreRequest` | `name` or `package_identifier` non-empty (after trim) depending on rule type |
+| Type                           | Key validations                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `RegisterRequest`              | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8–1024 chars            |
+| `LoginRequest`                 | email format, password non-empty                                                                     |
+| `CreateOidcProviderRequest`    | name non-empty, slug format (lowercase+digits+hyphens, 1–64), issuer_url scheme, client_id non-empty |
+| `UpdateScheduledTaskRequest`   | interval_seconds > 0, jitter_seconds >= 0                                                            |
+| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format                       |
+| `CreateSoftwareItemRequest`    | name non-empty, exactly one of plugin_config_id/plugin_config                                        |
+| `CreatePluginConfigRequest`    | name non-empty                                                                                       |
+| `CreateApiTokenRequest`        | `name` non-empty (after trim)                                                                        |
+| `CreateEnrollmentTokenRequest` | `name` non-empty; `max_uses` if present must be > 0; `expires_in_seconds` if present must be > 0     |
+| `UpdateServiceRequest`         | `ping_interval_seconds` if present must be 0 (sentinel: clear override) or ≥ 5                       |
+| `CreateSoftwareIgnoreRequest`  | `name` or `package_identifier` non-empty (after trim) depending on rule type                         |
 
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 
@@ -1223,12 +1223,12 @@ let Some(h) = hosts.get(&link.host_id) else { continue; };
 
 ### Anti-pattern table
 
-| Wrong | Right | Reason |
-| --- | --- | --- |
-| `Host::find().all(tenant_db.db())` | `tenant_db.find::<host::Entity>().all(tenant_db.db())` | No tenant filter applied |
-| `ServiceHost::find().all(tenant_db.db())` | `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(rel)` | Cross-tenant leak |
-| Per-item `Host::find_by_id(id).one(db)` inside a loop | Batch `find().filter(id.is_in(ids))` then in-memory lookup | N+1 queries |
-| `Entity::update_many().col_expr(...)` loop | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)` | N+1 updates |
+| Wrong                                                 | Right                                                                          | Reason                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------ |
+| `Host::find().all(tenant_db.db())`                    | `tenant_db.find::<host::Entity>().all(tenant_db.db())`                         | No tenant filter applied |
+| `ServiceHost::find().all(tenant_db.db())`             | `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(rel)` | Cross-tenant leak        |
+| Per-item `Host::find_by_id(id).one(db)` inside a loop | Batch `find().filter(id.is_in(ids))` then in-memory lookup                     | N+1 queries              |
+| `Entity::update_many().col_expr(...)` loop            | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)`           | N+1 updates              |
 
 See also: [Architecture — Multi-Tenancy](../architecture/multi-tenancy.md) and
 [Security — Secure Development](../security/secure-development.md).
@@ -1298,11 +1298,11 @@ comparison unconditionally constant-time regardless of input length differences.
 
 ### Anti-pattern table
 
-| Wrong | Right | Reason |
-| --- | --- | --- |
-| `provided != expected` | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak |
-| `provided == expected` | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak |
-| `subtle::ConstantTimeEq` directly on `&str` | Hash first, then `ct_eq` | Length difference leaks through variable-time `ct_eq` implementations |
+| Wrong                                       | Right                                        | Reason                                                                |
+| ------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------- |
+| `provided != expected`                      | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak                                             |
+| `provided == expected`                      | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak                                             |
+| `subtle::ConstantTimeEq` directly on `&str` | Hash first, then `ct_eq`                     | Length difference leaks through variable-time `ct_eq` implementations |
 
 See also: [Security — Secure Development](../security/secure-development.md).
 
@@ -1361,12 +1361,12 @@ in `uptrakit-shared-types`. Both `SecretString` and `MaskedEmail` follow this pa
 
 ### Required trait implementations
 
-| Trait | Purpose |
-| --- | --- |
-| `From<T> for sea_orm::Value` | Converts the wrapper into a `Value` for query binding |
-| `sea_orm::TryGetable` | Extracts the wrapper from a `QueryResult` row |
-| `sea_orm::sea_query::ValueType` | Declares the column type and provides `try_from(Value)` |
-| `sea_orm::sea_query::Nullable` | Provides the null `Value` representation for `Option<T>` columns |
+| Trait                           | Purpose                                                          |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `From<T> for sea_orm::Value`    | Converts the wrapper into a `Value` for query binding            |
+| `sea_orm::TryGetable`           | Extracts the wrapper from a `QueryResult` row                    |
+| `sea_orm::sea_query::ValueType` | Declares the column type and provides `try_from(Value)`          |
+| `sea_orm::sea_query::Nullable`  | Provides the null `Value` representation for `Option<T>` columns |
 
 ### Implementation template
 
@@ -1433,11 +1433,11 @@ mod sea_orm_impl {
 
 ### Existing custom types with SeaORM integration
 
-| Type | Crate | Entity usage |
-| --- | --- | --- |
-| `SecretString` | `uptrakit-shared-types` | `user.password_hash` |
-| `MaskedEmail` | `uptrakit-shared-types` | `user.email` |
-| `EncryptedString` | `uptrakit-shared-db` | `mqtt_client.password`, `oidc_provider.client_secret`, `ca_certificate.key_pem`, `ssh_host.private_key` |
+| Type              | Crate                   | Entity usage                                                                                            |
+| ----------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `SecretString`    | `uptrakit-shared-types` | `user.password_hash`                                                                                    |
+| `MaskedEmail`     | `uptrakit-shared-types` | `user.email`                                                                                            |
+| `EncryptedString` | `uptrakit-shared-db`    | `mqtt_client.password`, `oidc_provider.client_secret`, `ca_certificate.key_pem`, `ssh_host.private_key` |
 
 See also: [Secrets Handling and Encryption](../security/secrets-and-encryption.md) for security properties of `SecretString` and `MaskedEmail`.
 
@@ -1574,14 +1574,14 @@ Emit semantic audit entries for operations that:
 
 ### Required audit fields
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `action_type` | `AuditActionType` | Canonical action constant (for example `PLUGIN_CONFIG_UPDATE`) |
-| `outcome` | `AuditOutcome` | `Success`, `Denied`, `ValidationFailed`, `Failed`, or `Partial` |
-| Scope | `tenant_scope(...)` or `system_scope()` | Choose the correct audit table |
-| Actor | `actor(...)`, `actor_service(...)`, or `actor_system()` | Who performed the action |
-| Target | `target(...)` / `target_opt(...)` | Optional semantic target identity |
-| `details_json` | JSON (optional) | Minimal, non-secret metadata |
+| Field          | Type                                                    | Description                                                     |
+| :------------- | :------------------------------------------------------ | :-------------------------------------------------------------- |
+| `action_type`  | `AuditActionType`                                       | Canonical action constant (for example `PLUGIN_CONFIG_UPDATE`)  |
+| `outcome`      | `AuditOutcome`                                          | `Success`, `Denied`, `ValidationFailed`, `Failed`, or `Partial` |
+| Scope          | `tenant_scope(...)` or `system_scope()`                 | Choose the correct audit table                                  |
+| Actor          | `actor(...)`, `actor_service(...)`, or `actor_system()` | Who performed the action                                        |
+| Target         | `target(...)` / `target_opt(...)`                       | Optional semantic target identity                               |
+| `details_json` | JSON (optional)                                         | Minimal, non-secret metadata                                    |
 
 ### Example
 
@@ -1619,12 +1619,12 @@ target/level convention. `JournaldBackend` emits structured audit events to `upt
 Rust provides four visibility levels. Use the narrowest level that satisfies the actual
 call-site requirements:
 
-| Scope | Keyword | Use when |
-| --- | --- | --- |
-| Private (default) | *(none)* | Item is only used in the same module |
-| Crate-internal | `pub(crate)` | Item is used across modules/files **within the same crate** |
-| Parent module | `pub(super)` | Item is used only in the parent module |
-| Fully public | `pub` | Item crosses a **crate boundary** (called by another crate) |
+| Scope             | Keyword      | Use when                                                    |
+| ----------------- | ------------ | ----------------------------------------------------------- |
+| Private (default) | _(none)_     | Item is only used in the same module                        |
+| Crate-internal    | `pub(crate)` | Item is used across modules/files **within the same crate** |
+| Parent module     | `pub(super)` | Item is used only in the parent module                      |
+| Fully public      | `pub`        | Item crosses a **crate boundary** (called by another crate) |
 
 ### The `unreachable_pub` lint
 
