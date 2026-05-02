@@ -1011,7 +1011,7 @@ fn emit_proxmox_add_config_audit_event(
                 .get("name")
                 .and_then(|value| value.as_str())
                 .map(std::string::ToString::to_string)
-                .or(requested_name.clone());
+                .or_else(|| requested_name.clone());
             let plugin_type = result
                 .get("plugin_type")
                 .and_then(|value| value.as_str())
@@ -1179,12 +1179,12 @@ fn emit_proxmox_update_protection_audit_event(
                     .get("plugin_config_id")
                     .and_then(|value| value.as_str())
                     .map(std::string::ToString::to_string)
-                    .or(requested_plugin_config_id.clone()),
+                    .or_else(|| requested_plugin_config_id.clone()),
                 response
                     .get("plugin_config_id")
                     .and_then(|value| value.as_str())
                     .map(std::string::ToString::to_string)
-                    .or(requested_plugin_config_id.clone()),
+                    .or_else(|| requested_plugin_config_id.clone()),
             ),
             (ProxmoxUpdateProtectionAction::SaveGlobalDefaults, Err(error)) => {
                 let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
@@ -1204,12 +1204,12 @@ fn emit_proxmox_update_protection_audit_event(
                     .get("software_item_id")
                     .and_then(|value| value.as_str())
                     .map(std::string::ToString::to_string)
-                    .or(requested_software_item_id.clone()),
+                    .or_else(|| requested_software_item_id.clone()),
                 response
                     .get("plugin_config_id")
                     .and_then(|value| value.as_str())
                     .map(std::string::ToString::to_string)
-                    .or(requested_plugin_config_id.clone()),
+                    .or_else(|| requested_plugin_config_id.clone()),
             ),
             (ProxmoxUpdateProtectionAction::SaveItemOverrides, Err(error)) => {
                 let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
@@ -1363,13 +1363,13 @@ fn emit_notification_channel_audit_event(
                 .get("id")
                 .and_then(|value| value.as_str())
                 .map(std::string::ToString::to_string)
-                .or(requested_id.clone())
+                .or_else(|| requested_id.clone())
                 .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
             let target_display = response
                 .get("name")
                 .and_then(|value| value.as_str())
                 .map(std::string::ToString::to_string)
-                .or(requested_name.clone());
+                .or_else(|| requested_name.clone());
             (
                 uptrakit_audit_log::AuditOutcome::Success,
                 None,
