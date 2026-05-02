@@ -199,42 +199,42 @@ unfulfilled_lint_expectations = "deny"
 all = { level = "deny", priority = -1 }
 
 # Panic prevention
-unwrap_used = "warn"
-expect_used = "warn"
-get_unwrap = "warn"
-unwrap_in_result = "warn"
-panic = "warn"
-todo = "warn"
-unimplemented = "warn"
-unreachable = "warn"
-indexing_slicing = "warn"
-string_slice = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+get_unwrap = "deny"
+unwrap_in_result = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
 
 # Silent failure prevention
-map_err_ignore = "warn"
-let_underscore_future = "warn"
-let_underscore_must_use = "warn"
-unused_result_ok = "warn"
-assertions_on_result_states = "warn"
+map_err_ignore = "deny"
+let_underscore_future = "deny"
+let_underscore_must_use = "deny"
+unused_result_ok = "deny"
+assertions_on_result_states = "deny"
 
 # Async correctness
-large_futures = "warn"
+large_futures = "deny"
 
 # Memory and unsafe hygiene
-mem_forget = "warn"
-undocumented_unsafe_blocks = "warn"
-multiple_unsafe_ops_per_block = "warn"
+mem_forget = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
 
 # Numeric correctness
-float_cmp = "warn"
+float_cmp = "deny"
 
 # Suppression hygiene
-allow_attributes = "warn"
-allow_attributes_without_reason = "warn"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
 
 # Hygiene
-dbg_macro = "warn"
-rc_mutex = "warn"
+dbg_macro = "deny"
+rc_mutex = "deny"
 
 [profile.dev]
 # Reduce debug info to line tables only — backtraces still work,
