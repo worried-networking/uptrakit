@@ -133,6 +133,15 @@ pub struct PveTaskStatus {
     pub exitstatus: Option<String>,
 }
 
+/// A single log line from `GET /nodes/{node}/tasks/{upid}/log`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PveTaskLogEntry {
+    /// 0-based line number; monotonically increasing across pages.
+    pub n: u64,
+    /// Log line text (no trailing newline).
+    pub t: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +200,16 @@ mod tests {
         let resp: PveResponse<PveTaskStatus> = serde_json::from_str(json).expect("deserialize");
         assert_eq!(resp.data.status, "stopped");
         assert_eq!(resp.data.exitstatus.as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn deserialize_task_log() {
+        let json = r#"{"data":[{"n":0,"t":"INFO: starting"},{"n":1,"t":"INFO: done"}]}"#;
+        let resp: PveResponse<Vec<PveTaskLogEntry>> =
+            serde_json::from_str(json).expect("deserialize");
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].n, 0);
+        assert_eq!(resp.data[0].t, "INFO: starting");
+        assert_eq!(resp.data[1].n, 1);
     }
 }
