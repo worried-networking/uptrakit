@@ -374,11 +374,6 @@ pub fn navigate_json_path<'a>(
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::let_underscore_must_use,
-        reason = "test helper — ignoring Result from init_master_key which may already be initialized"
-    )]
-
     use super::*;
     use std::collections::HashMap;
 
@@ -506,7 +501,7 @@ mod tests {
         use uptrakit_crypto::{EncryptedString, init_master_key};
 
         // Ensure a test master key is set (no-op if already initialized).
-        let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        let _ignored = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let client_secret = EncryptedString::new(
             "test-secret".to_string(),
             "uptrakit:oidc_providers:client_secret",
