@@ -10,8 +10,9 @@ registration.
 
 **Architecture:** `FrameworkGenerationRange` holds two `FrameworkGeneration` fields, each two
 `u16` — all `Copy`. The struct is a pure value type with no heap allocation. Adding `Copy` to its
-derive list makes the `.clone()` at `registry.rs:836` implicit and allows the field to be used
-without moving. `cargo check` will surface any previously-hidden move errors.
+derive list allows direct field access without cloning; the explicit `.clone()` at `registry.rs:836`
+is then redundant and must be removed by hand (it still compiles — only Clippy flags it).
+`cargo check` will surface any previously-hidden move errors.
 
 **Tech Stack:** Rust, `crates/shared/surfaces`, `crates/ui/surface-proxy`
 
@@ -48,17 +49,10 @@ cargo check --all-features
 Expected: no errors. If any crate fails because it assumed `FrameworkGenerationRange` was not
 `Copy` (e.g. a move that now becomes a copy silently), the compiler will surface it here.
 
-- [ ] **Step 3: Verify the clone at registry.rs:836 is now implicit**
+- [ ] **Step 3: Remove the now-redundant .clone() at registry.rs:836**
 
-```sh
-grep -n 'supported_generation.*clone\|FrameworkGenerationRange.*clone' \
-    crates/ui/surface-proxy/src/registry.rs
-```
-
-The `.clone()` call at line 836 will still compile (calling `Clone::clone` on a `Copy` type is
-valid but redundant). Clippy will flag it as `clippy::clone_on_copy` — remove it in Step 4.
-
-- [ ] **Step 4: Remove the now-redundant .clone() at registry.rs:836**
+After adding `Copy`, calling `.clone()` on `FrameworkGenerationRange` still compiles — `rustc`
+does not warn about it. Only Clippy flags it as `clone_on_copy`. Remove it now by hand.
 
 In `crates/ui/surface-proxy/src/registry.rs`, replace:
 
@@ -81,7 +75,10 @@ with:
 Note: `required_capabilities` is `CapabilitySet(BTreeSet<Capability>)` — heap-allocated, not
 `Copy`. Its `.clone()` is unchanged.
 
-- [ ] **Step 5: Verify compilation**
+Alternatively, `cargo clippy --fix -p uptrakit-surface-proxy --all-features -- -A clippy::all -W clippy::clone_on_copy`
+will auto-remove it, but the manual edit above is simpler.
+
+- [ ] **Step 4: Verify compilation**
 
 ```sh
 cargo check --all-features
@@ -89,7 +86,7 @@ cargo check --all-features
 
 Expected: no errors.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```sh
 git add crates/shared/surfaces/src/surface.rs \

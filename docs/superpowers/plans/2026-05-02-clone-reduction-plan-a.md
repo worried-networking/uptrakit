@@ -153,9 +153,11 @@ with:
 
 - [ ] **Step 3: Apply changes to `batch_deactivate_services` (~line 797)**
 
-Replace:
+Replace the entire loop body:
 
 ```rust
+    // Deactivate each service in its own transaction so that individual
+    // failures don't block the rest of the batch.
     for (id, svc) in &found {
         if svc.is_embedded {
             failed.push((*id, "embedded services cannot be deactivated".to_string()));
@@ -168,11 +170,36 @@ Replace:
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
+
+        ServiceCertificate::update_many()
+            .col_expr(
+                service_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                service_certificate::Column::RevocationReason,
+                Expr::value(Some(RevocationReason::ServiceDeactivated)),
+            )
+            .filter(service_certificate::Column::ServiceId.eq(*id))
+            .filter(service_certificate::Column::RevokedAt.is_null())
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        crate::settings_version::bump_revocation_version(&txn, default_tenant_id)
+            .await
+            .map_err(|e| report!(ServiceQueryError::Db(e)))?;
+
+        txn.commit().await.context_to()?;
+        succeeded.push(*id);
+    }
 ```
 
 with:
 
 ```rust
+    // Deactivate each service in its own transaction so that individual
+    // failures don't block the rest of the batch.
     for (id, svc) in found {
         if svc.is_embedded {
             failed.push((id, "embedded services cannot be deactivated".to_string()));
@@ -185,9 +212,30 @@ with:
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
-```
 
-Also update the `succeeded.push(*id)` at the end of that loop body to `succeeded.push(id)`.
+        ServiceCertificate::update_many()
+            .col_expr(
+                service_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                service_certificate::Column::RevocationReason,
+                Expr::value(Some(RevocationReason::ServiceDeactivated)),
+            )
+            .filter(service_certificate::Column::ServiceId.eq(id))
+            .filter(service_certificate::Column::RevokedAt.is_null())
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        crate::settings_version::bump_revocation_version(&txn, default_tenant_id)
+            .await
+            .map_err(|e| report!(ServiceQueryError::Db(e)))?;
+
+        txn.commit().await.context_to()?;
+        succeeded.push(id);
+    }
+```
 
 - [ ] **Step 4: Verify compilation**
 
@@ -210,7 +258,7 @@ git commit -m "refactor(web-api-queries): consume service map by value in batch 
 
 **Files:**
 
-- Modify: `crates/ui/web-api-queries/src/queries/system_services.rs` (three sites ~398, 441, 488)
+- Modify: `crates/ui/web-api-queries/src/queries/system_services.rs` (three sites ~393, 436, 480)
 
 Same two-pass pattern as services.rs. `found` is not used after any loop.
 
@@ -286,7 +334,7 @@ with:
 
 - [ ] **Step 3: Apply change to `batch_deactivate_system_services` (~line 480)**
 
-Replace:
+Replace the entire loop body:
 
 ```rust
     for (id, svc) in &found {
@@ -301,6 +349,25 @@ Replace:
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
+
+        system_service_certificate::Entity::update_many()
+            .col_expr(
+                system_service_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                system_service_certificate::Column::RevocationReason,
+                Expr::value(Some(SystemRevocationReason::ServiceDeactivated)),
+            )
+            .filter(system_service_certificate::Column::SystemServiceId.eq(*id))
+            .filter(system_service_certificate::Column::RevokedAt.is_null())
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        txn.commit().await.context_to()?;
+        succeeded.push(*id);
+    }
 ```
 
 with:
@@ -318,9 +385,26 @@ with:
         active.deactivated_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(&txn).await.context_to()?;
-```
 
-Also update the `succeeded.push(*id)` at end of loop body to `succeeded.push(id)`.
+        system_service_certificate::Entity::update_many()
+            .col_expr(
+                system_service_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                system_service_certificate::Column::RevocationReason,
+                Expr::value(Some(SystemRevocationReason::ServiceDeactivated)),
+            )
+            .filter(system_service_certificate::Column::SystemServiceId.eq(id))
+            .filter(system_service_certificate::Column::RevokedAt.is_null())
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        txn.commit().await.context_to()?;
+        succeeded.push(id);
+    }
+```
 
 - [ ] **Step 4: Verify compilation**
 
@@ -478,7 +562,19 @@ cargo check -p uptrakit-web-api-queries --all-features
 
 Expected: no errors.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Mid-point cross-feature check**
+
+All consume-by-value changes in `web-api-queries` are complete after this task. Run the full
+workspace check under both feature sets before continuing:
+
+```sh
+cargo check --no-default-features --features db-sqlite
+cargo check --all-features
+```
+
+Expected: no errors. If any failure surfaces here, fix it before committing.
+
+- [ ] **Step 7: Commit**
 
 ```sh
 git add crates/ui/web-api-queries/src/queries/plugin_configs.rs \
