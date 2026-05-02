@@ -43,6 +43,9 @@ https_addr: "[::]:8443".parse().unwrap(),
 
 ## Lint Suppression
 
+Lint suppression is a last resort. Fix the code first; suppress only when the lint is a false
+positive or the fix would genuinely worsen readability or correctness.
+
 Use `#[expect(lint_name, reason = "...")]`, never `#[allow(lint_name)]`. The `reason` field is
 mandatory (`allow_attributes_without_reason = "deny"`). When the lint stops firing at a site,
 the `#[expect]` becomes a compile error via `unfulfilled_lint_expectations` (promoted to error by
@@ -65,19 +68,40 @@ When two lints fire on the same expression, list both in one attribute:
 let re = Regex::new(PATTERN).unwrap();
 ```
 
-**Feature-conditional sites** (where a lint fires only when a specific feature is disabled)
-cannot use `#[expect]` because the lint is unfulfilled under the other feature variant. Wrap
-them instead:
+**Feature-gated items** (struct fields, modules, `let` bindings that are unused when a feature is
+disabled) use `#[cfg_attr]` so the suppression only applies in the affected build variant:
 
 ```rust
-#[expect(
+pub(crate) struct Foo {
+    #[cfg_attr(
+        not(feature = "embedded"),
+        expect(dead_code, reason = "field only accessed when the embedded feature is enabled")
+    )]
+    handle: Arc<EmbeddedHandle>,
+}
+```
+
+**Feature-conditional expression sites** (where `#[expect]` would be unfulfilled under the
+opposing feature variant) cannot use `#[cfg_attr]`. Use a module-level `#![expect]` that covers
+the file-scoped `#[allow]`, keeping both `allow_attributes` and `allow_attributes_without_reason`
+in a single module-level attribute:
+
+```rust
+// top of file — explains the single #[allow] below
+#![expect(
     clippy::allow_attributes,
     clippy::allow_attributes_without_reason,
-    reason = "feature-conditional: unused_mut fires only when the nats feature is disabled"
+    reason = "feature-conditional: unused_mut fires only when the interactive feature is disabled"
 )]
-#[allow(unused_mut)]
-let mut x = ...;
+
+// …later in the file…
+#[allow(unused_mut)]         // no reason here; the module-level attribute documents it
+let mut handle = start(…);
 ```
+
+Do not mix a module-level `#![expect(clippy::allow_attributes)]` with a local
+`#[expect(clippy::allow_attributes)]` for the same `#[allow]` — Clippy counts the lint event
+once, so one of the two `#[expect]` attributes will be unfulfilled.
 
 ## Shared Contract Crates
 
