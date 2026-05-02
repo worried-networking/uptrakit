@@ -833,7 +833,7 @@ impl SurfaceRegistry {
         }
 
         if let Err(err) = registration.validate_against(&surfaces::SurfaceRegistrationPolicy {
-            supported_generation: self.config.supported_generation.clone(),
+            supported_generation: self.config.supported_generation,
             required_capabilities: self.config.required_capabilities.clone(),
         }) {
             let code = match err.code {
