@@ -200,7 +200,8 @@ export enum AdminEventType {
 	HostTagCreated = 'host_tag_created',
 	HostTagUpdated = 'host_tag_updated',
 	HostTagDeleted = 'host_tag_deleted',
-	HostTagsChanged = 'host_tags_changed'
+	HostTagsChanged = 'host_tags_changed',
+	SurfacesChanged = 'surfaces_changed'
 }
 
 /** Callbacks for the admin event SSE connection. */
