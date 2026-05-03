@@ -120,18 +120,17 @@ pub use host_runtime::{
 };
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 pub use roles::{
-    ControllerUpdateProtection, Discoverer, EmailSmtpSettings, EmailSmtpSettingsPatch,
-    EmailSmtpSettingsStore, ExecuteUpdateResult, LifecycleHook, NotificationActionTokenRecord,
-    NotificationChannelListItem, NotificationChannelListPage, NotificationChannelListRequest,
-    NotificationChannelStore, NotificationTransport, PackageIndexer, PluginMeta,
-    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
-    ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest,
-    ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest, ProxmoxMappingRequest,
-    ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord, ProxmoxProtectionMode,
-    ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore, ProxmoxScopeSelectionRequest,
-    ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest, ReleaseFetcher, SoftwareItemLifecycle,
-    SurfaceActionController, TelegramGlobalSettingsStore, UpdateExecutor,
-    UpdateProtectionController, VersionDetector,
+    ControllerUpdateProtection, Discoverer, ExecuteUpdateResult, LifecycleHook,
+    NotificationActionTokenRecord, NotificationChannelListItem, NotificationChannelListPage,
+    NotificationChannelListRequest, NotificationChannelStore, NotificationTransport,
+    PackageIndexer, PluginMeta, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
+    ProxmoxHostInfoRequest, ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest,
+    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest,
+    ProxmoxMappingRequest, ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord,
+    ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
+    ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
+    ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController, TelegramGlobalSettingsStore,
+    UpdateExecutor, UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};

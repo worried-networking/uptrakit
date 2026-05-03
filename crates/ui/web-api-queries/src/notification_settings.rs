@@ -1,194 +1,127 @@
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
-use uptrakit_plugin_infrastructure_registry::EmailSmtpSettings;
-
 const SMTP_PREFIX: &str = "smtp.";
 const GLOBAL_SMTP_PREFIX: &str = "global_smtp.";
 const GLOBAL_TELEGRAM_PREFIX: &str = "global_telegram.";
 const SMTP_PASSWORD_AAD: &str = "uptrakit:settings:smtp_password";
 const GLOBAL_SMTP_PASSWORD_AAD: &str = "uptrakit:settings:global_smtp_password";
 
+/// Build the settings bag consumed by notification plugin `deliver()` calls.
+///
+/// Returns `{ "tenant": { "smtp.*" -> val, ... }, "global": { ... } }`.
 pub async fn build_settings_bag(db: &DatabaseConnection, tenant_id: Uuid) -> serde_json::Value {
-    let tenant_smtp = typed_smtp_settings_or_empty(
-        {
-            let raw = uptrakit_shared_db::raw_settings::load_settings_by_prefix(
-                db,
-                tenant_id,
-                SMTP_PREFIX,
-            )
-            .await;
-            raw.and_then(|r| {
-                uptrakit_shared_db::raw_settings::decode_prefixed_settings(SMTP_PREFIX, &r)
-            })
-        },
-        "tenant",
-        Some(tenant_id),
-        SMTP_PASSWORD_AAD,
-    );
+    let tenant_map = load_smtp_map(db, tenant_id, SMTP_PREFIX, SMTP_PASSWORD_AAD).await;
+    let mut global_map =
+        load_global_smtp_map(db, GLOBAL_SMTP_PREFIX, GLOBAL_SMTP_PASSWORD_AAD).await;
 
-    let global_smtp = typed_smtp_settings_or_empty(
-        {
-            let raw = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
-                db,
-                GLOBAL_SMTP_PREFIX,
-            )
-            .await;
-            raw.and_then(|r| {
-                uptrakit_shared_db::raw_settings::decode_prefixed_settings(GLOBAL_SMTP_PREFIX, &r)
-            })
-        },
-        "global",
-        None,
-        GLOBAL_SMTP_PASSWORD_AAD,
-    );
-
-    let global_telegram = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
+    match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
         db,
         GLOBAL_TELEGRAM_PREFIX,
     )
     .await
-    .unwrap_or_default();
-
-    let mut global = smtp_settings_to_prefixed_map(GLOBAL_SMTP_PREFIX, &global_smtp);
-    for (k, v) in &global_telegram {
-        global.insert(k.clone(), v.clone());
+    {
+        Ok(r) => {
+            for (k, v) in r {
+                global_map.insert(k, v);
+            }
+        }
+        Err(e) => tracing::warn!(error = ?e, "failed to load global Telegram settings"),
     }
 
-    let tenant_map = smtp_settings_to_prefixed_map(SMTP_PREFIX, &tenant_smtp);
-
-    serde_json::json!({ "tenant": tenant_map, "global": global })
+    serde_json::json!({ "tenant": tenant_map, "global": global_map })
 }
 
-fn typed_smtp_settings_or_empty(
-    result: uptrakit_shared_db::raw_settings::Result<EmailSmtpSettings>,
+async fn load_smtp_map(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    prefix: &str,
+    password_aad: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    let raw = match uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, prefix)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                error = ?e, %tenant_id,
+                "failed to load tenant SMTP settings; using empty"
+            );
+            return serde_json::Map::new();
+        }
+    };
+    smtp_raw_to_json_map(raw, password_aad, "tenant", Some(tenant_id))
+}
+
+async fn load_global_smtp_map(
+    db: &DatabaseConnection,
+    prefix: &str,
+    password_aad: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    let raw =
+        match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = ?e, "failed to load global SMTP settings; using empty");
+                return serde_json::Map::new();
+            }
+        };
+    smtp_raw_to_json_map(raw, password_aad, "global", None)
+}
+
+fn smtp_raw_to_json_map(
+    raw: std::collections::HashMap<String, serde_json::Value>,
+    password_aad: &str,
     scope: &'static str,
     tenant_id: Option<Uuid>,
-    password_aad: &str,
-) -> EmailSmtpSettings {
-    match result {
-        Ok(settings) => normalize_smtp_settings(settings, password_aad, scope, tenant_id),
-        Err(error) => {
-            if let Some(tenant_id) = tenant_id {
-                tracing::warn!(
-                    error = ?error,
-                    %tenant_id,
-                    scope,
-                    "failed to load typed SMTP settings for notification dispatch; using empty fallback"
-                );
-            } else {
-                tracing::warn!(
-                    error = ?error,
-                    scope,
-                    "failed to load typed SMTP settings for notification dispatch; using empty fallback"
-                );
-            }
-            EmailSmtpSettings::default()
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for (k, v) in raw {
+        if let serde_json::Value::String(s) = &v
+            && s.is_empty()
+        {
+            continue;
+        }
+        let value = if k.ends_with(".password") {
+            let raw_str = match &v {
+                serde_json::Value::String(s) => s.clone(),
+                _ => continue,
+            };
+            decrypt_password_value(raw_str, password_aad, scope, tenant_id)
+                .map(serde_json::Value::String)
+        } else {
+            Some(v)
+        };
+        if let Some(value) = value {
+            map.insert(k, value);
         }
     }
+    map
 }
 
-fn normalize_smtp_settings(
-    settings: EmailSmtpSettings,
-    password_aad: &str,
-    scope: &'static str,
-    tenant_id: Option<Uuid>,
-) -> EmailSmtpSettings {
-    EmailSmtpSettings {
-        host: normalize_non_empty_string(settings.host),
-        port: settings.port,
-        username: normalize_non_empty_string(settings.username),
-        password: decode_smtp_password(settings.password, password_aad, scope, tenant_id),
-        from_address: normalize_non_empty_string(settings.from_address),
-        from_name: normalize_non_empty_string(settings.from_name),
-        tls_mode: normalize_non_empty_string(settings.tls_mode),
-        helo_host: normalize_non_empty_string(settings.helo_host),
-    }
-}
-
-fn normalize_non_empty_string(value: Option<String>) -> Option<String> {
-    value.filter(|value| !value.is_empty())
-}
-
-fn decode_smtp_password(
-    value: Option<String>,
+fn decrypt_password_value(
+    raw: String,
     aad: &str,
     scope: &'static str,
     tenant_id: Option<Uuid>,
 ) -> Option<String> {
-    let raw = normalize_non_empty_string(value)?;
-
-    if uptrakit_crypto::is_encrypted(&raw) {
-        return match uptrakit_crypto::decrypt_str(&raw, aad) {
-            Ok(value) => normalize_non_empty_string(Some(value)),
-            Err(error) => {
-                if let Some(tenant_id) = tenant_id {
-                    tracing::warn!(
-                        error = ?error,
-                        %tenant_id,
-                        scope,
-                        "failed to decrypt SMTP password for notification dispatch; using empty fallback"
-                    );
-                } else {
-                    tracing::warn!(
-                        error = ?error,
-                        scope,
-                        "failed to decrypt SMTP password for notification dispatch; using empty fallback"
-                    );
-                }
-                None
+    if !uptrakit_crypto::is_encrypted(&raw) {
+        return if raw.is_empty() { None } else { Some(raw) };
+    }
+    match uptrakit_crypto::decrypt_str(&raw, aad) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => Some(v),
+        Err(e) => {
+            if let Some(tid) = tenant_id {
+                tracing::warn!(
+                    error = ?e, %tid, scope,
+                    "failed to decrypt SMTP password; using empty"
+                );
+            } else {
+                tracing::warn!(error = ?e, scope, "failed to decrypt SMTP password; using empty");
             }
-        };
-    }
-
-    Some(raw)
-}
-
-fn smtp_settings_to_prefixed_map(
-    prefix: &str,
-    settings: &EmailSmtpSettings,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::new();
-
-    insert_prefixed_string(&mut map, prefix, "host", settings.host.as_deref());
-    insert_prefixed_u16(&mut map, prefix, "port", settings.port);
-    insert_prefixed_string(&mut map, prefix, "username", settings.username.as_deref());
-    insert_prefixed_string(&mut map, prefix, "password", settings.password.as_deref());
-    insert_prefixed_string(
-        &mut map,
-        prefix,
-        "from_address",
-        settings.from_address.as_deref(),
-    );
-    insert_prefixed_string(&mut map, prefix, "from_name", settings.from_name.as_deref());
-    insert_prefixed_string(&mut map, prefix, "tls_mode", settings.tls_mode.as_deref());
-    insert_prefixed_string(&mut map, prefix, "helo_host", settings.helo_host.as_deref());
-
-    map
-}
-
-fn insert_prefixed_string(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    prefix: &str,
-    suffix: &str,
-    value: Option<&str>,
-) {
-    if let Some(value) = value {
-        map.insert(
-            format!("{prefix}{suffix}"),
-            serde_json::Value::String(value.to_string()),
-        );
-    }
-}
-
-fn insert_prefixed_u16(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    prefix: &str,
-    suffix: &str,
-    value: Option<u16>,
-) {
-    if let Some(value) = value {
-        map.insert(format!("{prefix}{suffix}"), serde_json::json!(value));
+            None
+        }
     }
 }
 
@@ -197,17 +130,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn typed_smtp_settings_or_empty_returns_default_on_load_error() {
-        let tenant_id = Uuid::now_v7();
-        let settings = typed_smtp_settings_or_empty(
-            Err(rootcause::report!(
-                uptrakit_shared_db::raw_settings::RawSettingsError::Decode("boom".into())
-            )),
-            "tenant",
-            Some(tenant_id),
-            SMTP_PASSWORD_AAD,
+    fn decrypt_password_value_returns_plaintext_for_non_encrypted_values() {
+        assert_eq!(
+            decrypt_password_value("plain-secret".to_string(), "unused", "tenant", None),
+            Some("plain-secret".to_string())
         );
+    }
 
-        assert_eq!(settings, EmailSmtpSettings::default());
+    #[test]
+    fn decrypt_password_value_returns_none_for_empty_plaintext() {
+        assert_eq!(
+            decrypt_password_value(String::new(), "unused", "tenant", None),
+            None
+        );
+    }
+
+    #[test]
+    fn smtp_raw_to_json_map_skips_empty_strings() {
+        let mut raw = std::collections::HashMap::new();
+        raw.insert(
+            "smtp.host".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+        raw.insert("smtp.port".to_string(), serde_json::json!(587_u64));
+        let map = smtp_raw_to_json_map(raw, "unused", "tenant", None);
+        assert!(
+            !map.contains_key("smtp.host"),
+            "empty host should be skipped"
+        );
+        assert!(
+            map.contains_key("smtp.port"),
+            "non-empty port should be kept"
+        );
     }
 }
