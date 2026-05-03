@@ -91,6 +91,7 @@ pub struct AppStateSurfaceActionController<'a> {
     plugin_ops: &'a dyn PluginOps,
     tenant_id: Uuid,
     caller_user_id: Option<Uuid>,
+    tenant_db: uptrakit_shared_db::TenantDb,
 }
 
 impl<'a> AppStateSurfaceActionController<'a> {
@@ -105,6 +106,7 @@ impl<'a> AppStateSurfaceActionController<'a> {
             plugin_ops,
             tenant_id,
             caller_user_id,
+            tenant_db: uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id),
         }
     }
 
@@ -120,6 +122,10 @@ impl SurfaceActionController for AppStateSurfaceActionController<'_> {
 
     fn user_id(&self) -> Option<Uuid> {
         self.caller_user_id
+    }
+
+    fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
+        &self.tenant_db
     }
 
     fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
