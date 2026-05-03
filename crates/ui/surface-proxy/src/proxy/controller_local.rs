@@ -1,20 +1,17 @@
 use super::SurfaceProxyError;
 use async_trait::async_trait;
 use rootcause::report;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_registry::{
-    DockerSurfaceStore, EmailSmtpSettingsStore, NotificationActionTokenRecord,
-    NotificationChannelListItem, NotificationChannelListPage, NotificationChannelListRequest,
-    NotificationChannelStore, PluginError, PluginOps, ProxmoxApproveMatchRequest,
-    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingsRequest,
-    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest,
-    ProxmoxMappingRequest, ProxmoxPluginConfigRequest, ProxmoxScopeSelectionRequest,
-    ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest, SurfaceActionController,
-    SurfaceActionError, TelegramGlobalSettingsStore, execute_proxmox_controller_approve_match,
+    EmailSmtpSettingsStore, NotificationActionTokenRecord, NotificationChannelListItem,
+    NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
+    PluginError, PluginOps, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
+    ProxmoxHostInfoRequest, ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest,
+    ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest, ProxmoxMappingRequest,
+    ProxmoxPluginConfigRequest, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
+    ProxmoxUnmatchedGuestsRequest, SurfaceActionController, SurfaceActionError,
+    TelegramGlobalSettingsStore, execute_proxmox_controller_approve_match,
     execute_proxmox_controller_discover_hosts, execute_proxmox_controller_get_host_info,
     execute_proxmox_controller_list_all_unmatched, execute_proxmox_controller_list_host_mappings,
     execute_proxmox_controller_load_backup_target_options, execute_proxmox_controller_manual_match,
@@ -25,12 +22,6 @@ use uptrakit_plugin_infrastructure_registry::{
     execute_proxmox_controller_unmatch_host,
 };
 use uuid::Uuid;
-
-/// Docker releases plugin type identifier — used as a DB filter value when querying
-/// plugin assignments specific to the Docker releases plugin. Defined at module scope
-/// so it does not appear as a literal in filter-expression contexts where the
-/// `Column::PluginType` reference would trigger the plugin-type identity check.
-const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
 
 mod docker;
 mod notification_settings;
@@ -137,10 +128,6 @@ impl SurfaceActionController for AppStateSurfaceActionController<'_> {
     }
 
     fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
-        Some(self)
-    }
-
-    fn docker_surface_store(&self) -> Option<&dyn DockerSurfaceStore> {
         Some(self)
     }
 
@@ -251,112 +238,6 @@ impl NotificationChannelStore for AppStateSurfaceActionController<'_> {
             .exec(self.db())
             .await
             .map_err(plugin_internal_error)?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl DockerSurfaceStore for AppStateSurfaceActionController<'_> {
-    async fn load_current_image_ref(
-        &self,
-        host_id: Uuid,
-        software_item_id: Uuid,
-    ) -> uptrakit_plugin_infrastructure_registry::PluginResult<String> {
-        use uptrakit_shared_db::entity::host_software_item_plugin;
-
-        let plugin_rows = host_software_item_plugin::Entity::find()
-            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-            .filter(host_software_item_plugin::Column::PluginType.eq(DOCKER_RELEASES_CONFIG_TYPE))
-            .all(self.db())
-            .await
-            .map_err(plugin_internal_error)?;
-
-        Ok(plugin_rows
-            .into_iter()
-            .next()
-            .map(|row| strip_container_suffix(&row.package_identifier))
-            .unwrap_or_default())
-    }
-
-    async fn switch_image_ref(
-        &self,
-        host_id: Uuid,
-        software_item_id: Uuid,
-        new_image_ref: String,
-    ) -> uptrakit_plugin_infrastructure_registry::PluginResult<()> {
-        use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
-
-        let plugin_rows = host_software_item_plugin::Entity::find()
-            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-            .all(self.db())
-            .await
-            .map_err(|e| {
-                plugin_internal_error(format!("database error loading plugin rows: {e}"))
-            })?;
-
-        if plugin_rows.is_empty() {
-            return Err(plugin_internal_error(
-                "no plugin assignments found for this host",
-            ));
-        }
-
-        let hsi_row = host_software_item::Entity::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
-            .one(self.db())
-            .await
-            .map_err(|e| {
-                plugin_internal_error(format!("database error loading host_software_item: {e}"))
-            })?
-            .ok_or_else(|| {
-                plugin_internal_error(format!(
-                    "host_software_item not found for host {host_id} / item {software_item_id}"
-                ))
-            })?;
-
-        let txn = self
-            .db()
-            .begin()
-            .await
-            .map_err(|e| plugin_internal_error(format!("failed to begin transaction: {e}")))?;
-
-        for row in plugin_rows {
-            if row.plugin_type != DOCKER_RELEASES_CONFIG_TYPE {
-                continue;
-            }
-
-            let new_pkg_id = match extract_container_suffix(&row.package_identifier) {
-                Some(container) => format!("{new_image_ref}#{container}"),
-                None => new_image_ref.clone(),
-            };
-
-            let mut active: host_software_item_plugin::ActiveModel = row.into();
-            active.package_identifier = Set(new_pkg_id);
-            active
-                .update(&txn)
-                .await
-                .map_err(|e| plugin_internal_error(format!("failed to update plugin row: {e}")))?;
-        }
-
-        let mut hsi_active: host_software_item::ActiveModel = hsi_row.into();
-        hsi_active.package_identifier = Set(Some(new_image_ref));
-        hsi_active.installed_version = Set(None);
-        hsi_active.installed_display_version = Set(None);
-        hsi_active.installed_version_detected_at = Set(None);
-        hsi_active.latest_version = Set(None);
-        hsi_active.latest_version_fetched_at = Set(None);
-        hsi_active.latest_release_metadata = Set(None);
-        hsi_active.update_category = Set("unknown".to_string());
-        hsi_active.update(&txn).await.map_err(|e| {
-            plugin_internal_error(format!("failed to update host_software_item: {e}"))
-        })?;
-
-        txn.commit()
-            .await
-            .map_err(|e| plugin_internal_error(format!("failed to commit transaction: {e}")))?;
-
         Ok(())
     }
 }
@@ -484,23 +365,4 @@ impl ProxmoxSurfaceStore for AppStateSurfaceActionController<'_> {
         .await
         .map_err(plugin_internal_error)
     }
-}
-
-fn strip_container_suffix(id: &str) -> String {
-    match id.find('#') {
-        #[expect(
-            clippy::string_slice,
-            reason = "`pos` from str::find is on a char boundary"
-        )]
-        Some(pos) => id[..pos].to_string(),
-        None => id.to_string(),
-    }
-}
-
-fn extract_container_suffix(id: &str) -> Option<&str> {
-    #[expect(
-        clippy::string_slice,
-        reason = "`pos` from str::find is on a char boundary; `pos + 1` advances past the ASCII '#'"
-    )]
-    id.find('#').map(|pos| &id[pos + 1..])
 }

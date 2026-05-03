@@ -22,8 +22,7 @@ pub use registry::{
 // Re-export commonly used types for convenience
 pub use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
-    ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
-    DockerItemHostRequest, DockerSurfaceStore, DockerSwitchTagRequest, EmailSmtpSettings,
+    ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection, EmailSmtpSettings,
     EmailSmtpSettingsPatch, EmailSmtpSettingsStore, GlobalProviderLookup, HostRuntime,
     MetadataAwareHostRuntime, NotificationActionTokenRecord, NotificationChannelListItem,
     NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
