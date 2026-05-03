@@ -149,6 +149,18 @@ mod tests {
     }
 
     #[test]
+    fn sse_data_surfaces_changed_emits_empty_object() {
+        let event = AdminEvent::SurfacesChanged;
+        let data = extract_sse_data(&event);
+        assert!(data.is_object(), "expected object, got: {data}");
+        assert_eq!(
+            data.as_object().map(|m| m.len()).unwrap_or(1),
+            0,
+            "expected empty object: {data}"
+        );
+    }
+
+    #[test]
     fn sse_data_update_triggered_exposes_inner_fields() {
         let id = Uuid::nil();
         let event = AdminEvent::UpdateTriggered {
