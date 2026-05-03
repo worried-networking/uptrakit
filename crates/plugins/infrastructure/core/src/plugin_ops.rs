@@ -17,6 +17,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use async_trait::async_trait;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uptrakit_surfaces as surfaces;
 
@@ -52,6 +53,29 @@ pub enum PluginOpsError {
 
 /// Result type for plugin operations.
 pub type Result<T> = std::result::Result<T, rootcause::Report<PluginOpsError>>;
+
+// ── TransactionalEmailError ──────────────────────────────────────────────────
+
+/// Error type for transactional email delivery via `NotificationOps::send_transactional_email`.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum TransactionalEmailError {
+    /// No SMTP transport is configured for this tenant.
+    NotConfigured,
+    /// Delivery was attempted but failed.
+    DeliveryFailed(String),
+}
+
+impl std::fmt::Display for TransactionalEmailError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotConfigured => write!(f, "email transport not configured"),
+            Self::DeliveryFailed(msg) => write!(f, "email delivery failed: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for TransactionalEmailError {}
 
 // ── Trait 1: PluginMetadataOps ──────────────────────────────────────────────
 
@@ -287,12 +311,30 @@ pub trait PluginSurfaceOps: Send + Sync + 'static {
 // ── Trait 5: NotificationOps ────────────────────────────────────────────────
 
 /// Notification transport lookup.
+#[async_trait]
 pub trait NotificationOps: Send + Sync + 'static {
     /// Look up a notification transport by plugin type ID.
     fn transport(&self, id: &PluginTypeId) -> Option<std::sync::Arc<dyn NotificationTransport>>;
 
     /// All supported notification transport type IDs.
     fn notification_supported_types(&self) -> Vec<PluginTypeId>;
+
+    /// Send a transactional email to a single recipient using the tenant's SMTP transport.
+    ///
+    /// Returns `Err(TransactionalEmailError::NotConfigured)` by default when the
+    /// email feature is not enabled or no transport is available.
+    #[cfg(feature = "plugin-ops")]
+    async fn send_transactional_email(
+        &self,
+        tenant_db: &uptrakit_tenant_db::TenantDb,
+        to: &str,
+        subject: &str,
+        text_body: &str,
+        html_body: &str,
+    ) -> std::result::Result<(), TransactionalEmailError> {
+        let _ = (tenant_db, to, subject, text_body, html_body);
+        Err(TransactionalEmailError::NotConfigured)
+    }
 }
 
 // ── Trait 6: SoftwareItemLifecycleOps ───────────────────────────────────────

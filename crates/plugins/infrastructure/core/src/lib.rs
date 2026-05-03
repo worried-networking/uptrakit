@@ -54,6 +54,7 @@ pub use version::Version;
 pub use plugin_ops::{
     ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps,
     PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    TransactionalEmailError,
 };
 
 // Catalog (feature-gated)

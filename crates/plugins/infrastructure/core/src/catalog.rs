@@ -284,6 +284,7 @@ impl PluginSurfaceOps for PluginCatalog {
     }
 }
 
+#[async_trait::async_trait]
 impl NotificationOps for PluginCatalog {
     fn transport(&self, id: &PluginTypeId) -> Option<Arc<dyn NotificationTransport>> {
         self.transports.get(id.as_str()).cloned()
