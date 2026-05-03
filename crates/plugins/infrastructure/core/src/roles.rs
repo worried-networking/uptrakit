@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
@@ -241,139 +241,6 @@ pub trait NotificationTransport: PluginMeta {
     ) -> uptrakit_notification_plugin_core::Result<()>;
 }
 
-/// Typed list request for paginated Proxmox host mappings.
-///
-/// `plugin_config_id` is optional: when absent, mappings for all Proxmox
-/// configurations belonging to the tenant are returned.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxHostMappingsRequest {
-    pub plugin_config_id: Option<Uuid>,
-    pub page: Option<u64>,
-    pub per_page: Option<u64>,
-}
-
-/// Typed config-scoped Proxmox action request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxPluginConfigRequest {
-    pub plugin_config_id: Uuid,
-}
-
-/// Typed manual-match request for Proxmox host mappings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxManualMatchRequest {
-    pub mapping_id: Uuid,
-    pub host_id: Uuid,
-}
-
-/// Typed approve-match request for Proxmox host mappings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxApproveMatchRequest {
-    pub mapping_id: Uuid,
-    pub host_id: Uuid,
-    pub match_method: String,
-}
-
-/// Typed mapping-targeted Proxmox action request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxMappingRequest {
-    pub mapping_id: Uuid,
-}
-
-/// Typed host-targeted Proxmox action request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxHostInfoRequest {
-    pub host_id: Uuid,
-}
-
-/// Typed list request for unmatched Proxmox guests.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxUnmatchedGuestsRequest {
-    pub page: Option<u64>,
-    pub per_page: Option<u64>,
-}
-
-/// Typed scope selector for Proxmox policy UI actions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ProxmoxScopeSelectionRequest {
-    pub plugin_config_id: Option<Uuid>,
-    pub software_item_id: Option<Uuid>,
-}
-
-/// Typed preload request for Proxmox software-item overrides.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxItemOverridePreloadRequest {
-    pub software_item_id: Uuid,
-    pub plugin_config_id: Option<Uuid>,
-}
-
-/// Typed save request for Proxmox global-default policies.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxGlobalDefaultsSaveRequest {
-    pub plugin_config_id: Uuid,
-    pub mode: String,
-    pub backup_target_option: Option<String>,
-    pub snapshot_timeout_seconds: Option<i64>,
-    pub backup_timeout_seconds: Option<i64>,
-}
-
-/// Typed save request for Proxmox software-item override policies.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProxmoxItemOverrideSaveRequest {
-    pub software_item_id: Uuid,
-    pub plugin_config_id: Uuid,
-    pub mode: String,
-    pub backup_target_option: Option<String>,
-    pub snapshot_timeout_seconds: Option<i64>,
-    pub backup_timeout_seconds: Option<i64>,
-}
-
-/// Typed Proxmox surface-action boundary for host-mapping and policy UI actions.
-#[async_trait]
-pub trait ProxmoxSurfaceStore: Send + Sync {
-    async fn list_host_mappings(
-        &self,
-        request: ProxmoxHostMappingsRequest,
-    ) -> Result<serde_json::Value>;
-    async fn discover_hosts(
-        &self,
-        request: ProxmoxPluginConfigRequest,
-    ) -> Result<serde_json::Value>;
-    async fn test_connection(
-        &self,
-        request: ProxmoxPluginConfigRequest,
-    ) -> Result<serde_json::Value>;
-    async fn match_host(&self, request: ProxmoxManualMatchRequest) -> Result<serde_json::Value>;
-    async fn approve_match(&self, request: ProxmoxApproveMatchRequest)
-    -> Result<serde_json::Value>;
-    async fn unmatch_host(&self, request: ProxmoxMappingRequest) -> Result<serde_json::Value>;
-    async fn list_all_unmatched(
-        &self,
-        request: ProxmoxUnmatchedGuestsRequest,
-    ) -> Result<serde_json::Value>;
-    async fn get_host_info(&self, request: ProxmoxHostInfoRequest) -> Result<serde_json::Value>;
-
-    async fn preload_global_defaults(
-        &self,
-        request: ProxmoxScopeSelectionRequest,
-    ) -> Result<serde_json::Value>;
-    async fn save_global_defaults(
-        &self,
-        request: ProxmoxGlobalDefaultsSaveRequest,
-    ) -> Result<serde_json::Value>;
-    async fn preload_item_overrides(
-        &self,
-        request: ProxmoxItemOverridePreloadRequest,
-    ) -> Result<serde_json::Value>;
-    async fn save_item_overrides(
-        &self,
-        request: ProxmoxItemOverrideSaveRequest,
-    ) -> Result<serde_json::Value>;
-    async fn load_backup_target_options(
-        &self,
-        request: ProxmoxScopeSelectionRequest,
-    ) -> Result<serde_json::Value>;
-}
-
 /// Typed Proxmox host mapping required by update-protection workflows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxmoxHostMappingRecord {
@@ -477,11 +344,6 @@ pub trait SurfaceActionController: Send + Sync {
     /// Only available when the `plugin-ops` feature is active.
     #[cfg(feature = "plugin-ops")]
     fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
-
-    /// Proxmox host/policy surface-actions capability.
-    fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
-        None
-    }
 
     /// Proxmox update-protection persistence capability.
     fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
@@ -864,7 +726,6 @@ mod execute_update_result_tests {
 mod controller_boundary_tests {
     use super::*;
 
-    struct TestProxmoxSurfaceStore;
     struct TestProxmoxStore;
 
     #[async_trait]
@@ -914,101 +775,9 @@ mod controller_boundary_tests {
         }
     }
 
-    #[async_trait]
-    impl ProxmoxSurfaceStore for TestProxmoxSurfaceStore {
-        async fn list_host_mappings(
-            &self,
-            _request: ProxmoxHostMappingsRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "items": [] }))
-        }
-
-        async fn discover_hosts(
-            &self,
-            _request: ProxmoxPluginConfigRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "discovered": 0 }))
-        }
-
-        async fn test_connection(
-            &self,
-            _request: ProxmoxPluginConfigRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn match_host(
-            &self,
-            _request: ProxmoxManualMatchRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn approve_match(
-            &self,
-            _request: ProxmoxApproveMatchRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn unmatch_host(&self, _request: ProxmoxMappingRequest) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn list_all_unmatched(
-            &self,
-            _request: ProxmoxUnmatchedGuestsRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "items": [] }))
-        }
-
-        async fn get_host_info(
-            &self,
-            _request: ProxmoxHostInfoRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "linked": false }))
-        }
-
-        async fn preload_global_defaults(
-            &self,
-            _request: ProxmoxScopeSelectionRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "mode": "do_nothing" }))
-        }
-
-        async fn save_global_defaults(
-            &self,
-            _request: ProxmoxGlobalDefaultsSaveRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn preload_item_overrides(
-            &self,
-            _request: ProxmoxItemOverridePreloadRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "mode": "inherit_global" }))
-        }
-
-        async fn save_item_overrides(
-            &self,
-            _request: ProxmoxItemOverrideSaveRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "success": true }))
-        }
-
-        async fn load_backup_target_options(
-            &self,
-            _request: ProxmoxScopeSelectionRequest,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({ "options": [] }))
-        }
-    }
-
     struct TestController {
         tenant_id: Uuid,
         user_id: Option<Uuid>,
-        proxmox_surface_store: TestProxmoxSurfaceStore,
         proxmox_store: TestProxmoxStore,
     }
 
@@ -1027,10 +796,6 @@ mod controller_boundary_tests {
         )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs surface action tests")
-        }
-
-        fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
-            Some(&self.proxmox_surface_store)
         }
 
         fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
@@ -1053,15 +818,13 @@ mod controller_boundary_tests {
     }
 
     #[tokio::test]
-    async fn controller_capabilities_expose_first_wave_stores() {
+    async fn controller_capabilities_expose_protection_stores() {
         let controller = TestController {
             tenant_id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
-            proxmox_surface_store: TestProxmoxSurfaceStore,
             proxmox_store: TestProxmoxStore,
         };
 
-        assert!(controller.proxmox_surface_store().is_some());
         assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
         assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());
     }

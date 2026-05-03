@@ -17,12 +17,8 @@ use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
     ApiSubmitDescriptor, FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor,
-    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
-    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
-    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
-    ProxmoxScopeSelectionRequest, ProxmoxUnmatchedGuestsRequest, SurfaceActionContext,
-    SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
-    SurfaceRowCondition,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi,
+    SurfaceFormDescriptor, SurfaceRowCondition,
 };
 use uptrakit_shared_types::Permission;
 
@@ -33,6 +29,80 @@ use crate::policy_store::{
     list_cached_backup_targets, load_global_default, load_item_override, upsert_global_default,
     upsert_item_override,
 };
+
+// ── Request types (moved from plugin-infrastructure-core) ────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxHostMappingsRequest {
+    pub plugin_config_id: Option<uuid::Uuid>,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxPluginConfigRequest {
+    pub plugin_config_id: uuid::Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxManualMatchRequest {
+    pub mapping_id: uuid::Uuid,
+    pub host_id: uuid::Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxApproveMatchRequest {
+    pub mapping_id: uuid::Uuid,
+    pub host_id: uuid::Uuid,
+    pub match_method: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxMappingRequest {
+    pub mapping_id: uuid::Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxHostInfoRequest {
+    pub host_id: uuid::Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxUnmatchedGuestsRequest {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxScopeSelectionRequest {
+    pub plugin_config_id: Option<uuid::Uuid>,
+    pub software_item_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxItemOverridePreloadRequest {
+    pub software_item_id: uuid::Uuid,
+    pub plugin_config_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxGlobalDefaultsSaveRequest {
+    pub plugin_config_id: uuid::Uuid,
+    pub mode: String,
+    pub backup_target_option: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProxmoxItemOverrideSaveRequest {
+    pub software_item_id: uuid::Uuid,
+    pub plugin_config_id: uuid::Uuid,
+    pub mode: String,
+    pub backup_target_option: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
+}
 
 const SURFACE_SETTINGS_UPDATE_PROTECTION: &str = "proxmox.settings.update-protection";
 const SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION: &str = "proxmox.software-item.update-protection";
@@ -287,113 +357,14 @@ async fn handle_action_inner(
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     tracing::debug!("dispatching Proxmox surface action");
-
-    let store = require_proxmox_surface_store(ctx)?;
-
-    let Some(route) = resolve_controller_surface_action(surface_id, action_id) else {
-        return Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        )));
-    };
-
-    let result = match route {
-        ControllerSurfaceAction::ListHostMappings => store
-            .list_host_mappings(parse_action_params::<ProxmoxHostMappingsRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::DiscoverHosts => store
-            .discover_hosts(parse_action_params::<ProxmoxPluginConfigRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::TestConnection => store
-            .test_connection(parse_action_params::<ProxmoxPluginConfigRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::MatchHost => store
-            .match_host(parse_action_params::<ProxmoxManualMatchRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::ApproveMatch => store
-            .approve_match(parse_approve_match_request(params)?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::UnmatchHost => store
-            .unmatch_host(parse_action_params::<ProxmoxMappingRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::ListAllUnmatched => store
-            .list_all_unmatched(parse_action_params::<ProxmoxUnmatchedGuestsRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::GetHostInfo => store
-            .get_host_info(parse_action_params::<ProxmoxHostInfoRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::PreloadGlobalDefaults => store
-            .preload_global_defaults(parse_action_params::<ProxmoxScopeSelectionRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::SaveGlobalDefaults => store
-            .save_global_defaults(parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::LoadBackupTargetOptions => store
-            .load_backup_target_options(parse_action_params::<ProxmoxScopeSelectionRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::PreloadItemOverrides => store
-            .preload_item_overrides(parse_action_params::<ProxmoxItemOverridePreloadRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-        ControllerSurfaceAction::SaveItemOverrides => store
-            .save_item_overrides(parse_action_params::<ProxmoxItemOverrideSaveRequest>(
-                params, action_id,
-            )?)
-            .await
-            .map_err(map_store_error),
-    };
-
-    match &result {
-        Ok(_) => tracing::debug!("Proxmox surface action succeeded"),
-        Err(e) => tracing::warn!(error = %e, "Proxmox surface action failed"),
-    }
-
-    result
-}
-
-fn require_proxmox_surface_store<'a>(
-    ctx: &'a SurfaceActionContext<'a>,
-) -> std::result::Result<
-    &'a dyn uptrakit_plugin_infrastructure_core::ProxmoxSurfaceStore,
-    SurfaceActionError,
-> {
-    ctx.controller.proxmox_surface_store().ok_or_else(|| {
-        SurfaceActionError::ControllerIntegration(
-            "proxmox surface store is not available".to_string(),
-        )
-    })
+    execute_controller_surface_action_typed(
+        ctx.tenant_db().db(),
+        Some(ctx.tenant_id()),
+        surface_id,
+        action_id,
+        params,
+    )
+    .await
 }
 
 /// Execute a Proxmox controller surface action using the canonical DB-backed handlers.
@@ -651,12 +622,6 @@ fn parse_approve_match_request(
         host_id,
         match_method,
     })
-}
-
-fn map_store_error(
-    error: rootcause::Report<uptrakit_plugin_infrastructure_core::PluginError>,
-) -> SurfaceActionError {
-    SurfaceActionError::ControllerIntegration(error.to_string())
 }
 
 fn map_controller_action_error(error: String) -> SurfaceActionError {
