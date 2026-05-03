@@ -13,7 +13,7 @@ agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "migrations"]
 catalog = ["dep:reqwest", "dep:tokio-util", "http-client"]
 http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
 migrations = ["dep:sea-orm-migration"]
-plugin-ops = ["dep:sea-orm"]
+plugin-ops = ["dep:sea-orm", "dep:uptrakit-tenant-db"]
 testing = []
 
 [dependencies]
@@ -34,6 +34,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-surfaces = { workspace = true }
 reqwest = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
+uptrakit-tenant-db = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
 tokio-util = { workspace = true, features = ["rt"], optional = true }
 uuid = { workspace = true }
