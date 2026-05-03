@@ -127,6 +127,31 @@
 	function groupIsOpen(itemId: string): boolean {
 		return !collapsedGroupIds.has(itemId);
 	}
+
+	const flatRowIndices = $derived.by(() => {
+		const indices = new SvelteMap<string, number>();
+		let idx = 0;
+		for (const item of items) {
+			indices.set(`header:${item.id}`, idx++);
+			if (!isSingleHostItem(item)) {
+				if (itemDetailLoadingIds.has(item.id)) {
+					indices.set(`loading:${item.id}`, idx++);
+				} else if (!collapsedGroupIds.has(item.id) && detailHosts(item).length > 0) {
+					for (const host of visibleHosts(item)) {
+						indices.set(`host:${host.id}`, idx++);
+					}
+					if (hiddenHostCount(item) > 0) {
+						indices.set(`overflow:${item.id}`, idx++);
+					}
+				}
+			}
+		}
+		return indices;
+	});
+
+	function zebraClass(idx: number): string {
+		return idx % 2 !== 0 ? 'bg-[var(--bg-raised)]' : '';
+	}
 </script>
 
 <!-- Desktop layout: hidden on mobile (< 640px) -->
@@ -134,13 +159,16 @@
 	{#each items as item (item.id)}
 		{@const compactSingleHost = singleHost(item)}
 		{@const isCompactSingleHost = isSingleHostItem(item)}
+		{@const headerRowIdx = flatRowIndices.get(`header:${item.id}`) ?? -1}
 		<div
 			class="border-b border-[var(--border-subtle)] last:border-b-0"
 			data-testid={'software-group-' + item.id}
 			role="listitem"
 		>
 			<div
-				class="grid items-center gap-x-2 bg-[var(--bg-raised)] px-4 py-2.5 {canManage
+				class="grid items-center gap-x-2 {zebraClass(
+					headerRowIdx
+				)} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast px-4 py-2.5 {canManage
 					? 'grid-cols-[24px_minmax(0,1fr)_40px]'
 					: 'grid-cols-[minmax(0,1fr)]'}"
 				data-testid={'software-group-header-' + item.id}
@@ -299,8 +327,11 @@
 				{/if}
 			</div>
 			{#if !isCompactSingleHost && itemDetailLoadingIds.has(item.id)}
+				{@const loadingRowIdx = flatRowIndices.get(`loading:${item.id}`) ?? -1}
 				<div
-					class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] px-4 py-2.5 {canManage
+					class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] {zebraClass(
+						loadingRowIdx
+					)} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast px-4 py-2.5 {canManage
 						? 'grid-cols-[24px_minmax(0,1fr)_40px]'
 						: 'grid-cols-[minmax(0,1fr)]'}"
 					id={'software-group-body-' + item.id}
@@ -318,8 +349,11 @@
 			{:else if !isCompactSingleHost && detailHosts(item).length > 0}
 				<div id={'software-group-body-' + item.id}>
 					{#each visibleHosts(item) as host (host.id)}
+						{@const hostRowIdx = flatRowIndices.get(`host:${host.id}`) ?? -1}
 						<div
-							class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-fast hover:bg-[var(--bg-raised)] {canManage
+							class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] {zebraClass(
+								hostRowIdx
+							)} px-4 py-2.5 transition-[background,border-color,color] duration-fast hover:bg-[var(--bg-hover)] {canManage
 								? 'grid-cols-[24px_minmax(0,1fr)_40px]'
 								: 'grid-cols-[minmax(0,1fr)]'}"
 							data-testid={'software-host-row-' + host.id}
@@ -382,8 +416,11 @@
 						</div>
 					{/each}
 					{#if hiddenHostCount(item) > 0}
+						{@const overflowRowIdx = flatRowIndices.get(`overflow:${item.id}`) ?? -1}
 						<div
-							class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 {canManage
+							class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] {zebraClass(
+								overflowRowIdx
+							)} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast px-4 py-2.5 {canManage
 								? 'grid-cols-[24px_minmax(0,1fr)_40px]'
 								: 'grid-cols-[minmax(0,1fr)]'}"
 						>
@@ -423,10 +460,16 @@
 	role="list"
 	aria-label="Tracked software"
 >
-	{#each items as item (item.id)}
+	{#each items as item, i (item.id)}
 		{@const compactSingleHost = singleHost(item)}
 		{@const isCompactSingleHost = isSingleHostItem(item)}
-		<div class="px-4 py-3" data-testid={'software-group-mobile-' + item.id} role="listitem">
+		<div
+			class="px-4 py-3 {i % 2 !== 0
+				? 'bg-[var(--bg-raised)]'
+				: ''} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast"
+			data-testid={'software-group-mobile-' + item.id}
+			role="listitem"
+		>
 			<!-- Card header: checkbox + star + icon + name + actions button -->
 			<div class="flex min-w-0 items-center gap-2">
 				{#if canManage}
