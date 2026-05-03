@@ -37,6 +37,7 @@ mod notification_settings;
 mod notifications;
 mod params;
 mod proxmox_add_config;
+mod proxmox_update_protection;
 mod settings_store;
 
 #[expect(
@@ -78,6 +79,14 @@ pub(crate) use notifications::{
 pub(crate) use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
+};
+#[expect(
+    unused_imports,
+    reason = "re-exports for local_executor.rs wiring not yet implemented"
+)]
+pub(crate) use proxmox_update_protection::{
+    ProxmoxUpdateProtectionAction, allowlisted_proxmox_update_protection_controller_local_action,
+    emit_proxmox_update_protection_audit_event,
 };
 
 #[expect(
