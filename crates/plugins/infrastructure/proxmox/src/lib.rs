@@ -29,6 +29,7 @@ pub mod plugin;
 pub mod policy_store;
 pub(crate) mod protection_store;
 pub mod pve_setup;
+pub(crate) mod reset;
 pub mod surfaces;
 pub mod update_protection;
 
