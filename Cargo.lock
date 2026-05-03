@@ -8320,6 +8320,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-config-merge",
  "uptrakit-crypto",
+ "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
  "uptrakit-shared-db",

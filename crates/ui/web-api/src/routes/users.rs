@@ -1263,7 +1263,13 @@ async fn send_email_change_emails(
         .map_err(|e| match e {
             TransactionalEmailError::NotConfigured => "Email delivery not configured".to_string(),
             TransactionalEmailError::DeliveryFailed(_) => "Email delivery failed".to_string(),
-            _ => "Email delivery failed".to_string(),
+            _ => {
+                tracing::warn!(
+                    ?e,
+                    "unhandled TransactionalEmailError variant sending confirmation"
+                );
+                "Email delivery failed".to_string()
+            }
         })?;
 
     // Message 2: to old address — notification
@@ -1294,7 +1300,13 @@ async fn send_email_change_emails(
         .map_err(|e| match e {
             TransactionalEmailError::NotConfigured => "Email delivery not configured".to_string(),
             TransactionalEmailError::DeliveryFailed(_) => "Email delivery failed".to_string(),
-            _ => "Email delivery failed".to_string(),
+            _ => {
+                tracing::warn!(
+                    ?e,
+                    "unhandled TransactionalEmailError variant sending notification"
+                );
+                "Email delivery failed".to_string()
+            }
         })?;
 
     Ok(())

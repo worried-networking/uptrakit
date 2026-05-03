@@ -13,7 +13,10 @@ use proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache;
 use proxmox_protection_audit::Entity as ProxmoxProtectionAudit;
 use proxmox_protection_default::Entity as ProxmoxProtectionDefault;
 use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait as _,
+};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_shared_db::entity::{plugin_config, prelude::*, proxmox_host_mapping};
@@ -287,8 +290,19 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
 
     async fn upsert_audit(&self, audit: &ProxmoxProtectionAuditRecord) -> Result<()> {
         let now = OffsetDateTime::now_utc();
+        // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT when another connection
+        // commits between our read and write.
+        let txn = self
+            .db
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await
+            .map_err(plugin_internal_error)?;
+
         let existing = ProxmoxProtectionAudit::find_by_id(audit.update_history_id)
-            .one(self.db)
+            .one(&txn)
             .await
             .map_err(plugin_internal_error)?;
 
@@ -307,10 +321,7 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
             active.detail = Set(audit.detail.clone());
             active.error_message = Set(audit.error_message.clone());
             active.updated_at = Set(now);
-            active
-                .update(self.db)
-                .await
-                .map_err(plugin_internal_error)?;
+            active.update(&txn).await.map_err(plugin_internal_error)?;
         } else {
             let active = proxmox_protection_audit::ActiveModel {
                 update_history_id: Set(audit.update_history_id),
@@ -329,12 +340,10 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
                 created_at: Set(now),
                 updated_at: Set(now),
             };
-            active
-                .insert(self.db)
-                .await
-                .map_err(plugin_internal_error)?;
+            active.insert(&txn).await.map_err(plugin_internal_error)?;
         }
 
+        txn.commit().await.map_err(plugin_internal_error)?;
         Ok(())
     }
 

@@ -54,6 +54,11 @@ pub mod user;
 pub mod user_oidc_link;
 pub mod user_role;
 
+// SPEC GAP (Wave 3): proxmox_host_mapping cannot move to the proxmox plugin crate
+// because controller-runtime/db_migrate/tables.rs requires the SeaORM entity type
+// for migration (copy_all/clean_all/verify_all). Making controller-runtime depend
+// on a plugin crate would violate the core/plugin layering. Resolution requires a
+// plugin table registration mechanism in tables.rs, which is out of scope here.
 pub mod proxmox_host_mapping;
 
 pub mod prelude;
