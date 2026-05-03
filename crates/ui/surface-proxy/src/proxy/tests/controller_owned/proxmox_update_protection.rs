@@ -198,3 +198,82 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
         serde_json::json!("infrastructure_proxmox")
     );
 }
+
+#[tokio::test]
+async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row() {
+    ensure_master_key();
+    let db = setup_proxmox_db().await;
+    let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+    let software_item_id = Uuid::now_v7();
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_update_protection_registration(
+            "plugin.infrastructure_proxmox",
+            "proxmox.software-item.update-protection",
+            "save-item-overrides",
+        ))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "plugin_config_id".to_string(),
+        serde_json::json!(plugin_config_id.to_string()),
+    );
+    params.insert(
+        "software_item_id".to_string(),
+        serde_json::json!(software_item_id.to_string()),
+    );
+    params.insert("mode".to_string(), serde_json::json!("do_nothing"));
+
+    // Invoke — may succeed or fail depending on plugin state; audit must be emitted either way.
+    let _ = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.software-item.update-protection".to_string(),
+                interaction_id: "save-item-overrides".to_string(),
+                idempotency_key: "idem-proxmox-save-item-overrides-audit".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await;
+
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+    )
+    .await;
+    assert_eq!(row.actor_id, Some(user_id()));
+    assert_eq!(row.target_type.as_deref(), Some("software_item"));
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["mutation_source"],
+        serde_json::json!("surface_proxy.proxmox_update_protection.save_item_overrides")
+    );
+    assert_eq!(
+        details["plugin_type"],
+        serde_json::json!("infrastructure_proxmox")
+    );
+}
