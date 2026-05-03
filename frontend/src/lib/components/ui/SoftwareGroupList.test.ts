@@ -199,6 +199,36 @@ describe('SoftwareGroupList — zebra rows', () => {
 		expect(screen.getByTestId('software-group-header-d').className).toContain('bg-[var(--bg-raised)]'); // idx 3
 	});
 
+	it('expanding overflow re-stripes: 4th host appears at correct index, overflow row disappears', () => {
+		// A=0(T), B_header=1(R), h1=2(T), h2=3(R), h3=4(T), overflow=5(R) — before expand
+		// A=0(T), B_header=1(R), h1=2(T), h2=3(R), h3=4(T), h4=5(R)      — after expand
+		const itemA = makeItem('a', 1);
+		const itemB = makeItem('b', 4);
+		const host1 = makeHost('row-h1', 'hid1');
+		const host2 = makeHost('row-h2', 'hid2');
+		const host3 = makeHost('row-h3', 'hid3');
+		const host4 = makeHost('row-h4', 'hid4');
+		const detailsById = new SvelteMap([
+			['a', makeDetail(itemA, [makeHost('row-a1', 'h-a1')])],
+			['b', makeDetail(itemB, [host1, host2, host3, host4])]
+		]);
+		const items = [itemA, itemB];
+
+		// Overflow not expanded: 3 hosts visible, host4 hidden
+		const { rerender } = render(
+			SoftwareGroupList,
+			makeProps({ items, itemDetailsById: detailsById, expandedOverflowGroupIds: new SvelteSet() })
+		);
+		expect(screen.queryByTestId('software-host-row-row-h4')).toBeNull(); // host4 hidden by overflow
+
+		// Overflow expanded: all 4 hosts visible, stripes re-number
+		rerender(makeProps({ items, itemDetailsById: detailsById, expandedOverflowGroupIds: new SvelteSet(['b']) }));
+		const hostRow3 = screen.getByTestId('software-host-row-row-h3');
+		const hostRow4 = screen.getByTestId('software-host-row-row-h4');
+		expect(hostRow3.className).not.toContain('bg-[var(--bg-raised)]'); // idx 4: transparent
+		expect(hostRow4.className).toContain('bg-[var(--bg-raised)]'); // idx 5: raised (took overflow slot)
+	});
+
 	it('mobile cards alternate bg: idx=0 transparent, idx=1 raised', () => {
 		const itemA = makeItem('a', 1);
 		const itemB = makeItem('b', 1);
