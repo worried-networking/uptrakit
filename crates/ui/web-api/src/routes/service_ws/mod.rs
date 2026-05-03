@@ -1,7 +1,10 @@
-#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
+#![expect(
+    clippy::indexing_slicing,
+    reason = "audit/protocol message slices use indices computed from preceding length checks or constant-bounded buffers"
+)]
 #![expect(
     clippy::large_futures,
-    reason = "large future is acceptable in this WS handler path"
+    reason = "WS handler holds the full per-connection state machine across awaits; boxing per connection would trade allocation overhead for stack savings on a long-lived task"
 )]
 
 mod connection;
