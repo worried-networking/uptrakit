@@ -296,60 +296,6 @@ pub trait NotificationChannelStore: Send + Sync {
     async fn mark_action_token_triggered(&self, action_token: Uuid) -> Result<()>;
 }
 
-/// Typed SMTP settings snapshot used by email plugin surface actions.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-pub struct EmailSmtpSettings {
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub from_address: Option<String>,
-    pub from_name: Option<String>,
-    pub tls_mode: Option<String>,
-    pub helo_host: Option<String>,
-}
-
-/// Partial SMTP update payload.
-///
-/// `Some(None)` clears a value, `Some(Some(v))` sets it, `None` leaves unchanged.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EmailSmtpSettingsPatch {
-    pub host: Option<Option<String>>,
-    pub port: Option<Option<u16>>,
-    pub username: Option<Option<String>>,
-    pub password: Option<Option<String>>,
-    pub from_address: Option<Option<String>>,
-    pub from_name: Option<Option<String>>,
-    pub tls_mode: Option<Option<String>>,
-    pub helo_host: Option<Option<String>>,
-}
-
-/// Typed SMTP settings persistence boundary for controller-side actions.
-#[async_trait]
-pub trait EmailSmtpSettingsStore: Send + Sync {
-    /// Load tenant-scoped SMTP settings.
-    async fn load_tenant_smtp_settings(&self, tenant_id: Uuid) -> Result<EmailSmtpSettings>;
-
-    /// Save tenant-scoped SMTP settings and return the effective tenant snapshot.
-    async fn save_tenant_smtp_settings(
-        &self,
-        tenant_id: Uuid,
-        patch: EmailSmtpSettingsPatch,
-    ) -> Result<EmailSmtpSettings>;
-
-    /// Load global SMTP defaults.
-    async fn load_global_smtp_settings(&self) -> Result<EmailSmtpSettings>;
-
-    /// Save global SMTP defaults and return the updated snapshot.
-    async fn save_global_smtp_settings(
-        &self,
-        patch: EmailSmtpSettingsPatch,
-    ) -> Result<EmailSmtpSettings>;
-
-    /// Load the email address for a user when sending test SMTP messages.
-    async fn load_user_email(&self, user_id: Uuid) -> Result<Option<String>>;
-}
-
 /// Typed global Telegram settings boundary for controller-side surface actions.
 #[async_trait]
 pub trait TelegramGlobalSettingsStore: Send + Sync {
@@ -599,11 +545,6 @@ pub trait SurfaceActionController: Send + Sync {
 
     /// Notification channel persistence capability.
     fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-        None
-    }
-
-    /// Email SMTP settings persistence capability.
-    fn email_smtp_settings_store(&self) -> Option<&dyn EmailSmtpSettingsStore> {
         None
     }
 
@@ -999,7 +940,6 @@ mod controller_boundary_tests {
     use super::*;
 
     struct TestNotificationStore;
-    struct TestEmailStore;
     struct TestTelegramStore;
     struct TestProxmoxSurfaceStore;
     struct TestProxmoxStore;
@@ -1037,36 +977,6 @@ mod controller_boundary_tests {
 
         async fn mark_action_token_triggered(&self, _action_token: Uuid) -> Result<()> {
             Ok(())
-        }
-    }
-
-    #[async_trait]
-    impl EmailSmtpSettingsStore for TestEmailStore {
-        async fn load_tenant_smtp_settings(&self, _tenant_id: Uuid) -> Result<EmailSmtpSettings> {
-            Ok(EmailSmtpSettings::default())
-        }
-
-        async fn save_tenant_smtp_settings(
-            &self,
-            _tenant_id: Uuid,
-            _patch: EmailSmtpSettingsPatch,
-        ) -> Result<EmailSmtpSettings> {
-            Ok(EmailSmtpSettings::default())
-        }
-
-        async fn load_global_smtp_settings(&self) -> Result<EmailSmtpSettings> {
-            Ok(EmailSmtpSettings::default())
-        }
-
-        async fn save_global_smtp_settings(
-            &self,
-            _patch: EmailSmtpSettingsPatch,
-        ) -> Result<EmailSmtpSettings> {
-            Ok(EmailSmtpSettings::default())
-        }
-
-        async fn load_user_email(&self, _user_id: Uuid) -> Result<Option<String>> {
-            Ok(Some("user@example.com".to_string()))
         }
     }
 
@@ -1223,7 +1133,6 @@ mod controller_boundary_tests {
         tenant_id: Uuid,
         user_id: Option<Uuid>,
         notification_store: TestNotificationStore,
-        email_store: TestEmailStore,
         telegram_store: TestTelegramStore,
         proxmox_surface_store: TestProxmoxSurfaceStore,
         proxmox_store: TestProxmoxStore,
@@ -1248,10 +1157,6 @@ mod controller_boundary_tests {
 
         fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
             Some(&self.notification_store)
-        }
-
-        fn email_smtp_settings_store(&self) -> Option<&dyn EmailSmtpSettingsStore> {
-            Some(&self.email_store)
         }
 
         fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
@@ -1305,14 +1210,12 @@ mod controller_boundary_tests {
             tenant_id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
             notification_store: TestNotificationStore,
-            email_store: TestEmailStore,
             telegram_store: TestTelegramStore,
             proxmox_surface_store: TestProxmoxSurfaceStore,
             proxmox_store: TestProxmoxStore,
         };
 
         assert!(controller.notification_channel_store().is_some());
-        assert!(controller.email_smtp_settings_store().is_some());
         assert!(controller.telegram_global_settings_store().is_some());
         assert!(controller.proxmox_surface_store().is_some());
         assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
