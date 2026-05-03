@@ -21,6 +21,7 @@ db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration?/sqlx-sqlite"]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uptrakit-shared-db = { workspace = true }
+uptrakit-tenant-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-command = { workspace = true }
 reqwest = { workspace = true }

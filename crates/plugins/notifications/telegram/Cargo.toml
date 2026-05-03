@@ -21,6 +21,7 @@ subtle = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true, features = ["channel_admin"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }
+uptrakit-tenant-db = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
