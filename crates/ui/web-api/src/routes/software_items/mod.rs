@@ -2222,14 +2222,13 @@ mod tests {
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
     };
-    use std::pin::Pin;
     use uptrakit_plugin_infrastructure_registry::{
         CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
         ControllerProtectionDecision, ControllerUpdateProtection, ControllerUpdateProtectionOps,
         NotificationOps, NotificationTransport, PluginConfigOps, PluginMetadataOps, PluginOps,
         PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome, SoftwareItemCreatedEvent,
         SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, build_catalog,
+        SoftwareItemPatch, SurfaceActionContext, SurfaceActionError, build_catalog,
     };
     use uptrakit_shared_db::entity::{
         audit_log, host_software_item, host_software_item_plugin, software_item, update_history,
@@ -2283,26 +2282,18 @@ mod tests {
 
     impl PluginConfigOps for ProtectionOverridePluginOps {}
 
+    #[async_trait]
     impl PluginSurfaceActionOps for ProtectionOverridePluginOps {
-        fn handle_surface_action<'a>(
-            &'a self,
-            ctx: &'a uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'a>,
-            surface_id: &'a str,
-            action_id: &'a str,
+        async fn handle_surface_action(
+            &self,
+            ctx: &SurfaceActionContext<'_>,
+            surface_id: &str,
+            action_id: &str,
             params: serde_json::Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = std::result::Result<
-                            serde_json::Value,
-                            uptrakit_plugin_infrastructure_registry::SurfaceActionError,
-                        >,
-                    > + Send
-                    + 'a,
-            >,
-        > {
+        ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
             self.inner
                 .handle_surface_action(ctx, surface_id, action_id, params)
+                .await
         }
     }
 
@@ -2326,14 +2317,14 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl SoftwareItemLifecycleOps for ProtectionOverridePluginOps {
-        fn on_software_item_created<'a>(
-            &'a self,
-            event: &'a SoftwareItemCreatedEvent,
-            ctx: &'a SoftwareItemLifecycleContext,
-        ) -> Pin<Box<dyn std::future::Future<Output = Option<SoftwareItemPatch>> + Send + 'a>>
-        {
-            self.inner.on_software_item_created(event, ctx)
+        async fn on_software_item_created(
+            &self,
+            event: &SoftwareItemCreatedEvent,
+            ctx: &SoftwareItemLifecycleContext,
+        ) -> Option<SoftwareItemPatch> {
+            self.inner.on_software_item_created(event, ctx).await
         }
 
         fn software_item_lifecycle_plugins(&self) -> &[Arc<dyn SoftwareItemLifecycle>] {

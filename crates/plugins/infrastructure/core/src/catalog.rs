@@ -6,8 +6,6 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use uptrakit_shared_types::PluginTypeId;
@@ -249,28 +247,19 @@ impl PluginMetadataOps for PluginCatalog {
 
 impl PluginConfigOps for PluginCatalog {} // all defaults via PluginMetadataOps
 
+#[async_trait::async_trait]
 impl PluginSurfaceActionOps for PluginCatalog {
-    fn handle_surface_action<'a>(
-        &'a self,
-        ctx: &'a SurfaceActionContext<'a>,
-        surface_id: &'a str,
-        action_id: &'a str,
+    async fn handle_surface_action(
+        &self,
+        ctx: &SurfaceActionContext<'_>,
+        surface_id: &str,
+        action_id: &str,
         params: serde_json::Value,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
-            let handler = self.route_surface_action(surface_id).ok_or_else(|| {
-                SurfaceActionError::InvalidInput(format!(
-                    "no plugin handles surface '{surface_id}'"
-                ))
-            })?;
-            handler(ctx, surface_id, action_id, params).await
-        })
+    ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+        let handler = self.route_surface_action(surface_id).ok_or_else(|| {
+            SurfaceActionError::InvalidInput(format!("no plugin handles surface '{surface_id}'"))
+        })?;
+        handler(ctx, surface_id, action_id, params).await
     }
 }
 
@@ -341,36 +330,35 @@ impl NotificationOps for PluginCatalog {
     }
 }
 
+#[async_trait::async_trait]
 impl SoftwareItemLifecycleOps for PluginCatalog {
-    fn on_software_item_created<'a>(
-        &'a self,
-        event: &'a SoftwareItemCreatedEvent,
-        ctx: &'a SoftwareItemLifecycleContext,
-    ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>> {
-        Box::pin(async move {
-            let mut merged: Option<SoftwareItemPatch> = None;
+    async fn on_software_item_created(
+        &self,
+        event: &SoftwareItemCreatedEvent,
+        ctx: &SoftwareItemLifecycleContext,
+    ) -> Option<SoftwareItemPatch> {
+        let mut merged: Option<SoftwareItemPatch> = None;
 
-            for plugin in &self.lifecycle_plugins {
-                match plugin.on_software_item_created(event, ctx).await {
-                    Ok(Some(patch)) => {
-                        let m = merged.get_or_insert_with(SoftwareItemPatch::new);
-                        if patch.icon_url.is_some() {
-                            m.icon_url = patch.icon_url;
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        tracing::warn!(
-                            plugin = %plugin.plugin_type_id(),
-                            error = %e,
-                            "software item lifecycle plugin error"
-                        );
+        for plugin in &self.lifecycle_plugins {
+            match plugin.on_software_item_created(event, ctx).await {
+                Ok(Some(patch)) => {
+                    let m = merged.get_or_insert_with(SoftwareItemPatch::new);
+                    if patch.icon_url.is_some() {
+                        m.icon_url = patch.icon_url;
                     }
                 }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        plugin = %plugin.plugin_type_id(),
+                        error = %e,
+                        "software item lifecycle plugin error"
+                    );
+                }
             }
+        }
 
-            merged
-        })
+        merged
     }
 
     fn software_item_lifecycle_plugins(&self) -> &[Arc<dyn SoftwareItemLifecycle>] {
