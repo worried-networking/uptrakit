@@ -1906,6 +1906,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl NotificationOps for TestPluginOps {
         fn transport(
             &self,

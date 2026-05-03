@@ -2679,6 +2679,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl NotificationOps for ProtectionOverridePluginOps {
         fn transport(
             &self,
