@@ -84,9 +84,10 @@ No changes to `SurfaceRegistry` itself; no new dependencies introduced.
 
 ### Frontend — event type
 
-Add `"surfaces_changed"` to the `AdminEventType` union/const in `frontend/src/lib/sse.ts`.
-Note: the existing union is missing `'global_github_provider_misconfigured'` and `'data_reset'`
-(pre-existing gap, not introduced here). Do not assume the union is otherwise complete.
+Add `SurfacesChanged = 'surfaces_changed'` to the `AdminEventType` enum in `frontend/src/lib/sse.ts`.
+`AdminEventType` is an `export enum` (not a union type). Add the new member after `HostTagsChanged`.
+Note: `BatchUpdateCompleted = 'batch_update_completed'` is a pre-existing member with no backend
+counterpart — leave it as-is. Do not rewrite the rest of the enum.
 
 Wire the handler in `frontend/src/lib/stores/events.svelte.ts` alongside existing event
 handlers. `SurfacesChanged` carries no entity ID; the debounce key will be
