@@ -118,19 +118,24 @@ is the only context where a `TenantDb` can be constructed.
 Add to `SurfaceActionController` in `roles.rs`:
 
 ```rust
+#[cfg(feature = "plugin-ops")]
 fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
 ```
 
 Add to `UpdateProtectionController` in `roles.rs`:
 
 ```rust
+#[cfg(feature = "plugin-ops")]
 fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
 ```
 
-Both are required methods with no default. Add convenience delegate to `SurfaceActionContext`
-in `descriptor.rs`:
+Both are required methods with no default. They must be `#[cfg(feature = "plugin-ops")]`-gated
+to match the gate on `uptrakit-tenant-db` in `Cargo.toml` — without the gate, `TenantDb`
+is not in scope in agent-side builds that compile `plugin-infrastructure-core` without
+`plugin-ops`. Add convenience delegate to `SurfaceActionContext` in `descriptor.rs`:
 
 ```rust
+#[cfg(feature = "plugin-ops")]
 pub fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
     self.controller.tenant_db()
 }
@@ -139,8 +144,8 @@ pub fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
 ### `surface-proxy` changes
 
 `AppStateSurfaceActionController` in `proxy/controller_local.rs` gains a
-`tenant_db: TenantDb` field (constructed from the existing `db` + `tenant_id` in its
-constructor) and implements:
+`tenant_db: TenantDb` field constructed via `TenantDb::new(db.clone(), tenant_id)`
+(pool handle clone is cheap) and implements:
 
 ```rust
 fn tenant_db(&self) -> &TenantDb {
@@ -160,9 +165,19 @@ fn tenant_db(&self) -> &TenantDb {
 ```
 
 Construction sites (lines ~842, ~898) currently have `db: &DatabaseConnection` and
-`tenant_id: Uuid` in scope. Construct `TenantDb::new(db, tenant_id)` at the call site
-and pass `&tenant_db` to the constructor. Update function signatures if `tenant_id` is
-not yet in scope at those points.
+`tenant_id: Uuid` in scope. `TenantDb::new` takes an owned `DatabaseConnection`, so
+clone the pool handle: `TenantDb::new(db.clone(), tenant_id)`. `DatabaseConnection` is
+a pool handle and `.clone()` is cheap. Pass `&tenant_db` to the constructor. Update
+function signatures if `tenant_id` is not yet in scope at those points.
+
+### Design note
+
+`tenant_db()` exposes a `&TenantDb` which in turn exposes `.db() -> &DatabaseConnection`.
+This means any plugin can issue raw SeaORM queries against any table — boundary enforcement
+remains at the import/CI level (Wave 7 checker), not the type system. This is acceptable:
+the goal is removing plugin-specific types from non-plugin crates, not preventing
+intra-plugin query cross-talk. Future enforcement of the "plugin only queries its own
+tables" rule requires grepping for entity imports from other plugin crates in CI.
 
 ### Acceptance
 
@@ -178,12 +193,13 @@ not yet in scope at those points.
 `tenant_db()` directly. Simultaneously remove every plugin-named store trait, request
 type, and accessor method from `roles.rs` and both controller traits.
 
-This is the largest wave. Sub-steps 3a–3f each update one plugin to query via
-`tenant_db()` directly while **leaving the old store method on the controller trait
-intact**. Each sub-step is independently CI-green because the store method still
-compiles. Sub-step 3g then removes all store methods, store traits, and registry
-re-exports in a single atomic commit — this is the only irreversible step. Sub-step
-3h is independent and may land before or after 3g.
+This is the largest wave. Sub-steps 3a–3f each atomically: (1) update the plugin to
+query via `tenant_db()` directly; (2) delete that plugin's store trait, its request/response
+types, and all `impl <StoreTrait> for ...` blocks. Each sub-step is independently
+CI-green because it removes every usage of the store method at the same time as it
+removes the method itself — no dangling impls, no broken callers. Sub-step 3g removes
+the remaining plugin-named re-exports from the registry. Sub-step 3h is independent
+and may land before or after 3g.
 
 ### 3a — Docker plugin
 
@@ -225,8 +241,11 @@ stays unchanged — all callers remain unmodified. Known callers: `dispatcher.rs
 
 Risk: the rewrite replaces `EmailSmtpSettings` struct-field access with string-keyed
 map construction. Any misspelled key would be a silent runtime failure (wrong field
-name = empty value in the settings bag). Mitigate by adding a test that exercises
-`build_settings_bag` against a real DB with known fixture data.
+name = empty value in the settings bag). Mitigate: write the fixture test **before**
+the rewrite, running it against the current struct-based implementation to capture
+correct key names as a baseline. Then rewrite to raw queries and verify the test still
+passes. A test written after the rewrite could be written against broken output and
+confirm the wrong contract.
 
 ### 3c — Telegram plugin
 
@@ -322,8 +341,8 @@ boundary violations:
 pub enum TransactionalEmailError {
     /// No SMTP transport is configured for this tenant.
     NotConfigured,
-    /// Delivery was attempted but failed.
-    DeliveryFailed(Box<dyn std::error::Error + Send + Sync>),
+    /// Delivery was attempted but failed; inner string is the error message.
+    DeliveryFailed(String),
 }
 ```
 
@@ -358,10 +377,20 @@ existing test stubs compile without changes. The default body is deliberately
 explicit (not a one-liner) so reviewers see the noop is intentional, not an
 oversight.
 
-The registry's `impl NotificationOps` overrides this default, routing via
-`plugin_ids::EMAIL` internally — that knowledge stays inside the registry.
-`SmtpNotConfigured` is mapped to `TransactionalEmailError::NotConfigured` within the
-registry impl.
+`PluginCatalog`'s `impl NotificationOps` (in `plugin-infrastructure-core/catalog.rs`)
+overrides this default, routing via `plugin_ids::EMAIL` internally — that knowledge
+stays inside the catalog. `SmtpNotConfigured` is mapped to
+`TransactionalEmailError::NotConfigured`; other delivery errors become
+`TransactionalEmailError::DeliveryFailed(err.to_string())`.
+
+Adding `#[async_trait]` to the `NotificationOps` trait definition requires updating
+every `impl NotificationOps` block with the attribute. Sites to update in addition to
+`PluginCatalog`: test stubs `ProtectionOverridePluginOps` in
+`service_ws/handler/update_tracking.rs`, `service_ws/handler/updates.rs`,
+`software_items/mod.rs`; and `TestPluginOps` in `service_ws/handler/messages.rs`.
+All four stubs already implement the two sync methods and can rely on the default for
+`send_transactional_email` — only the `#[async_trait]` attribute needs adding to the
+`impl` block header.
 
 **`users.rs` changes:**
 
@@ -463,9 +492,11 @@ After this wave `roles.rs` must contain only:
 
 ### `notification-plugin-core` tidy
 
-`list_channels.rs` now accepts `&TenantDb` directly. Remove any vestigial
-`NotificationChannelStore` trait usage. Ensure `uptrakit-tenant-db` is a dep of
-`uptrakit-notification-plugin-core`.
+`list_channels.rs` signature stays as `(db: &DatabaseConnection, tenant_id: Uuid, ...)`
+— no change needed. Surface action handlers added in Wave 3d extract these from
+`ctx.tenant_db()` via `.db()` and `.tenant_id` (public field, not a method) and pass
+them through. Remove any vestigial `NotificationChannelStore` trait usage if any remains
+after Wave 3d.
 
 ### Convert remaining `Pin<Box<dyn Future>>` trait methods
 
@@ -525,8 +556,11 @@ pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
 ```
 
 `#[async_trait]` is already a dep of `plugin-infrastructure-core`. Add the macro import
-to `plugin_ops.rs`. Update `#[async_trait]` annotations on every `impl` of both traits
-in `uptrakit-plugin-infrastructure-registry` (`PluginCatalog`) and any test stubs.
+to `plugin_ops.rs`. Update `#[async_trait]` annotations on every `impl` of both traits:
+`PluginCatalog` in `plugin-infrastructure-core/catalog.rs` (the production impl), and
+test stubs in `web-api` test modules (`ProtectionOverridePluginOps` in
+`service_ws/handler/update_tracking.rs`, `service_ws/handler/updates.rs`,
+`software_items/mod.rs`; `TestPluginOps` in `service_ws/handler/messages.rs`).
 Callers using `.await` at call sites are unaffected — `async_trait` expands to the same
 `Pin<Box<dyn Future>>` boxing internally.
 
@@ -538,8 +572,8 @@ alias keeps its `for<'a> fn(...) -> Pin<Box<dyn Future<...> + Send + 'a>>` signa
 
 - `roles.rs` contains zero plugin-named identifiers (grep clean).
 - Registry `lib.rs` contains zero plugin-named store-trait re-exports.
-- `plugin_ops.rs` contains zero `Pin<Box<dyn Future` outside the `ResetTenantDataFn`
-  type alias and the `SurfaceActionHandler` fn-pointer type in `descriptor.rs`.
+- `plugin_ops.rs` contains zero `Pin<Box<dyn Future` (both remaining uses are in
+  `descriptor.rs`: `ResetTenantDataFn` type alias and `SurfaceActionHandler` fn-pointer).
 - `cargo check --all-features` clean.
 - `cargo clippy --all-targets --all-features` clean.
 
@@ -644,6 +678,13 @@ pub async fn reset_plugin_tenant_data(
     Ok(())
 }
 ```
+
+Currently only Proxmox registers a reset callback, so iteration order is irrelevant.
+If a future plugin registers a callback whose tables have `Restrict` FK dependencies on
+another plugin's tables, the iteration order (registration order) could cause a FK
+violation. At that point, an explicit ordering mechanism (e.g., a `reset_order` field
+on `PluginDescriptor`) will be needed. Document this risk as a `// TODO` in the registry
+function so future plugin authors see it.
 
 ### `web-api-queries/reset_data.rs`
 
@@ -798,10 +839,12 @@ person understands what the allowlist does and does not enforce.
 
 ### Acceptance
 
-- Before Wave 3h: `./ci/check_plugin_semantic_boundary.sh` reports `plugin_ids
-token references` violation for `users.rs` (confirming Gap 2 is real).
-- Before Wave 7 Python fix A: `python3 ci/check_plugin_semantic_boundary.py` does
-  NOT flag `plugin_ids::EMAIL` inline path in `users.rs` (confirming Gap 3 is real).
+- Before Wave 3h (**manual pre-condition check, not a CI gate**): running
+  `./ci/check_plugin_semantic_boundary.sh` locally reports `plugin_ids token references`
+  violation for `users.rs` (confirms Gap 2 is real before the fix).
+- Before Wave 7 Python fix A (**manual pre-condition check**): running
+  `python3 ci/check_plugin_semantic_boundary.py` locally does NOT flag
+  `plugin_ids::EMAIL` inline path in `users.rs` (confirms Gap 3 is real before the fix).
 - After Wave 7: Python checker flags both `plugin_ids::EMAIL` inline paths and
   `NotificationPluginError::SmtpNotConfigured` if either appears in non-plugin code.
 - Shell script runs in CI and exits 0 against the refactored codebase.
