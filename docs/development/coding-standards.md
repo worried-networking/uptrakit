@@ -103,6 +103,30 @@ Do not mix a module-level `#![expect(clippy::allow_attributes)]` with a local
 `#[expect(clippy::allow_attributes)]` for the same `#[allow]` — Clippy counts the lint event
 once, so one of the two `#[expect]` attributes will be unfulfilled.
 
+### Test-mode exemptions
+
+`clippy.toml` enables `allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`,
+`allow-dbg-in-tests`, and `allow-indexing-slicing-in-tests`. These exemptions cover **only
+functions annotated with `#[test]`** (or `#[tokio::test]`, etc.). Helper functions inside
+`mod tests {}` blocks and integration-test helpers driven by macros like `db_test!` are **not**
+covered — they need an explicit `#![expect(...)]` at the module top with a specific reason.
+
+### Prefer refactor over suppression
+
+Many suppressions can be eliminated by changing the code rather than annotating it. A few
+recurring substitutions:
+
+- `args[0]` after a length check → `args.first()` with `let-else`
+- `Vec<T>` plus `vec[..n]` slices when the length is fixed → `[T; N]` plus `split_at(n)`
+- `let _ = result_expr` to discard a `Result` you knowingly ignore → `let _ignored = result_expr`
+  (named bindings prefixed with `_` do not trigger `let_underscore_must_use` and convey intent)
+- `Some(row).unwrap()` after a `.get()` guard → consume the guard's binding directly
+
+When a suppression is the right call, write a **specific** reason: name the invariant
+("`pos` from `str::find` is on a char boundary") or the guard ("idx came from
+`lines.iter().rposition(...)`"). Avoid generic placeholders like "in bounds" or
+"checked above" — they rot the moment surrounding code shifts.
+
 ## Shared Contract Crates
 
 - Public fallible APIs in shared or reusable contract crates should document a `# Errors` section.
