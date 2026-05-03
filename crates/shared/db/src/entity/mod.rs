@@ -62,4 +62,4 @@ pub mod proxmox_protection_item_override;
 
 pub mod prelude;
 pub mod tenant_scoped;
-pub use tenant_scoped::TenantScoped;
+pub use uptrakit_tenant_db::TenantScoped;
