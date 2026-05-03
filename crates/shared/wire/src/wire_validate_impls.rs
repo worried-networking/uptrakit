@@ -737,15 +737,7 @@ impl WireValidate for surfaces::SurfaceRegistration {
                         message: "must not be empty".to_string(),
                     });
                 }
-                if nav_icon.len() > MAX_NAV_ICON_LEN {
-                    return Err(WireValidationError {
-                        field: "surfaces[].descriptor.nav_icon",
-                        message: format!(
-                            "string is {} bytes, max {MAX_NAV_ICON_LEN}",
-                            nav_icon.len()
-                        ),
-                    });
-                }
+                check_string_len(nav_icon, MAX_NAV_ICON_LEN, "surfaces[].descriptor.nav_icon")?;
             }
             check_vec_len(
                 &surface.interactions,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Snippet } from 'svelte';
+	import type { ComponentType, Snippet, SvelteComponent } from 'svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -26,7 +26,6 @@
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import type { ComponentType, SvelteComponent } from 'svelte';
 	import {
 		History,
 		HardDrive,
