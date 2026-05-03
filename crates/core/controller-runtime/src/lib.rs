@@ -440,11 +440,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
             uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
                 Arc::new(db_conn.clone()),
-                Arc::new(
-                    uptrakit_web_api::surface_proxy::PluginOpsSurfaceActionInvoker::new(
-                        Arc::clone(&plugin_ops),
-                    ),
-                ),
+                Arc::clone(&plugin_ops),
             )
             .with_audit_emitter(audit_emitter.clone()),
         )),

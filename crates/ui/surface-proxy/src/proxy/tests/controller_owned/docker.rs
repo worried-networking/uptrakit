@@ -53,28 +53,27 @@ fn docker_switch_tag_registration(provider_id: &str) -> surfaces::SurfaceRegistr
             tenant_id: None,
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("docker.item-host-actions").unwrap(),
-                label: "Docker Actions".to_string(),
-                priority: 100,
-                slot: "software.actions".to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("docker.item-host-actions").unwrap())
+                .label("Docker Actions")
+                .priority(100)
+                .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("switch-tag").unwrap(),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: None,
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),

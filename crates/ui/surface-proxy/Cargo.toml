@@ -46,9 +46,10 @@ uptrakit-web-api-types                  = { workspace = true }
 uptrakit-wire                           = { workspace = true }
 
 [dev-dependencies]
-sea-orm                    = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio"] }
-time                       = { workspace = true }
-tokio                      = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
-uptrakit-shared-db         = { workspace = true, features = ["migration", "db-sqlite"] }
-uptrakit-crypto            = { workspace = true, features = ["testing"] }
-zeroize                    = { workspace = true }
+sea-orm                                  = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio"] }
+time                                     = { workspace = true }
+tokio                                    = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
+uptrakit-plugin-infrastructure-proxmox  = { workspace = true, features = ["migrations"] }
+uptrakit-shared-db                       = { workspace = true, features = ["migration", "db-sqlite"] }
+uptrakit-crypto                          = { workspace = true, features = ["testing"] }
+zeroize                                  = { workspace = true }

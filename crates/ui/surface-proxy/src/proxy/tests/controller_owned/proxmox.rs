@@ -7,8 +7,8 @@ use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_wire::surfaces;
 
 use super::super::super::{
-    PluginOpsSurfaceActionInvoker, PluginSurfaceLocalExecutor, ServiceConnectionRegistry,
-    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
+    PluginSurfaceLocalExecutor, ServiceConnectionRegistry, SurfaceCallerOrigin,
+    SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
 };
 use super::super::{tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
@@ -33,28 +33,27 @@ fn proxmox_hosts_registration(provider_id: &str) -> surfaces::SurfaceRegistratio
             tenant_id: None,
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
-                label: "Proxmox Hosts".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("proxmox.hosts").unwrap())
+                .label("Proxmox Hosts")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("add-config").unwrap(),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: Some("manage_commands".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -89,7 +88,7 @@ async fn invoke_proxmox_add_config_executes_controller_owned_create_path() {
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db.clone()),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -165,7 +164,7 @@ async fn invoke_proxmox_add_config_accepts_legacy_string_verify_tls_values() {
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -225,7 +224,7 @@ async fn invoke_proxmox_add_config_rejects_invalid_verify_tls_type() {
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -287,7 +286,7 @@ async fn invoke_proxmox_add_config_rejects_invalid_node_filter_type() {
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -350,7 +349,7 @@ async fn invoke_proxmox_add_config_preserves_duplicate_name_conflict() {
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 

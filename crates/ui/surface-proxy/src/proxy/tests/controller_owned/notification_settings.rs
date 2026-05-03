@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use uptrakit_plugin_infrastructure_registry::{PluginOps, SurfaceActionError};
+use uptrakit_plugin_infrastructure_registry::SurfaceActionError;
 use uptrakit_wire::surfaces;
 
 use super::super::super::{
@@ -50,34 +50,34 @@ fn notification_settings_registration(
             surfaces::Capability::TextBlockNode,
             surfaces::Capability::UniversalTargeting,
             surfaces::Capability::MutationAction,
+            surfaces::Capability::FormSubmit,
         ]),
         effective_tenant_binding: surfaces::EffectiveTenantBinding {
             scope: surfaces::Scope::Global,
             tenant_id: None,
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                label: "Settings".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                .label("Settings")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: None,
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),

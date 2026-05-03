@@ -33,28 +33,27 @@ fn plugin_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
             tenant_id: Some(tenant_id().to_string()),
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("notifications.email.global_smtp").unwrap(),
-                label: "SMTP Defaults".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("notifications.email.global_smtp").unwrap())
+                .label("SMTP Defaults")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: None,
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),
