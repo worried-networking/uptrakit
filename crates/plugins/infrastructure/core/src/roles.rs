@@ -622,6 +622,12 @@ pub trait SurfaceActionController: Send + Sync {
     /// Authenticated user ID when available.
     fn user_id(&self) -> Option<Uuid>;
 
+    /// Tenant-scoped database access — the sole persistence seam for plugin surface actions.
+    ///
+    /// Only available when the `plugin-ops` feature is active.
+    #[cfg(feature = "plugin-ops")]
+    fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
+
     /// Notification channel persistence capability.
     fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
         None
@@ -655,6 +661,10 @@ pub trait SurfaceActionController: Send + Sync {
 
 /// Typed controller boundary for pre/post update protection workflows.
 pub trait UpdateProtectionController: Send + Sync {
+    /// Tenant-scoped database access for the update protection workflow.
+    #[cfg(feature = "plugin-ops")]
+    fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
+
     /// Proxmox update-protection persistence capability.
     fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
         None
@@ -1286,6 +1296,10 @@ mod controller_boundary_tests {
             self.user_id
         }
 
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            unimplemented!("tenant_db not used in roles.rs surface action tests")
+        }
+
         fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
             Some(&self.notification_store)
         }
@@ -1312,6 +1326,10 @@ mod controller_boundary_tests {
     }
 
     impl UpdateProtectionController for TestController {
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            unimplemented!("tenant_db not used in roles.rs protection tests")
+        }
+
         fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
             Some(&self.proxmox_store)
         }

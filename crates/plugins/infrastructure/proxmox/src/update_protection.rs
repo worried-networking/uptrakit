@@ -829,7 +829,13 @@ mod tests {
 
     struct TestController;
 
-    impl UpdateProtectionController for TestController {}
+    impl UpdateProtectionController for TestController {
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            unimplemented!(
+                "tenant_db not used in proxmox update_protection tests — will be replaced in Wave 3f"
+            )
+        }
+    }
 
     #[test]
     fn snapshot_name_is_deterministic_and_safe() {
