@@ -1230,21 +1230,11 @@ async fn send_email_change_emails(
     old_email: &str,
     confirm_url: &str,
 ) -> Result<(), String> {
-    use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, NotificationPluginError};
+    use uptrakit_plugin_infrastructure_registry::{TransactionalEmailError, escape_html};
 
-    let Some(transport) = state
-        .plugin_ops
-        .transport(&uptrakit_shared_types::plugin_ids::EMAIL)
-    else {
-        return Err("Email delivery not configured".to_string());
-    };
+    let tenant_db = uptrakit_web_api_queries::TenantDb::new(state.db().clone(), tenant_id);
 
-    let settings_bag =
-        uptrakit_web_api_queries::notification_settings::build_settings_bag(state.db(), tenant_id)
-            .await;
-
-    // Template 1: to new address — confirm link
-    let config1 = serde_json::json!({ "to_addresses": [new_email] });
+    // Message 1: to new address — confirm link
     let body1 = format!(
         "A request was made to change the email on account {old_email}. \
         Confirm your new address by clicking the link below (expires in 24 hours).\n\n\
@@ -1256,66 +1246,55 @@ async fn send_email_change_emails(
         <p>Confirm your new address by clicking the link below (expires in 24 hours).</p>\
         <p><a href=\"{url}\">{url}</a></p>\
         <p>If you did not request this, contact your administrator.</p>",
-        old_email_esc = uptrakit_plugin_infrastructure_registry::escape_html(old_email),
-        url = uptrakit_plugin_infrastructure_registry::escape_html(confirm_url),
-    );
-    let msg1 = DeliveryMessage::new(
-        "Confirm your new email address — Uptrakit".to_string(),
-        body1,
-        Some(body1_html),
-        serde_json::Value::Null,
-        vec![],
+        old_email_esc = escape_html(old_email),
+        url = escape_html(confirm_url),
     );
 
-    transport
-        .deliver(&config1, &settings_bag, &msg1)
+    state
+        .plugin_ops
+        .send_transactional_email(
+            &tenant_db,
+            new_email,
+            "Confirm your new email address \u{2014} Uptrakit",
+            &body1,
+            &body1_html,
+        )
         .await
-        .map_err(|e| {
-            if matches!(
-                e.current_context(),
-                NotificationPluginError::SmtpNotConfigured
-            ) {
-                "Email delivery not configured".to_string()
-            } else {
-                "Email delivery failed".to_string()
-            }
+        .map_err(|e| match e {
+            TransactionalEmailError::NotConfigured => "Email delivery not configured".to_string(),
+            TransactionalEmailError::DeliveryFailed(_) => "Email delivery failed".to_string(),
+            _ => "Email delivery failed".to_string(),
         })?;
 
-    // Template 2: to old address — notification
+    // Message 2: to old address — notification
     let masked_new = mask_email(new_email);
-    let config2 = serde_json::json!({ "to_addresses": [old_email] });
     let body2 = format!(
         "A request was made to change the email address on account {old_email} \
-        to {masked_new}. To cancel this change, sign in and go to Profile → \
+        to {masked_new}. To cancel this change, sign in and go to Profile \u{2192} \
         Cancel pending change.",
     );
     let body2_html = format!(
         "<p>A request was made to change the email address on account \
         <strong>{old_email_esc}</strong> to <strong>{masked_new_esc}</strong>.</p>\
-        <p>To cancel this change, sign in and go to Profile → Cancel pending change.</p>",
-        old_email_esc = uptrakit_plugin_infrastructure_registry::escape_html(old_email),
-        masked_new_esc = uptrakit_plugin_infrastructure_registry::escape_html(&masked_new),
-    );
-    let msg2 = DeliveryMessage::new(
-        "Email address change requested — Uptrakit".to_string(),
-        body2,
-        Some(body2_html),
-        serde_json::Value::Null,
-        vec![],
+        <p>To cancel this change, sign in and go to Profile \u{2192} Cancel pending change.</p>",
+        old_email_esc = escape_html(old_email),
+        masked_new_esc = escape_html(&masked_new),
     );
 
-    transport
-        .deliver(&config2, &settings_bag, &msg2)
+    state
+        .plugin_ops
+        .send_transactional_email(
+            &tenant_db,
+            old_email,
+            "Email address change requested \u{2014} Uptrakit",
+            &body2,
+            &body2_html,
+        )
         .await
-        .map_err(|e| {
-            if matches!(
-                e.current_context(),
-                NotificationPluginError::SmtpNotConfigured
-            ) {
-                "Email delivery not configured".to_string()
-            } else {
-                "Email delivery failed".to_string()
-            }
+        .map_err(|e| match e {
+            TransactionalEmailError::NotConfigured => "Email delivery not configured".to_string(),
+            TransactionalEmailError::DeliveryFailed(_) => "Email delivery failed".to_string(),
+            _ => "Email delivery failed".to_string(),
         })?;
 
     Ok(())
