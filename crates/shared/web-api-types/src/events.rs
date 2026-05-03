@@ -95,6 +95,11 @@ pub enum AdminEvent {
     GlobalGitHubProviderMisconfigured { problem: String },
     /// All tenant data was reset (hosts, software items, etc. deleted).
     DataReset,
+    /// The surface provider registry changed (provider joined or left).
+    ///
+    /// Carries no payload — coarse invalidation signal. The frontend re-fetches
+    /// `GET /api/v1/surfaces` and provider availability on receipt.
+    SurfacesChanged,
 }
 
 impl AdminEvent {
@@ -126,6 +131,7 @@ impl AdminEvent {
                 "global_github_provider_misconfigured"
             }
             Self::DataReset => "data_reset",
+            Self::SurfacesChanged => "surfaces_changed",
         }
     }
 }
@@ -187,6 +193,7 @@ mod tests {
                 problem: "api_base_url requires auth_token".to_string(),
             },
             AdminEvent::DataReset,
+            AdminEvent::SurfacesChanged,
         ]
     }
 
@@ -288,7 +295,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 20);
+        assert_eq!(all_variants().len(), 21);
     }
 
     #[test]
