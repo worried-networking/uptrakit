@@ -227,7 +227,6 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             let result = execute_allowlisted_proxmox_add_config_action(
                 &tenant_db,
                 plugin_ops,
-                uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone(),
                 &request.params,
             )
             .await;

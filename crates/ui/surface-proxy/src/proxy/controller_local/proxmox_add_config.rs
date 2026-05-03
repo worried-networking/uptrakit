@@ -4,6 +4,10 @@ use uuid::Uuid;
 use super::SurfaceProxyError;
 use super::params::{parse_csv_array_or_string_array_param, required_string_param};
 
+fn proxmox_plugin_type_id() -> uptrakit_shared_types::PluginTypeId {
+    uptrakit_shared_types::PluginTypeId::from_static("infrastructure_proxmox")
+}
+
 pub(crate) fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
     matches!(
         provider_id,
@@ -21,12 +25,11 @@ pub(crate) fn allowlisted_proxmox_add_config_controller_local_action(
 pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
-    plugin_type: uptrakit_shared_types::PluginTypeId,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, SurfaceProxyError> {
     use uptrakit_web_api_types::validation::Validate as _;
 
-    let request = build_proxmox_add_config_create_request(plugin_type, params)
+    let request = build_proxmox_add_config_create_request(proxmox_plugin_type_id(), params)
         .map_err(SurfaceProxyError::SchemaValidationFailed)?;
     request
         .validate()
