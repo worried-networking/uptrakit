@@ -1997,8 +1997,8 @@ mod tests {
 
     #[tokio::test]
     async fn save_global_defaults_persists_timeout_fields() {
+        use crate::entity::proxmox_protection_default;
         use sea_orm::MockExecResult;
-        use uptrakit_shared_db::entity::proxmox_protection_default;
 
         let tenant_id = Uuid::now_v7();
         let plugin_config_id = Uuid::now_v7();

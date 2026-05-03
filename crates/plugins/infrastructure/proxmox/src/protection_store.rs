@@ -4,14 +4,19 @@
 //! update-protection persistence boundary. The trait and its implementation
 //! are `pub(crate)` — they are not part of the public API of this crate.
 
+use crate::entity::{
+    proxmox_backup_target_cache, proxmox_protection_audit, proxmox_protection_default,
+    proxmox_protection_item_override,
+};
 use async_trait::async_trait;
+use proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache;
+use proxmox_protection_audit::Entity as ProxmoxProtectionAudit;
+use proxmox_protection_default::Entity as ProxmoxProtectionDefault;
+use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
-use uptrakit_shared_db::entity::{
-    plugin_config, prelude::*, proxmox_backup_target_cache, proxmox_host_mapping,
-    proxmox_protection_audit, proxmox_protection_default, proxmox_protection_item_override,
-};
+use uptrakit_shared_db::entity::{plugin_config, prelude::*, proxmox_host_mapping};
 use uuid::Uuid;
 
 const PROXMOX_INFRA_CONFIG_TYPE: &str = "infrastructure_proxmox";

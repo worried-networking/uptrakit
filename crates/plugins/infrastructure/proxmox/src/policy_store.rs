@@ -1,26 +1,30 @@
 //! Controller-side policy, cache, and audit storage for Proxmox update protection.
 
+use crate::entity::{
+    proxmox_backup_target_cache, proxmox_protection_audit, proxmox_protection_default,
+    proxmox_protection_item_override,
+};
+use proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache;
+use proxmox_protection_audit::Entity as ProxmoxProtectionAudit;
+use proxmox_protection_default::Entity as ProxmoxProtectionDefault;
+use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
     TransactionTrait,
 };
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{
-    prelude::{
-        ProxmoxBackupTargetCache, ProxmoxProtectionAudit, ProxmoxProtectionDefault,
-        ProxmoxProtectionItemOverride,
-    },
-    proxmox_backup_target_cache, proxmox_protection_audit, proxmox_protection_default,
-    proxmox_protection_item_override,
-};
 use uuid::Uuid;
 
 use crate::error::{ProxmoxError, Result};
 
-pub use uptrakit_shared_db::entity::proxmox_backup_target_cache as backup_target_cache;
-pub use uptrakit_shared_db::entity::proxmox_protection_audit as protection_audit;
-pub use uptrakit_shared_db::entity::proxmox_protection_default as global_default;
-pub use uptrakit_shared_db::entity::proxmox_protection_item_override as item_override;
+#[cfg(test)]
+pub(crate) use crate::entity::proxmox_backup_target_cache as backup_target_cache;
+#[cfg(test)]
+pub(crate) use crate::entity::proxmox_protection_audit as protection_audit;
+#[cfg(test)]
+pub(crate) use crate::entity::proxmox_protection_default as global_default;
+#[cfg(test)]
+pub(crate) use crate::entity::proxmox_protection_item_override as item_override;
 
 /// Protection mode resolved for a software item update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

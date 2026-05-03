@@ -27,7 +27,6 @@ pub mod pending_oidc_token_exchange;
 pub mod permission;
 pub mod plugin_config;
 pub mod plugin_type_setting;
-pub mod proxmox_backup_target_cache;
 pub mod revoked_token_jti;
 pub mod revoked_token_user;
 pub mod role;
@@ -56,9 +55,6 @@ pub mod user_oidc_link;
 pub mod user_role;
 
 pub mod proxmox_host_mapping;
-pub mod proxmox_protection_audit;
-pub mod proxmox_protection_default;
-pub mod proxmox_protection_item_override;
 
 pub mod prelude;
 pub mod tenant_scoped;
