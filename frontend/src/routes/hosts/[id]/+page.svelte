@@ -749,9 +749,7 @@
 <!-- Discovery allowlist modal -->
 {#if showAllowlistModal}
 	<ModalShell title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
-		<p class="text-sm text-[var(--text-muted)]">
-			Once any entry exists, only the listed plugin types will run discovery on this host.
-		</p>
+		{#snippet subtitle()}Once any entry exists, only the listed plugin types will run discovery on this host.{/snippet}
 
 		<FormFieldRow label="Plugin Type" inputId="allowlist-plugin-type">
 			<Select

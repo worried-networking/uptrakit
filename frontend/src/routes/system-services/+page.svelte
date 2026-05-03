@@ -666,10 +666,8 @@
 
 	{#if editPingService}
 		<ModalShell title="Edit Ping Interval" onclose={cancelPingEdit}>
-			<p>
-				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
-				default.
-			</p>
+			{#snippet subtitle()}Set a custom ping interval for <strong>{editPingService!.name}</strong>. Leave empty to use
+				the service-profile default.{/snippet}
 			<FormFieldRow label="Ping interval (seconds)">
 				<Input
 					id="system-services-ping-interval"

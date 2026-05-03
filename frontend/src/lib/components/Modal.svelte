@@ -5,12 +5,14 @@
 	let {
 		onclose,
 		title,
-		maxWidth = 'max-w-lg',
+		subtitle,
+		maxWidth = 'max-w-2xl',
 		children,
 		footer
 	}: {
 		onclose: () => void;
 		title?: string;
+		subtitle?: Snippet;
 		maxWidth?: string;
 		children: Snippet;
 		footer?: Snippet;
@@ -28,9 +30,16 @@
 		{#if title}
 			<div class="flex-shrink-0 px-6 pt-6 pb-2">
 				<h3 class="text-subsection-title font-bold text-[var(--text-primary)]" id="modal-title">{title}</h3>
+				{#if subtitle}
+					<p class="mt-1 text-sm text-[var(--text-muted)]">{@render subtitle()}</p>
+				{/if}
 			</div>
 		{/if}
-		<div class="min-h-0 flex-1 overflow-y-auto px-6 {title ? 'pt-2' : 'pt-6'} {footer ? 'pb-2' : 'pb-6'}">
+		<div
+			class="min-h-0 flex-1 overflow-y-auto px-6 {title ? (subtitle ? 'pt-1' : 'pt-2') : 'pt-6'} {footer
+				? 'pb-2'
+				: 'pb-6'}"
+		>
 			{@render children()}
 		</div>
 		{#if footer}
