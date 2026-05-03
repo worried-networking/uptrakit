@@ -5,12 +5,14 @@
 	let {
 		open = false,
 		title,
+		subtitle,
 		maxWidth = 'max-w-md',
 		onclose,
 		children
 	}: {
 		open?: boolean;
 		title?: string;
+		subtitle?: Snippet;
 		maxWidth?: string;
 		onclose: () => void;
 		children: Snippet;
@@ -18,7 +20,7 @@
 </script>
 
 {#if open}
-	<Modal {title} {maxWidth} {onclose}>
+	<Modal {title} {subtitle} {maxWidth} {onclose}>
 		{@render children()}
 	</Modal>
 {/if}

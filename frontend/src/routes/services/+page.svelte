@@ -687,10 +687,8 @@
 
 	{#if mergeSource}
 		<ModalShell title="Merge Service" onclose={cancelMerge}>
-			<p>
-				Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
-				to the target, preserving the target's history.
-			</p>
+			{#snippet subtitle()}Merge <strong>{mergeSource!.name}</strong> into an existing service. The source service's enrollment
+				will be transferred to the target, preserving the target's history.{/snippet}
 			<FormFieldRow label="Select target service">
 				<Select
 					id="merge-target"
@@ -708,10 +706,8 @@
 
 	{#if editPingService}
 		<ModalShell title="Edit Ping Interval" onclose={cancelPingEdit}>
-			<p>
-				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
-				default.
-			</p>
+			{#snippet subtitle()}Set a custom ping interval for <strong>{editPingService!.name}</strong>. Leave empty to use
+				the service-profile default.{/snippet}
 			<FormFieldRow label="Ping interval (seconds)">
 				<Input
 					id="services-ping-interval"

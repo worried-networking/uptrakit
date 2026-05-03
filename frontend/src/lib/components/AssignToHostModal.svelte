@@ -266,9 +266,7 @@
 </script>
 
 <Modal title="Assign to Hosts" {onclose} maxWidth="max-w-2xl max-h-[85vh] flex flex-col">
-	<p class="text-sm text-[var(--text-muted)]">
-		Select hosts to track <strong>{softwareItemName}</strong> on.
-	</p>
+	{#snippet subtitle()}Select hosts to track <strong>{softwareItemName}</strong> on.{/snippet}
 	{#if assignmentError}
 		<Callout tone="danger" message={assignmentError} />
 	{/if}
