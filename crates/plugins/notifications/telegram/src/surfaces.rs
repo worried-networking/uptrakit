@@ -101,13 +101,7 @@ async fn handle_list(
 async fn handle_get_global_telegram(
     ctx: &SurfaceActionContext<'_>,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    let store = require_global_telegram_store(ctx)?;
-    let bot_token = store.load_global_bot_token().await.map_err(|error| {
-        tracing::error!(error = ?error, "failed to load global Telegram settings");
-        SurfaceActionError::ControllerIntegration(
-            "failed to load global Telegram settings".to_string(),
-        )
-    })?;
+    let bot_token = db_load_global_bot_token(ctx.tenant_db().db()).await?;
     Ok(serde_json::json!({
         "has_bot_token": !bot_token.is_empty(),
     }))
@@ -124,17 +118,7 @@ async fn handle_save_global_telegram(
         .unwrap_or("")
         .to_string();
 
-    let store = require_global_telegram_store(ctx)?;
-    let saved = store
-        .save_global_bot_token(bot_token)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = ?error, "failed to save global Telegram bot token");
-            SurfaceActionError::ControllerIntegration(
-                "failed to save global Telegram bot token".to_string(),
-            )
-        })?;
-
+    let saved = db_save_global_bot_token(ctx.tenant_db().db(), bot_token).await?;
     Ok(serde_json::json!({
         "has_bot_token": !saved.is_empty(),
     }))
@@ -257,21 +241,6 @@ fn require_notification_channel_store<'a>(
     })
 }
 
-fn require_global_telegram_store<'a>(
-    ctx: &'a SurfaceActionContext<'a>,
-) -> std::result::Result<
-    &'a dyn uptrakit_plugin_infrastructure_core::TelegramGlobalSettingsStore,
-    SurfaceActionError,
-> {
-    ctx.controller
-        .telegram_global_settings_store()
-        .ok_or_else(|| {
-            SurfaceActionError::ControllerIntegration(
-                "global Telegram settings store is not available".to_string(),
-            )
-        })
-}
-
 fn parse_page(params: &serde_json::Value) -> u64 {
     params
         .get("page")
@@ -286,4 +255,33 @@ fn parse_per_page(params: &serde_json::Value) -> u64 {
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(50)
         .clamp(1, 100)
+}
+
+async fn db_load_global_bot_token(
+    db: &sea_orm::DatabaseConnection,
+) -> std::result::Result<String, SurfaceActionError> {
+    let map =
+        uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, "global_telegram.")
+            .await
+            .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
+
+    Ok(map
+        .get(KEY_GLOBAL_TELEGRAM_BOT_TOKEN)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string())
+}
+
+async fn db_save_global_bot_token(
+    db: &sea_orm::DatabaseConnection,
+    bot_token: String,
+) -> std::result::Result<String, SurfaceActionError> {
+    uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
+        db,
+        KEY_GLOBAL_TELEGRAM_BOT_TOKEN,
+        serde_json::json!(bot_token),
+    )
+    .await
+    .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
+    db_load_global_bot_token(db).await
 }

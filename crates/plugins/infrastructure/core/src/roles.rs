@@ -296,16 +296,6 @@ pub trait NotificationChannelStore: Send + Sync {
     async fn mark_action_token_triggered(&self, action_token: Uuid) -> Result<()>;
 }
 
-/// Typed global Telegram settings boundary for controller-side surface actions.
-#[async_trait]
-pub trait TelegramGlobalSettingsStore: Send + Sync {
-    /// Load the global Telegram bot token.
-    async fn load_global_bot_token(&self) -> Result<String>;
-
-    /// Save the global Telegram bot token and return the stored value.
-    async fn save_global_bot_token(&self, bot_token: String) -> Result<String>;
-}
-
 /// Typed list request for paginated Proxmox host mappings.
 ///
 /// `plugin_config_id` is optional: when absent, mappings for all Proxmox
@@ -545,11 +535,6 @@ pub trait SurfaceActionController: Send + Sync {
 
     /// Notification channel persistence capability.
     fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-        None
-    }
-
-    /// Global Telegram settings capability.
-    fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
         None
     }
 
@@ -940,7 +925,6 @@ mod controller_boundary_tests {
     use super::*;
 
     struct TestNotificationStore;
-    struct TestTelegramStore;
     struct TestProxmoxSurfaceStore;
     struct TestProxmoxStore;
 
@@ -1024,17 +1008,6 @@ mod controller_boundary_tests {
             _target_key: &str,
         ) -> Result<Option<String>> {
             Ok(None)
-        }
-    }
-
-    #[async_trait]
-    impl TelegramGlobalSettingsStore for TestTelegramStore {
-        async fn load_global_bot_token(&self) -> Result<String> {
-            Ok("token".to_string())
-        }
-
-        async fn save_global_bot_token(&self, bot_token: String) -> Result<String> {
-            Ok(bot_token)
         }
     }
 
@@ -1133,7 +1106,6 @@ mod controller_boundary_tests {
         tenant_id: Uuid,
         user_id: Option<Uuid>,
         notification_store: TestNotificationStore,
-        telegram_store: TestTelegramStore,
         proxmox_surface_store: TestProxmoxSurfaceStore,
         proxmox_store: TestProxmoxStore,
     }
@@ -1157,10 +1129,6 @@ mod controller_boundary_tests {
 
         fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
             Some(&self.notification_store)
-        }
-
-        fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
-            Some(&self.telegram_store)
         }
 
         fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
@@ -1210,13 +1178,11 @@ mod controller_boundary_tests {
             tenant_id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
             notification_store: TestNotificationStore,
-            telegram_store: TestTelegramStore,
             proxmox_surface_store: TestProxmoxSurfaceStore,
             proxmox_store: TestProxmoxStore,
         };
 
         assert!(controller.notification_channel_store().is_some());
-        assert!(controller.telegram_global_settings_store().is_some());
         assert!(controller.proxmox_surface_store().is_some());
         assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
         assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());
