@@ -143,7 +143,7 @@ pub async fn create_provider(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -249,7 +249,7 @@ pub async fn create_provider(
     let provider_id = generate_uuid();
     let provider = oidc_provider::ActiveModel {
         id: Set(provider_id),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name),
         slug: Set(req.slug),
         logo_url: Set(req.logo_url),
@@ -421,7 +421,7 @@ pub async fn update_provider(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -679,7 +679,7 @@ pub async fn delete_provider(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -796,7 +796,7 @@ pub async fn activate_provider(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -1006,7 +1006,7 @@ pub async fn deactivate_provider(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };

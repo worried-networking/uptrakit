@@ -126,7 +126,7 @@ async fn load_actor_names(
         .collect::<HashMap<_, _>>();
 
     let service_entries = Service::find()
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(service::Column::Id.is_in(actor_ids.iter().copied()))
         .all(tenant_db.db())
         .await?
@@ -184,7 +184,7 @@ pub async fn list_update_history(
     let host_subquery = Query::select()
         .column(host::Column::Id)
         .from(host::Entity)
-        .and_where(Expr::col(host::Column::TenantId).eq(tenant_db.tenant_id))
+        .and_where(Expr::col(host::Column::TenantId).eq(tenant_db.tenant_id()))
         .to_owned();
 
     let mut q =

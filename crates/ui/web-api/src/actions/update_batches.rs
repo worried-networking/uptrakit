@@ -37,7 +37,7 @@ pub(crate) async fn trigger_host_batch(
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
     let candidates = batch_queries::find_outdated_items_for_host(
         bctx.tenant_db.db(),
-        bctx.tenant_db.tenant_id,
+        bctx.tenant_db.tenant_id(),
         host_id,
         category_filter,
         exclude_item_ids,
@@ -51,7 +51,7 @@ pub(crate) async fn trigger_host_batch(
             protection: bctx.protection.clone(),
         },
         &batch_queries::CreateBatchParams {
-            tenant_id: bctx.tenant_db.tenant_id,
+            tenant_id: bctx.tenant_db.tenant_id(),
             batch_type: BatchType::HostUpdate,
             actor_type: actor_type.as_str(),
             actor_id,
@@ -66,14 +66,14 @@ pub(crate) async fn trigger_host_batch(
 
     bctx.ctx
         .notification_service
-        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id)
+        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id())
         .await;
 
     for item in &resp.updates {
         bctx.ctx
             .event_broadcaster
             .send(
-                bctx.tenant_db.tenant_id,
+                bctx.tenant_db.tenant_id(),
                 AdminEvent::UpdateTriggered {
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,
@@ -272,7 +272,7 @@ pub(crate) async fn trigger_item_batch(
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
     let mut candidates = batch_queries::find_outdated_hosts_for_item(
         bctx.tenant_db.db(),
-        bctx.tenant_db.tenant_id,
+        bctx.tenant_db.tenant_id(),
         item_id,
         host_ids,
     )
@@ -289,7 +289,7 @@ pub(crate) async fn trigger_item_batch(
             protection: bctx.protection.clone(),
         },
         &batch_queries::CreateBatchParams {
-            tenant_id: bctx.tenant_db.tenant_id,
+            tenant_id: bctx.tenant_db.tenant_id(),
             batch_type: BatchType::ItemRollout,
             actor_type: actor_type.as_str(),
             actor_id,
@@ -304,14 +304,14 @@ pub(crate) async fn trigger_item_batch(
 
     bctx.ctx
         .notification_service
-        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id)
+        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id())
         .await;
 
     for item in &resp.updates {
         bctx.ctx
             .event_broadcaster
             .send(
-                bctx.tenant_db.tenant_id,
+                bctx.tenant_db.tenant_id(),
                 AdminEvent::UpdateTriggered {
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,

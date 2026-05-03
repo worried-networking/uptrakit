@@ -193,7 +193,7 @@ pub async fn update_service(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -291,7 +291,7 @@ pub async fn approve_service(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -354,7 +354,7 @@ pub async fn reject_service(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -418,7 +418,7 @@ pub async fn deactivate_service(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -511,7 +511,7 @@ pub async fn set_update_freeze(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -666,7 +666,7 @@ pub async fn merge_service(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -770,7 +770,7 @@ pub async fn batch_services(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &auth_user,
         api_token_id,
     };

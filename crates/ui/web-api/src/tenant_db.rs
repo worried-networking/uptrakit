@@ -10,7 +10,7 @@ use uptrakit_shared_db::TenantDb as TenantDbInner;
 ///
 /// Route handlers keep `tenant_db: TenantDb` in signatures — auto-deref
 /// handles method calls (`tenant_db.find::<E>()`), field access
-/// (`tenant_db.tenant_id`), and passing `&tenant_db` to query functions
+/// (`tenant_db.tenant_id()`), and passing `&tenant_db` to query functions
 /// expecting `&TenantDbInner`.
 pub struct TenantDb(pub TenantDbInner);
 

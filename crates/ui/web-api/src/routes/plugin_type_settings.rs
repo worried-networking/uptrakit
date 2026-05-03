@@ -157,7 +157,7 @@ pub async fn list_plugin_type_settings(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match pts_queries::list_type_settings(tenant_db.db(), tenant_db.tenant_id).await {
+    match pts_queries::list_type_settings(tenant_db.db(), tenant_db.tenant_id()).await {
         Ok(models) => {
             let responses: Vec<PluginTypeSettingsResponse> =
                 models.into_iter().map(model_to_response).collect();
@@ -195,7 +195,8 @@ pub async fn get_plugin_type_settings(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match pts_queries::get_type_settings(tenant_db.db(), tenant_db.tenant_id, &plugin_type).await {
+    match pts_queries::get_type_settings(tenant_db.db(), tenant_db.tenant_id(), &plugin_type).await
+    {
         Ok(Some(model)) => (StatusCode::OK, Json(model_to_response(model))).into_response(),
         Ok(None) => error_response(
             StatusCode::NOT_FOUND,
@@ -240,7 +241,7 @@ pub async fn upsert_plugin_type_settings(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -262,7 +263,7 @@ pub async fn upsert_plugin_type_settings(
 
     match pts_queries::upsert_type_settings(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         &plugin_type,
         req.config,
     )
@@ -320,11 +321,12 @@ pub async fn delete_plugin_type_settings(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
-    match pts_queries::delete_type_settings(tenant_db.db(), tenant_db.tenant_id, &plugin_type).await
+    match pts_queries::delete_type_settings(tenant_db.db(), tenant_db.tenant_id(), &plugin_type)
+        .await
     {
         Ok(true) => {
             emit_plugin_type_settings_audit(

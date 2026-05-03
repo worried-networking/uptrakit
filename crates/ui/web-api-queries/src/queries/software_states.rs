@@ -57,11 +57,11 @@ struct ActiveUpdateRow {
 /// # Errors
 ///
 /// Returns a [`sea_orm::DbErr`] if any database query fails.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id()))]
 pub async fn load_software_states_for_tenant(
     tenant_db: &TenantDb,
 ) -> Result<SoftwareStatesPayload, sea_orm::DbErr> {
-    let tenant_id = tenant_db.tenant_id;
+    let tenant_id = tenant_db.tenant_id();
     let db = tenant_db.db();
 
     // 1. Load all active, non-deactivated software items for the tenant.
@@ -305,13 +305,13 @@ pub async fn load_software_states_for_tenant(
 /// # Errors
 ///
 /// Returns a [`sea_orm::DbErr`] if any database query fails.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, host_page))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id(), host_page))]
 pub async fn load_software_states_page_for_tenant(
     tenant_db: &TenantDb,
     host_page: u64,
     host_page_size: u64,
 ) -> Result<SoftwareStatesPayload, sea_orm::DbErr> {
-    let tenant_id = tenant_db.tenant_id;
+    let tenant_id = tenant_db.tenant_id();
     let db = tenant_db.db();
 
     // 1. Count active hosts for this tenant to compute total_pages.

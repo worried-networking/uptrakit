@@ -118,7 +118,7 @@ async fn execute_notification_channel_test_action(
 
     let settings_bag = uptrakit_web_api_queries::notification_settings::build_settings_bag(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
     )
     .await;
     let test_msg = uptrakit_plugin_infrastructure_registry::DeliveryMessage::new(

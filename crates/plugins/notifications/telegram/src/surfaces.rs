@@ -163,8 +163,11 @@ async fn handle_callback(
         }
     };
 
-    // Look up notification log by action token
+    let tenant_id = ctx.tenant_id();
+
+    // Look up notification log by action token, scoped to the current tenant.
     let model = notification_log::Entity::find()
+        .filter(notification_log::Column::TenantId.eq(tenant_id))
         .filter(notification_log::Column::ActionToken.eq(action_token))
         .one(ctx.tenant_db().db())
         .await
@@ -194,6 +197,7 @@ async fn handle_callback(
                 notification_log::Column::ActionTaken,
                 Expr::value(Some("triggered".to_string())),
             )
+            .filter(notification_log::Column::TenantId.eq(tenant_id))
             .filter(notification_log::Column::ActionToken.eq(action_token))
             .exec(ctx.tenant_db().db())
             .await

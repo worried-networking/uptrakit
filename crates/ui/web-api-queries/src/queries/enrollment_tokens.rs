@@ -58,7 +58,7 @@ pub async fn create_enrollment_token(
     let now = OffsetDateTime::now_utc();
     let model = enrollment_token::ActiveModel {
         id: Set(params.id),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(params.name.to_string()),
         token_hash: Set(params.token_hash.to_string()),
         allowed_capabilities: Set(caps_json),

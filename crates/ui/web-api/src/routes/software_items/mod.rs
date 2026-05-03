@@ -253,7 +253,7 @@ pub async fn create_software_item(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -290,7 +290,7 @@ pub async fn create_software_item(
         .notification
         .event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::SoftwareItemCreated { id: resp.id },
         )
         .await;
@@ -391,7 +391,7 @@ pub async fn execute_software_item_merge(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &update_user,
         api_token_id,
     };
@@ -489,7 +489,7 @@ pub async fn update_software_item(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -558,7 +558,7 @@ pub async fn delete_software_item(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -632,12 +632,12 @@ pub async fn approve_software_item(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
     let item = match software_item::Entity::find_by_id(item_id)
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -787,7 +787,7 @@ pub async fn assign_hosts(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -883,7 +883,7 @@ pub async fn unassign_host(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -892,7 +892,7 @@ pub async fn unassign_host(
     // create a name-based ignore rule.
     let ignore_name: Option<String> = if ignore_requested {
         match SoftwareItem::find_by_id(item_id)
-            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
             .one(tenant_db.db())
             .await
         {
@@ -937,7 +937,7 @@ pub async fn unassign_host(
             if let Some(name) = ignore_name
                 && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
                     tenant_db.db(),
-                    tenant_db.tenant_id,
+                    tenant_db.tenant_id(),
                     &name,
                     None,
                 )
@@ -1027,7 +1027,7 @@ pub async fn update_host_assignment(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -1107,7 +1107,7 @@ pub async fn delete_plugin_assignment(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -1234,7 +1234,7 @@ pub async fn trigger_update(
         &tenant_db,
         &ctx,
         TriggerUpdateParams {
-            tenant_id: tenant_db.tenant_id,
+            tenant_id: tenant_db.tenant_id(),
             item_id,
             host_id,
             to_version: to_version.clone(),
@@ -1251,7 +1251,7 @@ pub async fn trigger_update(
             let (outcome, reason_code) = err.current_context().trigger_audit_classification();
             emit_software_update_audit(
                 &state,
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 &user,
                 api_token_id,
                 item_id,
@@ -1286,7 +1286,7 @@ pub async fn trigger_update(
 
     emit_software_update_audit(
         &state,
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         &user,
         api_token_id,
         item_id,
@@ -1331,29 +1331,30 @@ pub async fn check_versions(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
 
     // Verify software item exists and is active
-    let item =
-        match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
-            Some(i) => i,
-            None => {
-                emit_software_version_check_audit(
-                    &audit_ctx,
-                    item_id,
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Denied,
-                    serde_json::json!({
-                        "dispatch_scope": "all_hosts",
-                        "reason_code": "version_check.software_item_not_found",
-                    }),
-                );
-                return error_response(StatusCode::NOT_FOUND, "Software item not found");
-            }
-        };
+    let item = match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id(), item_id)
+        .await
+    {
+        Some(i) => i,
+        None => {
+            emit_software_version_check_audit(
+                &audit_ctx,
+                item_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "dispatch_scope": "all_hosts",
+                    "reason_code": "version_check.software_item_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
+        }
+    };
 
     // Phase 1: Load all data needed for version checks.
     let ctx = match load_version_check_context(&tenant_db, item_id).await {
@@ -1503,14 +1504,15 @@ async fn verify_software_item_and_host(
     ),
     CheckVersionsHostPreconditionError,
 > {
-    let item =
-        match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
-            Some(i) => i,
-            None => return Err(CheckVersionsHostPreconditionError::SoftwareItemNotFound),
-        };
+    let item = match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id(), item_id)
+        .await
+    {
+        Some(i) => i,
+        None => return Err(CheckVersionsHostPreconditionError::SoftwareItemNotFound),
+    };
 
     let host_record = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -1613,7 +1615,7 @@ async fn load_agent_service(
 
     let agents = match Service::find()
         .filter(service::Column::Id.is_in(service_ids))
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(service::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await
@@ -1850,7 +1852,7 @@ pub async fn check_versions_host(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -1934,7 +1936,7 @@ pub async fn check_versions_host(
         tenant_db.db(),
         &state.notification.notification_service,
         &state.notification.event_broadcaster,
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         controller_fetch_jobs,
     )
     .await;
@@ -2056,7 +2058,7 @@ pub async fn batch_software_items(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -2169,7 +2171,7 @@ async fn fire_software_item_lifecycle(
 ) -> Option<uptrakit_plugin_infrastructure_registry::SoftwareItemPatch> {
     let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
         resp.id,
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         resp.name.clone(),
         resp.featured,
         resp.icon_url.clone(),
@@ -2177,7 +2179,7 @@ async fn fire_software_item_lifecycle(
 
     let lifecycle_ctx = match pts_queries::preload_lifecycle_type_settings(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         state.plugin_ops.as_ref(),
     )
     .await
@@ -2186,7 +2188,7 @@ async fn fire_software_item_lifecycle(
         Err(e) => {
             tracing::warn!(
                 error = %e,
-                tenant_id = %tenant_db.tenant_id,
+                tenant_id = %tenant_db.tenant_id(),
                 "failed to preload lifecycle type settings; using defaults"
             );
             uptrakit_plugin_infrastructure_registry::SoftwareItemLifecycleContext::default()

@@ -81,7 +81,7 @@ pub async fn create_enrollment_token(
     let api_token_id = api_token_id.map(|value| value.0);
     let ctx = AuditContext {
         emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -297,7 +297,7 @@ pub async fn revoke_enrollment_token(
     let api_token_id = api_token_id.map(|value| value.0);
     let ctx = AuditContext {
         emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };

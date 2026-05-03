@@ -129,7 +129,7 @@ pub async fn trigger_host_batch_update(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -231,7 +231,7 @@ pub async fn trigger_item_batch_update(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };

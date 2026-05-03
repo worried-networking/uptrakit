@@ -19,7 +19,7 @@ pub(crate) async fn reset_data(
         .await;
 
     ctx.event_broadcaster
-        .send(tenant_db.tenant_id, AdminEvent::DataReset)
+        .send(tenant_db.tenant_id(), AdminEvent::DataReset)
         .await;
 
     tracing::info!(

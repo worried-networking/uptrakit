@@ -189,12 +189,6 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
                 ))
             })?;
 
-        if config.plugin_type != PROXMOX_INFRA_CONFIG_TYPE {
-            return Err(plugin_internal_error(format!(
-                "plugin config {plugin_config_id} is not an {PROXMOX_INFRA_CONFIG_TYPE} config"
-            )));
-        }
-
         Ok(config.config)
     }
 

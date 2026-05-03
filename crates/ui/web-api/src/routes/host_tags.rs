@@ -155,7 +155,7 @@ pub async fn create_host_tag(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
@@ -261,7 +261,7 @@ pub async fn update_host_tag(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
@@ -386,12 +386,12 @@ pub async fn delete_host_tag(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
     let existing_tag = host_tag::Entity::find_by_id(tag_id)
-        .filter(host_tag::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host_tag::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_tag::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -474,7 +474,7 @@ pub async fn batch_host_tags(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
@@ -590,7 +590,7 @@ pub async fn set_host_tags(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
@@ -610,7 +610,7 @@ pub async fn set_host_tags(
     }
 
     let host_record = match host::Entity::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await

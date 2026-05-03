@@ -208,7 +208,7 @@ async fn handle_switch_tag(
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     use sea_orm::{
         ActiveModelTrait as _, ColumnTrait as _, EntityTrait as _, QueryFilter as _, Set,
-        TransactionTrait as _,
+        SqliteTransactionMode, TransactionOptions, TransactionTrait as _,
     };
     use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
 
@@ -219,18 +219,30 @@ async fn handle_switch_tag(
     tracing::debug!(%host_id, %software_item_id, new_image_ref = %new_image_ref, "switching Docker tag");
 
     // Validate format first (parses the image ref) then SSRF check.
-    let new_ref: ImageRef = new_image_ref
-        .parse()
+    new_image_ref
+        .parse::<ImageRef>()
         .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
     validate_identifier(&new_image_ref)
         .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
 
     let db = ctx.tenant_db().db();
 
+    // Use BEGIN IMMEDIATE so SQLite promotes to RESERVED lock before the first read,
+    // preventing SQLITE_BUSY_SNAPSHOT when another connection commits mid-transaction.
+    let txn = db
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| {
+            SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
+        })?;
+
     let plugin_rows = host_software_item_plugin::Entity::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-        .all(db)
+        .all(&txn)
         .await
         .map_err(|e| {
             SurfaceActionError::ControllerIntegration(format!(
@@ -247,7 +259,7 @@ async fn handle_switch_tag(
     let hsi_row = host_software_item::Entity::find()
         .filter(host_software_item::Column::HostId.eq(host_id))
         .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
-        .one(db)
+        .one(&txn)
         .await
         .map_err(|e| {
             SurfaceActionError::ControllerIntegration(format!(
@@ -259,10 +271,6 @@ async fn handle_switch_tag(
                 "host_software_item not found for host {host_id} / item {software_item_id}"
             ))
         })?;
-
-    let txn = db.begin().await.map_err(|e| {
-        SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
-    })?;
 
     for row in plugin_rows {
         if row.plugin_type != DOCKER_RELEASES_CONFIG_TYPE {
@@ -301,7 +309,7 @@ async fn handle_switch_tag(
     tracing::info!(
         %host_id,
         %software_item_id,
-        new_image_ref = %new_ref.full_ref,
+        %new_image_ref,
         "Docker tag switched successfully"
     );
 

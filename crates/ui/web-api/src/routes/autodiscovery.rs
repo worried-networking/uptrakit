@@ -111,8 +111,12 @@ pub async fn list_autodiscovery_ignores(
         per_page: params.per_page,
     };
 
-    match autodiscovery_queries::list_ignore_rules(tenant_db.db(), tenant_db.tenant_id, &pagination)
-        .await
+    match autodiscovery_queries::list_ignore_rules(
+        tenant_db.db(),
+        tenant_db.tenant_id(),
+        &pagination,
+    )
+    .await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
@@ -148,7 +152,7 @@ pub async fn create_autodiscovery_ignore(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -160,7 +164,7 @@ pub async fn create_autodiscovery_ignore(
     // Create the rule (idempotent). Returns true if newly inserted, false if already existed.
     let was_created = match autodiscovery_queries::create_or_ignore_ignore_rule(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         &name,
         req.host_id,
     )
@@ -188,7 +192,7 @@ pub async fn create_autodiscovery_ignore(
 
     // Fetch the current rule to get the correct ID and created_at.
     let mut query = SoftwareIgnore::find()
-        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_ignore::Column::Name.eq(&name));
     if let Some(host_id) = req.host_id {
         query = query.filter(software_ignore::Column::HostId.eq(host_id));
@@ -292,7 +296,7 @@ pub async fn delete_autodiscovery_ignore(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -300,7 +304,7 @@ pub async fn delete_autodiscovery_ignore(
     use uptrakit_shared_db::entity::{prelude::*, software_ignore};
 
     let existing_rule = match SoftwareIgnore::find_by_id(rule_id)
-        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id()))
         .one(tenant_db.db())
         .await
     {
@@ -322,7 +326,7 @@ pub async fn delete_autodiscovery_ignore(
         }
     };
 
-    match autodiscovery_queries::delete_ignore_rule(tenant_db.db(), tenant_db.tenant_id, rule_id)
+    match autodiscovery_queries::delete_ignore_rule(tenant_db.db(), tenant_db.tenant_id(), rule_id)
         .await
     {
         Ok(true) => {
@@ -402,7 +406,7 @@ pub async fn batch_autodiscovery_ignores(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -410,7 +414,7 @@ pub async fn batch_autodiscovery_ignores(
         "delete" => {
             match autodiscovery_queries::batch_delete_ignore_rules(
                 tenant_db.db(),
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 &body.ids,
             )
             .await

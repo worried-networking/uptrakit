@@ -16,7 +16,7 @@ pub(crate) async fn create(
     let resp = tag_queries::create_host_tag(tenant_db, body).await?;
     ctx.event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::HostTagCreated { id: resp.id },
         )
         .await;
@@ -35,7 +35,7 @@ pub(crate) async fn update(
     if resp.is_some() {
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::HostTagUpdated { id: tag_id },
             )
             .await;
@@ -54,7 +54,7 @@ pub(crate) async fn delete(
     if found {
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::HostTagDeleted { id: tag_id },
             )
             .await;
@@ -70,7 +70,10 @@ pub(crate) async fn batch_delete(
     let (succeeded_ids, failed) = tag_queries::batch_delete_host_tags(tenant_db, ids).await?;
     for id in &succeeded_ids {
         ctx.event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostTagDeleted { id: *id })
+            .send(
+                tenant_db.tenant_id(),
+                AdminEvent::HostTagDeleted { id: *id },
+            )
             .await;
     }
     Ok((succeeded_ids, failed))
@@ -208,11 +211,14 @@ pub(crate) async fn set(
     let resp = tag_queries::set_host_tags(tenant_db, host_id, tag_ids).await?;
 
     ctx.event_broadcaster
-        .send(tenant_db.tenant_id, AdminEvent::HostTagsChanged { host_id })
+        .send(
+            tenant_db.tenant_id(),
+            AdminEvent::HostTagsChanged { host_id },
+        )
         .await;
 
     ctx.notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
+        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id())
         .await;
 
     Ok(resp)

@@ -94,7 +94,7 @@ pub async fn list_tenant_discovery_allowlist(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
 ) -> Response {
-    match allowlist_queries::list_tenant_allowlist(tenant_db.db(), tenant_db.tenant_id).await {
+    match allowlist_queries::list_tenant_allowlist(tenant_db.db(), tenant_db.tenant_id()).await {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to list tenant discovery allowlist");
@@ -132,13 +132,13 @@ pub async fn add_tenant_discovery_allowlist_entry(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
     let plugin_type = req.plugin_type.to_string();
     let was_created = tenant_discovery_allowlist::Entity::find()
-        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(tenant_discovery_allowlist::Column::PluginType.eq(&plugin_type))
         .one(tenant_db.db())
         .await
@@ -148,7 +148,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     let entry = match allowlist_queries::add_tenant_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         req.plugin_type,
     )
     .await
@@ -221,12 +221,12 @@ pub async fn remove_tenant_discovery_allowlist_entry(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
     let existing_entry = match tenant_discovery_allowlist::Entity::find_by_id(entry_id)
-        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
         .one(tenant_db.db())
         .await
     {
@@ -250,7 +250,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
 
     match allowlist_queries::remove_tenant_allowlist_entry(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         entry_id,
     )
     .await
@@ -335,7 +335,7 @@ pub async fn list_host_discovery_allowlist(
 ) -> Response {
     // Verify host belongs to tenant.
     match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -348,7 +348,8 @@ pub async fn list_host_discovery_allowlist(
         }
     }
 
-    match allowlist_queries::list_host_allowlist(tenant_db.db(), tenant_db.tenant_id, host_id).await
+    match allowlist_queries::list_host_allowlist(tenant_db.db(), tenant_db.tenant_id(), host_id)
+        .await
     {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
         Err(e) => {
@@ -391,7 +392,7 @@ pub async fn add_host_discovery_allowlist_entry(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -399,7 +400,7 @@ pub async fn add_host_discovery_allowlist_entry(
 
     // Verify host belongs to tenant.
     match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -444,7 +445,7 @@ pub async fn add_host_discovery_allowlist_entry(
     }
 
     let was_created = host_discovery_allowlist::Entity::find()
-        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .filter(host_discovery_allowlist::Column::PluginType.eq(&plugin_type))
         .one(tenant_db.db())
@@ -455,7 +456,7 @@ pub async fn add_host_discovery_allowlist_entry(
     let entry = match allowlist_queries::add_host_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         host_id,
         req.plugin_type,
     )
@@ -533,12 +534,12 @@ pub async fn remove_host_discovery_allowlist_entry(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
     let existing_entry = match host_discovery_allowlist::Entity::find_by_id(entry_id)
-        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .one(tenant_db.db())
         .await
@@ -564,7 +565,7 @@ pub async fn remove_host_discovery_allowlist_entry(
 
     match allowlist_queries::remove_host_allowlist_entry(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         host_id,
         entry_id,
     )
