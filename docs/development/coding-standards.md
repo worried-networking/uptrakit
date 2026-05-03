@@ -1579,6 +1579,53 @@ can be unbounded.
 A silently-zero count on DB failure hides errors. Propagate DB errors with `?` or log and return an explicit error
 response. Do not use `count.unwrap_or(0)` as a silent default.
 
+### SQLite transactions that read before writing must use `BEGIN IMMEDIATE`
+
+**Background — SQLITE_BUSY_SNAPSHOT:** SQLite WAL mode allows one writer and many concurrent
+readers. When a `BEGIN DEFERRED` transaction reads a row, it establishes a snapshot at the WAL
+position at that moment. If a separate connection commits a write before the first transaction
+tries to write, SQLite detects that the snapshot is stale and returns `SQLITE_BUSY` (error code
+5) **immediately** — it bypasses `busy_timeout` entirely because retrying cannot help: the
+snapshot can never become current without restarting the transaction.
+
+The symptom is a `database is locked` error with a 2–5 ms latency on an operation that is
+supposed to wait up to 5 seconds. It is easy to miss in testing because it only triggers under
+concurrent load.
+
+**Rule:** Any transaction that **reads rows first and then writes** must be started with
+`BEGIN IMMEDIATE`. This acquires the write lock at `BEGIN` time, before any reads establish a
+snapshot, so the snapshot-staleness race cannot occur.
+
+```rust
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+
+// ✓ Correct — write lock acquired before snapshot is established
+let txn = db
+    .begin_with_options(TransactionOptions {
+        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+    .context_to()?;
+
+let row = Entity::find().one(&txn).await?;   // read
+// … some logic …
+active_model.update(&txn).await?;            // write — safe, no BUSY_SNAPSHOT
+
+// ✗ Wrong — BEGIN DEFERRED; snapshot established on first read;
+//   concurrent commit between read and write → SQLITE_BUSY (code 5, 2 ms)
+let txn = db.begin().await.context_to()?;
+let row = Entity::find().one(&txn).await?;
+active_model.update(&txn).await?;  // may fail instantly
+```
+
+`SqliteTransactionMode::Immediate` is **ignored on Postgres** connections — it is a SQLite-only
+hint, so it is safe to pass unconditionally regardless of which backend is active.
+
+**Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do
+not need `BEGIN IMMEDIATE`; `busy_timeout` handles the ordinary writer-writer lock contention
+for those.
+
 ## Exhaustive Enum Dispatch
 
 Wildcard arms in dispatch functions are forbidden. A function that maps enum variants to domain values (timeout,
