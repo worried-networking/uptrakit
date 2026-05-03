@@ -117,6 +117,9 @@ PLUGIN_IDS_DIRECT_CONST_IMPORT_RE = re.compile(
 PLUGIN_IDS_SELF_ALIAS_RE = re.compile(
     r"self(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?"
 )
+PLUGIN_IDS_INLINE_QUALIFIED_RE = re.compile(
+    r"\bplugin_ids\s*::\s*[A-Z_][A-Z0-9_]*\b"
+)
 PLUGIN_TYPE_ID_TYPED_BINDING_RE = re.compile(
     r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<type>(?:&\s*)?(?:mut\s+)?[^=,;)\{\n]+)"
 )
@@ -1429,6 +1432,23 @@ def add_plugin_ids_reference_findings(
                         excerpt=line.strip(),
                     )
                 )
+
+    # Secondary scan: inline fully-qualified paths like
+    # `uptrakit_shared_types::plugin_ids::GENERIC_SHELL` where no `use plugin_ids` binding exists.
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if _line_is_comment(line):
+            continue
+        for match in PLUGIN_IDS_INLINE_QUALIFIED_RE.finditer(line):
+            findings.add(
+                Finding(
+                    rule_id=RULE_PLUGIN_IDS_REFERENCE,
+                    path=rel_path,
+                    line=line_no,
+                    match_kind="module_token",
+                    match_value=match.group(0),
+                    excerpt=line.strip(),
+                )
+            )
 
 
 def add_plugin_type_id_helper_definition_findings(
