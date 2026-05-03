@@ -1551,6 +1551,13 @@ impl MessageProcessor {
             uptrakit_audit_log::AuditOutcome::Success,
             None,
         );
+        if let Some(tenant_id) = self.service_tenant_id {
+            self.state
+                .notification
+                .event_broadcaster
+                .send(tenant_id, AdminEvent::SurfacesChanged)
+                .await;
+        }
         ProcessorResponse::cont()
     }
 
@@ -6030,6 +6037,111 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "no broadcast expected for system service"
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn surface_registration_success_broadcasts_surfaces_changed() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        let processor = MessageProcessor {
+            state: Arc::clone(&state),
+            service_id,
+            cert: None,
+            is_system: false,
+            has_update_tracking: false,
+            has_software_discovery: false,
+            has_update_hooks: false,
+            has_ui_surfaces: true,
+            has_workload_claims: false,
+            runtime_instance_id: None,
+            service_app_name: Some("uptrakit-agent-ssh".to_string()),
+            service_tenant_id: Some(tenant_id),
+            linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            report_tracker: ReportTracker::new(),
+        };
+        let response = processor
+            .handle_surface_registration(test_surface_registration("provider-a", tenant_id))
+            .await;
+
+        assert!(response.replies.is_empty(), "success path returns cont()");
+
+        match rx.try_recv() {
+            Ok(AdminEvent::SurfacesChanged) => {}
+            other => panic!("expected SurfacesChanged on success, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn surface_registration_rejection_does_not_broadcast() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        let service_id_b = uuid::Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+        insert_test_service_row(&db, tenant_id, service_id_b, "uptrakit-agent-ssh-2").await;
+
+        // Register provider-a from service_id (succeeds).
+        state
+            .surface_proxy_deps
+            .registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_id),
+                test_surface_registration("provider-a", tenant_id),
+            )
+            .expect("first registration should succeed");
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        // Try to claim the SAME provider ID ("provider-a") from a different service
+        // (service_id_b). The registry rejects this because provider-a is already bound
+        // to service_id — two different services cannot share the same provider ID.
+        let processor = MessageProcessor {
+            state: Arc::clone(&state),
+            service_id: service_id_b,
+            cert: None,
+            is_system: false,
+            has_update_tracking: false,
+            has_software_discovery: false,
+            has_update_hooks: false,
+            has_ui_surfaces: true,
+            has_workload_claims: false,
+            runtime_instance_id: None,
+            service_app_name: Some("uptrakit-agent-ssh-2".to_string()),
+            service_tenant_id: Some(tenant_id),
+            linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            report_tracker: ReportTracker::new(),
+        };
+        let response = processor
+            .handle_surface_registration(test_surface_registration("provider-a", tenant_id))
+            .await;
+
+        assert!(
+            !response.replies.is_empty(),
+            "rejection path returns an error reply"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no broadcast expected on rejected registration"
         );
     }
 }
