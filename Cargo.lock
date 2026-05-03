@@ -7393,6 +7393,7 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
+ "uptrakit-tenant-db",
  "uuid",
 ]
 
@@ -7414,6 +7415,7 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
+ "uptrakit-tenant-db",
  "uuid",
 ]
 
@@ -7584,6 +7586,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-surfaces",
+ "uptrakit-tenant-db",
  "uuid",
 ]
 
@@ -7608,6 +7611,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tenant-db",
  "url",
  "uuid",
 ]
@@ -7857,6 +7861,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tenant-db",
  "url",
  "uuid",
 ]
@@ -8094,6 +8099,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tenant-db",
  "uuid",
  "zeroize",
 ]

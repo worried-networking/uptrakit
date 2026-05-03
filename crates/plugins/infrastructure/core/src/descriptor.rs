@@ -381,6 +381,10 @@ mod surface_action_context_tests {
             self.user_id
         }
 
+        #[expect(
+            clippy::unimplemented,
+            reason = "tenant_db is never called by these unit tests"
+        )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in descriptor.rs surface action context tests")
         }

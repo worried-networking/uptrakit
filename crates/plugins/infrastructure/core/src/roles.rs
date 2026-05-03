@@ -1296,6 +1296,10 @@ mod controller_boundary_tests {
             self.user_id
         }
 
+        #[expect(
+            clippy::unimplemented,
+            reason = "tenant_db is never called by these unit tests"
+        )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs surface action tests")
         }
@@ -1326,6 +1330,10 @@ mod controller_boundary_tests {
     }
 
     impl UpdateProtectionController for TestController {
+        #[expect(
+            clippy::unimplemented,
+            reason = "tenant_db is never called by these unit tests"
+        )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs protection tests")
         }
