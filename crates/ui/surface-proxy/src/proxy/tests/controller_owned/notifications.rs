@@ -428,7 +428,7 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
     let details = row.details_json.expect("audit details");
     assert_eq!(details["channel_type"], serde_json::json!("webhook"));
     assert_eq!(
-        details["action_source"],
+        details["create_source"],
         serde_json::json!("surface_proxy.notification_channel.create")
     );
 }
