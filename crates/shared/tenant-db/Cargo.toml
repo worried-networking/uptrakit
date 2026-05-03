@@ -1,0 +1,15 @@
+[package]
+name = "uptrakit-tenant-db"
+description = "Uptrakit tenant-scoped database access primitives"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+sea-orm = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
+
+[lints]
+workspace = true
