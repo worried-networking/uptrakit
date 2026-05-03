@@ -231,7 +231,7 @@ pub async fn create_software_item(
     let txn = tenant_db.db().begin().await.context_to()?;
 
     let duplicate = SoftwareItem::find()
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_item::Column::Name.eq(&req.name))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .one(&txn)
@@ -245,7 +245,7 @@ pub async fn create_software_item(
     let now = OffsetDateTime::now_utc();
     let model = software_item::ActiveModel {
         id: Set(generate_uuid()),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name),
         featured: Set(req.featured),
         icon_url: Set(req.icon_url),
@@ -335,7 +335,7 @@ pub async fn list_software_items(
     let pagination = params.pagination().resolve();
 
     let mut base_query = SoftwareItem::find()
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .order_by(
             sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
@@ -479,7 +479,7 @@ pub async fn get_software_item(
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> super::Result<Option<SoftwareItemDetailResponse>> {
-    let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
+    let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id).await else {
         return Ok(None);
     };
 
@@ -507,7 +507,7 @@ pub async fn update_software_item(
     id: Uuid,
     req: UpdateSoftwareItemRequest,
 ) -> super::Result<SoftwareItemResponse> {
-    let existing = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    let existing = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -521,7 +521,7 @@ pub async fn update_software_item(
         && new_name != &existing.name
     {
         let duplicate = SoftwareItem::find()
-            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
             .filter(software_item::Column::Name.eq(new_name))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .filter(software_item::Column::Id.ne(id))
@@ -641,7 +641,7 @@ pub async fn load_items_needing_enrichment(
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
 #[tracing::instrument(skip_all, fields(%id))]
 pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> super::Result<bool> {
-    let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
+    let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id).await else {
         return Ok(false);
     };
 
@@ -665,7 +665,7 @@ pub async fn batch_feature_software_items(
 ) -> super::Result<crate::queries::BatchOutcome> {
     let items = software_item::Entity::find()
         .filter(software_item::Column::Id.is_in(ids.iter().copied()))
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await
@@ -704,7 +704,7 @@ pub async fn batch_delete_software_items(
 ) -> super::Result<crate::queries::BatchOutcome> {
     let items = software_item::Entity::find()
         .filter(software_item::Column::Id.is_in(ids.iter().copied()))
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await

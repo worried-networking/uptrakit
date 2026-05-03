@@ -158,7 +158,7 @@ pub async fn update_host(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
@@ -237,12 +237,12 @@ pub async fn deactivate_host(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
     let existing_host = Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -331,13 +331,13 @@ pub async fn discover_host(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };
     // Verify host belongs to tenant.
     let host_record = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -402,7 +402,7 @@ pub async fn discover_host(
         trigger_discovery_for_agent_host(
             &state,
             link.service_id,
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             host_id,
             &host_record.machine_id,
         )
@@ -461,7 +461,7 @@ pub async fn batch_hosts(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         state: &state,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &caller,
         api_token_id,
     };

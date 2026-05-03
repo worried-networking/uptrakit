@@ -29,7 +29,7 @@ pub(crate) async fn approve(
 
     let service_label = resp.service_label.clone();
     ctx.notification_dispatcher.dispatch(NotificationEvent::new(
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         NotificationEventDetails::NewServiceEnrolled {
             service_id,
             service_label,
@@ -38,7 +38,7 @@ pub(crate) async fn approve(
 
     ctx.event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::ServiceStatusChanged {
                 id: service_id,
                 status: "approved".to_string(),
@@ -70,7 +70,7 @@ pub(crate) async fn reject(
 
     ctx.event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::ServiceStatusChanged {
                 id: service_id,
                 status: "rejected".to_string(),
@@ -106,7 +106,7 @@ pub(crate) async fn deactivate(
 
     ctx.event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::ServiceStatusChanged {
                 id: service_id,
                 status: "deactivated".to_string(),
@@ -180,7 +180,7 @@ pub(crate) async fn batch_approve(
 
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::ServiceStatusChanged {
                     id: *id,
                     status: "approved".to_string(),
@@ -211,7 +211,7 @@ pub(crate) async fn batch_reject(
         service_connections.force_disconnect(id).await;
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::ServiceStatusChanged {
                     id: *id,
                     status: "rejected".to_string(),
@@ -244,7 +244,7 @@ pub(crate) async fn batch_deactivate(
         service_connections.force_disconnect(id).await;
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::ServiceStatusChanged {
                     id: *id,
                     status: "deactivated".to_string(),

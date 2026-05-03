@@ -17,7 +17,10 @@ pub(crate) async fn update(
     let resp = host_queries::update_host(tenant_db, host_id, body).await?;
     if resp.is_some() {
         ctx.event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostUpdated { id: host_id })
+            .send(
+                tenant_db.tenant_id(),
+                AdminEvent::HostUpdated { id: host_id },
+            )
             .await;
     }
     Ok(resp)
@@ -33,7 +36,10 @@ pub(crate) async fn deactivate(
     let found = host_queries::deactivate_host(tenant_db, host_id).await?;
     if found {
         ctx.event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: host_id })
+            .send(
+                tenant_db.tenant_id(),
+                AdminEvent::HostDeleted { id: host_id },
+            )
             .await;
     }
     Ok(found)
@@ -47,7 +53,7 @@ pub(crate) async fn batch_deactivate(
     let (succeeded_ids, failed) = host_queries::batch_deactivate_hosts(tenant_db, ids).await?;
     for id in &succeeded_ids {
         ctx.event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: *id })
+            .send(tenant_db.tenant_id(), AdminEvent::HostDeleted { id: *id })
             .await;
     }
     Ok((succeeded_ids, failed))

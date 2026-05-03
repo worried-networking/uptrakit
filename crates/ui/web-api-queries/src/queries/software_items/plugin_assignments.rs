@@ -28,7 +28,7 @@ pub async fn delete_plugin_assignment(
     role: PluginRole,
     ordinal: i32,
 ) -> super::Result<SoftwareItemDetailResponse> {
-    find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
+    find_active_item(tenant_db.db(), tenant_db.tenant_id(), item_id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -45,7 +45,7 @@ pub async fn delete_plugin_assignment(
         bail!(SoftwareItemQueryError::PluginAssignmentNotFound);
     }
 
-    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id(), item_id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 

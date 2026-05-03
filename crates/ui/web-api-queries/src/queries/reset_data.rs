@@ -36,9 +36,9 @@ impl_report_conversion!(sea_orm::DbErr => ResetDataQueryError::Database);
 /// Delete all tenant-scoped data in FK-safe order within a single transaction.
 ///
 /// Returns per-category counts of deleted rows for the primary entities.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id()))]
 pub async fn reset_tenant_data(tenant_db: &TenantDb) -> Result<ResetDeletedCounts> {
-    let tenant_id = tenant_db.tenant_id;
+    let tenant_id = tenant_db.tenant_id();
     let txn = tenant_db.db().begin().await.context_to()?;
 
     // -- 1. update_output_lines: FK to update_history (no tenant_id) --

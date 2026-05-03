@@ -122,7 +122,7 @@ async fn load_active_agent_service_for_host(
 
     let agents = match Service::find()
         .filter(service::Column::Id.is_in(service_ids))
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(service::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await
@@ -340,7 +340,7 @@ pub async fn create_plugin_config(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -526,13 +526,13 @@ pub async fn update_plugin_config(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
 
     let existing = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -639,13 +639,13 @@ pub async fn delete_plugin_config(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
 
     let existing = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -766,7 +766,7 @@ pub async fn discover_plugin_config(
 ) -> Response {
     // Load the plugin config and verify it belongs to the tenant.
     let cfg = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -813,7 +813,7 @@ pub async fn discover_plugin_config(
         .column(service_host::Column::ServiceId)
         .column(host::Column::MachineId)
         .filter(service::Column::DeactivatedAt.is_null())
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .into_model::<AgentHostRow>()
         .all(tenant_db.db())
@@ -1031,7 +1031,7 @@ pub async fn batch_plugin_configs(
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id,
+        tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
     };
@@ -1154,7 +1154,7 @@ pub async fn test_plugin_config(
     // 2. Merge with saved config if plugin_config_id is provided.
     let config = if let Some(config_id) = body.plugin_config_id {
         let saved = match PluginConfig::find_by_id(config_id)
-            .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
             .filter(plugin_config::Column::DeactivatedAt.is_null())
             .one(tenant_db.db())
             .await
@@ -1224,7 +1224,7 @@ pub async fn test_plugin_config(
 
     // 6. Resolve host → service.
     let host_record = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await

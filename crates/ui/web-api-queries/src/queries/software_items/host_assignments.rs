@@ -376,7 +376,7 @@ pub async fn assign_hosts(
     id: Uuid,
     req: AssignHostsRequest,
 ) -> super::Result<SoftwareItemDetailResponse> {
-    find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -399,7 +399,7 @@ pub async fn assign_hosts(
             upsert_role_assignment(
                 ops,
                 &txn,
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 &host_model,
                 id,
                 hsi_id,
@@ -412,7 +412,7 @@ pub async fn assign_hosts(
 
     txn.commit().await.context_to()?;
 
-    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -441,7 +441,7 @@ pub async fn update_host_assignment(
     host_id: Uuid,
     req: UpdateHostAssignmentRequest,
 ) -> super::Result<SoftwareItemDetailResponse> {
-    find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -565,7 +565,7 @@ pub async fn update_host_assignment(
         };
 
         let (plugin_config_id, config) =
-            resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, &synthetic).await?;
+            resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id(), &synthetic).await?;
 
         validate_assignment(
             ops,
@@ -621,7 +621,7 @@ pub async fn update_host_assignment(
 
     txn.commit().await.context_to()?;
 
-    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
@@ -646,7 +646,7 @@ pub async fn update_host_assignment(
 /// Cascade deletes will remove the associated `host_software_item_plugins` rows.
 #[tracing::instrument(skip_all, fields(%id, %host_id))]
 pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> super::Result<bool> {
-    if find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    if find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
         .await
         .is_none()
     {

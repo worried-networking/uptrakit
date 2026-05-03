@@ -57,7 +57,7 @@ pub async fn create_channel(
 
     let model = notification_channel::ActiveModel {
         id: Set(id),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name.clone()),
         channel_type: Set(req.channel_type.clone()),
         config: Set(encrypted_config),
@@ -216,7 +216,7 @@ pub async fn create_rule(
 
     let model = notification_rule::ActiveModel {
         id: Set(id),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         channel_id: Set(req.channel_id),
         event_type: Set(req.event_type.as_str().to_string()),
         host_id: Set(req.host_id),

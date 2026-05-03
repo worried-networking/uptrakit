@@ -33,60 +33,53 @@ use crate::policy_store::{
 // ── Request types (moved from plugin-infrastructure-core) ────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxHostMappingsRequest {
-    pub plugin_config_id: Option<uuid::Uuid>,
-    pub page: Option<u64>,
-    pub per_page: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxPluginConfigRequest {
+pub(crate) struct ProxmoxPluginConfigRequest {
     pub plugin_config_id: uuid::Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxManualMatchRequest {
+pub(crate) struct ProxmoxManualMatchRequest {
     pub mapping_id: uuid::Uuid,
     pub host_id: uuid::Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxApproveMatchRequest {
+pub(crate) struct ProxmoxApproveMatchRequest {
     pub mapping_id: uuid::Uuid,
     pub host_id: uuid::Uuid,
     pub match_method: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxMappingRequest {
+pub(crate) struct ProxmoxMappingRequest {
     pub mapping_id: uuid::Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxHostInfoRequest {
+pub(crate) struct ProxmoxHostInfoRequest {
     pub host_id: uuid::Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxUnmatchedGuestsRequest {
+pub(crate) struct ProxmoxUnmatchedGuestsRequest {
     pub page: Option<u64>,
     pub per_page: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxScopeSelectionRequest {
+pub(crate) struct ProxmoxScopeSelectionRequest {
     pub plugin_config_id: Option<uuid::Uuid>,
     pub software_item_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxItemOverridePreloadRequest {
+pub(crate) struct ProxmoxItemOverridePreloadRequest {
     pub software_item_id: uuid::Uuid,
     pub plugin_config_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxGlobalDefaultsSaveRequest {
+pub(crate) struct ProxmoxGlobalDefaultsSaveRequest {
     pub plugin_config_id: uuid::Uuid,
     pub mode: String,
     pub backup_target_option: Option<String>,
@@ -95,7 +88,7 @@ pub struct ProxmoxGlobalDefaultsSaveRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProxmoxItemOverrideSaveRequest {
+pub(crate) struct ProxmoxItemOverrideSaveRequest {
     pub software_item_id: uuid::Uuid,
     pub plugin_config_id: uuid::Uuid,
     pub mode: String,
@@ -367,21 +360,6 @@ async fn handle_action_inner(
     .await
 }
 
-/// Execute a Proxmox controller surface action using the canonical DB-backed handlers.
-///
-/// Kept for compatibility with string-based dispatch entry points.
-pub async fn execute_controller_surface_action(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
-    surface_id: &str,
-    action_id: &str,
-    params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    execute_controller_surface_action_typed(db, tenant_id, surface_id, action_id, params)
-        .await
-        .map_err(|error| error.to_string())
-}
-
 async fn execute_controller_surface_action_typed(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
@@ -488,7 +466,7 @@ async fn execute_controller_surface_action_typed(
     }
 }
 
-pub async fn execute_controller_list_host_mappings(
+async fn execute_controller_list_host_mappings(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     params: serde_json::Value,
@@ -496,7 +474,7 @@ pub async fn execute_controller_list_host_mappings(
     handle_list(db, tenant_id, params).await
 }
 
-pub async fn execute_controller_discover_hosts(
+async fn execute_controller_discover_hosts(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxPluginConfigRequest,
@@ -504,7 +482,7 @@ pub async fn execute_controller_discover_hosts(
     handle_discover(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_test_connection(
+async fn execute_controller_test_connection(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxPluginConfigRequest,
@@ -512,28 +490,28 @@ pub async fn execute_controller_test_connection(
     handle_test_connection(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_manual_match(
+async fn execute_controller_manual_match(
     db: &DatabaseConnection,
     request: ProxmoxManualMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     handle_match(db, request).await
 }
 
-pub async fn execute_controller_approve_match(
+async fn execute_controller_approve_match(
     db: &DatabaseConnection,
     request: ProxmoxApproveMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     handle_approve_match(db, request).await
 }
 
-pub async fn execute_controller_unmatch_host(
+async fn execute_controller_unmatch_host(
     db: &DatabaseConnection,
     request: ProxmoxMappingRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     handle_unmatch(db, request).await
 }
 
-pub async fn execute_controller_list_all_unmatched(
+async fn execute_controller_list_all_unmatched(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxUnmatchedGuestsRequest,
@@ -541,7 +519,7 @@ pub async fn execute_controller_list_all_unmatched(
     handle_list_all_unmatched(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_get_host_info(
+async fn execute_controller_get_host_info(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxHostInfoRequest,
@@ -549,7 +527,7 @@ pub async fn execute_controller_get_host_info(
     handle_get_info(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_preload_global_defaults(
+async fn execute_controller_preload_global_defaults(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxScopeSelectionRequest,
@@ -557,7 +535,7 @@ pub async fn execute_controller_preload_global_defaults(
     handle_preload_global_defaults(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_save_global_defaults(
+async fn execute_controller_save_global_defaults(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxGlobalDefaultsSaveRequest,
@@ -565,7 +543,7 @@ pub async fn execute_controller_save_global_defaults(
     handle_save_global_defaults(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_preload_item_overrides(
+async fn execute_controller_preload_item_overrides(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxItemOverridePreloadRequest,
@@ -573,7 +551,7 @@ pub async fn execute_controller_preload_item_overrides(
     handle_preload_item_overrides(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_save_item_overrides(
+async fn execute_controller_save_item_overrides(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxItemOverrideSaveRequest,
@@ -581,7 +559,7 @@ pub async fn execute_controller_save_item_overrides(
     handle_save_item_overrides(db, tenant_id, request).await
 }
 
-pub async fn execute_controller_load_backup_target_options(
+async fn execute_controller_load_backup_target_options(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     request: ProxmoxScopeSelectionRequest,
@@ -1122,7 +1100,7 @@ async fn handle_save_global_defaults(
     let tenant_id = require_tenant_id(tenant_id, "global defaults save")?;
     let plugin_config_id = request.plugin_config_id;
     let mode_raw = normalize_required_mode(request.mode.as_str())?;
-    let mode = parse_protection_mode(&mode_raw)?;
+    let mode = parse_protection_mode(mode_raw)?;
 
     ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
 
@@ -1255,7 +1233,7 @@ async fn handle_save_item_overrides(
         }));
     }
 
-    let mode = parse_protection_mode(&mode_raw)?;
+    let mode = parse_protection_mode(mode_raw)?;
 
     let snapshot_timeout =
         validate_optional_positive_timeout(request.snapshot_timeout_seconds, "snapshot timeout")?;
@@ -1558,12 +1536,12 @@ fn parse_required_backup_target_option(
     decode_backup_target_option(raw)
 }
 
-fn normalize_required_mode(value: &str) -> std::result::Result<String, String> {
+fn normalize_required_mode(value: &str) -> std::result::Result<&str, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err("missing required parameter 'mode'".to_string());
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed)
 }
 
 fn parse_protection_mode(value: &str) -> std::result::Result<ProtectionMode, String> {

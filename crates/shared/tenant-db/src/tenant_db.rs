@@ -12,13 +12,18 @@ use uuid::Uuid;
 /// `uptrakit-web-api` and wraps this struct.
 pub struct TenantDb {
     db: DatabaseConnection,
-    pub tenant_id: Uuid,
+    tenant_id: Uuid,
 }
 
 impl TenantDb {
     /// Create a new `TenantDb` from its components.
     pub fn new(db: DatabaseConnection, tenant_id: Uuid) -> Self {
         Self { db, tenant_id }
+    }
+
+    /// Returns the tenant identifier scoped to this connection.
+    pub fn tenant_id(&self) -> Uuid {
+        self.tenant_id
     }
 
     /// Returns a reference to the underlying database connection.

@@ -730,7 +730,7 @@ async fn soft_delete_losers<C: ConnectionTrait>(
 }
 
 /// Preview a manual merge of software items for a tenant.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, survivor_id = %req.survivor_id))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id(), survivor_id = %req.survivor_id))]
 pub async fn preview_merge_software_items(
     tenant_db: &TenantDb,
     req: &MergeSoftwareItemsPreviewRequest,
@@ -738,7 +738,7 @@ pub async fn preview_merge_software_items(
     let candidate_ids = validate_candidate_ids(&req.candidate_ids, req.survivor_id)?;
     let plan = build_merge_plan(
         tenant_db.db(),
-        tenant_db.tenant_id,
+        tenant_db.tenant_id(),
         &candidate_ids,
         req.survivor_id,
     )
@@ -747,7 +747,7 @@ pub async fn preview_merge_software_items(
 }
 
 /// Execute a manual merge of software items for a tenant.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, survivor_id = %req.survivor_id))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id(), survivor_id = %req.survivor_id))]
 pub async fn execute_merge_software_items(
     tenant_db: &TenantDb,
     req: &MergeSoftwareItemsExecuteRequest,
@@ -756,7 +756,8 @@ pub async fn execute_merge_software_items(
     let deleted_ids = deleted_candidate_ids(&candidate_ids, req.survivor_id);
 
     let txn = tenant_db.db().begin().await.context_to()?;
-    let plan = build_merge_plan(&txn, tenant_db.tenant_id, &candidate_ids, req.survivor_id).await?;
+    let plan =
+        build_merge_plan(&txn, tenant_db.tenant_id(), &candidate_ids, req.survivor_id).await?;
 
     let moved_link_ids: Vec<Uuid> = plan.moved_links.iter().map(|link| link.id).collect();
     let skipped_duplicate_link_ids: Vec<Uuid> = plan
@@ -768,7 +769,7 @@ pub async fn execute_merge_software_items(
     move_host_links(&txn, req.survivor_id, &moved_link_ids).await?;
     move_link_plugin_rows(&txn, req.survivor_id, &moved_link_ids).await?;
     delete_duplicate_links(&txn, req.survivor_id, &skipped_duplicate_link_ids).await?;
-    soft_delete_losers(&txn, tenant_db.tenant_id, &deleted_ids).await?;
+    soft_delete_losers(&txn, tenant_db.tenant_id(), &deleted_ids).await?;
     txn.commit().await.context_to()?;
 
     Ok(MergeSoftwareItemsExecuteResponse {

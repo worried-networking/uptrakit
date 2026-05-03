@@ -145,7 +145,7 @@ pub async fn create_host_tag(
 
     let model = host_tag::ActiveModel {
         id: Set(Uuid::now_v7()),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name.clone()),
         color: Set(color),
         description: Set(req.description.clone()),

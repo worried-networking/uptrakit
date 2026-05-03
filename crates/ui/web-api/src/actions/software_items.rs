@@ -21,7 +21,7 @@ pub(crate) async fn update(
 
     ctx.event_broadcaster
         .send(
-            tenant_db.tenant_id,
+            tenant_db.tenant_id(),
             AdminEvent::SoftwareItemUpdated { id: item_id },
         )
         .await;
@@ -77,7 +77,7 @@ pub(crate) async fn batch_feature(
 
     for &id in ids {
         match software_item::Entity::find_by_id(id)
-            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(tenant_db.db())
             .await
@@ -104,7 +104,7 @@ pub(crate) async fn batch_feature(
     for id in &succeeded {
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::SoftwareItemUpdated { id: *id },
             )
             .await;
@@ -127,7 +127,7 @@ pub(crate) async fn batch_delete(
     for id in &succeeded_ids {
         ctx.event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                tenant_db.tenant_id(),
                 AdminEvent::SoftwareItemUpdated { id: *id },
             )
             .await;

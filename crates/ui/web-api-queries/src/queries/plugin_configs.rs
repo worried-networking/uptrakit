@@ -121,7 +121,7 @@ pub async fn create_plugin_config(
     let now = OffsetDateTime::now_utc();
     let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
-        tenant_id: Set(tenant_db.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name),
         plugin_type: Set(req.plugin_type.to_string()),
         config: Set(req.config),
