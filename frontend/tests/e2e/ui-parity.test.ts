@@ -807,7 +807,7 @@ test('shell ui parity: shared shell z-index scale for header, sidebar, and toast
 
 	expect(zIndex.header).toBe('10');
 	expect(zIndex.sidebar).toBe('20');
-	expect(zIndex.toasts).toBe('500');
+	expect(zIndex.toasts).toBe('920');
 });
 
 test('settings panel ui parity: settings.below.global', async ({ page }) => {
