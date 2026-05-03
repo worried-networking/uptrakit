@@ -546,6 +546,10 @@ impl ProxmoxClient {
                 match self.task_log(node, upid, next_n).await {
                     Ok(entries) => {
                         for entry in &entries {
+                            #[expect(
+                                clippy::let_underscore_must_use,
+                                reason = "fire-and-forget log forwarding; receiver may be gone"
+                            )]
                             let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
                         }
                     }
@@ -577,6 +581,10 @@ impl ProxmoxClient {
             match self.task_log(node, upid, next_n).await {
                 Ok(entries) => {
                     for entry in &entries {
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "fire-and-forget log forwarding; receiver may be gone"
+                        )]
                         let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
                     }
                     if let Some(last) = entries.last() {

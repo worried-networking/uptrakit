@@ -1,4 +1,7 @@
-#![allow(unreachable_pub)]
+#![expect(
+    unreachable_pub,
+    reason = "items re-exported as `pub` for downstream `local_executor.rs` wiring; the host crate gates visibility"
+)]
 
 use super::SurfaceProxyError;
 use async_trait::async_trait;
@@ -44,7 +47,10 @@ mod settings_store;
 // `surface_proxy.rs` (the legacy path) that are pending deduplication. Until that step
 // lands, the functions exist here but have no compiled callers, triggering unused-import
 // warnings. Remove these allow attributes once `local_executor.rs` is incorporated.
-#[allow(unused_imports)]
+#[expect(
+    unused_imports,
+    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+)]
 pub use notifications::{
     allowlisted_notification_channel_controller_local_action,
     execute_allowlisted_notification_channel_action, notification_channel_type_for_surface_id,
@@ -53,11 +59,17 @@ pub use notifications::{
 // They are behind `#[cfg(test)]` because only tests reach them today; production callers
 // (again, `local_executor.rs`) are pending wiring.
 #[cfg(test)]
-#[allow(unused_imports)]
+#[expect(
+    unused_imports,
+    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+)]
 pub use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
-#[allow(unused_imports)]
+#[expect(
+    unused_imports,
+    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+)]
 pub use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
@@ -66,7 +78,10 @@ pub use proxmox_add_config::{
 // Called from `local_executor.rs` to map a controller-local surface action error into a
 // `SurfaceProxyError` for the HTTP response layer. Not yet reachable because
 // `local_executor.rs` is pending wiring (see comments above).
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "consumed by local_executor.rs which is not yet wired"
+)]
 pub fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {
@@ -484,11 +499,19 @@ impl ProxmoxSurfaceStore for AppStateSurfaceActionController<'_> {
 
 fn strip_container_suffix(id: &str) -> String {
     match id.find('#') {
+        #[expect(
+            clippy::string_slice,
+            reason = "`pos` from str::find is on a char boundary"
+        )]
         Some(pos) => id[..pos].to_string(),
         None => id.to_string(),
     }
 }
 
 fn extract_container_suffix(id: &str) -> Option<&str> {
+    #[expect(
+        clippy::string_slice,
+        reason = "`pos` from str::find is on a char boundary; `pos + 1` advances past the ASCII '#'"
+    )]
     id.find('#').map(|pos| &id[pos + 1..])
 }

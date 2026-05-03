@@ -3,8 +3,14 @@
 // helpers in `surface_proxy.rs` (the legacy path) that must be deduplicated first. Until
 // that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
 // this allow once `local_executor.rs` is incorporated.
-#![allow(dead_code)]
-#![allow(unreachable_pub)]
+#![expect(
+    dead_code,
+    reason = "all helpers are called from local_executor.rs which is not yet wired"
+)]
+#![expect(
+    unreachable_pub,
+    reason = "items are `pub` for downstream `local_executor.rs` wiring; the parent module gates visibility"
+)]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uuid::Uuid;
