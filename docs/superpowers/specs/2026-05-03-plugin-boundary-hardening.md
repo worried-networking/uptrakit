@@ -40,11 +40,16 @@ artefacts, and only for structural assembly — not to leak store traits to cons
 
 ## Dependency
 
-Wave 3 assumes the **surface-proxy controller-local wiring spec**
-(`2026-05-03-surface-proxy-controller-local-wiring-design.md`) has landed. Specifically, the
-three `controller_local/` submodules it creates (`docker.rs`, `notification_settings.rs`,
-`proxmox_update_protection.rs`) and the `AppStateSurfaceActionController` struct in
-`controller_local.rs` must exist before Wave 3 begins.
+~~Wave 3 requires~~ **Predecessor landed** — the surface-proxy controller-local wiring spec
+(`2026-05-03-surface-proxy-controller-local-wiring-design.md`) has been implemented and merged.
+Wave 3 is unblocked. The following are confirmed present in the codebase:
+
+- `controller_local/docker.rs`, `controller_local/notification_settings.rs`,
+  `controller_local/proxmox_update_protection.rs`
+- `AppStateSurfaceActionController` struct in `controller_local.rs`
+- `controller_local/settings_store.rs` — new file added during the wiring spec (not in the
+  original spec); contains `impl EmailSmtpSettingsStore` and `impl TelegramGlobalSettingsStore`
+  for `AppStateSurfaceActionController`. Waves 3b and 3c target this file.
 
 ---
 
@@ -144,8 +149,10 @@ pub fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
 ### `surface-proxy` changes
 
 `AppStateSurfaceActionController` in `proxy/controller_local.rs` gains a
-`tenant_db: TenantDb` field constructed via `TenantDb::new(db.clone(), tenant_id)`
-(pool handle clone is cheap) and implements:
+`#[cfg(feature = "plugin-ops")] tenant_db: TenantDb` field. In the
+`from_database_connection` constructor, add `tenant_db: TenantDb::new(db.clone(), tenant_id)`
+(the struct already holds `db: &'a DatabaseConnection`; `.clone()` on a pool handle is a
+cheap Arc clone). Implement:
 
 ```rust
 fn tenant_db(&self) -> &TenantDb {
@@ -224,7 +231,9 @@ and may land before or after 3g.
 
 - Handlers call `ctx.tenant_db()` and query `setting` / `global_setting` entities directly.
 - `EmailSmtpSettings`, `EmailSmtpSettingsPatch`, `EmailSmtpSettingsStore` deleted from `roles.rs`.
-- `impl EmailSmtpSettingsStore for AppStateSurfaceActionController` deleted.
+- `impl EmailSmtpSettingsStore for AppStateSurfaceActionController` deleted from
+  `surface-proxy/proxy/controller_local/settings_store.rs` (not `controller_local.rs` — the
+  wiring spec moved this impl into its own `settings_store.rs` file alongside Telegram).
 - `email_smtp_settings_store()` deleted from `SurfaceActionController`.
 
 **`web-api-queries/notification_settings.rs` fix:**
@@ -239,6 +248,10 @@ stays unchanged — all callers remain unmodified. Known callers: `dispatcher.rs
 `notifications.rs`, `surface-proxy/proxy.rs`, and
 `surface-proxy/proxy/controller_local/notifications.rs`.
 
+The exact SMTP setting key constants and raw-query patterns already exist in
+`surface-proxy/proxy/controller_local/settings_store.rs` — use them as the canonical
+reference for key names to avoid silent misspelling bugs.
+
 Risk: the rewrite replaces `EmailSmtpSettings` struct-field access with string-keyed
 map construction. Any misspelled key would be a silent runtime failure (wrong field
 name = empty value in the settings bag). Mitigate: write the fixture test **before**
@@ -252,7 +265,9 @@ confirm the wrong contract.
 Same pattern as Email.
 
 - `TelegramGlobalSettingsStore` deleted from `roles.rs`.
-- `impl TelegramGlobalSettingsStore for AppStateSurfaceActionController` deleted.
+- `impl TelegramGlobalSettingsStore for AppStateSurfaceActionController` deleted from
+  `surface-proxy/proxy/controller_local/settings_store.rs`. After both 3b and 3c land,
+  `settings_store.rs` is empty and can be deleted.
 - `telegram_global_settings_store()` deleted from `SurfaceActionController`.
 
 ### 3d — Notification plugins (all three + notification-plugin-core)
@@ -412,7 +427,7 @@ is refactored.
   `EmailSmtpSettingsStore`, `TelegramGlobalSettingsStore`, `NotificationChannelStore`
   anywhere in the codebase.
 - `web-api-queries/update_dispatch.rs` imports no `proxmox_*` entities.
-- `surface-proxy/proxy/controller_local.rs` implements no plugin-specific store traits.
+- `surface-proxy/proxy/controller_local.rs` and `settings_store.rs` implement no plugin-specific store traits (and `settings_store.rs` is deleted).
 - `web-api-queries/notification_settings.rs` imports no `EmailSmtpSettings` or any other
   plugin-specific type.
 - `cargo check --all-features` clean.
