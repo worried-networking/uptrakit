@@ -208,6 +208,22 @@ class PluginSemanticBoundaryTests(unittest.TestCase):
         self.assertIn("id_catalog::WEBHOOK", values, msg=output)
         self.assertIn("GENERIC_SHELL", values, msg=output)
 
+    def test_plugin_ids_inline_qualified_path_is_rejected(self) -> None:
+        result = run_checker("fail/plugin_ids_inline_qualified", output_format="json")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        payload = json.loads(result.stdout)
+        findings = [
+            f for f in payload["findings"]
+            if f["rule_id"] == "plugin-ids-reference"
+        ]
+        self.assertTrue(len(findings) > 0, msg=f"Expected plugin-ids-reference findings\n{output}")
+        values = {f["match_value"] for f in findings}
+        self.assertTrue(
+            any("plugin_ids::GENERIC_SHELL" in v for v in values),
+            msg=f"Expected plugin_ids::GENERIC_SHELL in findings, got {values}\n{output}",
+        )
+
     def test_plugin_ids_alias_chains_register_transitive_bindings(self) -> None:
         result = run_checker("fail/plugin_ids_reference", output_format="json")
         output = result.stdout + result.stderr
