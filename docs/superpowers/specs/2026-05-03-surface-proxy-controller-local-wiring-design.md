@@ -52,6 +52,7 @@ call `controller_local` functions directly from `PluginSurfaceLocalExecutor::exe
 the stored `db` and `plugin_ops`. The trait reduces to a single method:
 
 ```rust
+#[async_trait]
 pub trait PluginSurfaceActionInvoker: Send + Sync {
     async fn invoke(
         &self,
@@ -64,6 +65,9 @@ pub trait PluginSurfaceActionInvoker: Send + Sync {
     ) -> Result<serde_json::Value, SurfaceActionError>;
 }
 ```
+
+`#[async_trait]` is retained — the workspace has not dropped it, and `dyn PluginSurfaceActionInvoker`
+requires object-safe async dispatch.
 
 `PluginOpsSurfaceActionInvoker` implements this trait (just `invoke`). It is no longer part
 of the public crate API — it becomes `pub(super)` inside `local_executor.rs` and is
@@ -97,9 +101,14 @@ PluginSurfaceLocalExecutor::new(
     Arc::new(db_conn.clone()),
     Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
 )
+.with_audit_emitter(audit_emitter.clone())
 // after
 PluginSurfaceLocalExecutor::new(Arc::new(db_conn.clone()), Arc::clone(&plugin_ops))
+.with_audit_emitter(audit_emitter.clone())
 ```
+
+The `.with_audit_emitter(...)` builder method is retained unchanged — the struct gains a
+`plugin_ops` field but the builder chain is unaffected.
 
 **Test constructor** (unchanged shape, kept `#[cfg(test)]`):
 
@@ -107,9 +116,10 @@ PluginSurfaceLocalExecutor::new(Arc::new(db_conn.clone()), Arc::clone(&plugin_op
 pub fn new_without_database(plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>) -> Self
 ```
 
-Sets `action_context_db` and `plugin_ops` to `None`. The test suite uses mock `plugin_invoker`
-implementations for the generic invoke path; DB-backed allowlisted paths are tested separately
-via the `controller_owned` test suite.
+Sets `action_context_db` and `plugin_ops` to `None`. Valid only for Tier 2 and Tier 3 paths —
+any Tier 1 path reached with this constructor will return an internal-error
+`SchemaValidationFailed`. DB-backed Tier 1 paths are tested via the `controller_owned` suite
+using the production constructor.
 
 ### Three-tier dispatch in `execute()`
 
@@ -124,7 +134,25 @@ via the `controller_owned` test suite.
 
 These call `controller_local` functions directly via `self.action_context_db` + `self.plugin_ops`.
 Both must be `Some` or the function returns `SurfaceProxyError::SchemaValidationFailed` with an
-internal-error message.
+internal-error message (matching the existing guard pattern in `local_executor.rs`).
+
+Audit emission is required for both families in the Tier 1 path:
+
+- **Proxmox add-config**: `local_executor.rs` already emits `emit_proxmox_add_config_audit_event`
+  on success only (success path, lines 282–288). Retain this behavior.
+- **Notification channel CRUD**: the current `local_executor.rs` does NOT emit audit (it was
+  never wired). The existing `proxy.rs` inline code emits `emit_notification_channel_audit_event`
+  on **both success and failure**. After migration, `execute()` must emit on both outcomes to
+  match the inline behavior — this is distinct from the proxmox add-config pattern which emits
+  on success only. The audit assertion test (see Inline test migration section) enforces this.
+
+Additionally, the call site for `execute_allowlisted_proxmox_add_config_action` in
+`local_executor.rs` (line 152) is missing the required `plugin_type: PluginTypeId` argument —
+the function signature takes four arguments but the current call passes only three. This is a
+latent build error that will surface the moment `local_executor.rs` is wired in. The correct
+`plugin_type` to pass is `uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone()`,
+which is consistent with the allowlist guard (`surface_id == "proxmox.hosts"`). Fix this as
+part of Step 3 when updating `execute()`.
 
 **Tier 2 — generic invoke + audit:**
 
@@ -138,6 +166,12 @@ These call `self.plugin_invoker.invoke(...)` (the standard plugin surface-action
 emit an audit event. The allowlist check determines which audit emitter to call. Error branches
 also emit audit events with the appropriate failure outcome.
 
+Error mapping for Tier 2 uses `map_surface_action_error`, which maps `InvalidInput` →
+`SchemaValidationFailed` and `ControllerIntegration`/`PluginInternal` → `SendFailed`. The old
+`proxy.rs` inline code collapsed all errors to `SchemaValidationFailed(error.to_string())`.
+This is an intentional behavioral correction — `SendFailed` is the semantically correct
+response for internal plugin errors, not a validation failure.
+
 **Tier 3 — generic invoke (no audit):**
 
 Everything else: `self.plugin_invoker.invoke(...)` with `map_surface_action_error`.
@@ -149,7 +183,8 @@ Everything else: `self.plugin_invoker.invoke(...)` with `map_surface_action_erro
 Migrated from `proxy.rs` inline code. Contains:
 
 - `allowlisted_notification_settings_controller_local_action(provider_id, surface_id, interaction_id) -> Option<NotificationSettingsAction>`
-- `NotificationSettingsAction` enum (`ConfigureSmtp`, `SaveGlobalSmtp`, `SaveGlobalTelegram`)
+- `NotificationSettingsAction` enum (`ConfigureSmtp`, `SaveGlobalSmtp`, `SaveGlobalTelegram`) — must carry
+  `#[non_exhaustive]` per project standard; external match sites require a wildcard arm with `tracing::warn!`
 - `emit_notification_settings_audit_event(emitter, caller_user_id, tenant_id, action, params, result)`
 
 Note: notification settings actions use the existing `plugin_ops.handle_surface_action()` path
@@ -171,7 +206,8 @@ Note: docker switch-tag also uses the Tier 2 invoke path — the `DockerSurfaceS
 Migrated from `proxy.rs` inline code. Contains:
 
 - `allowlisted_proxmox_update_protection_controller_local_action(surface_id, interaction_id) -> Option<ProxmoxUpdateProtectionAction>`
-- `ProxmoxUpdateProtectionAction` enum (`SaveGlobalDefaults`, `SaveItemOverrides`)
+- `ProxmoxUpdateProtectionAction` enum (`SaveGlobalDefaults`, `SaveItemOverrides`) — must carry
+  `#[non_exhaustive]` per project standard; external match sites require a wildcard arm with `tracing::warn!`
 - `emit_proxmox_update_protection_audit_event(emitter, caller_user_id, tenant_id, action, params, result)`
 - `classify_proxmox_update_protection_error(error) -> (AuditOutcome, &'static str)`
 - Helper fns: `proxmox_update_protection_action_type`, `proxmox_update_protection_mutation_source`
@@ -247,7 +283,7 @@ type. All other current exports remain.
 | `controller_local.rs`   | `#![expect(unreachable_pub)]`                            | Remove                       |
 | `controller_local.rs`   | `#[expect(unused_imports)]` on non-test re-exports       | Remove                       |
 | `controller_local.rs`   | `#[expect(unused_imports)]` on `#[cfg(test)]` re-exports | Remove (keep `#[cfg(test)]`) |
-| `controller_local.rs`   | `#[expect(dead_code)]` on `map_surface_action_error`     | Remove                       |
+| `controller_local.rs`   | `#[expect(dead_code)]` on `map_surface_action_error`     | Remove (keep `pub fn`)       |
 | `notifications.rs`      | `#![expect(dead_code)]`                                  | Remove                       |
 | `notifications.rs`      | `#![expect(unreachable_pub)]`                            | Remove                       |
 | `proxmox_add_config.rs` | `#![expect(dead_code)]`                                  | Remove                       |
@@ -257,7 +293,7 @@ type. All other current exports remain.
 
 ## Inline test migration
 
-The inline `#[cfg(test)] mod tests { ... }` block in `proxy.rs` contains ~39 tests. These
+The inline `#[cfg(test)] mod tests { ... }` block in `proxy.rs` contains approximately 55 tests. These
 must be audited against the external `proxy/tests/` suite before deletion. The process:
 
 1. List all inline test function names
@@ -268,7 +304,20 @@ must be audited against the external `proxy/tests/` suite before deletion. The p
    - DB-backed proxmox tests → `tests/controller_owned/proxmox.rs`
    - Rollout / provider-proxied behavior → `tests/provider_proxied/rollout.rs`
    - General proxied flow (timeout, rate limiting, idempotency, budget) → new files if needed
-4. Delete inline block once coverage is verified
+4. Delete **entire** inline block once coverage is verified
+
+**Trait signature incompatibility — mocks must be rewritten, not moved.** The inline test
+mocks in `proxy.rs` implement the old `PluginSurfaceActionInvoker` with signature
+`db: &(dyn Any + Send + Sync)`. The external `tests.rs` `TestPluginInvoker` implements the
+new signature `db: Option<&DatabaseConnection>`. These are distinct incompatible traits. Every
+mock `invoke` implementation ported from the inline block must be rewritten to match the new
+signature — verbatim copy-paste will not compile.
+
+**Sequencing constraint: the inline block must be fully deleted (not just partially ported)
+before Step 3 begins.** The inline block directly references `PluginOpsSurfaceActionInvoker::new(...)`
+in ~14 call sites. Step 3 makes `PluginOpsSurfaceActionInvoker` `pub(super)`, which immediately
+breaks compilation for any inline test still referencing the type. Port all missing coverage
+first, then delete the entire block in one operation, before starting Step 3.
 
 For the three new action families (notification settings, docker, proxmox update-protection),
 new test coverage must be written in the external suite before the inline tests for those
@@ -280,13 +329,32 @@ families are deleted:
 - New `tests/controller_owned/proxmox_update_protection.rs` — add tests for
   save-global-defaults and save-item-overrides paths
 
+**Audit assertion test as forcing function.** Before implementing the notification channel CRUD
+audit emission in Step 3, write an audit assertion test in `tests/controller_owned/notifications.rs`
+that verifies `emit_notification_channel_audit_event` is called on a successful create. Writing
+this test first ensures the audit path cannot be silently omitted during the Step 3
+implementation.
+
+**Submodule test duplication.** `controller_local/notifications.rs` contains an inline
+`#[cfg(test)] mod tests` with builder-function unit tests that are also covered (as integration
+tests with richer assertions) in `tests/controller_owned/notifications.rs`. The submodule-level
+tests are lower-value duplicates. Remove the submodule-level unit tests for
+`build_notification_channel_create_request` and `build_notification_channel_update_request` from
+`notifications.rs` during Step 2, retaining the integration-level equivalents.
+
 ---
 
 ## External caller impact
 
 `controller-runtime/src/lib.rs` (lines 440–450): constructor signature changes from
 `new(db, invoker)` to `new(db, plugin_ops)`. No other external callers of
-`PluginSurfaceLocalExecutor` or `PluginOpsSurfaceActionInvoker` exist.
+`PluginSurfaceLocalExecutor` or `PluginOpsSurfaceActionInvoker` exist outside the crate.
+
+Within the crate, `tests/controller_owned/notifications.rs` (lines 13–14, 102–104, 170–172)
+currently imports and calls `PluginOpsSurfaceActionInvoker::new(...)` directly to construct
+the executor for integration tests. These call sites must be updated during Step 5 to use
+`PluginSurfaceLocalExecutor::new(db, plugin_ops)` instead — the new production constructor
+produces the same wired-up executor without exposing the internal invoker type.
 
 ---
 
@@ -298,17 +366,19 @@ The implementation should proceed in this order to keep the build green at each 
    `proxmox_update_protection.rs` in `controller_local/`; add `mod` declarations in
    `controller_local.rs`; add re-exports; clean suppression attributes from `notifications.rs`
    and `proxmox_add_config.rs`
-2. **Refactor `local_executor.rs`** — remove `invoke_allowlisted_*` from trait; make
-   `PluginOpsSurfaceActionInvoker` `pub(super)`; add `plugin_ops` field; update `new`
-   constructor; update `execute()` for all 5 families; add `pub use map_surface_action_error`
-3. **Wire into `proxy.rs`** — add `mod local_executor;` and re-exports; add
+2. **Audit and port inline tests** — audit the ~55 inline tests against the external
+   `proxy/tests/` suite; port missing coverage; update `tests/controller_owned/notifications.rs`
+   to use `PluginSurfaceLocalExecutor::new(db, plugin_ops)` instead of constructing
+   `PluginOpsSurfaceActionInvoker` directly; add missing DB-backed tests for the 3 new families
+3. **Refactor `local_executor.rs`** — remove `invoke_allowlisted_*` from trait; make
+   `PluginOpsSurfaceActionInvoker` `pub(super)` (safe now that tests no longer reference it);
+   add `plugin_ops` field; update `new` constructor; update `execute()` for all 5 families
+   including audit emission for notification channel CRUD
+4. **Wire into `proxy.rs`** — add `mod local_executor;` and re-exports; add
    `#[cfg(test)] mod tests;`; remove inline duplicates (keeping `SurfaceProxy` struct,
    `SurfaceProxyError`, `SurfaceCallerOrigin`, `SurfaceInvokeRequest`, and all non-executor
-   logic intact); update `lib.rs` exports
-4. **Update `controller-runtime`** — update `PluginSurfaceLocalExecutor::new` call site
-5. **Audit and port inline tests** — for each of the 39 inline tests, confirm coverage in
-   external suite or port it; add missing DB-backed tests for the 3 new families; delete
-   inline test block
+   logic intact); update `lib.rs` exports; delete inline test block
+5. **Update `controller-runtime`** — update `PluginSurfaceLocalExecutor::new` call site
 
 ---
 
