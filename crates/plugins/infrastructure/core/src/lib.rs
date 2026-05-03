@@ -121,10 +121,8 @@ pub use host_runtime::{
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 pub use roles::{
     ControllerUpdateProtection, Discoverer, ExecuteUpdateResult, LifecycleHook,
-    NotificationTransport, PackageIndexer, PluginMeta, ProxmoxHostMappingRecord,
-    ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
-    ProxmoxProtectionStore, ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController,
-    UpdateExecutor, UpdateProtectionController, VersionDetector,
+    NotificationTransport, PackageIndexer, PluginMeta, ReleaseFetcher, SoftwareItemLifecycle,
+    SurfaceActionController, UpdateExecutor, UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
