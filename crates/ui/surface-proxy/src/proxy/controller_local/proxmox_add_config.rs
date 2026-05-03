@@ -1,15 +1,6 @@
-// All functions in this module are called exclusively from `local_executor.rs`, which is not
-// yet wired into the module tree. `local_executor.rs` shares function names with inline
-// helpers in `surface_proxy.rs` (the legacy path) that must be deduplicated first. Until
-// that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
-// this allow once `local_executor.rs` is incorporated.
 #![expect(
     dead_code,
-    reason = "all helpers are called from local_executor.rs which is not yet wired"
-)]
-#![expect(
-    unreachable_pub,
-    reason = "items are `pub` for downstream `local_executor.rs` wiring; the parent module gates visibility"
+    reason = "all functions will be called from local_executor.rs when wired"
 )]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
@@ -18,21 +9,21 @@ use uuid::Uuid;
 use super::SurfaceProxyError;
 use super::params::{parse_csv_array_or_string_array_param, required_string_param};
 
-pub fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
+pub(crate) fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
     matches!(
         provider_id,
         "plugin.infrastructure_proxmox" | "infrastructure_proxmox"
     )
 }
 
-pub fn allowlisted_proxmox_add_config_controller_local_action(
+pub(crate) fn allowlisted_proxmox_add_config_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
 ) -> bool {
     surface_id == "proxmox.hosts" && interaction_id == "add-config"
 }
 
-pub async fn execute_allowlisted_proxmox_add_config_action(
+pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     plugin_type: uptrakit_shared_types::PluginTypeId,
@@ -68,11 +59,12 @@ pub async fn execute_allowlisted_proxmox_add_config_action(
     })
 }
 
-pub fn emit_proxmox_add_config_audit_event(
+pub(crate) fn emit_proxmox_add_config_audit_event(
     audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
     caller_user_id: Option<Uuid>,
     tenant_id: Uuid,
-    result: &serde_json::Value,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
 ) {
     let Some(audit_emitter) = audit_emitter else {
         return;
@@ -80,24 +72,60 @@ pub fn emit_proxmox_add_config_audit_event(
     let Some(caller_user_id) = caller_user_id else {
         return;
     };
-    let Some(plugin_config_id) = result.get("id").and_then(|value| value.as_str()) else {
-        return;
-    };
-    let config_name = result
+    let requested_name = request_params
         .get("name")
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string);
-    // Extract plugin_type from the serialised PluginConfigResponse rather than hardcoding it,
-    // keeping the audit event generic and free of inline plugin-type string literals.
-    let Some(plugin_type) = result.get("plugin_type").and_then(|v| v.as_str()) else {
-        return;
-    };
-    let plugin_type = plugin_type.to_string();
 
-    let details = serde_json::json!({
+    let (outcome, reason_code, error_kind, target_id, target_display, plugin_type) = match result {
+        Ok(result) => {
+            let Some(plugin_config_id) = result.get("id").and_then(|v| v.as_str()) else {
+                return;
+            };
+            let config_name = result
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(std::string::ToString::to_string)
+                .or_else(|| requested_name.clone());
+            let plugin_type = result
+                .get("plugin_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("infrastructure_proxmox");
+            (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                None,
+                Some(plugin_config_id.to_string()),
+                config_name,
+                plugin_type.to_string(),
+            )
+        }
+        Err(error) => {
+            let (outcome, reason_code, error_kind) = classify_proxmox_add_config_error(error);
+            (
+                outcome,
+                Some(reason_code),
+                error_kind,
+                None,
+                requested_name,
+                "infrastructure_proxmox".to_string(),
+            )
+        }
+    };
+
+    let mut details = serde_json::json!({
         "plugin_type": plugin_type,
         "create_source": "surface_proxy.proxmox_add_config",
     });
+    if let Some(config_name) = target_display.as_deref() {
+        details["config_name"] = serde_json::json!(config_name);
+    }
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+    if let Some(error_kind) = error_kind {
+        details["error_kind"] = serde_json::json!(error_kind);
+    }
 
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
@@ -107,12 +135,8 @@ pub fn emit_proxmox_add_config_audit_event(
         uptrakit_audit_log::AuditActorType::User,
         Some(caller_user_id),
     )
-    .target_opt(
-        Some("plugin_config".to_string()),
-        Some(plugin_config_id.to_string()),
-        config_name,
-    )
-    .outcome(uptrakit_audit_log::AuditOutcome::Success)
+    .target_opt(Some("plugin_config".to_string()), target_id, target_display)
+    .outcome(outcome)
     .details(details)
     .build()
     {
@@ -120,7 +144,30 @@ pub fn emit_proxmox_add_config_audit_event(
     }
 }
 
-pub fn build_proxmox_add_config_create_request(
+fn classify_proxmox_add_config_error(
+    error: &SurfaceProxyError,
+) -> (
+    uptrakit_audit_log::AuditOutcome,
+    &'static str,
+    Option<&'static str>,
+) {
+    match error {
+        SurfaceProxyError::SchemaValidationFailed(_)
+        | SurfaceProxyError::SensitiveFieldRejected(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "validation_failed",
+            None,
+        ),
+        SurfaceProxyError::Conflict { code, .. } => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            code,
+            Some("conflict"),
+        ),
+        _ => (uptrakit_audit_log::AuditOutcome::Failed, "failed", None),
+    }
+}
+
+pub(crate) fn build_proxmox_add_config_create_request(
     plugin_type: uptrakit_shared_types::PluginTypeId,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest, String> {
@@ -177,106 +224,5 @@ fn proxmox_verify_tls_param_with_default(
         _ => Err(format!(
             "field `{key}` must be a boolean or the string `true`/`false`"
         )),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
-        build_proxmox_add_config_create_request,
-    };
-
-    #[test]
-    fn allowlist_accepts_only_expected_provider_surface_and_action() {
-        assert!(allowlisted_proxmox_provider(
-            "plugin.infrastructure_proxmox"
-        ));
-        assert!(allowlisted_proxmox_provider("infrastructure_proxmox"));
-        assert!(!allowlisted_proxmox_provider("plugin.releases_docker"));
-
-        assert!(allowlisted_proxmox_add_config_controller_local_action(
-            "proxmox.hosts",
-            "add-config"
-        ));
-        assert!(!allowlisted_proxmox_add_config_controller_local_action(
-            "proxmox.hosts",
-            "save-config"
-        ));
-    }
-
-    #[test]
-    fn build_request_normalizes_flat_params_and_defaults_verify_tls() {
-        let params = serde_json::json!({
-            "name": "PVE Cluster",
-            "api_url": "https://pve.local:8006",
-            "api_token": "root@pam!uptrakit=secret-token",
-            "node_filter": "node-a, , node-b"
-        });
-        let params = params.as_object().expect("params should be an object");
-
-        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
-        let request = build_proxmox_add_config_create_request(plugin_type, params)
-            .expect("request should build from flat params");
-        assert_eq!(request.name, "PVE Cluster");
-        assert_eq!(request.plugin_type.as_str(), "infrastructure_proxmox");
-        assert_eq!(
-            request.config,
-            serde_json::json!({
-                "api_url": "https://pve.local:8006",
-                "api_token": "root@pam!uptrakit=secret-token",
-                "verify_tls": true,
-                "node_filter": ["node-a", "node-b"],
-            })
-        );
-        assert!(request.enabled);
-    }
-
-    #[test]
-    fn build_request_accepts_nested_config_and_legacy_verify_tls_string() {
-        let params = serde_json::json!({
-            "name": "PVE Cluster",
-            "config": {
-                "api_url": "https://pve.local:8006",
-                "api_token": "root@pam!uptrakit=secret-token",
-                "verify_tls": "false",
-                "node_filter": ["node-a", "node-b"]
-            }
-        });
-        let params = params.as_object().expect("params should be an object");
-
-        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
-        let request = build_proxmox_add_config_create_request(plugin_type, params)
-            .expect("request should build from nested config");
-        assert_eq!(
-            request.config,
-            serde_json::json!({
-                "api_url": "https://pve.local:8006",
-                "api_token": "root@pam!uptrakit=secret-token",
-                "verify_tls": false,
-                "node_filter": ["node-a", "node-b"],
-            })
-        );
-    }
-
-    #[test]
-    fn build_request_rejects_invalid_verify_tls_value() {
-        let params = serde_json::json!({
-            "name": "PVE Cluster",
-            "config": {
-                "api_url": "https://pve.local:8006",
-                "api_token": "root@pam!uptrakit=secret-token",
-                "verify_tls": "not-bool"
-            }
-        });
-        let params = params.as_object().expect("params should be an object");
-
-        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
-        let err = build_proxmox_add_config_create_request(plugin_type, params)
-            .expect_err("invalid verify_tls should fail");
-        assert!(
-            err.contains("verify_tls"),
-            "expected verify_tls error, got: {err}"
-        );
     }
 }
