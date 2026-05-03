@@ -40,7 +40,10 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceProviders: vi.fn(() => []),
 	getSurfacesBySlot: vi.fn(() => []),
-	loadSurfaceReadModels: vi.fn(() => Promise.resolve())
+	loadSurfaceReadModels: vi.fn(() => Promise.resolve()),
+	getSurfaceRegistryLoaded: vi.fn(() => true),
+	getSurfaceReadRequested: vi.fn(() => false),
+	getSurfaceReadLoading: vi.fn(() => false)
 }));
 
 vi.mock('$lib/interactive', () => ({
@@ -196,14 +199,9 @@ describe('Software Detail shared-surface slots', () => {
 		]);
 
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
-
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
-			if (slot === 'software_item.tabs') {
-				return [softwareItemTabSurface];
-			}
-			if (slot === 'software_item.host_context_menu') {
-				return [hostContextSurface];
-			}
+			if (slot === 'software_item.tabs') return [softwareItemTabSurface];
+			if (slot === 'software_item.host_context_menu') return [hostContextSurface];
 			return [];
 		});
 		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) => reads.get(surfaceId));
@@ -211,9 +209,13 @@ describe('Software Detail shared-surface slots', () => {
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
-		expect(screen.getByRole('heading', { name: 'Software Item Diagnostics' })).toBeInTheDocument();
+		// Tab button is visible before clicking
+		const tabBtn = screen.getByRole('tab', { name: 'Software Item Diagnostics' });
+		expect(tabBtn).toBeInTheDocument();
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith(['software.item.tab.surface']);
 
+		// Click the tab — panel mounts, preload fires
+		await fireEvent.click(tabBtn);
 		await waitFor(() =>
 			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith(
 				'software.item.tab.surface',
@@ -224,6 +226,51 @@ describe('Software Detail shared-surface slots', () => {
 				}
 			)
 		);
+	});
+
+	it('defaults to Overview tab and shows hosts table', async () => {
+		const item = makeSoftwareItem([makeHost()]);
+		const softwareItemTabSurface = makeSurface(
+			'software.item.tab.surface',
+			'software_item.tabs',
+			'Software Item Diagnostics',
+			Permission.ViewSoftware
+		);
+		const reads = new Map<string, SurfaceReadResponse>([
+			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')]
+		]);
+
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
+			if (slot === 'software_item.tabs') return [softwareItemTabSurface];
+			return [];
+		});
+		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) => reads.get(surfaceId));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		// Overview tab is active by default — hosts table visible, surface panel not mounted
+		expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'Software Item Diagnostics' })).toBeInTheDocument();
+		// DataTable renders a columnheader for Hostname in the Overview tab
+		expect(screen.getByRole('columnheader', { name: 'Hostname' })).toBeInTheDocument();
+		// Surface interaction has not been called (panel not mounted)
+		expect(vi.mocked(api.invokeSurfaceInteraction)).not.toHaveBeenCalled();
+	});
+
+	it('renders flat layout when no surfaces are registered', async () => {
+		const item = makeSoftwareItem([makeHost()]);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockReturnValue([]);
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		// No tablist — flat layout
+		expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+		// Hosts table still present
+		expect(screen.getByRole('columnheader', { name: 'Hostname' })).toBeInTheDocument();
 	});
 
 	it('keeps host-context menu surface behavior active', async () => {
