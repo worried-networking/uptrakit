@@ -41,19 +41,20 @@ PageShell
     Overview | <surface label> …
   [content area — keyed to activeTab]
     Overview tab → SectionCard wrapping the hosts DataTable
-    Surface tab  → bare SurfaceReadPanel (no extra SectionCard; tab label is already the title)
+    Surface tab  → SectionCard title={surface.label} wrapping SurfaceReadPanel (mirrors settings page)
 ```
 
 When `softwareItemTabSurfaces.length === 0`, the TabStrip is absent and the hosts `SectionCard`
-renders directly below the header card (same visual result as today).
+renders directly below the header card. This is a minor visual change from today (where both
+lived inside one unified card), accepted as a consequence of the split-card structure.
 
 ## Tab List
 
 ```ts
 tabItems = [
-  { id: 'overview', label: 'Overview' },   // always first
-  ...softwareItemTabSurfaces.map(s => ({ id: s.surface_id, label: s.label }))
-]
+  { id: "overview", label: "Overview" }, // always first
+  ...softwareItemTabSurfaces.map((s) => ({ id: s.surface_id, label: s.label })),
+];
 ```
 
 Computed as `$derived`.
@@ -62,32 +63,47 @@ Computed as `$derived`.
 
 - Read: `let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'overview')`
 - Write: `$effect` mirrors the settings page — `goto(..., { replaceState: true, keepFocus: true, noScroll: true })`
-- For the default tab, omit the query string: `activeTab === 'overview' ? '' : '?tab=' + activeTab`
+- For the default tab, omit the query string. Use the full pathname form from the settings page
+  (passing `''` or a bare `?tab=…` to `goto` is ambiguous in SvelteKit).
+  Target: `activeTab === 'overview' ? location.pathname : location.pathname + '?tab=' + activeTab`
 - Invalid slug (unknown `?tab=` value): use the same `$effect` validation pattern from settings
   — wait for `surfaceRegistryLoaded`, then if neither `'overview'` nor any `surface_id` matches,
   reset to `'overview'`
 
 ## Surface Tab Active-Tab Validation
 
-Reuse the exact pattern from the settings page:
+Reuse the exact pattern from the settings page. Declare this as a `$effect` **before** the
+URL-sync `$effect` (Svelte 5 runs effects in declaration order; validation must fire first):
 
 ```ts
-const isSurfaceAccessible = softwareItemTabSurfaces.some(
-  (s) => s.surface_id === activeTab,
-);
-const isPending = isSurfaceTabPending({
-  activeTab,
-  slotSurfaces: softwareItemTabSurfaces,
-  readBySurface: softwareItemTabReads,
-  isReadRequested: getSurfaceReadRequested(activeTab),
-  isReadLoading: getSurfaceReadLoading(activeTab),
+// $effect — validate and correct activeTab
+$effect(() => {
+  const surfaceRegistryLoaded = getSurfaceRegistryLoaded();
+  const isSurfaceAccessible = softwareItemTabSurfaces.some(
+    (s) => s.surface_id === activeTab,
+  );
+  const isPending = isSurfaceTabPending({
+    activeTab,
+    slotSurfaces: softwareItemTabSurfaces,
+    readBySurface: softwareItemTabReads,
+    isReadRequested: getSurfaceReadRequested(activeTab),
+    isReadLoading: getSurfaceReadLoading(activeTab),
+  });
+  // wait for registry before correcting surface tabs
+  if (!surfaceRegistryLoaded && activeTab !== "overview") return;
+  // if not accessible and not pending → reset to 'overview'
+  if (activeTab !== "overview" && !isSurfaceAccessible && !isPending) {
+    activeTab = "overview";
+  }
 });
-// if !getSurfaceRegistryLoaded() && activeTab !== 'overview' → wait
-// if not accessible and not pending → reset to 'overview'
+
+// $effect — sync activeTab to URL (declared after validation)
 ```
 
 Imports needed: `getSurfaceRegistryLoaded`, `getSurfaceReadRequested`, `getSurfaceReadLoading`
-from `$lib/surfaces/registry.svelte`; `isSurfaceTabPending` from `$lib/surfaces/read-model`.
+from `$lib/surfaces/registry.svelte` (backing file: `registry.svelte.ts`);
+`isSurfaceTabPending` from `$lib/surfaces/read-model`. `read-model` exports pure functions
+and does not need a mock in tests.
 
 ## Data Loading
 
@@ -109,7 +125,7 @@ from `$lib/surfaces/registry.svelte`; `isSurfaceTabPending` from `$lib/surfaces/
 
 <!-- TabStrip — only when surfaces exist -->
 {#if softwareItemTabSurfaces.length > 0}
-  <TabStrip items={tabItems} activeId={activeTab} idBase="software-detail" onSelect={(id) => (activeTab = id)} />
+  <TabStrip items={tabItems} activeId={activeTab} ariaLabel="Software detail tabs" idBase="software-detail" onSelect={(id) => (activeTab = id)} />
 {/if}
 
 <!-- Tab content -->
@@ -120,12 +136,14 @@ from `$lib/surfaces/registry.svelte`; `isSurfaceTabPending` from `$lib/surfaces/
 {:else}
   {#each softwareItemTabSurfaces as surface (surface.surface_id)}
     {#if activeTab === surface.surface_id}
-      <SurfaceReadPanel
-        {surface}
-        read={softwareItemTabReads[surface.surface_id]}
-        baseParams={softwareItemTabBaseParams}
-        reloadToken={softwareItemTabsReloadToken}
-      />
+      <SectionCard title={surface.label}>
+        <SurfaceReadPanel
+          {surface}
+          read={softwareItemTabReads[surface.surface_id]}
+          baseParams={softwareItemTabBaseParams}
+          reloadToken={softwareItemTabsReloadToken}
+        />
+      </SectionCard>
     {/if}
   {/each}
 {/if}
@@ -160,11 +178,31 @@ is visible without any tab interaction.
 Add a new test: `'renders flat layout when no surfaces are registered'` — verify no TabStrip
 renders when `getSurfacesBySlot` returns `[]`.
 
+**Mock additions required**: the new `$effect` for tab validation imports
+`getSurfaceRegistryLoaded`, `getSurfaceReadRequested`, and `getSurfaceReadLoading` from
+`$lib/surfaces/registry.svelte`. Add these to the existing mock of that module:
+
+```ts
+vi.mock("$lib/surfaces/registry.svelte", () => ({
+  getSurfaceReadModel: vi.fn(() => undefined),
+  getSurfaceProviders: vi.fn(() => []),
+  getSurfacesBySlot: vi.fn(() => []),
+  loadSurfaceReadModels: vi.fn(() => Promise.resolve()),
+  getSurfaceRegistryLoaded: vi.fn(() => true), // ← add
+  getSurfaceReadRequested: vi.fn(() => false), // ← add
+  getSurfaceReadLoading: vi.fn(() => false), // ← add
+}));
+```
+
 ### `software-detail-update-trigger.test.ts`
 
-Tests that trigger updates via the hosts table do not need to change — the hosts table is still
-in the Overview tab which is the default. No tab navigation is required. Verify these tests still
-pass unchanged (they should, because the DataTable is always rendered when `activeTab === 'overview'`).
+The hosts-table update-trigger tests do not need changes to their test logic — the DataTable is
+always rendered when `activeTab === 'overview'`, which is the default. However, the new `$effect`
+imports `getSurfaceRegistryLoaded`, `getSurfaceReadRequested`, and `getSurfaceReadLoading` from
+`$lib/surfaces/registry.svelte`, which is already mocked in this file. The existing mock must be
+expanded to include these three functions (same values as listed in the `software-detail.test.ts`
+section above), otherwise the new `$effect` throws `getSurfaceRegistryLoaded is not a function`
+at runtime and the entire suite fails.
 
 ## Out of Scope
 
