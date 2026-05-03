@@ -21,6 +21,7 @@ pub mod config;
 #[cfg(feature = "migrations")]
 pub mod controller_migration;
 pub mod discovery;
+pub(crate) mod entity;
 pub mod error;
 pub mod guest_exec;
 pub mod matching;
