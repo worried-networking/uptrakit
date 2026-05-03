@@ -917,6 +917,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
         registrations: descriptor_surface_registrations,
     },
     migrations: __proxmox_migrations,
+    reset_tenant_data: crate::reset::proxmox_reset_tenant_data,
 });
 
 // ── Stub trait implementations for declare_plugin! roles ─────────────────
