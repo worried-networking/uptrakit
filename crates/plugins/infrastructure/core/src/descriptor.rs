@@ -240,6 +240,23 @@ pub type MigrationsFn = fn() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>;
 #[cfg(not(feature = "migrations"))]
 pub type MigrationsFn = fn() -> Vec<Box<dyn std::any::Any>>;
 
+/// Function type for plugin-owned tenant data deletion.
+///
+/// When `migrations` feature is active, deletes all plugin-owned rows for a given
+/// tenant within an existing transaction. Called by the registry's
+/// `reset_plugin_tenant_data` helper during tenant-data reset.
+#[cfg(feature = "migrations")]
+pub type ResetTenantDataFn = for<'a> fn(
+    tenant_id: uuid::Uuid,
+    txn: &'a sea_orm::DatabaseTransaction,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), sea_orm::DbErr>> + Send + 'a>,
+>;
+
+/// Placeholder used when `migrations` feature is not active.
+#[cfg(not(feature = "migrations"))]
+pub type ResetTenantDataFn = fn();
+
 // ── Role slots ──────────────────────────────────────────────────────────────
 
 /// A role creation function paired with its host requirements.
@@ -345,6 +362,10 @@ pub struct PluginDescriptor {
     // Always present so `declare_plugin!` macro expansions always see the field.
     // The actual type is only meaningful when `migrations` feature is active.
     pub migrations: Option<MigrationsFn>,
+    /// Plugin-owned tenant data deletion callback.
+    ///
+    /// The actual type is only meaningful when `migrations` feature is active.
+    pub reset_tenant_data: Option<ResetTenantDataFn>,
 }
 
 impl PluginDescriptor {

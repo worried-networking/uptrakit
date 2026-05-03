@@ -12,7 +12,7 @@ default = []
 agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "migrations"]
 catalog = ["dep:reqwest", "dep:tokio-util", "http-client", "dep:uptrakit-shared-db", "dep:uptrakit-crypto"]
 http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
-migrations = ["dep:sea-orm-migration"]
+migrations = ["dep:sea-orm", "dep:sea-orm-migration"]
 plugin-ops = ["dep:sea-orm", "dep:uptrakit-tenant-db"]
 testing = []
 
