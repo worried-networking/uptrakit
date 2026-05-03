@@ -30,7 +30,7 @@ describe('Modal', () => {
 		const dialog = screen.getByRole('dialog');
 		expect(dialog).toBeInTheDocument();
 		expect(dialog.className).toContain('bg-[var(--bg-surface)]');
-		expect(dialog.className).toContain('max-w-[380px]');
+		expect(dialog.className).toContain('max-w-lg');
 		expect(dialog.className).toContain('z-[910]');
 		expect(dialog).toHaveAttribute('data-ui', 'modal-shell');
 		expect(container.querySelector('[data-ui="modal-shell"]')).toBe(dialog);
