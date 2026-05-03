@@ -2622,6 +2622,13 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
+        if let Some(tenant_id) = service_tenant_id {
+            state
+                .notification
+                .event_broadcaster
+                .send(tenant_id, AdminEvent::SurfacesChanged)
+                .await;
+        }
     }
     state
         .surface_proxy_deps
@@ -5917,6 +5924,106 @@ mod tests {
             "uptrakit-agent-ssh",
             false,
             None, // system service — no tenant
+        )
+        .await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "no broadcast expected for system service"
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn cleanup_authenticated_session_broadcasts_surfaces_changed_when_tenant_present() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        register_test_runtime_state(&state, service_id, tenant_id);
+        let connected_at = register_test_connection(&state, service_id).await;
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+        let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+        cleanup_authenticated_session(
+            &state,
+            AuthenticatedSessionState {
+                service_id,
+                connected_at,
+                is_system: false,
+                has_update_tracking: false,
+                has_software_discovery: false,
+                has_workload_claims: false,
+                service_tenant_id: Some(tenant_id),
+                linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                push_rx,
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                msg_tx,
+                resp_rx,
+                processor_cancel: tokio_util::sync::CancellationToken::new(),
+                processor_handle: tokio::spawn(async {}),
+                rate_limiter: MessageRateLimiter::new(
+                    WS_MESSAGE_RATE_WINDOW,
+                    WS_MESSAGE_RATE_LIMIT,
+                ),
+            },
+        )
+        .await;
+
+        match rx.try_recv() {
+            Ok(AdminEvent::SurfacesChanged) => {}
+            other => panic!("expected SurfacesChanged, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn cleanup_authenticated_session_skips_broadcast_when_no_tenant_id() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        register_test_runtime_state(&state, service_id, tenant_id);
+        let connected_at = register_test_connection(&state, service_id).await;
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+        let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+        cleanup_authenticated_session(
+            &state,
+            AuthenticatedSessionState {
+                service_id,
+                connected_at,
+                is_system: true,
+                has_update_tracking: false,
+                has_software_discovery: false,
+                has_workload_claims: false,
+                service_tenant_id: None,
+                linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                push_rx,
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                msg_tx,
+                resp_rx,
+                processor_cancel: tokio_util::sync::CancellationToken::new(),
+                processor_handle: tokio::spawn(async {}),
+                rate_limiter: MessageRateLimiter::new(
+                    WS_MESSAGE_RATE_WINDOW,
+                    WS_MESSAGE_RATE_LIMIT,
+                ),
+            },
         )
         .await;
 
