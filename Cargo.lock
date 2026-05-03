@@ -8165,6 +8165,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-tenant-db"
+version = "0.0.1"
+dependencies = [
+ "sea-orm",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-tracing-init"
 version = "0.0.1"
 dependencies = [
