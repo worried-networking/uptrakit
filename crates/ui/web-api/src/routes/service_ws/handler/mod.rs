@@ -89,6 +89,7 @@ use super::protocol::{
     record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -2268,6 +2269,7 @@ async fn run_embedded_message_handler_inner(
         session.service_id,
         session.app_name,
         has_workload_claims,
+        session.service_tenant_id,
     )
     .await;
 
@@ -2283,6 +2285,7 @@ async fn cleanup_embedded_service_session(
     service_id: uuid::Uuid,
     _service_app_name: &str,
     has_workload_claims: bool,
+    tenant_id: Option<uuid::Uuid>,
 ) {
     if has_workload_claims {
         workload::release_all_claims_on_disconnect(state, service_id).await;
@@ -2297,6 +2300,13 @@ async fn cleanup_embedded_service_session(
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
+        if let Some(tid) = tenant_id {
+            state
+                .notification
+                .event_broadcaster
+                .send(tid, AdminEvent::SurfacesChanged)
+                .await;
+        }
     }
     state
         .surface_proxy_deps
@@ -5854,5 +5864,65 @@ mod tests {
                 Err(crate::surface_proxy::SurfaceProxyError::ServiceDisconnected)
             ));
         }
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn cleanup_embedded_session_broadcasts_surfaces_changed_when_tenant_present() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        register_test_runtime_state(&state, service_id, tenant_id);
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        cleanup_embedded_service_session(
+            &state,
+            service_id,
+            "uptrakit-agent-ssh",
+            false,
+            Some(tenant_id),
+        )
+        .await;
+
+        match rx.try_recv() {
+            Ok(AdminEvent::SurfacesChanged) => {}
+            other => panic!("expected SurfacesChanged, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn cleanup_embedded_session_skips_broadcast_when_no_tenant_id() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        register_test_runtime_state(&state, service_id, tenant_id);
+
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
+        cleanup_embedded_service_session(
+            &state,
+            service_id,
+            "uptrakit-agent-ssh",
+            false,
+            None, // system service — no tenant
+        )
+        .await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "no broadcast expected for system service"
+        );
     }
 }
