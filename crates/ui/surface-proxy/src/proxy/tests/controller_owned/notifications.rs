@@ -354,3 +354,133 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
         );
     }
 }
+
+#[tokio::test]
+async fn invoke_allowlisted_notification_create_emits_audit_row() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(notification_channel_registration(
+            "plugin.webhook",
+            "notifications.webhook",
+            "create",
+        ))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = serde_json::Map::new();
+    params.insert("name".to_string(), serde_json::json!("Ops Hook"));
+    params.insert("channel_type".to_string(), serde_json::json!("webhook"));
+    params.insert(
+        "config".to_string(),
+        serde_json::json!({"url": "https://example.invalid/hook"}),
+    );
+    params.insert("enabled".to_string(), serde_json::json!(true));
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "notifications.webhook".to_string(),
+                interaction_id: "create".to_string(),
+                idempotency_key: "idem-notification-create-audit".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(std::time::Duration::from_secs(5)),
+        )
+        .await
+        .expect("notification create should succeed");
+
+    assert!(response.success);
+
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+    )
+    .await;
+    assert_eq!(row.tenant_id, tenant_id());
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.actor_id, Some(user_id()));
+    assert_eq!(row.target_type.as_deref(), Some("notification_channel"));
+    let details = row.details_json.expect("audit details");
+    assert_eq!(details["channel_type"], serde_json::json!("webhook"));
+    assert_eq!(
+        details["action_source"],
+        serde_json::json!("surface_proxy.notification_channel.create")
+    );
+}
+
+#[test]
+fn build_notification_channel_requests_pass_config_through() {
+    let create_params = serde_json::json!({
+        "name": "Email Alerts",
+        "channel_type": "email",
+        "config": {
+            "to_addresses": ["alice@example.com", "bob@example.com"]
+        },
+        "enabled": true
+    });
+    let create_params = create_params
+        .as_object()
+        .expect("create params should be an object");
+    let create_request = build_notification_channel_create_request("email", create_params)
+        .expect("create request should build");
+    assert_eq!(
+        create_request.config,
+        serde_json::from_value::<uptrakit_web_api_types::notifications::channels::JsonObjectInput>(
+            serde_json::json!({
+                "to_addresses": ["alice@example.com", "bob@example.com"]
+            })
+        )
+        .expect("valid JsonObjectInput"),
+        "config JSON object must be passed through unchanged for create"
+    );
+
+    let update_params = serde_json::json!({
+        "id": uuid::Uuid::now_v7().to_string(),
+        "config": {
+            "to_addresses": ["carol@example.com", "dave@example.com"]
+        }
+    });
+    let update_params = update_params
+        .as_object()
+        .expect("update params should be an object");
+    let update_request = build_notification_channel_update_request("email", update_params)
+        .expect("update request should build");
+    assert_eq!(
+        update_request.config,
+        Some(
+            serde_json::from_value::<
+                uptrakit_web_api_types::notifications::channels::JsonObjectInput,
+            >(serde_json::json!({
+                "to_addresses": ["carol@example.com", "dave@example.com"]
+            }))
+            .expect("valid JsonObjectInput")
+        ),
+        "config JSON object must be passed through unchanged for update"
+    );
+}
