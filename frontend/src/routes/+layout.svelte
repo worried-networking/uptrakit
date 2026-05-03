@@ -22,6 +22,8 @@
 		getSurfacesBySlot,
 		resolveSurfacePageNavItems
 	} from '$lib/surfaces/registry.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } from '$lib/stores/software-updates.svelte';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
@@ -123,8 +125,13 @@
 		syncViewport();
 		window.addEventListener('resize', syncViewport);
 
+		const unsubscribeSurfaces = subscribeToEvent(AdminEventType.SurfacesChanged, () => {
+			void loadSurfaceRegistry();
+		});
+
 		return () => {
 			window.removeEventListener('resize', syncViewport);
+			unsubscribeSurfaces();
 		};
 	});
 
