@@ -3,6 +3,7 @@ use uuid::Uuid;
 use super::SurfaceProxyError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub(crate) enum NotificationSettingsAction {
     ConfigureSmtp,
     SaveGlobalSmtp,
@@ -17,9 +18,7 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     let channel_type = surface_id
         .strip_prefix("notifications.")
         .and_then(|rest| rest.split('.').next())?;
-    let short_form = format!("plugin.{channel_type}");
-    let long_form = format!("plugin.notifications_{channel_type}");
-    if provider_id != short_form && provider_id != long_form {
+    if provider_id.strip_prefix("plugin.") != Some(channel_type) {
         return None;
     }
     match (surface_id, interaction_id) {
