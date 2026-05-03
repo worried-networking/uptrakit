@@ -142,6 +142,12 @@ impl<'a> SurfaceActionContext<'a> {
     pub fn caller_user_id(&self) -> Option<uuid::Uuid> {
         self.controller.user_id()
     }
+
+    /// Convenience delegate — tenant-scoped database access via the controller.
+    #[cfg(feature = "plugin-ops")]
+    pub fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+        self.controller.tenant_db()
+    }
 }
 
 /// Typed reusable surface-action errors.
@@ -373,6 +379,10 @@ mod surface_action_context_tests {
 
         fn user_id(&self) -> Option<uuid::Uuid> {
             self.user_id
+        }
+
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            unimplemented!("tenant_db not used in descriptor.rs surface action context tests")
         }
     }
 
