@@ -21,10 +21,6 @@ use crate::error::{ProxmoxError, Result};
 pub(crate) use crate::entity::proxmox_backup_target_cache as backup_target_cache;
 #[cfg(test)]
 pub(crate) use crate::entity::proxmox_protection_audit as protection_audit;
-#[cfg(test)]
-pub(crate) use crate::entity::proxmox_protection_default as global_default;
-#[cfg(test)]
-pub(crate) use crate::entity::proxmox_protection_item_override as item_override;
 
 /// Protection mode resolved for a software item update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
