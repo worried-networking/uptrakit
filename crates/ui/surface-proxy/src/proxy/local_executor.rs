@@ -9,9 +9,14 @@ use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
 use super::controller_local::{
+    allowlisted_docker_switch_tag_controller_local_action,
     allowlisted_notification_channel_controller_local_action,
+    allowlisted_notification_settings_controller_local_action,
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
-    emit_proxmox_add_config_audit_event, execute_allowlisted_notification_channel_action,
+    allowlisted_proxmox_update_protection_controller_local_action,
+    emit_docker_switch_tag_audit_event, emit_notification_channel_audit_event,
+    emit_notification_settings_audit_event, emit_proxmox_add_config_audit_event,
+    emit_proxmox_update_protection_audit_event, execute_allowlisted_notification_channel_action,
     execute_allowlisted_proxmox_add_config_action, map_surface_action_error,
     notification_channel_type_for_surface_id,
 };
@@ -37,36 +42,14 @@ pub trait PluginSurfaceActionInvoker: Send + Sync {
         interaction_id: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError>;
-
-    async fn invoke_allowlisted_notification_channel_action(
-        &self,
-        _db: &DatabaseConnection,
-        _tenant_id: Uuid,
-        _surface_id: &str,
-        _interaction_id: &str,
-        _params: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
-        Ok(None)
-    }
-
-    async fn invoke_allowlisted_proxmox_add_config_action(
-        &self,
-        _db: &DatabaseConnection,
-        _tenant_id: Uuid,
-        _surface_id: &str,
-        _interaction_id: &str,
-        _params: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
-        Ok(None)
-    }
 }
 
-pub struct PluginOpsSurfaceActionInvoker {
+pub(super) struct PluginOpsSurfaceActionInvoker {
     plugin_ops: Arc<dyn PluginOps>,
 }
 
 impl PluginOpsSurfaceActionInvoker {
-    pub fn new(plugin_ops: Arc<dyn PluginOps>) -> Self {
+    pub(super) fn new(plugin_ops: Arc<dyn PluginOps>) -> Self {
         Self { plugin_ops }
     }
 }
@@ -105,69 +88,21 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
             .handle_surface_action(&ctx, surface_id, interaction_id, params)
             .await
     }
-
-    async fn invoke_allowlisted_notification_channel_action(
-        &self,
-        db: &DatabaseConnection,
-        tenant_id: Uuid,
-        surface_id: &str,
-        interaction_id: &str,
-        params: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
-        let Some(channel_type) = notification_channel_type_for_surface_id(surface_id) else {
-            return Ok(None);
-        };
-        if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
-            return Ok(None);
-        }
-
-        let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
-
-        execute_allowlisted_notification_channel_action(
-            &tenant_db,
-            &*self.plugin_ops,
-            channel_type,
-            interaction_id,
-            params,
-        )
-        .await
-        .map_err(SurfaceProxyError::SchemaValidationFailed)
-        .map(Some)
-    }
-
-    async fn invoke_allowlisted_proxmox_add_config_action(
-        &self,
-        db: &DatabaseConnection,
-        tenant_id: Uuid,
-        surface_id: &str,
-        interaction_id: &str,
-        params: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
-        if !allowlisted_proxmox_add_config_controller_local_action(surface_id, interaction_id) {
-            return Ok(None);
-        }
-
-        let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
-
-        execute_allowlisted_proxmox_add_config_action(&tenant_db, &*self.plugin_ops, params)
-            .await
-            .map(Some)
-    }
 }
 
 pub struct PluginSurfaceLocalExecutor {
     action_context_db: Option<Arc<DatabaseConnection>>,
+    plugin_ops: Option<Arc<dyn PluginOps>>,
     plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
     audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
 }
 
 impl PluginSurfaceLocalExecutor {
-    pub fn new(
-        action_context_db: Arc<DatabaseConnection>,
-        plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
-    ) -> Self {
+    pub fn new(db: Arc<DatabaseConnection>, plugin_ops: Arc<dyn PluginOps>) -> Self {
+        let plugin_invoker = Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops)));
         Self {
-            action_context_db: Some(action_context_db),
+            action_context_db: Some(db),
+            plugin_ops: Some(plugin_ops),
             plugin_invoker,
             audit_emitter: None,
         }
@@ -182,6 +117,7 @@ impl PluginSurfaceLocalExecutor {
     pub fn new_without_database(plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>) -> Self {
         Self {
             action_context_db: None,
+            plugin_ops: None,
             plugin_invoker,
             audit_emitter: None,
         }
@@ -201,7 +137,6 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                 resolved.provider_id
             )));
         }
-
         if resolved.interaction.transport != surfaces::InteractionTransport::ControllerLocal {
             return Err(SurfaceProxyError::SchemaValidationFailed(format!(
                 "plugin local executor only supports controller_local transport for interaction `{}`",
@@ -209,22 +144,23 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             )));
         }
 
-        let tenant_id = Uuid::parse_str(request.tenant_id.as_str()).map_err(|error| {
+        let tenant_id = Uuid::parse_str(request.tenant_id.as_str()).map_err(|e| {
             SurfaceProxyError::SchemaValidationFailed(format!(
-                "invalid tenant_id in surface action request: {error}"
+                "invalid tenant_id in surface action request: {e}"
             ))
         })?;
         let caller_user_id = match &request.caller_origin {
             surfaces::CallerOrigin::UserSession { user_id, .. } => {
-                Some(Uuid::parse_str(user_id.as_str()).map_err(|error| {
+                Some(Uuid::parse_str(user_id.as_str()).map_err(|e| {
                     SurfaceProxyError::SchemaValidationFailed(format!(
-                        "invalid caller user_id in surface action request: {error}"
+                        "invalid caller user_id in surface action request: {e}"
                     ))
                 })?)
             }
             _ => None,
         };
 
+        // --- Tier 1: Notification channel CRUD (db + plugin_ops required) ---
         if allowlisted_notification_channel_controller_local_action(
             resolved.provider_id.as_str(),
             resolved.descriptor.surface_id.as_str(),
@@ -232,62 +168,166 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
         )
         .is_some()
         {
-            let result = self
-                .plugin_invoker
-                .invoke_allowlisted_notification_channel_action(
-                    self.action_context_db.as_deref().ok_or_else(|| {
-                        SurfaceProxyError::SchemaValidationFailed(
-                            "internal error: expected DatabaseConnection".to_string(),
-                        )
-                    })?,
-                    tenant_id,
-                    resolved.descriptor.surface_id.as_str(),
-                    resolved.interaction.interaction_id.as_str(),
-                    &request.params,
+            let db = self.action_context_db.as_deref().ok_or_else(|| {
+                SurfaceProxyError::SchemaValidationFailed(
+                    "internal error: expected DatabaseConnection".to_string(),
                 )
-                .await?;
-            let Some(result) = result else {
-                return Err(SurfaceProxyError::SchemaValidationFailed(
-                    "allowlisted notification controller_local action is unavailable".to_string(),
-                ));
-            };
-            return Ok(result);
+            })?;
+            let plugin_ops = self.plugin_ops.as_deref().ok_or_else(|| {
+                SurfaceProxyError::SchemaValidationFailed(
+                    "internal error: expected PluginOps".to_string(),
+                )
+            })?;
+            let channel_type =
+                notification_channel_type_for_surface_id(resolved.descriptor.surface_id.as_str())
+                    .ok_or_else(|| {
+                    SurfaceProxyError::SchemaValidationFailed(
+                        "internal error: could not determine notification channel type".to_string(),
+                    )
+                })?;
+            let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
+            let result = execute_allowlisted_notification_channel_action(
+                &tenant_db,
+                plugin_ops,
+                channel_type,
+                resolved.interaction.interaction_id.as_str(),
+                &request.params,
+            )
+            .await
+            .map_err(SurfaceProxyError::SchemaValidationFailed);
+            emit_notification_channel_audit_event(
+                self.audit_emitter.as_ref(),
+                caller_user_id,
+                tenant_id,
+                resolved.interaction.interaction_id.as_str(),
+                channel_type,
+                &request.params,
+                result.as_ref(),
+            );
+            return result;
         }
 
+        // --- Tier 1: Proxmox add-config (db + plugin_ops required) ---
         if allowlisted_proxmox_provider(resolved.provider_id.as_str())
             && allowlisted_proxmox_add_config_controller_local_action(
                 resolved.descriptor.surface_id.as_str(),
                 resolved.interaction.interaction_id.as_str(),
             )
         {
-            let result = self
-                .plugin_invoker
-                .invoke_allowlisted_proxmox_add_config_action(
-                    self.action_context_db.as_deref().ok_or_else(|| {
-                        SurfaceProxyError::SchemaValidationFailed(
-                            "internal error: expected DatabaseConnection".to_string(),
-                        )
-                    })?,
-                    tenant_id,
-                    resolved.descriptor.surface_id.as_str(),
-                    resolved.interaction.interaction_id.as_str(),
-                    &request.params,
+            let db = self.action_context_db.as_deref().ok_or_else(|| {
+                SurfaceProxyError::SchemaValidationFailed(
+                    "internal error: expected DatabaseConnection".to_string(),
                 )
-                .await?;
-            let Some(result) = result else {
-                return Err(SurfaceProxyError::SchemaValidationFailed(
-                    "allowlisted proxmox controller_local action is unavailable".to_string(),
-                ));
-            };
+            })?;
+            let plugin_ops = self.plugin_ops.as_deref().ok_or_else(|| {
+                SurfaceProxyError::SchemaValidationFailed(
+                    "internal error: expected PluginOps".to_string(),
+                )
+            })?;
+            let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
+            let result = execute_allowlisted_proxmox_add_config_action(
+                &tenant_db,
+                plugin_ops,
+                uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone(),
+                &request.params,
+            )
+            .await;
             emit_proxmox_add_config_audit_event(
                 self.audit_emitter.as_ref(),
                 caller_user_id,
                 tenant_id,
-                &result,
+                &request.params,
+                result.as_ref(),
             );
-            return Ok(result);
+            return result;
         }
 
+        // --- Tier 2: Notification settings (plugin_invoker + audit) ---
+        if let Some(action) = allowlisted_notification_settings_controller_local_action(
+            resolved.provider_id.as_str(),
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        ) {
+            let result = self
+                .plugin_invoker
+                .invoke(
+                    self.action_context_db.as_deref(),
+                    Some(tenant_id),
+                    caller_user_id,
+                    request.surface_id.as_str(),
+                    request.interaction_id.as_str(),
+                    serde_json::Value::Object(request.params.clone()),
+                )
+                .await
+                .map_err(map_surface_action_error);
+            emit_notification_settings_audit_event(
+                self.audit_emitter.as_ref(),
+                caller_user_id,
+                tenant_id,
+                action,
+                &request.params,
+                result.as_ref(),
+            );
+            return result;
+        }
+
+        // --- Tier 2: Docker switch-tag (plugin_invoker + audit) ---
+        if allowlisted_docker_switch_tag_controller_local_action(
+            resolved.provider_id.as_str(),
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        ) {
+            let result = self
+                .plugin_invoker
+                .invoke(
+                    self.action_context_db.as_deref(),
+                    Some(tenant_id),
+                    caller_user_id,
+                    request.surface_id.as_str(),
+                    request.interaction_id.as_str(),
+                    serde_json::Value::Object(request.params.clone()),
+                )
+                .await
+                .map_err(map_surface_action_error);
+            emit_docker_switch_tag_audit_event(
+                self.audit_emitter.as_ref(),
+                caller_user_id,
+                tenant_id,
+                &request.params,
+                result.as_ref(),
+            );
+            return result;
+        }
+
+        // --- Tier 2: Proxmox update-protection (plugin_invoker + audit) ---
+        if let Some(action) = allowlisted_proxmox_update_protection_controller_local_action(
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        ) {
+            let result = self
+                .plugin_invoker
+                .invoke(
+                    self.action_context_db.as_deref(),
+                    Some(tenant_id),
+                    caller_user_id,
+                    request.surface_id.as_str(),
+                    request.interaction_id.as_str(),
+                    serde_json::Value::Object(request.params.clone()),
+                )
+                .await
+                .map_err(map_surface_action_error);
+            emit_proxmox_update_protection_audit_event(
+                self.audit_emitter.as_ref(),
+                caller_user_id,
+                tenant_id,
+                action,
+                &request.params,
+                result.as_ref(),
+            );
+            return result;
+        }
+
+        // --- Tier 3: Generic invoke (no audit) ---
         self.plugin_invoker
             .invoke(
                 self.action_context_db.as_deref(),
