@@ -18,6 +18,7 @@
 	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import Button from '$lib/components/Button.svelte';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -138,7 +139,9 @@
 	});
 
 	onMount(() => {
-		unsubscribers.push(subscribeToEvent('system_service_status_changed', () => loadServices(currentPage, true)));
+		unsubscribers.push(
+			subscribeToEvent(AdminEventType.SystemServiceStatusChanged, () => loadServices(currentPage, true))
+		);
 	});
 
 	onDestroy(() => {

@@ -20,6 +20,7 @@
 	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
@@ -235,19 +236,19 @@
 		if (canView) {
 			loadItem();
 			unsubscribers.push(
-				subscribeToEvent('software_item_updated', (data) => {
+				subscribeToEvent(AdminEventType.SoftwareItemUpdated, (data) => {
 					if (data.id === id) loadItem(true);
 				}),
-				subscribeToEvent('version_check_completed', (data) => {
+				subscribeToEvent(AdminEventType.VersionCheckCompleted, (data) => {
 					if (data.software_item_id === id) loadItem(true);
 				}),
-				subscribeToEvent('update_completed', (data) => {
+				subscribeToEvent(AdminEventType.UpdateCompleted, (data) => {
 					if (data.software_item_id === id) loadItem(true);
 				}),
-				subscribeToEvent('update_triggered', (data) => {
+				subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
 					if (data.software_item_id === id) loadItem(true);
 				}),
-				subscribeToEvent('update_protection_started', (data) => {
+				subscribeToEvent(AdminEventType.UpdateProtectionStarted, (data) => {
 					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
 						const histId = pendingLiveHistoryId;
 						const hostName = pendingLiveHostName;
@@ -257,7 +258,7 @@
 					}
 					if (data.software_item_id === id) loadItem(true);
 				}),
-				subscribeToEvent('update_started', (data) => {
+				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
 					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
 						const histId = pendingLiveHistoryId;
 						const hostName = pendingLiveHostName;

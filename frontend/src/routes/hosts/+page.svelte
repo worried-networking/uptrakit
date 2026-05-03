@@ -16,6 +16,7 @@
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
@@ -83,10 +84,10 @@
 	$effect(() => {
 		loadHosts(currentPage);
 		const unsubs = [
-			subscribeToEvent('host_updated', () => loadHosts(currentPage, true)),
-			subscribeToEvent('host_created', () => loadHosts(currentPage, true)),
-			subscribeToEvent('host_deleted', () => loadHosts(currentPage, true)),
-			subscribeToEvent('discovery_completed', () => loadHosts(currentPage, true))
+			subscribeToEvent(AdminEventType.HostUpdated, () => loadHosts(currentPage, true)),
+			subscribeToEvent(AdminEventType.HostCreated, () => loadHosts(currentPage, true)),
+			subscribeToEvent(AdminEventType.HostDeleted, () => loadHosts(currentPage, true)),
+			subscribeToEvent(AdminEventType.DiscoveryCompleted, () => loadHosts(currentPage, true))
 		];
 		const interval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadHosts(currentPage, true);

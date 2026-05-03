@@ -60,6 +60,7 @@ import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import * as notifications from '$lib/notifications.svelte';
 import { page } from '$app/state';
+import { AdminEventType } from '$lib/sse';
 
 const adminUser = {
 	id: '00000000-0000-0000-0000-000000000001',
@@ -227,7 +228,7 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
 
-		mockEventSubscriptions.get('version_check_completed')?.();
+		mockEventSubscriptions.get(AdminEventType.VersionCheckCompleted)?.();
 
 		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
 		expect(screen.getAllByRole('button', { name: 'Expand Demo App' })[0]).toHaveAttribute('aria-expanded', 'false');
