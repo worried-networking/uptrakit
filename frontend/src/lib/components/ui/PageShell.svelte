@@ -16,6 +16,10 @@
 	} = $props();
 </script>
 
+<svelte:head>
+	<title>{title} | Uptrakit</title>
+</svelte:head>
+
 <section class="space-y-6" data-ui="page-shell">
 	<header class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 		<div class="space-y-2">
