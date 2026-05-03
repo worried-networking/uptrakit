@@ -121,13 +121,9 @@ pub use host_runtime::{
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 pub use roles::{
     ControllerUpdateProtection, Discoverer, ExecuteUpdateResult, LifecycleHook,
-    NotificationTransport, PackageIndexer, PluginMeta, ProxmoxApproveMatchRequest,
-    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
-    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
-    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
+    NotificationTransport, PackageIndexer, PluginMeta, ProxmoxHostMappingRecord,
     ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
-    ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
-    ProxmoxUnmatchedGuestsRequest, ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController,
+    ProxmoxProtectionStore, ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController,
     UpdateExecutor, UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
