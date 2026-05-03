@@ -6,30 +6,11 @@
 use serde::Deserialize;
 use uptrakit_notification_plugin_core::DeliveryMessage;
 use uptrakit_plugin_infrastructure_core::{
-    NotificationChannelListRequest, NotificationTransport as _, SurfaceActionContext,
-    SurfaceActionError,
+    NotificationTransport as _, SurfaceActionContext, SurfaceActionError,
 };
 use uptrakit_shared_types::SecretString;
 
 use crate::{EmailPlugin, SmtpSettingsSnapshot, merge_smtp_into_config};
-
-#[derive(Debug, Default, serde::Deserialize)]
-struct ListActionParams {
-    #[serde(default, deserialize_with = "deserialize_lenient_optional_u64")]
-    page: Option<u64>,
-    #[serde(default, deserialize_with = "deserialize_lenient_optional_u64")]
-    per_page: Option<u64>,
-}
-
-impl ListActionParams {
-    fn page(&self) -> u64 {
-        self.page.unwrap_or(1).max(1)
-    }
-
-    fn per_page(&self) -> u64 {
-        self.per_page.unwrap_or(50).clamp(1, 100)
-    }
-}
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct SmtpPatchActionParams {
@@ -126,44 +107,19 @@ async fn handle_list(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    let request_params = parse_action_params::<ListActionParams>(params, "list");
-    let store = require_notification_channel_store(ctx)?;
-    let page = store
-        .list_channels(NotificationChannelListRequest {
-            tenant_id: ctx.tenant_id(),
-            channel_type: "email",
-            page: request_params.page(),
-            per_page: request_params.per_page(),
-        })
-        .await
-        .map_err(|error| {
-            tracing::error!(error = ?error, "failed to list email channels");
-            SurfaceActionError::ControllerIntegration("failed to list channels".to_string())
-        })?;
-
-    let mut items = Vec::with_capacity(page.items.len());
-    for channel in page.items {
-        let mut row = serde_json::json!({
-            "id": channel.id,
-            "name": channel.name,
-            "enabled": channel.enabled,
-            "created_at": channel.created_at_rfc3339,
-        });
-        if let (Some(config), Some(row_obj)) = (channel.config.as_object(), row.as_object_mut()) {
-            for (key, value) in config {
-                row_obj.insert(key.clone(), value.clone());
-            }
-        }
-        items.push(row);
-    }
-
-    Ok(serde_json::json!({
-        "items": items,
-        "total": page.total,
-        "page": page.page,
-        "per_page": page.per_page,
-        "total_pages": page.total_pages,
-    }))
+    uptrakit_notification_plugin_core::list_channels::list_channels(
+        ctx.tenant_db().db(),
+        ctx.tenant_id(),
+        "email",
+        params,
+        |_channel_type, config| {
+            // email has no secrets in channel config (to_addresses are plaintext),
+            // return config as-is
+            config.clone()
+        },
+    )
+    .await
+    .map_err(SurfaceActionError::ControllerIntegration)
 }
 
 // ── Per-tenant SMTP settings ─────────────────────────────────────────────────
@@ -288,19 +244,6 @@ async fn handle_test_global_smtp_email(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn require_notification_channel_store<'a>(
-    ctx: &'a SurfaceActionContext<'a>,
-) -> std::result::Result<
-    &'a dyn uptrakit_plugin_infrastructure_core::NotificationChannelStore,
-    SurfaceActionError,
-> {
-    ctx.controller.notification_channel_store().ok_or_else(|| {
-        SurfaceActionError::ControllerIntegration(
-            "notification channel store is not available".to_string(),
-        )
-    })
-}
-
 fn parse_action_params<T>(params: &serde_json::Value, action_id: &str) -> T
 where
     T: serde::de::DeserializeOwned + Default,
@@ -318,14 +261,6 @@ where
             T::default()
         }
     }
-}
-
-fn deserialize_lenient_optional_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(value.and_then(|value| value.as_u64()))
 }
 
 fn deserialize_lenient_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -684,8 +619,7 @@ async fn db_load_user_email(
 #[cfg(test)]
 mod tests {
     use super::{
-        ListActionParams, SmtpPatchActionParams, normalize_tls_mode, parse_action_params,
-        settings_map_to_snapshot,
+        SmtpPatchActionParams, normalize_tls_mode, parse_action_params, settings_map_to_snapshot,
     };
 
     #[test]
@@ -721,33 +655,6 @@ mod tests {
     }
 
     #[test]
-    fn list_action_params_keep_legacy_defaults_and_bounds() {
-        let defaults = parse_action_params::<ListActionParams>(&serde_json::json!({}), "list");
-        assert_eq!(defaults.page(), 1);
-        assert_eq!(defaults.per_page(), 50);
-
-        let bounded = parse_action_params::<ListActionParams>(
-            &serde_json::json!({
-                "page": 0,
-                "per_page": 999,
-            }),
-            "list",
-        );
-        assert_eq!(bounded.page(), 1);
-        assert_eq!(bounded.per_page(), 100);
-
-        let string_values = parse_action_params::<ListActionParams>(
-            &serde_json::json!({
-                "page": "3",
-                "per_page": "20",
-            }),
-            "list",
-        );
-        assert_eq!(string_values.page(), 1);
-        assert_eq!(string_values.per_page(), 50);
-    }
-
-    #[test]
     fn smtp_patch_action_params_keep_port_and_password_compatibility() {
         let params = parse_action_params::<SmtpPatchActionParams>(
             &serde_json::json!({
@@ -779,11 +686,6 @@ mod tests {
 
     #[test]
     fn action_param_parsing_treats_non_object_payload_as_empty_object() {
-        let list_params =
-            parse_action_params::<ListActionParams>(&serde_json::json!("oops"), "list");
-        assert_eq!(list_params.page(), 1);
-        assert_eq!(list_params.per_page(), 50);
-
         // Non-object payload → defaults; empty password is not saved (checked in save path)
         let smtp_patch = parse_action_params::<SmtpPatchActionParams>(
             &serde_json::json!(["not", "an", "object"]),

@@ -1,18 +1,16 @@
 use super::SurfaceProxyError;
 use async_trait::async_trait;
 use rootcause::report;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
-use time::format_description::well_known::Rfc3339;
+
 use uptrakit_plugin_infrastructure_registry::{
-    NotificationActionTokenRecord, NotificationChannelListItem, NotificationChannelListPage,
-    NotificationChannelListRequest, NotificationChannelStore, PluginError, PluginOps,
-    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
-    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
-    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
-    ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
-    SurfaceActionController, SurfaceActionError, execute_proxmox_controller_approve_match,
-    execute_proxmox_controller_discover_hosts, execute_proxmox_controller_get_host_info,
-    execute_proxmox_controller_list_all_unmatched, execute_proxmox_controller_list_host_mappings,
+    PluginError, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
+    ProxmoxHostInfoRequest, ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest,
+    ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest, ProxmoxMappingRequest,
+    ProxmoxPluginConfigRequest, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
+    ProxmoxUnmatchedGuestsRequest, SurfaceActionController, SurfaceActionError,
+    execute_proxmox_controller_approve_match, execute_proxmox_controller_discover_hosts,
+    execute_proxmox_controller_get_host_info, execute_proxmox_controller_list_all_unmatched,
+    execute_proxmox_controller_list_host_mappings,
     execute_proxmox_controller_load_backup_target_options, execute_proxmox_controller_manual_match,
     execute_proxmox_controller_preload_global_defaults,
     execute_proxmox_controller_preload_item_overrides,
@@ -77,7 +75,6 @@ fn plugin_internal_error(error: impl std::fmt::Display) -> rootcause::Report<Plu
 
 pub struct AppStateSurfaceActionController<'a> {
     db: &'a sea_orm::DatabaseConnection,
-    plugin_ops: &'a dyn PluginOps,
     tenant_id: Uuid,
     caller_user_id: Option<Uuid>,
     tenant_db: uptrakit_shared_db::TenantDb,
@@ -86,13 +83,11 @@ pub struct AppStateSurfaceActionController<'a> {
 impl<'a> AppStateSurfaceActionController<'a> {
     pub fn from_database_connection(
         db: &'a sea_orm::DatabaseConnection,
-        plugin_ops: &'a dyn PluginOps,
         tenant_id: Uuid,
         caller_user_id: Option<Uuid>,
     ) -> Self {
         Self {
             db,
-            plugin_ops,
             tenant_id,
             caller_user_id,
             tenant_db: uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id),
@@ -117,118 +112,8 @@ impl SurfaceActionController for AppStateSurfaceActionController<'_> {
         &self.tenant_db
     }
 
-    fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-        Some(self)
-    }
-
     fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
         Some(self)
-    }
-}
-
-#[async_trait]
-impl NotificationChannelStore for AppStateSurfaceActionController<'_> {
-    async fn list_channels(
-        &self,
-        req: NotificationChannelListRequest<'_>,
-    ) -> uptrakit_plugin_infrastructure_registry::PluginResult<NotificationChannelListPage> {
-        use uptrakit_shared_db::entity::notification_channel;
-        use uptrakit_web_api_types::pagination::PaginationParams;
-
-        let resolved = PaginationParams {
-            page: Some(req.page),
-            per_page: Some(req.per_page),
-        }
-        .resolve();
-
-        let total = notification_channel::Entity::find()
-            .filter(notification_channel::Column::TenantId.eq(req.tenant_id))
-            .filter(notification_channel::Column::ChannelType.eq(req.channel_type))
-            .count(self.db())
-            .await
-            .map_err(plugin_internal_error)?;
-
-        let channels = notification_channel::Entity::find()
-            .filter(notification_channel::Column::TenantId.eq(req.tenant_id))
-            .filter(notification_channel::Column::ChannelType.eq(req.channel_type))
-            .order_by_desc(notification_channel::Column::CreatedAt)
-            .offset(resolved.offset())
-            .limit(resolved.per_page)
-            .all(self.db())
-            .await
-            .map_err(plugin_internal_error)?;
-
-        let items = channels
-            .into_iter()
-            .map(|channel| {
-                let channel_type_id =
-                    uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
-                let raw_config: serde_json::Value =
-                    serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
-                let config = if self.plugin_ops.transport(&channel_type_id).is_some() {
-                    self.plugin_ops
-                        .mask_config_secrets(&channel_type_id, &raw_config)
-                } else {
-                    serde_json::json!({})
-                };
-
-                NotificationChannelListItem {
-                    id: channel.id,
-                    name: channel.name,
-                    enabled: channel.enabled,
-                    created_at_rfc3339: channel
-                        .created_at
-                        .format(&Rfc3339)
-                        .unwrap_or_else(|_| channel.created_at.to_string()),
-                    config,
-                }
-            })
-            .collect();
-
-        Ok(NotificationChannelListPage {
-            items,
-            total,
-            page: resolved.page,
-            per_page: resolved.per_page,
-            total_pages: resolved.total_pages(total),
-        })
-    }
-
-    async fn resolve_action_token(
-        &self,
-        action_token: Uuid,
-    ) -> uptrakit_plugin_infrastructure_registry::PluginResult<Option<NotificationActionTokenRecord>>
-    {
-        let model = uptrakit_web_api_queries::queries::notifications::find_log_by_action_token(
-            self.db(),
-            action_token,
-        )
-        .await
-        .map_err(plugin_internal_error)?;
-
-        Ok(model.map(|row| NotificationActionTokenRecord {
-            action_token: row.action_token.unwrap_or(action_token),
-            action_taken: row.action_taken,
-        }))
-    }
-
-    async fn mark_action_token_triggered(
-        &self,
-        action_token: Uuid,
-    ) -> uptrakit_plugin_infrastructure_registry::PluginResult<()> {
-        use sea_orm::sea_query::Expr;
-        use uptrakit_shared_db::entity::notification_log;
-
-        notification_log::Entity::update_many()
-            .col_expr(
-                notification_log::Column::ActionTaken,
-                Expr::value(Some("triggered".to_string())),
-            )
-            .filter(notification_log::Column::ActionToken.eq(action_token))
-            .exec(self.db())
-            .await
-            .map_err(plugin_internal_error)?;
-        Ok(())
     }
 }
 
