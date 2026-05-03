@@ -83,5 +83,6 @@
 	aria-invalid={hasError ? 'true' : undefined}
 	aria-describedby={resolvedDescribedBy}
 	aria-label={ariaLabel}
+	data-ui="input"
 	class={computedClass}
 />

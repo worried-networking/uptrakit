@@ -74,6 +74,11 @@ describe('Checkbox primitive', () => {
 		expect(container.querySelector('input')!.hasAttribute('name')).toBe(false);
 	});
 
+	it('has data-ui="checkbox" attribute', () => {
+		const { container } = render(Checkbox, baseCheckbox());
+		expect(container.querySelector('input')!.getAttribute('data-ui')).toBe('checkbox');
+	});
+
 	it('fires onchange callback on change event', async () => {
 		const onchange = vi.fn();
 		const { container } = render(Checkbox, baseCheckbox({ onchange }));

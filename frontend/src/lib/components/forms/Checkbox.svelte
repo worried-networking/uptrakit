@@ -51,6 +51,7 @@
 	{name}
 	{disabled}
 	{onchange}
+	data-ui="checkbox"
 	class={computedClass}
 	aria-label={ariaLabel}
 />
