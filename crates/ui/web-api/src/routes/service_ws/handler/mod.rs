@@ -5981,6 +5981,99 @@ mod tests {
             );
         }
 
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn finalize_replaced_session_cancels_in_flight_requests_for_old_provider() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+            let service_id = uuid::Uuid::now_v7();
+            register_test_runtime_state(&state, service_id, tenant_id);
+            // Register superseded connection (receiver dropped — only timestamp needed).
+            let superseded_at = register_test_connection(&state, service_id).await;
+            // Register replacement connection, keeping receiver alive so the mpsc channel
+            // stays open and the proxy can dispatch the invoke without a SendFailed.
+            let (_rx_replacement, _handle_replacement) = state
+                .service_connections
+                .register(
+                    service_id,
+                    BTreeSet::from([Capability::UiSurfaces]),
+                    None,
+                    None,
+                    Some("uptrakit-agent-ssh".to_string()),
+                )
+                .await;
+
+            let state_for_invoke = Arc::clone(&state);
+            let invoke_task = tokio::spawn(async move {
+                state_for_invoke
+                    .surface_proxy_deps
+                    .proxy
+                    .invoke(
+                        &state_for_invoke.service_connections,
+                        &state_for_invoke.surface_proxy_deps.registry,
+                        crate::surface_proxy::SurfaceInvokeRequest::new(
+                            tenant_id,
+                            "ssh.guest.panel".to_string(),
+                            "refresh".to_string(),
+                            "replaced-session-test".to_string(),
+                            Some("provider-a".to_string()),
+                            crate::surface_proxy::SurfaceCallerOrigin::UserSession {
+                                user_id: uuid::Uuid::now_v7(),
+                                session_id: "session-1".to_string(),
+                            },
+                            serde_json::Map::new(),
+                            None,
+                        ),
+                        Some(std::time::Duration::from_secs(30)),
+                    )
+                    .await
+            });
+            tokio::task::yield_now().await;
+
+            let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+            let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+            let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+            finalize_authenticated_session(
+                &state,
+                AuthenticatedSessionState {
+                    service_id,
+                    connected_at: superseded_at,
+                    is_system: false,
+                    has_update_tracking: false,
+                    has_software_discovery: false,
+                    has_workload_claims: false,
+                    service_tenant_id: Some(tenant_id),
+                    linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                    push_rx,
+                    cancel_token: tokio_util::sync::CancellationToken::new(),
+                    msg_tx,
+                    resp_rx,
+                    processor_cancel: tokio_util::sync::CancellationToken::new(),
+                    processor_handle: tokio::spawn(async {}),
+                    rate_limiter: MessageRateLimiter::new(
+                        WS_MESSAGE_RATE_WINDOW,
+                        WS_MESSAGE_RATE_LIMIT,
+                    ),
+                },
+            )
+            .await;
+
+            let invoke_result =
+                tokio::time::timeout(std::time::Duration::from_secs(1), invoke_task)
+                    .await
+                    .expect("in-flight invoke should resolve after fail_in_flight_for_provider")
+                    .expect("invoke task should join");
+            assert!(
+                matches!(
+                    invoke_result,
+                    Err(crate::surface_proxy::SurfaceProxyError::ServiceDisconnected)
+                ),
+                "fail_in_flight_for_provider should have cancelled in-flight invoke: {invoke_result:?}"
+            );
+        }
+
         #[tokio::test]
         async fn rotating_surface_provider_id_fails_old_provider_in_flight_requests() {
             let db = crate::test_harness::setup_migrated_db().await;
