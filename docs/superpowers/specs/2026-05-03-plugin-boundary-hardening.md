@@ -549,23 +549,66 @@ Zero results expected. Fix any remaining hits.
 `ci/check_plugin_semantic_boundary.sh` detect all violations fixed in this spec,
 so regressions are caught automatically.
 
+### Why current violations are not caught
+
+Understanding the gaps is necessary to fix them correctly.
+
+**Gap 1 — Registry allowlist (covers almost all store-trait violations).**
+`RULE_CONCRETE_PLUGIN_IMPORT` in the Python checker exempts every crate in
+`ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES`, which includes
+`uptrakit_plugin_infrastructure_registry`. Every store-trait violation —
+`ProxmoxProtectionStore`, `EmailSmtpSettings`, `NotificationPluginError::SmtpNotConfigured`,
+`TelegramGlobalSettingsStore` — is imported through the registry and therefore
+invisible to the checker. The allowlist was correct when written (block direct
+concrete-plugin imports), but it does not detect plugin-specific types leaking
+through the registry's re-export surface.
+
+**Gap 2 — Shell script not in CI.**
+`check_plugin_semantic_boundary.sh` already flags `plugin_ids::EMAIL` in `users.rs`:
+
+```text
+semantic-boundary violation: plugin_ids token references in non-plugin production code
+./ui/web-api/src/routes/users.rs:1237:    .transport(&uptrakit_shared_types::plugin_ids::EMAIL)
+```
+
+But only `check_plugin_semantic_boundary.py` runs in CI (`.github/workflows/ci.yml:57`).
+The shell script is an unexecuted local tool.
+
+**Gap 3 — Python `plugin_ids` rule misses inline qualified paths.**
+`RULE_PLUGIN_IDS_REFERENCE` tracks `plugin_ids` through `use` statement bindings.
+`users.rs` uses `uptrakit_shared_types::plugin_ids::EMAIL` as an inline fully-qualified
+path with no `use plugin_ids` import — no binding is registered, so the usage is never
+matched.
+
 ### Shell script (`check_plugin_semantic_boundary.sh`)
 
-The existing `deny_plugin_ids_rule` call scans `ui/web-api/src/**/*.rs` and
-`ui/web-api-queries/src/queries/**/*.rs` for the token `plugin_ids`. This already
-catches `plugin_ids::EMAIL` in `users.rs` (and any future `plugin_ids::*` reference
-in those directories). **No new rule needed** — the existing rule covers this class
-of violation. Confirm by running the script before Wave 3h lands and verifying it
-reports the `users.rs` hit.
+**Add to CI** (`ci.yml`): add a step running `./ci/check_plugin_semantic_boundary.sh`
+immediately after the Python checker step. The existing `deny_plugin_ids_rule` already
+covers `plugin_ids::EMAIL` and requires no new patterns.
 
 ### Python script (`check_plugin_semantic_boundary.py`)
 
-The Python checker has no rule covering `NotificationPluginError::SmtpNotConfigured`
-because that import comes from `uptrakit_plugin_infrastructure_registry`, which is in
-`ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES` and thus exempt from
-`RULE_CONCRETE_PLUGIN_IMPORT`. A dedicated rule is required.
+Two fixes needed.
 
-**New rule constant:**
+**Fix A — Inline qualified `plugin_ids` paths (Gap 3).**
+
+`add_plugin_ids_reference_findings` currently only fires on `use`-imported bindings.
+Add a secondary regex scan within the same function to catch inline qualified paths
+that bypass `use`:
+
+```python
+PLUGIN_IDS_INLINE_QUALIFIED_RE = re.compile(
+    r"\bplugin_ids\s*::\s*[A-Z_][A-Z0-9_]*\b"
+)
+```
+
+Emit findings with `rule_id=RULE_PLUGIN_IDS_REFERENCE`, `match_kind="module_token"`.
+Scope: same `looks_like_production_code` files as the binding-based scan.
+
+**Fix B — Transport-specific error variant escapes (Gap 1).**
+
+Add a new rule to detect plugin-specific `NotificationPluginError` variants in
+non-plugin code:
 
 ```python
 RULE_PLUGIN_TRANSPORT_ESCAPE = "plugin-transport-escape"
@@ -577,8 +620,7 @@ Add to `KNOWN_RULE_IDS` and `RULE_MATCH_KINDS`:
 RULE_PLUGIN_TRANSPORT_ESCAPE: {"symbol_name"},
 ```
 
-**Detection:** Within `looks_like_production_code` files, flag any occurrence of
-transport-specific `NotificationPluginError` variant names:
+Detection regex:
 
 ```python
 NOTIFICATION_PLUGIN_TRANSPORT_VARIANT_RE = re.compile(
@@ -588,24 +630,23 @@ NOTIFICATION_PLUGIN_TRANSPORT_VARIANT_RE = re.compile(
 ```
 
 Emit a `Finding` with `rule_id=RULE_PLUGIN_TRANSPORT_ESCAPE`,
-`match_kind="symbol_name"`, `match_value` = the matched variant path. The check runs
-in the same file-walk loop as existing findings; no separate scan pass needed.
+`match_kind="symbol_name"`. Add `RULE_PLUGIN_TRANSPORT_ESCAPE` to the allowlist
+schema as a valid `rule_id`.
 
-Add `RULE_PLUGIN_TRANSPORT_ESCAPE` to the allowlist schema as a valid `rule_id` so the
-allowlist mechanism can handle any legitimate future exemptions.
-
-**Scope:** `looks_like_production_code` already excludes `crates/plugins/` and test
-modules — no additional scoping needed.
+Note: no new rule is needed for the store-trait violations
+(`ProxmoxProtectionStore`, `EmailSmtpSettings`, etc.) — those types are deleted
+in Waves 3–5 and will no longer exist in the registry to be imported.
 
 ### Acceptance
 
-- Before Wave 3h: running `./ci/check_plugin_semantic_boundary.sh` reports
-  `plugin_ids token references` violation for `users.rs`.
-- Before Wave 7 Python update: `python3 ci/check_plugin_semantic_boundary.py`
-  does NOT flag `SmtpNotConfigured` (confirming the gap this wave closes).
-- After Wave 7: `python3 ci/check_plugin_semantic_boundary.py` flags
-  `NotificationPluginError::SmtpNotConfigured` if it appears in non-plugin code.
-- After Wave 3h + Wave 7: both scripts exit 0 against the refactored codebase.
+- Before Wave 3h: `./ci/check_plugin_semantic_boundary.sh` reports `plugin_ids
+  token references` violation for `users.rs` (confirming Gap 2 is real).
+- Before Wave 7 Python fix A: `python3 ci/check_plugin_semantic_boundary.py` does
+  NOT flag `plugin_ids::EMAIL` inline path in `users.rs` (confirming Gap 3 is real).
+- After Wave 7: Python checker flags both `plugin_ids::EMAIL` inline paths and
+  `NotificationPluginError::SmtpNotConfigured` if either appears in non-plugin code.
+- Shell script runs in CI and exits 0 against the refactored codebase.
+- After Wave 3h + Wave 7: both scripts exit 0.
 - `python3 ci/check_plugin_semantic_boundary.py --help` and dry-run complete without
   config errors.
 
