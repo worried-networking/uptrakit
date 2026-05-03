@@ -145,6 +145,11 @@ git commit -m "feat(plugin-core): add optional reset_tenant_data parameter to de
 - Modify: `crates/plugins/infrastructure/proxmox/src/lib.rs`
 - Modify: `crates/plugins/infrastructure/proxmox/src/plugin.rs`
 
+**Design note — `proxmox_protection_audit` omission:** Audit records are intentionally never
+deleted during tenant reset. They are append-only history entries that must outlive plugin
+configuration. A tenant reset clears configuration data (host mappings, defaults, cache) but
+preserves audit trails. This is a deliberate policy decision in the spec — not an oversight.
+
 - [ ] **Step 1: Create `reset.rs` with dual-definition `proxmox_reset_tenant_data`**
 
 Create `crates/plugins/infrastructure/proxmox/src/reset.rs`:
@@ -342,17 +347,66 @@ uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["migra
 
 (The registry dep with `migrations` feature is likely already present — web-api-queries is a controller-side crate.)
 
-- [ ] **Step 5: Compile check**
+- [ ] **Step 5: Add integration test for `reset_plugin_tenant_data`**
+
+`reset_data.rs` has no tests. Add one to catch FK-ordering regressions. In
+`crates/ui/web-api-queries/src/queries/reset_data.rs` (or a new
+`crates/ui/web-api-queries/src/queries/reset_data_test.rs` if preferred), add:
+
+After Wave 4 moves the Proxmox entities into the proxmox plugin, the proxmox migrations are no
+longer included in `uptrakit_shared_db::migration::run_migrations` (shared-only). Use
+`run_migrations_with_plugins` to also create the proxmox tables:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use sea_orm::{Database, TransactionTrait};
+    use uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data;
+    use uuid::Uuid;
+
+    async fn make_db() -> sea_orm::DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations_with_plugins(
+            &db,
+            uptrakit_plugin_infrastructure_proxmox::__proxmox_migrations(),
+        )
+        .await
+        .unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn reset_plugin_tenant_data_runs_without_fk_error() {
+        let db = make_db().await;
+        let tenant_id = Uuid::new_v4();
+        // No rows to insert — verify it runs cleanly on empty data without FK constraint error.
+        let txn = db.begin().await.unwrap();
+        reset_plugin_tenant_data(tenant_id, &txn)
+            .await
+            .expect("reset_plugin_tenant_data must not fail on empty DB");
+        txn.commit().await.unwrap();
+    }
+}
+```
+
+Add `uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["migrations"] }` to
+`[dev-dependencies]` in `crates/ui/web-api-queries/Cargo.toml` for the test.
+
+Note: `__proxmox_migrations` is the internal fn that returns the migration list — check the actual
+fn name in `crates/plugins/infrastructure/proxmox/src/plugin.rs` (it follows the
+`__<name>_migrations` pattern from the `declare_plugin!` macro).
+
+- [ ] **Step 6: Compile check**
 
 Run: `cargo check -p uptrakit-web-api-queries --all-features`
 Expected: clean
 
-- [ ] **Step 6: Run tests**
+- [ ] **Step 7: Run tests**
 
 Run: `cargo test -p uptrakit-web-api-queries --all-features`
 Expected: all pass
 
-- [ ] **Step 7: Verify `reset_data.rs` imports no `proxmox_*` entity**
+- [ ] **Step 8: Verify `reset_data.rs` imports no `proxmox_*` entity**
 
 Run:
 
@@ -362,7 +416,7 @@ grep -n "proxmox" crates/ui/web-api-queries/src/queries/reset_data.rs
 
 Expected: zero results.
 
-- [ ] **Step 8: Run final boundary audit**
+- [ ] **Step 9: Run final boundary audit**
 
 Run:
 
@@ -374,7 +428,7 @@ grep -rn "Proxmox\|proxmox_host_mapping\|proxmox_protection\|DockerSurface\|Emai
 
 Expected: zero results.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add crates/plugins/infrastructure/registry/src/lib.rs \

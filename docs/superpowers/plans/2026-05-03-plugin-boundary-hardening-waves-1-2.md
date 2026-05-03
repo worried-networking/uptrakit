@@ -361,6 +361,43 @@ Locate `UpdateProtectionController` in the same file. Add inside its trait body:
 fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
 ```
 
+- [ ] **Step 3b: Update `TestController` impls to satisfy the new trait requirement**
+
+`roles.rs` has a `TestController` in its `#[cfg(test)]` module (around line 1269) that implements
+both `SurfaceActionController` and `UpdateProtectionController`. `update_protection.rs` in the
+proxmox plugin also has a `TestController` that implements `UpdateProtectionController`. Once
+`tenant_db()` is a required trait method (under `plugin-ops` which `cargo test --all-features`
+enables), both will fail to compile.
+
+In `crates/plugins/infrastructure/core/src/roles.rs` test module, add to the
+`impl SurfaceActionController for TestController` block:
+
+```rust
+fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+    unimplemented!("tenant_db not used in roles.rs surface action tests")
+}
+```
+
+And add to `impl UpdateProtectionController for TestController`:
+
+```rust
+fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+    unimplemented!("tenant_db not used in roles.rs protection tests")
+}
+```
+
+In `crates/plugins/infrastructure/proxmox/src/update_protection.rs` test module (around line 830),
+add to `impl UpdateProtectionController for TestController`:
+
+```rust
+fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+    unimplemented!("tenant_db not used in proxmox update_protection tests — will be replaced in Wave 3f")
+}
+```
+
+Note: In Wave 3f these test stubs will be replaced with real `TenantDb` instances when the
+protection tests are updated to use direct DB queries.
+
 - [ ] **Step 4: Add `tenant_db()` convenience delegate to `SurfaceActionContext`**
 
 `SurfaceActionContext` lives in `crates/plugins/infrastructure/core/src/descriptor.rs`. Locate the `impl SurfaceActionContext<'_>` block. Add:
@@ -419,7 +456,8 @@ pub struct AppStateSurfaceActionController<'a> {
 }
 ```
 
-Add the field (gated to match the trait's `#[cfg]`):
+Add the field — **no `#[cfg]` guard** (`surface-proxy` has no `plugin-ops` feature of its own; the
+guard would always evaluate false, preventing the vtable from providing the method at runtime):
 
 ```rust
 pub struct AppStateSurfaceActionController<'a> {
@@ -427,16 +465,12 @@ pub struct AppStateSurfaceActionController<'a> {
     plugin_ops: &'a dyn PluginOps,
     tenant_id: Uuid,
     caller_user_id: Option<Uuid>,
-    #[cfg(feature = "plugin-ops")]
     tenant_db: uptrakit_shared_db::TenantDb,
 }
 ```
 
-Note: `surface-proxy` already imports `uptrakit_shared_db` — check its `Cargo.toml` for the dep name. If it's imported via another crate, use
-`uptrakit_tenant_db::TenantDb` directly after confirming `uptrakit-tenant-db` is available (it is, via `shared-db` re-export path, or add direct dep).
-
-Check what path is available: run `grep "uptrakit.shared.db\|uptrakit.tenant.db" crates/ui/surface-proxy/Cargo.toml`. Use the crate that's already
-present.
+`surface-proxy` already depends on `uptrakit-shared-db`; `TenantDb` is re-exported from it after
+Task 2. No new dep entry needed.
 
 - [ ] **Step 3: Update the constructor**
 
@@ -459,7 +493,6 @@ Self {
     plugin_ops,
     tenant_id,
     caller_user_id,
-    #[cfg(feature = "plugin-ops")]
     tenant_db: uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id),
 }
 ```
@@ -468,10 +501,11 @@ Self {
 
 - [ ] **Step 4: Implement the trait method**
 
-Find `impl SurfaceActionController for AppStateSurfaceActionController<'_>` (around line 116). Add:
+Find `impl SurfaceActionController for AppStateSurfaceActionController<'_>` (around line 116). Add
+(**no `#[cfg]` guard** — the field is always present; always satisfies the trait regardless of feature
+unification):
 
 ```rust
-#[cfg(feature = "plugin-ops")]
 fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
     &self.tenant_db
 }
@@ -547,10 +581,10 @@ impl<'a> QueryUpdateProtectionController<'a> {
 
 - [ ] **Step 3: Implement `tenant_db()` on the trait**
 
-In `impl UpdateProtectionController for QueryUpdateProtectionController<'_>` (around line 452), add:
+In `impl UpdateProtectionController for QueryUpdateProtectionController<'_>` (around line 452), add
+(**no `#[cfg]` guard** — `web-api-queries` has no `plugin-ops` feature; guard would always be false):
 
 ```rust
-#[cfg(feature = "plugin-ops")]
 fn tenant_db(&self) -> &crate::TenantDb {
     self.tenant_db
 }

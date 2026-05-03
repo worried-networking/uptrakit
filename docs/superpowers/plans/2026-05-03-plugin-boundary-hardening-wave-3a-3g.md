@@ -20,7 +20,7 @@ store trait, its request/response types, and all `impl <StoreTrait> for ...` blo
 **Files:**
 
 - Modify: `crates/plugins/releases/docker/src/surfaces.rs` (or wherever docker surface action handlers live — check `grep -rn "docker_surface_store"
-  crates/plugins/`)
+crates/plugins/`)
 - Modify: `crates/plugins/infrastructure/core/src/roles.rs`
 - Modify: `crates/ui/surface-proxy/src/proxy/controller_local.rs`
 - Modify: `crates/plugins/infrastructure/core/src/roles.rs` (delete store types)
@@ -36,30 +36,45 @@ Expected call sites: `surfaces.rs` in the Docker plugin, `controller_local.rs` i
 In the Docker plugin's surface action handler (likely `crates/plugins/releases/docker/src/surfaces.rs`), locate each call to
 `ctx.controller.docker_surface_store()`. Replace with direct SeaORM queries using `ctx.tenant_db()`.
 
-Pattern — before:
+`host_software_item_plugin` has **no `tenant_id` column** — it is scoped by `host_id` +
+`software_item_id` (both come from action params, already tenant-scoped). The current impl lives in
+`crates/ui/surface-proxy/src/proxy/controller_local.rs` (not `controller_local/docker.rs` — that
+file contains routing helpers only).
+
+Pattern — before (`surfaces.rs` parses params and calls store):
 
 ```rust
+let request = parse_action_params::<DockerItemHostRequest>(params, action_id)?;
 let store = ctx.controller.docker_surface_store()
     .ok_or_else(|| SurfaceActionError::internal("docker store unavailable"))?;
-let result = store.some_method(&req).await?;
-```
-
-After:
-
-```rust
-use uptrakit_shared_db::entity::host_software_item_plugin;
-let tenant_db = ctx.tenant_db();
-// Query host_software_item_plugin filtered by plugin_type == "releases_docker"
-let rows = host_software_item_plugin::Entity::find()
-    .filter(host_software_item_plugin::Column::TenantId.eq(tenant_db.tenant_id))
-    .filter(host_software_item_plugin::Column::PluginType.eq("releases_docker"))
-    .all(tenant_db.db())
-    .await
+let image_ref = store.load_current_image_ref(request.host_id, request.software_item_id).await
     .map_err(|e| SurfaceActionError::internal(e.to_string()))?;
 ```
 
-For the switch-tag action, similarly replace the `DockerSwitchTagRequest` dispatch with direct DB update calls. Check the current impl in
-`controller_local/docker.rs` to understand exactly what queries are being made — replicate the same logic inline.
+After (inline query using `ctx.tenant_db().db()`):
+
+```rust
+use uptrakit_shared_db::entity::host_software_item_plugin;
+let request = parse_action_params::<DockerItemHostRequest>(params, action_id)?;
+let db = ctx.tenant_db().db();
+let plugin_rows = host_software_item_plugin::Entity::find()
+    .filter(host_software_item_plugin::Column::HostId.eq(request.host_id))
+    .filter(host_software_item_plugin::Column::SoftwareItemId.eq(request.software_item_id))
+    .filter(host_software_item_plugin::Column::PluginType.eq("releases_docker"))
+    .all(db)
+    .await
+    .map_err(|e| SurfaceActionError::internal(e.to_string()))?;
+let image_ref = plugin_rows
+    .into_iter()
+    .next()
+    .map(|r| strip_container_suffix(&r.package_identifier))
+    .unwrap_or_default();
+```
+
+For the switch-tag action, replicate the `switch_image_ref` logic from
+`crates/ui/surface-proxy/src/proxy/controller_local.rs` (the `impl DockerSurfaceStore` block,
+around line 276) — it queries by `host_id` + `software_item_id`, fetches
+`host_software_item`, then updates the `package_identifier` field in a transaction.
 
 - [ ] **Step 3: Delete `DockerSurfaceStore` trait and request types from `roles.rs`**
 
@@ -78,7 +93,7 @@ In `crates/ui/surface-proxy/src/proxy/controller_local.rs`:
 - Delete `impl DockerSurfaceStore for AppStateSurfaceActionController` (the full impl block)
 - Delete `mod docker;` line and the `docker.rs` file if it's now empty
 - Remove imports of `DockerSurfaceStore`, `DockerItemHostRequest`, `DockerSwitchTagRequest` from the `use uptrakit_plugin_infrastructure_registry::{
-  ... }` block
+... }` block
 
 Also check `controller_local/docker.rs` — if all its functionality has been moved into the Docker plugin crate, delete the file.
 
@@ -184,6 +199,10 @@ Rewrite to work directly with the raw string maps from `load_settings_by_prefix`
 Replace the full `build_settings_bag` function and all private helpers (`typed_smtp_settings_or_empty`, `normalize_smtp_settings`,
 `normalize_non_empty_string`, `decode_smtp_password`, `smtp_settings_to_prefixed_map`, `insert_prefixed_string`, `insert_prefixed_u16`) with:
 
+Note: `load_settings_by_prefix` and `load_global_settings_by_prefix` return
+`Result<HashMap<String, serde_json::Value>>` — no `Option` wrapping. Values are already JSON, not
+strings. Skip `decode_prefixed_settings` — work with the map directly.
+
 ```rust
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
@@ -196,19 +215,25 @@ const GLOBAL_SMTP_PASSWORD_AAD: &str = "uptrakit:settings:global_smtp_password";
 
 /// Build the settings bag consumed by notification plugin `deliver()` calls.
 ///
-/// Returns `{ "tenant": { "smtp.*" -> val, ... }, "global": { "global_smtp.*" -> val, "global_telegram.*" -> val, ... } }`.
+/// Returns `{ "tenant": { "smtp.*" -> val, ... }, "global": { ... } }`.
 pub async fn build_settings_bag(db: &DatabaseConnection, tenant_id: Uuid) -> serde_json::Value {
     let tenant_map = load_smtp_map(db, tenant_id, SMTP_PREFIX, SMTP_PASSWORD_AAD).await;
-    let mut global_map = load_global_smtp_map(db, GLOBAL_SMTP_PREFIX, GLOBAL_SMTP_PASSWORD_AAD).await;
+    let mut global_map =
+        load_global_smtp_map(db, GLOBAL_SMTP_PREFIX, GLOBAL_SMTP_PASSWORD_AAD).await;
 
     // Merge Telegram global settings into the global map.
-    if let Ok(Some(telegram_raw)) = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
+    match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
         db,
         GLOBAL_TELEGRAM_PREFIX,
-    ).await.map(Some) {
-        for (k, v) in telegram_raw {
-            global_map.insert(k, serde_json::Value::String(v));
+    )
+    .await
+    {
+        Ok(r) => {
+            for (k, v) in r {
+                global_map.insert(k, v);
+            }
         }
+        Err(e) => tracing::warn!(error = ?e, "failed to load global Telegram settings"),
     }
 
     serde_json::json!({ "tenant": tenant_map, "global": global_map })
@@ -220,20 +245,19 @@ async fn load_smtp_map(
     prefix: &str,
     password_aad: &str,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let raw = match uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, prefix).await {
-        Ok(Some(r)) => match uptrakit_shared_db::raw_settings::decode_prefixed_settings(prefix, &r) {
-            Ok(m) => m,
+    let raw =
+        match uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, prefix)
+            .await
+        {
+            Ok(r) => r,
             Err(e) => {
-                tracing::warn!(error = ?e, %tenant_id, "failed to decode tenant SMTP settings; using empty");
-                std::collections::HashMap::new()
+                tracing::warn!(
+                    error = ?e, %tenant_id,
+                    "failed to load tenant SMTP settings; using empty"
+                );
+                return serde_json::Map::new();
             }
-        },
-        Ok(None) => std::collections::HashMap::new(),
-        Err(e) => {
-            tracing::warn!(error = ?e, %tenant_id, "failed to load tenant SMTP settings; using empty");
-            std::collections::HashMap::new()
-        }
-    };
+        };
     smtp_raw_to_json_map(raw, password_aad, "tenant", Some(tenant_id))
 }
 
@@ -242,42 +266,44 @@ async fn load_global_smtp_map(
     prefix: &str,
     password_aad: &str,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let raw = match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix).await {
-        Ok(Some(r)) => match uptrakit_shared_db::raw_settings::decode_prefixed_settings(prefix, &r) {
-            Ok(m) => m,
+    let raw =
+        match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix).await {
+            Ok(r) => r,
             Err(e) => {
-                tracing::warn!(error = ?e, "failed to decode global SMTP settings; using empty");
-                std::collections::HashMap::new()
+                tracing::warn!(error = ?e, "failed to load global SMTP settings; using empty");
+                return serde_json::Map::new();
             }
-        },
-        Ok(None) => std::collections::HashMap::new(),
-        Err(e) => {
-            tracing::warn!(error = ?e, "failed to load global SMTP settings; using empty");
-            std::collections::HashMap::new()
-        }
-    };
+        };
     smtp_raw_to_json_map(raw, password_aad, "global", None)
 }
 
 fn smtp_raw_to_json_map(
-    raw: std::collections::HashMap<String, String>,
+    raw: std::collections::HashMap<String, serde_json::Value>,
     password_aad: &str,
     scope: &'static str,
     tenant_id: Option<Uuid>,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     for (k, v) in raw {
-        if v.is_empty() {
-            continue;
+        // Skip empty strings.
+        if let serde_json::Value::String(s) = &v {
+            if s.is_empty() {
+                continue;
+            }
         }
         // Decrypt the password field (key ends with ".password").
         let value = if k.ends_with(".password") {
-            decrypt_password_value(v, password_aad, scope, tenant_id)
+            let raw_str = match &v {
+                serde_json::Value::String(s) => s.clone(),
+                _ => continue,
+            };
+            decrypt_password_value(raw_str, password_aad, scope, tenant_id)
+                .map(serde_json::Value::String)
         } else {
             Some(v)
         };
         if let Some(value) = value {
-            map.insert(k, serde_json::Value::String(value));
+            map.insert(k, value);
         }
     }
     map
@@ -297,7 +323,10 @@ fn decrypt_password_value(
         Ok(v) => Some(v),
         Err(e) => {
             if let Some(tid) = tenant_id {
-                tracing::warn!(error = ?e, %tid, scope, "failed to decrypt SMTP password; using empty");
+                tracing::warn!(
+                    error = ?e, %tid, scope,
+                    "failed to decrypt SMTP password; using empty"
+                );
             } else {
                 tracing::warn!(error = ?e, scope, "failed to decrypt SMTP password; using empty");
             }
@@ -306,10 +335,6 @@ fn decrypt_password_value(
     }
 }
 ```
-
-**Important:** Check the exact return type/shape of `load_settings_by_prefix` and `decode_prefixed_settings` in `crates/shared/db/src/` before
-finalising — make sure the `HashMap` type and `Option`-wrapping matches their actual signatures. Adjust the `map(Some)` wrapper if
-`load_global_settings_by_prefix` returns `Result<HashMap>` directly (not `Result<Option<HashMap>>`).
 
 Remove the old `use uptrakit_plugin_infrastructure_registry::EmailSmtpSettings;` import at the top of the file.
 
@@ -553,10 +578,14 @@ In `crates/ui/surface-proxy/src/proxy/controller_local.rs`:
 - Remove all `Proxmox*` types and `execute_proxmox_controller_*` functions from the registry import block
 - Check `mod proxmox_add_config;` and `mod proxmox_update_protection;` — if they're now unused, delete them and their files
 
-- [ ] **Step 5: Delete `execute_proxmox_controller_*` free functions from `update_dispatch.rs`**
+- [ ] **Step 5: Remove `execute_proxmox_controller_*` imports from `controller_local.rs`**
 
-Remove all 14 free functions prefixed `execute_proxmox_controller_` from `crates/ui/web-api-queries/src/queries/update_dispatch.rs`. Their logic now
-lives in the proxmox plugin's `surfaces.rs`.
+These are NOT free functions in `update_dispatch.rs` — they are `pub use` re-exports in
+`registry/src/lib.rs` (removed in Step 6). In
+`crates/ui/surface-proxy/src/proxy/controller_local.rs`, find the `use
+uptrakit_plugin_infrastructure_registry::{...}` import block and remove any
+`execute_proxmox_controller_*` entries. Those call sites will now use the functions from the
+proxmox plugin crate directly.
 
 - [ ] **Step 6: Remove registry re-exports**
 
@@ -592,21 +621,45 @@ Run: `grep -rn "ProxmoxProtectionStore\|QueryProxmoxProtectionStore\|proxmox_pro
 `QueryProxmoxProtectionStore` struct + impl is in `update_dispatch.rs` around line 458–800. The Proxmox plugin's `ControllerUpdateProtection` impl (in
 `update_protection.rs`) calls `ctx.controller.proxmox_protection_store()`.
 
-- [ ] **Step 2: Rewrite `update_protection.rs` to query via `ctx.controller.tenant_db()`**
+- [ ] **Step 2: Move `QueryProxmoxProtectionStore` methods into `update_protection.rs`**
 
-In `crates/plugins/infrastructure/proxmox/src/update_protection.rs`, locate `prepare_pre_update_protection` and `finalize_post_update`. These
-currently call `ctx.controller.proxmox_protection_store().ok_or(...)?.method(...)`.
+`QueryProxmoxProtectionStore` in `update_dispatch.rs` (lines ~458–700) has these methods to port:
 
-Replace each store call with direct SeaORM queries. The logic currently lives in `QueryProxmoxProtectionStore` methods in `update_dispatch.rs` — move
-that logic here. Use:
+| Method                       | Line (approx) | Entities                                                         | Destination            |
+| ---------------------------- | ------------- | ---------------------------------------------------------------- | ---------------------- |
+| `load_host_mapping`          | ~464          | `proxmox_host_mapping`                                           | module-level helper fn |
+| `load_plugin_config_payload` | ~493          | `proxmox_host_mapping`, `plugin_config`                          | module-level helper fn |
+| `load_effective_policy`      | ~519          | `proxmox_protection_default`, `proxmox_protection_item_override` | module-level helper fn |
+| `load_audit`                 | ~583          | `proxmox_protection_audit`                                       | module-level helper fn |
+| `upsert_audit`               | ~609          | `proxmox_protection_audit`                                       | module-level helper fn |
+| `find_cached_backup_target`  | ~662          | `proxmox_backup_target_cache`                                    | module-level helper fn |
+
+Also port helper fns used exclusively by these methods:
+`proxmox_mode_from_db` (~line 424) and `proxmox_mode_to_db` (~line 432).
+
+In `crates/plugins/infrastructure/proxmox/src/update_protection.rs`, add these as free async
+functions accepting `db: &DatabaseConnection` and (where needed) `tenant_id: Uuid`. Change every
+call in `prepare_pre_update_protection` and `finalize_post_update` from:
 
 ```rust
-let tenant_db = ctx.controller.tenant_db();
-use uptrakit_shared_db::entity::{proxmox_host_mapping, proxmox_protection_default, proxmox_protection_item_override};
-// Run direct queries against tenant_db.db() with tenant_db.tenant_id
+ctx.controller.proxmox_protection_store()
+    .ok_or_else(|| anyhow!("no store"))?
+    .load_host_mapping(host_id, software_item_id)
+    .await?
 ```
 
-At this point entities still live in `shared-db` (Wave 4 moves them); imports are from `uptrakit_shared_db::entity::proxmox_*`.
+to:
+
+```rust
+load_host_mapping(ctx.controller.tenant_db().db(), host_id, software_item_id).await?
+```
+
+Entities still live in `shared-db` at this wave; imports use `uptrakit_shared_db::entity::proxmox_*`.
+
+**Tests:** The existing `QueryProxmoxProtectionStore` tests in `update_dispatch.rs`
+(lines ~1617–1735) exercise the DB logic. Move them into
+`crates/plugins/infrastructure/proxmox/src/update_protection.rs` test module, adjusting the
+test setup to use the helper functions directly instead of the store struct.
 
 - [ ] **Step 3: Delete `QueryProxmoxProtectionStore` from `update_dispatch.rs`**
 
@@ -618,13 +671,10 @@ In `crates/ui/web-api-queries/src/queries/update_dispatch.rs`, delete:
 - All tests for `QueryProxmoxProtectionStore` in the `#[cfg(test)]` module (lines ~1617–1735) — move relevant test logic to the proxmox plugin crate
   if needed
 
-Also delete `struct QueryUpdateProtectionController` and its `impl` block, since `QueryUpdateProtectionController::new()` (changed in Wave 2, Task 7)
-now only contains `tenant_db: &TenantDb`. If the Proxmox plugin no longer routes through a store, `QueryUpdateProtectionController` may be entirely
-unused — confirm and delete.
-
-Actually: `QueryUpdateProtectionController` itself (with the `tenant_db` field from Wave 2) is what implements `UpdateProtectionController`. It still
-needs to exist. What gets deleted is the `proxmox_store` field and `QueryProxmoxProtectionStore`. The controller then satisfies the trait purely via
-`tenant_db()`.
+`QueryUpdateProtectionController` itself must stay — it implements `UpdateProtectionController`.
+What gets deleted is its `proxmox_store: QueryProxmoxProtectionStore<'a>` field (along with the
+`QueryProxmoxProtectionStore` struct and impl). After this step the controller satisfies the trait
+purely via `tenant_db()`.
 
 - [ ] **Step 4: Delete `ProxmoxProtectionStore` from `roles.rs`**
 

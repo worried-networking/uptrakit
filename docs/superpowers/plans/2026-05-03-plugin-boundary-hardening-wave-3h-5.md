@@ -193,8 +193,11 @@ uptrakit-shared-db = { workspace = true, optional = true }
 
 - [ ] **Step 2: Override `send_transactional_email` in `PluginCatalog`'s `impl NotificationOps`**
 
-In `crates/plugins/infrastructure/core/src/catalog.rs`, the current `impl NotificationOps for PluginCatalog` has two methods. Add the override (all of
-this is already under `#[cfg(feature = "catalog")]` since the file is guarded):
+In `crates/plugins/infrastructure/core/src/catalog.rs`, find the existing
+`impl NotificationOps for PluginCatalog` block (it already has two methods: `transport` and
+`notification_supported_types`). Add the override method **inside that same impl block** — do NOT
+create a second `impl NotificationOps for PluginCatalog`. (All of `catalog.rs` is already under
+`#[cfg(feature = "catalog")]`, so no outer gate needed here.)
 
 ```rust
 #[cfg(feature = "plugin-ops")]
@@ -512,6 +515,10 @@ async fn send_email_change_emails(
 Note: `state.plugin_ops` is `Arc<dyn PluginOps>` and `PluginOps` supertrait includes `NotificationOps`, so `send_transactional_email` is callable on
 it.
 
+Feature availability note: `send_transactional_email` is gated on `#[cfg(feature = "plugin-ops")]` in `plugin-infrastructure-core`. In any `web-api`
+build, `plugin-ops` IS active via Cargo feature unification: `web-api → registry → proxmox plugin crate → plugin-infrastructure-core/plugin-ops`. The
+method will always be present in `users.rs` at compile time.
+
 Remove the `use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, NotificationPluginError};` import from inside `send_email_change_emails`.
 Add `use uptrakit_plugin_infrastructure_registry::escape_html;` or keep as fully-qualified. Check what other parts of `users.rs` import from the
 registry to avoid breaking existing imports.
@@ -705,8 +712,27 @@ pub trait PluginSurfaceActionOps: Send + Sync + 'static {
 }
 ```
 
-Remove the `use std::pin::Pin;` import at the top of `plugin_ops.rs` if it's no longer needed after converting all three traits. Also remove `use
-std::future::Future;` if no longer referenced.
+Remove the `use std::pin::Pin;` import at the top of `plugin_ops.rs` if it's no longer needed
+after converting all three traits. Also remove `use std::future::Future;` if no longer referenced.
+
+**Lifetime note:** The original signature uses `for<'a>` to unify `&'a self` and
+`ctx: &'a SurfaceActionContext<'a>`. With `#[async_trait]`, `ctx: &SurfaceActionContext<'_>` elides
+the inner lifetime — the macro resolves it correctly in most cases, but if any `impl` site produces
+a "borrowed value does not live long enough" error on `ctx.controller`, use an explicit named
+lifetime:
+
+```rust
+async fn handle_surface_action<'ctx>(
+    &self,
+    ctx: &'ctx SurfaceActionContext<'ctx>,
+    surface_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, SurfaceActionError>;
+```
+
+Run `cargo check --all-features` immediately after this step to catch any lifetime errors before
+proceeding.
 
 - [ ] **Step 2: Convert `SoftwareItemLifecycleOps` in `plugin_ops.rs`**
 
@@ -854,6 +880,10 @@ impl SoftwareItemLifecycleOps for PluginCatalog {
 Remove `use std::pin::Pin; use std::future::Future;` from `catalog.rs` if they become unused.
 
 - [ ] **Step 6: Update test stubs — add `#[async_trait]` to impl headers**
+
+**Important:** Wave 3h (Task 1 Step 5) already added `#[async_trait]` to `impl NotificationOps`
+in these same files. Do NOT add it again to the NotificationOps impl blocks — only add it to
+`impl PluginSurfaceActionOps` and `impl SoftwareItemLifecycleOps` headers.
 
 For each of the 4 test files, add `#[async_trait]` to the `impl PluginSurfaceActionOps` and `impl SoftwareItemLifecycleOps` headers. The stubs only
 need the attribute added — the method bodies are already `-> Pin<Box<dyn Future...>>` closures that now need to be plain `async fn`.
