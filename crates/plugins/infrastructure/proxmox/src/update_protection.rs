@@ -836,9 +836,7 @@ mod tests {
             reason = "tenant_db is never called by these unit tests"
         )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
-            unimplemented!(
-                "tenant_db not used in proxmox update_protection tests — will be replaced in Wave 3f"
-            )
+            unimplemented!("tenant_db not called by these unit tests")
         }
     }
 

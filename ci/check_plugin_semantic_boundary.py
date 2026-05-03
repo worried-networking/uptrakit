@@ -255,6 +255,8 @@ MANIFEST_ALLOWED_PLUGIN_DEPENDENCIES = frozenset(
         "uptrakit-plugin-infrastructure-catalogue",
     }
 )
+# STRUCTURAL GAP: registry and catalogue crates must import from each other to
+# wire plugins; they are the defined exception to the boundary rule.
 ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES = frozenset(
     {
         "uptrakit_plugin_infrastructure_core",

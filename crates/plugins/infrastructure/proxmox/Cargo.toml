@@ -20,6 +20,9 @@ db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration?/sqlx-sqlite"]
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
+# Retained for proxmox_host_mapping entity: that entity cannot move to this crate
+# because controller-runtime/db_migrate/tables.rs (a core crate) uses the SeaORM
+# entity type for migration — adding a plugin dep to a core crate is not allowed.
 uptrakit-shared-db = { workspace = true }
 uptrakit-tenant-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
