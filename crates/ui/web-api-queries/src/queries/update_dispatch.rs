@@ -17,15 +17,11 @@ use time::OffsetDateTime;
 use tokio::time::timeout;
 use uptrakit_plugin_infrastructure_registry::{
     ControllerPostUpdateContext, ControllerProtectionContext, ControllerUpdateProtection,
-    PluginError, PluginResult, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
-    ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
     UpdateProtectionController, is_interactive_dispatch_plugin,
 };
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
-    proxmox_backup_target_cache, proxmox_host_mapping, proxmox_protection_audit,
-    proxmox_protection_default, proxmox_protection_item_override, service, service_host,
-    software_item, update_history,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
+    service_host, software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::{
@@ -404,11 +400,6 @@ const PRE_UPDATE_PROTECTION_FAILURE_SUMMARY: &str =
     "Controller pre-update protection failed before dispatch.";
 const PRE_UPDATE_PROTECTION_FAILURE_OUTPUT: &str =
     "Update failed before agent dispatch: controller pre-update protection failed.";
-/// Proxmox infrastructure plugin type identifier — used as a DB filter value
-/// when scoping plugin-config queries to proxmox configs. Defined here to avoid
-/// appearing as a literal inside the filter-expression identity context (where
-/// `Column::PluginType` would trigger the plugin-type boundary check).
-const PROXMOX_INFRA_CONFIG_TYPE: &str = "infrastructure_proxmox";
 
 /// Outcome of attempting controller-side pre-update protection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,267 +408,21 @@ pub enum PreUpdateProtectionOutcome {
     Failed,
 }
 
-fn plugin_internal_error(error: impl std::fmt::Display) -> rootcause::Report<PluginError> {
-    report!(PluginError::PluginInternal(error.to_string()))
-}
-
-fn proxmox_mode_from_db(value: &str) -> ProxmoxProtectionMode {
-    match value {
-        "snapshot" => ProxmoxProtectionMode::Snapshot,
-        "backup" => ProxmoxProtectionMode::Backup,
-        _ => ProxmoxProtectionMode::DoNothing,
-    }
-}
-
-fn proxmox_mode_to_db(value: ProxmoxProtectionMode) -> &'static str {
-    match value {
-        ProxmoxProtectionMode::DoNothing => "do_nothing",
-        ProxmoxProtectionMode::Snapshot => "snapshot",
-        ProxmoxProtectionMode::Backup => "backup",
-    }
-}
-
-struct QueryUpdateProtectionController<'a> {
-    proxmox_store: QueryProxmoxProtectionStore<'a>,
+struct QueryUpdateProtectionController {
     tenant_db: crate::TenantDb,
 }
 
-impl<'a> QueryUpdateProtectionController<'a> {
-    fn new(db: &'a DatabaseConnection, tenant_id: Uuid) -> Self {
+impl QueryUpdateProtectionController {
+    fn new(db: &DatabaseConnection, tenant_id: Uuid) -> Self {
         Self {
-            proxmox_store: QueryProxmoxProtectionStore { db },
             tenant_db: crate::TenantDb::new(db.clone(), tenant_id),
         }
     }
 }
 
-impl UpdateProtectionController for QueryUpdateProtectionController<'_> {
+impl UpdateProtectionController for QueryUpdateProtectionController {
     fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
         &self.tenant_db
-    }
-
-    fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
-        Some(&self.proxmox_store)
-    }
-}
-
-struct QueryProxmoxProtectionStore<'a> {
-    db: &'a DatabaseConnection,
-}
-
-#[async_trait::async_trait]
-impl ProxmoxProtectionStore for QueryProxmoxProtectionStore<'_> {
-    async fn load_host_mapping(
-        &self,
-        tenant_id: Uuid,
-        host_id: Uuid,
-    ) -> PluginResult<Option<ProxmoxHostMappingRecord>> {
-        let mut mappings = ProxmoxHostMapping::find()
-            .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
-            .filter(proxmox_host_mapping::Column::HostId.eq(Some(host_id)))
-            .all(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        if mappings.len() > 1 {
-            return Err(plugin_internal_error(format!(
-                "multiple proxmox host mappings found for tenant={tenant_id}, host_id={host_id}"
-            )));
-        }
-
-        Ok(mappings.pop().map(|row| ProxmoxHostMappingRecord {
-            id: row.id,
-            tenant_id: row.tenant_id,
-            host_id: row.host_id,
-            plugin_config_id: row.plugin_config_id,
-            proxmox_node: row.proxmox_node,
-            proxmox_vmid: i64::from(row.proxmox_vmid),
-            proxmox_type: row.proxmox_type,
-        }))
-    }
-
-    async fn load_plugin_config_payload(
-        &self,
-        tenant_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> PluginResult<serde_json::Value> {
-        let config = PluginConfig::find_by_id(plugin_config_id)
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq(PROXMOX_INFRA_CONFIG_TYPE))
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?
-            .ok_or_else(|| {
-                plugin_internal_error(format!(
-                    "proxmox plugin config not found for tenant={tenant_id}, plugin_config_id={plugin_config_id}"
-                ))
-            })?;
-
-        if config.plugin_type != PROXMOX_INFRA_CONFIG_TYPE {
-            return Err(plugin_internal_error(format!(
-                "plugin config {plugin_config_id} is not an {PROXMOX_INFRA_CONFIG_TYPE} config"
-            )));
-        }
-
-        Ok(config.config)
-    }
-
-    async fn load_effective_policy(
-        &self,
-        tenant_id: Uuid,
-        software_item_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> PluginResult<ProxmoxProtectionPolicyRecord> {
-        let item_override = ProxmoxProtectionItemOverride::find()
-            .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
-            .filter(proxmox_protection_item_override::Column::PluginConfigId.eq(plugin_config_id))
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        let global_default = ProxmoxProtectionDefault::find()
-            .filter(proxmox_protection_default::Column::TenantId.eq(tenant_id))
-            .filter(proxmox_protection_default::Column::PluginConfigId.eq(plugin_config_id))
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        let item_mode = item_override
-            .as_ref()
-            .map(|row| proxmox_mode_from_db(&row.mode));
-        let global_mode = global_default
-            .as_ref()
-            .map(|row| proxmox_mode_from_db(&row.mode));
-
-        let snapshot_timeout_seconds = item_override
-            .as_ref()
-            .and_then(|row| row.snapshot_timeout_seconds)
-            .or_else(|| {
-                global_default
-                    .as_ref()
-                    .and_then(|row| row.snapshot_timeout_seconds)
-            });
-
-        let backup_timeout_seconds = item_override
-            .as_ref()
-            .and_then(|row| row.backup_timeout_seconds)
-            .or_else(|| {
-                global_default
-                    .as_ref()
-                    .and_then(|row| row.backup_timeout_seconds)
-            });
-
-        let effective = ProxmoxProtectionPolicyRecord {
-            mode: item_mode
-                .or(global_mode)
-                .unwrap_or(ProxmoxProtectionMode::DoNothing),
-            backup_target_key: item_override
-                .as_ref()
-                .and_then(|row| row.backup_target_key.clone())
-                .or_else(|| {
-                    global_default
-                        .as_ref()
-                        .and_then(|row| row.backup_target_key.clone())
-                }),
-            snapshot_timeout_seconds,
-            backup_timeout_seconds,
-        };
-
-        Ok(effective)
-    }
-
-    async fn load_audit(
-        &self,
-        update_history_id: Uuid,
-    ) -> PluginResult<Option<ProxmoxProtectionAuditRecord>> {
-        let row = ProxmoxProtectionAudit::find_by_id(update_history_id)
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        Ok(row.map(|row| ProxmoxProtectionAuditRecord {
-            update_history_id: row.update_history_id,
-            tenant_id: row.tenant_id,
-            host_id: row.host_id,
-            software_item_id: row.software_item_id,
-            plugin_config_id: row.plugin_config_id,
-            mapping_id: row.mapping_id,
-            mode: proxmox_mode_from_db(&row.mode),
-            status: row.status,
-            artifact_kind: row.artifact_kind,
-            artifact_ref: row.artifact_ref,
-            backup_target_key: row.backup_target_key,
-            detail: row.detail,
-            error_message: row.error_message,
-        }))
-    }
-
-    async fn upsert_audit(&self, audit: &ProxmoxProtectionAuditRecord) -> PluginResult<()> {
-        let now = OffsetDateTime::now_utc();
-        let existing = ProxmoxProtectionAudit::find_by_id(audit.update_history_id)
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        if let Some(existing) = existing {
-            let mut active: proxmox_protection_audit::ActiveModel = existing.into();
-            active.tenant_id = Set(audit.tenant_id);
-            active.host_id = Set(audit.host_id);
-            active.software_item_id = Set(audit.software_item_id);
-            active.plugin_config_id = Set(audit.plugin_config_id);
-            active.mapping_id = Set(audit.mapping_id);
-            active.mode = Set(proxmox_mode_to_db(audit.mode).to_string());
-            active.status = Set(audit.status.clone());
-            active.artifact_kind = Set(audit.artifact_kind.clone());
-            active.artifact_ref = Set(audit.artifact_ref.clone());
-            active.backup_target_key = Set(audit.backup_target_key.clone());
-            active.detail = Set(audit.detail.clone());
-            active.error_message = Set(audit.error_message.clone());
-            active.updated_at = Set(now);
-            active
-                .update(self.db)
-                .await
-                .map_err(plugin_internal_error)?;
-        } else {
-            let active = proxmox_protection_audit::ActiveModel {
-                update_history_id: Set(audit.update_history_id),
-                tenant_id: Set(audit.tenant_id),
-                host_id: Set(audit.host_id),
-                software_item_id: Set(audit.software_item_id),
-                plugin_config_id: Set(audit.plugin_config_id),
-                mapping_id: Set(audit.mapping_id),
-                mode: Set(proxmox_mode_to_db(audit.mode).to_string()),
-                status: Set(audit.status.clone()),
-                artifact_kind: Set(audit.artifact_kind.clone()),
-                artifact_ref: Set(audit.artifact_ref.clone()),
-                backup_target_key: Set(audit.backup_target_key.clone()),
-                detail: Set(audit.detail.clone()),
-                error_message: Set(audit.error_message.clone()),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            active
-                .insert(self.db)
-                .await
-                .map_err(plugin_internal_error)?;
-        }
-
-        Ok(())
-    }
-
-    async fn find_cached_backup_target(
-        &self,
-        plugin_config_id: Uuid,
-        target_key: &str,
-    ) -> PluginResult<Option<String>> {
-        let row = ProxmoxBackupTargetCache::find()
-            .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
-            .filter(proxmox_backup_target_cache::Column::TargetKey.eq(target_key))
-            .one(self.db)
-            .await
-            .map_err(plugin_internal_error)?;
-
-        Ok(row.map(|row| row.storage_id))
     }
 }
 
@@ -1385,59 +1130,7 @@ pub fn enrich_release_info_with_attestation(
 
 #[cfg(test)]
 mod tests {
-    use super::QueryProxmoxProtectionStore;
-    use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
-    use time::OffsetDateTime;
-    use uptrakit_plugin_infrastructure_registry::ProxmoxProtectionStore;
-    use uptrakit_shared_db::entity::{plugin_config, proxmox_host_mapping};
-    use uuid::Uuid;
-
-    fn store_with_db(db: DatabaseConnection) -> QueryProxmoxProtectionStore<'static> {
-        let leaked = Box::leak(Box::new(db));
-        QueryProxmoxProtectionStore { db: leaked }
-    }
-
-    fn sample_mapping(
-        tenant_id: Uuid,
-        host_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> proxmox_host_mapping::Model {
-        proxmox_host_mapping::Model {
-            id: Uuid::now_v7(),
-            tenant_id,
-            plugin_config_id,
-            host_id: Some(host_id),
-            proxmox_node: "pve1".to_string(),
-            proxmox_vmid: 101,
-            proxmox_type: "qemu".to_string(),
-            proxmox_name: Some("vm-101".to_string()),
-            proxmox_status: "running".to_string(),
-            hostname: Some("vm-101".to_string()),
-            ip_addresses: None,
-            machine_id: None,
-            match_method: Some("manual".to_string()),
-            discovered_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-        }
-    }
-
-    fn sample_plugin_config(
-        tenant_id: Uuid,
-        plugin_config_id: Uuid,
-        plugin_type: &str,
-    ) -> plugin_config::Model {
-        plugin_config::Model {
-            id: plugin_config_id,
-            tenant_id,
-            name: "test".to_string(),
-            plugin_type: plugin_type.to_string(),
-            config: serde_json::json!({"api_url":"https://pve.local:8006"}),
-            enabled: true,
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-            deactivated_at: Some(OffsetDateTime::now_utc()),
-        }
-    }
+    use sea_orm::DatabaseConnection;
 
     /// Insert the minimum parent rows required by the `update_history` FK constraints.
     ///
@@ -1620,79 +1313,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proxmox_protection_store_rejects_duplicate_host_mappings() {
-        let tenant_id = Uuid::now_v7();
-        let host_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
-        let db = MockDatabase::new(DbBackend::MySql)
-            .append_query_results([vec![
-                sample_mapping(tenant_id, host_id, plugin_config_id),
-                sample_mapping(tenant_id, host_id, plugin_config_id),
-            ]])
-            .into_connection();
-        let store = store_with_db(db);
-
-        let error = store
-            .load_host_mapping(tenant_id, host_id)
-            .await
-            .expect_err("duplicate mappings must be rejected");
-
-        assert!(
-            error.to_string().contains("multiple proxmox host mappings"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn proxmox_protection_store_merges_item_mode_and_global_timeouts() {
-        use uptrakit_plugin_infrastructure_registry::ProxmoxProtectionMode;
-        use uptrakit_shared_db::entity::{
-            proxmox_protection_default, proxmox_protection_item_override,
-        };
-
-        let tenant_id = Uuid::now_v7();
-        let software_item_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
-        let now = OffsetDateTime::now_utc();
-
-        let item = proxmox_protection_item_override::Model {
-            software_item_id,
-            plugin_config_id,
-            mode: "snapshot".to_string(),
-            backup_target_key: None,
-            snapshot_timeout_seconds: None,
-            backup_timeout_seconds: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let global = proxmox_protection_default::Model {
-            tenant_id,
-            plugin_config_id,
-            mode: "backup".to_string(),
-            backup_target_key: Some("pbs-home:pbs".to_string()),
-            snapshot_timeout_seconds: Some(180),
-            backup_timeout_seconds: Some(1200),
-            created_at: now,
-            updated_at: now,
-        };
-
-        let db = MockDatabase::new(DbBackend::MySql)
-            .append_query_results([vec![item]])
-            .append_query_results([vec![global]])
-            .into_connection();
-        let store = store_with_db(db);
-
-        let policy = store
-            .load_effective_policy(tenant_id, software_item_id, plugin_config_id)
-            .await
-            .expect("policy should load");
-
-        assert_eq!(policy.mode, ProxmoxProtectionMode::Snapshot);
-        assert_eq!(policy.snapshot_timeout_seconds, Some(180));
-        assert_eq!(policy.backup_timeout_seconds, Some(1200));
-    }
-
-    #[tokio::test]
     async fn test_has_active_update_includes_awaiting_restart() {
         use sea_orm::ActiveModelTrait;
         use uptrakit_shared_db::entity::update_history;
@@ -1735,29 +1355,5 @@ mod tests {
             .await
             .unwrap();
         assert!(active, "AwaitingRestart should count as active");
-    }
-
-    #[tokio::test]
-    async fn proxmox_protection_store_rejects_non_proxmox_plugin_config_payload() {
-        let tenant_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
-        let db = MockDatabase::new(DbBackend::MySql)
-            .append_query_results([vec![sample_plugin_config(
-                tenant_id,
-                plugin_config_id,
-                "notifications_email",
-            )]])
-            .into_connection();
-        let store = store_with_db(db);
-
-        let error = store
-            .load_plugin_config_payload(tenant_id, plugin_config_id)
-            .await
-            .expect_err("non-proxmox plugin config must be rejected");
-
-        assert!(
-            error.to_string().contains("infrastructure_proxmox"),
-            "unexpected error: {error}"
-        );
     }
 }

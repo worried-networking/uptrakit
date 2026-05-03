@@ -241,96 +241,6 @@ pub trait NotificationTransport: PluginMeta {
     ) -> uptrakit_notification_plugin_core::Result<()>;
 }
 
-/// Typed Proxmox host mapping required by update-protection workflows.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProxmoxHostMappingRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub host_id: Option<Uuid>,
-    pub plugin_config_id: Uuid,
-    pub proxmox_node: String,
-    pub proxmox_vmid: i64,
-    pub proxmox_type: String,
-}
-
-/// Typed protection mode for Proxmox controller protection workflows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProxmoxProtectionMode {
-    #[default]
-    DoNothing,
-    Snapshot,
-    Backup,
-}
-
-/// Typed effective protection policy used during pre-update planning.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ProxmoxProtectionPolicyRecord {
-    pub mode: ProxmoxProtectionMode,
-    pub backup_target_key: Option<String>,
-    pub snapshot_timeout_seconds: Option<i64>,
-    pub backup_timeout_seconds: Option<i64>,
-}
-
-/// Typed persisted audit row used by Proxmox protection reconciliation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProxmoxProtectionAuditRecord {
-    pub update_history_id: Uuid,
-    pub tenant_id: Uuid,
-    pub host_id: Uuid,
-    pub software_item_id: Uuid,
-    pub plugin_config_id: Uuid,
-    pub mapping_id: Option<Uuid>,
-    pub mode: ProxmoxProtectionMode,
-    pub status: String,
-    pub artifact_kind: Option<String>,
-    pub artifact_ref: Option<String>,
-    pub backup_target_key: Option<String>,
-    pub detail: Option<String>,
-    pub error_message: Option<String>,
-}
-
-/// Typed Proxmox protection persistence boundary for controller-side workflows.
-#[async_trait]
-pub trait ProxmoxProtectionStore: Send + Sync {
-    /// Load the Proxmox host mapping for a tenant/host pair.
-    async fn load_host_mapping(
-        &self,
-        tenant_id: Uuid,
-        host_id: Uuid,
-    ) -> Result<Option<ProxmoxHostMappingRecord>>;
-
-    /// Load raw Proxmox plugin config JSON for a tenant-scoped plugin config row.
-    async fn load_plugin_config_payload(
-        &self,
-        tenant_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> Result<serde_json::Value>;
-
-    /// Load the effective update-protection policy for a software item.
-    async fn load_effective_policy(
-        &self,
-        tenant_id: Uuid,
-        software_item_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> Result<ProxmoxProtectionPolicyRecord>;
-
-    /// Load persisted protection audit state for a dispatch row.
-    async fn load_audit(
-        &self,
-        update_history_id: Uuid,
-    ) -> Result<Option<ProxmoxProtectionAuditRecord>>;
-
-    /// Upsert protection audit state for a dispatch row.
-    async fn upsert_audit(&self, audit: &ProxmoxProtectionAuditRecord) -> Result<()>;
-
-    /// Resolve a cached backup target by plugin config and logical key.
-    async fn find_cached_backup_target(
-        &self,
-        plugin_config_id: Uuid,
-        target_key: &str,
-    ) -> Result<Option<String>>;
-}
-
 /// Typed controller boundary for surface-action handlers.
 pub trait SurfaceActionController: Send + Sync {
     /// Authenticated tenant scope for this action.
@@ -344,11 +254,6 @@ pub trait SurfaceActionController: Send + Sync {
     /// Only available when the `plugin-ops` feature is active.
     #[cfg(feature = "plugin-ops")]
     fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
-
-    /// Proxmox update-protection persistence capability.
-    fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
-        None
-    }
 }
 
 /// Typed controller boundary for pre/post update protection workflows.
@@ -356,11 +261,6 @@ pub trait UpdateProtectionController: Send + Sync {
     /// Tenant-scoped database access for the update protection workflow.
     #[cfg(feature = "plugin-ops")]
     fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
-
-    /// Proxmox update-protection persistence capability.
-    fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
-        None
-    }
 }
 
 /// Controller-side pre-update protection workflow plugin.
@@ -726,59 +626,9 @@ mod execute_update_result_tests {
 mod controller_boundary_tests {
     use super::*;
 
-    struct TestProxmoxStore;
-
-    #[async_trait]
-    impl ProxmoxProtectionStore for TestProxmoxStore {
-        async fn load_host_mapping(
-            &self,
-            _tenant_id: Uuid,
-            _host_id: Uuid,
-        ) -> Result<Option<ProxmoxHostMappingRecord>> {
-            Ok(None)
-        }
-
-        async fn load_plugin_config_payload(
-            &self,
-            _tenant_id: Uuid,
-            _plugin_config_id: Uuid,
-        ) -> Result<serde_json::Value> {
-            Ok(serde_json::json!({}))
-        }
-
-        async fn load_effective_policy(
-            &self,
-            _tenant_id: Uuid,
-            _software_item_id: Uuid,
-            _plugin_config_id: Uuid,
-        ) -> Result<ProxmoxProtectionPolicyRecord> {
-            Ok(ProxmoxProtectionPolicyRecord::default())
-        }
-
-        async fn load_audit(
-            &self,
-            _update_history_id: Uuid,
-        ) -> Result<Option<ProxmoxProtectionAuditRecord>> {
-            Ok(None)
-        }
-
-        async fn upsert_audit(&self, _audit: &ProxmoxProtectionAuditRecord) -> Result<()> {
-            Ok(())
-        }
-
-        async fn find_cached_backup_target(
-            &self,
-            _plugin_config_id: Uuid,
-            _target_key: &str,
-        ) -> Result<Option<String>> {
-            Ok(None)
-        }
-    }
-
     struct TestController {
         tenant_id: Uuid,
         user_id: Option<Uuid>,
-        proxmox_store: TestProxmoxStore,
     }
 
     impl SurfaceActionController for TestController {
@@ -797,10 +647,6 @@ mod controller_boundary_tests {
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs surface action tests")
         }
-
-        fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
-            Some(&self.proxmox_store)
-        }
     }
 
     impl UpdateProtectionController for TestController {
@@ -811,21 +657,18 @@ mod controller_boundary_tests {
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs protection tests")
         }
-
-        fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
-            Some(&self.proxmox_store)
-        }
     }
 
-    #[tokio::test]
-    async fn controller_capabilities_expose_protection_stores() {
+    #[test]
+    fn controller_boundary_traits_are_object_safe() {
         let controller = TestController {
             tenant_id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
-            proxmox_store: TestProxmoxStore,
         };
 
-        assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
-        assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());
+        // Verify that both traits can be used as trait objects without
+        // requiring any Proxmox-specific capability injection.
+        let _surface: &dyn SurfaceActionController = &controller;
+        let _protection: &dyn UpdateProtectionController = &controller;
     }
 }

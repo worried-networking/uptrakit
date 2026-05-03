@@ -13,9 +13,12 @@ use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
     ControllerProtectionDecision, ControllerUpdateProtection, PluginMeta, PluginTypeId,
-    PostUpdateOutcome, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
+    PostUpdateOutcome,
+};
+
+use crate::protection_store::{
+    DbProxmoxProtectionStore, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
     ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
-    UpdateProtectionController,
 };
 use uuid::Uuid;
 
@@ -52,9 +55,11 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
         &self,
         ctx: &ControllerProtectionContext<'_>,
     ) -> Result<ControllerProtectionDecision> {
-        let store = proxmox_protection_store(ctx.controller)?;
+        let store = DbProxmoxProtectionStore {
+            db: ctx.controller.tenant_db().db(),
+        };
 
-        let mapping = match load_unique_mapping(store, ctx.tenant_id, ctx.host_id).await? {
+        let mapping = match load_unique_mapping(&store, ctx.tenant_id, ctx.host_id).await? {
             Some(mapping) => mapping,
             None => {
                 tracing::debug!("no Proxmox host mapping found — skipping protection");
@@ -72,7 +77,7 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
         );
 
         let proxmox_cfg =
-            load_proxmox_config(store, ctx.tenant_id, mapping.plugin_config_id).await?;
+            load_proxmox_config(&store, ctx.tenant_id, mapping.plugin_config_id).await?;
         let policy = map_policy_record(
             store
                 .load_effective_policy(
@@ -140,10 +145,10 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
                 )))
             }
             ProtectionMode::Snapshot => {
-                prepare_snapshot_protection(store, ctx, &mapping, &proxmox_cfg, &policy).await
+                prepare_snapshot_protection(&store, ctx, &mapping, &proxmox_cfg, &policy).await
             }
             ProtectionMode::Backup => {
-                prepare_backup_protection(store, ctx, &mapping, &proxmox_cfg, &policy).await
+                prepare_backup_protection(&store, ctx, &mapping, &proxmox_cfg, &policy).await
             }
         }
     }
@@ -156,7 +161,9 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
         &self,
         ctx: &ControllerPostUpdateContext<'_>,
     ) -> Result<PostUpdateOutcome> {
-        let store = proxmox_protection_store(ctx.controller)?;
+        let store = DbProxmoxProtectionStore {
+            db: ctx.controller.tenant_db().db(),
+        };
         let audit = store
             .load_audit(ctx.update_history_id)
             .await
@@ -194,16 +201,6 @@ fn snapshot_decision_failure() -> ControllerProtectionDecision {
         Some(STATUS_FAILED.to_string()),
         Some(SUMMARY_FAILURE.to_string()),
     )
-}
-
-fn proxmox_protection_store(
-    controller: &dyn UpdateProtectionController,
-) -> Result<&dyn ProxmoxProtectionStore> {
-    controller.proxmox_protection_store().ok_or_else(|| {
-        report!(PluginError::PluginInternal(
-            "ControllerUpdateProtection expected a ProxmoxProtectionStore capability".to_string()
-        ))
-    })
 }
 
 async fn load_unique_mapping(
@@ -743,12 +740,15 @@ mod tests {
     use sea_orm::{ColumnTrait, DbBackend, EntityTrait, MockDatabase, MockExecResult, QueryFilter};
     use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_core::{
-        ControllerProtectionContext, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
-        ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore, SecretString,
-        UpdateProtectionController,
+        ControllerProtectionContext, SecretString, UpdateProtectionController,
     };
     use uptrakit_shared_db::entity::{
         prelude::ProxmoxBackupTargetCache, proxmox_backup_target_cache,
+    };
+
+    use crate::protection_store::{
+        ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord, ProxmoxProtectionPolicyRecord,
+        ProxmoxProtectionStore,
     };
 
     struct TestProtectionStore {

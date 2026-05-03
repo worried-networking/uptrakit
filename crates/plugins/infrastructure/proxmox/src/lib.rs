@@ -26,6 +26,7 @@ pub mod guest_exec;
 pub mod matching;
 pub mod plugin;
 pub mod policy_store;
+pub(crate) mod protection_store;
 pub mod pve_setup;
 pub mod surfaces;
 pub mod update_protection;

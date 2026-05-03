@@ -25,11 +25,9 @@ pub use uptrakit_plugin_infrastructure_core::{
     ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
     GlobalProviderLookup, HostRuntime, MetadataAwareHostRuntime, NotificationTransport,
     PluginCapability, PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginMeta,
-    PostUpdateOutcome, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
-    ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
-    SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-    SoftwareItemPatch, SudoCommandEntry, SudoHelperScript, SurfaceActionController,
-    SurfaceActionError, UpdateProtectionController,
+    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
+    SurfaceActionController, SurfaceActionError, UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
