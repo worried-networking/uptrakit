@@ -32,7 +32,7 @@ uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-command = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-wire = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["migrations"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
@@ -44,6 +44,7 @@ uptrakit-web-api-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
+uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["migrations"] }
 
 [lints]
 workspace = true
