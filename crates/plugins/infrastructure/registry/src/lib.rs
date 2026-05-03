@@ -37,6 +37,10 @@ pub use uptrakit_plugin_infrastructure_core::{
     PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
+// Re-export transactional email error for callers that use `send_transactional_email`.
+#[cfg(feature = "notifications")]
+pub use uptrakit_plugin_infrastructure_core::TransactionalEmailError;
+
 // Re-export descriptor surface-action context (typed controller boundary).
 pub use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
