@@ -64,26 +64,36 @@ definitions from `shared-db`.
 
 ### Moves
 
-| Source | Destination |
-| ------ | ----------- |
-| `crates/shared/db/src/tenant_db.rs` | `crates/shared/tenant-db/src/tenant_db.rs` |
-| `crates/shared/db/src/entity/tenant_scoped.rs` | `crates/shared/tenant-db/src/tenant_scoped.rs` |
+| Source                                                                                       | Destination                                    |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `crates/shared/db/src/tenant_db.rs`                                                          | `crates/shared/tenant-db/src/tenant_db.rs`     |
+| `TenantScoped` **trait definition only** from `crates/shared/db/src/entity/tenant_scoped.rs` | `crates/shared/tenant-db/src/tenant_scoped.rs` |
 
-`TenantScoped` imports only `EntityTrait` and `ColumnTrait` from `sea-orm` — no entity
-file deps, safe to extract.
+`tenant_scoped.rs` in `shared-db` also contains 22+ `impl TenantScoped for X::Entity`
+blocks that each reference concrete entity modules from `shared-db`. Those impl blocks
+**stay in `shared-db`** — moving them would create a dependency cycle (the new crate
+would have to import all of `shared-db`'s entities). Only the trait definition
+(`pub trait TenantScoped { ... }`) moves. `shared-db/entity/tenant_scoped.rs` shrinks
+to just the impl blocks, which now import the trait from `uptrakit_tenant_db`.
 
 ### Dependency updates
 
-| Crate | Change |
-| ----- | ------ |
-| `uptrakit-shared-db` | Add `uptrakit-tenant-db` dep; re-export `TenantDb` and `TenantScoped` from it; remove the two moved source files |
-| `uptrakit-plugin-infrastructure-proxmox` | Add direct dep on `uptrakit-tenant-db` |
-| `uptrakit-plugin-releases-docker` | Add direct dep |
-| `uptrakit-notification-plugin-email` | Add direct dep |
-| `uptrakit-notification-plugin-telegram` | Add direct dep |
+| Crate                                    | Change                                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `uptrakit-shared-db`                     | Add `uptrakit-tenant-db` dep; re-export `TenantDb` and `TenantScoped` from it; remove the two moved source files |
+| `uptrakit-plugin-infrastructure-proxmox` | Add direct dep on `uptrakit-tenant-db`                                                                           |
+| `uptrakit-plugin-releases-docker`        | Add direct dep                                                                                                   |
+| `uptrakit-notification-plugin-email`     | Add direct dep                                                                                                   |
+| `uptrakit-notification-plugin-telegram`  | Add direct dep                                                                                                   |
 
 `uptrakit-web-api-queries` already re-exports from `shared-db` via its
 `src/tenant_db.rs` — no change needed there.
+
+In `uptrakit-plugin-infrastructure-core/Cargo.toml`, `uptrakit-tenant-db` must be
+added under the `plugin-ops` feature (not unconditional), since `sea-orm` is already
+gated behind `plugin-ops` in that crate. Adding it unconditionally would pull `sea-orm`
+into every transitive consumer of `plugin-infrastructure-core`, including agent-side
+builds that intentionally have no DB dependency.
 
 ### Acceptance
 
@@ -100,7 +110,10 @@ plugin-named methods — removal is deferred to Wave 3. Purely additive; no beha
 
 ### `plugin-infrastructure-core` changes
 
-Add `uptrakit-tenant-db` as a non-optional dependency in `Cargo.toml`.
+Add `uptrakit-tenant-db` as a dep gated behind the `plugin-ops` feature in `Cargo.toml`
+(same gate as `sea-orm`). The `tenant_db()` method on the controller traits and the
+`SurfaceActionContext` delegate are only reachable when `plugin-ops` is active, which
+is the only context where a `TenantDb` can be constructed.
 
 Add to `SurfaceActionController` in `roles.rs`:
 
@@ -146,8 +159,10 @@ fn tenant_db(&self) -> &TenantDb {
 }
 ```
 
-Construction sites (lines ~842, ~898) updated to pass `&tenant_db` (the `TenantDb`
-already in scope from the function signature).
+Construction sites (lines ~842, ~898) currently have `db: &DatabaseConnection` and
+`tenant_id: Uuid` in scope. Construct `TenantDb::new(db, tenant_id)` at the call site
+and pass `&tenant_db` to the constructor. Update function signatures if `tenant_id` is
+not yet in scope at those points.
 
 ### Acceptance
 
@@ -163,8 +178,12 @@ already in scope from the function signature).
 `tenant_db()` directly. Simultaneously remove every plugin-named store trait, request
 type, and accessor method from `roles.rs` and both controller traits.
 
-This is the largest wave. All sub-steps must land atomically (single commit or
-fast-follow commit series with CI green at each step).
+This is the largest wave. Sub-steps 3a–3f each update one plugin to query via
+`tenant_db()` directly while **leaving the old store method on the controller trait
+intact**. Each sub-step is independently CI-green because the store method still
+compiles. Sub-step 3g then removes all store methods, store traits, and registry
+re-exports in a single atomic commit — this is the only irreversible step. Sub-step
+3h is independent and may land before or after 3g.
 
 ### 3a — Docker plugin
 
@@ -200,7 +219,14 @@ registry re-exports, this import breaks. Fix: rewrite `build_settings_bag` to qu
 the `setting` and `global_setting` tables directly via raw DB calls and build the
 `serde_json::Value` result without using the typed struct. The public signature
 (`async fn build_settings_bag(db: &DatabaseConnection, tenant_id: Uuid) -> serde_json::Value`)
-stays unchanged — callers in `dispatcher.rs` and `notifications.rs` remain unmodified.
+stays unchanged — all callers remain unmodified. Known callers: `dispatcher.rs`,
+`notifications.rs`, `surface-proxy/proxy.rs`, and
+`surface-proxy/proxy/controller_local/notifications.rs`.
+
+Risk: the rewrite replaces `EmailSmtpSettings` struct-field access with string-keyed
+map construction. Any misspelled key would be a silent runtime failure (wrong field
+name = empty value in the settings bag). Mitigate by adding a test that exercises
+`build_settings_bag` against a real DB with known fixture data.
 
 ### 3c — Telegram plugin
 
@@ -213,13 +239,15 @@ Same pattern as Email.
 ### 3d — Notification plugins (all three + notification-plugin-core)
 
 Surface action handlers for channel listing/management use
-`ctx.controller.notification_channel_store()`. `notification-plugin-core/list_channels.rs`
-accepts a `&dyn NotificationChannelStore` parameter.
+`ctx.controller.notification_channel_store()`.
+
+Note: `notification-plugin-core/list_channels.rs` already accepts
+`(db: &DatabaseConnection, tenant_id: Uuid, ...)` directly — no signature change
+needed there. The store trait exists on the controller, not inside `list_channels.rs`.
 
 **After:**
 
 - Handlers call `ctx.tenant_db()` and query `notification_channel` entity directly.
-- `list_channels.rs` signature changes to accept `&TenantDb` instead of `&dyn NotificationChannelStore`.
 - `NotificationChannelStore`, `NotificationChannelListRequest`, `NotificationChannelListItem`,
   `NotificationChannelListPage`, `NotificationActionTokenRecord` deleted from `roles.rs`.
 - `impl NotificationChannelStore for AppStateSurfaceActionController` deleted.
@@ -245,6 +273,8 @@ accepts a `&dyn NotificationChannelStore` parameter.
   `ProxmoxProtectionMode`, `ProxmoxProtectionPolicyRecord`, `ProxmoxHostMappingRecord`.
 - `impl ProxmoxSurfaceStore for AppStateSurfaceActionController` deleted from `surface-proxy`.
 - `proxmox_surface_store()` deleted from `SurfaceActionController`.
+- `proxmox_protection_store()` also deleted from `SurfaceActionController` here
+  (it exists on both traits; its removal from `UpdateProtectionController` is in 3f).
 
 ### 3f — Proxmox update protection
 
@@ -299,20 +329,37 @@ pub enum TransactionalEmailError {
 
 **New method on `NotificationOps` in `plugin_ops.rs`:**
 
+`async-trait` is already a dep of `plugin-infrastructure-core`. Annotate `NotificationOps`
+with `#[async_trait]` and add the method as a plain `async fn` with a default body:
+
 ```rust
-async fn send_transactional_email(
-    &self,
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    to: &str,
-    subject: &str,
-    text_body: &str,
-    html_body: &str,
-) -> Result<(), TransactionalEmailError>;
+#[async_trait]
+pub trait NotificationOps: Send + Sync + 'static {
+    // … existing methods unchanged …
+
+    async fn send_transactional_email(
+        &self,
+        tenant_db: &TenantDb,
+        to: &str,
+        subject: &str,
+        text_body: &str,
+        html_body: &str,
+    ) -> Result<(), TransactionalEmailError> {
+        let _ = (tenant_db, to, subject, text_body, html_body);
+        Err(TransactionalEmailError::NotConfigured)
+    }
+}
 ```
 
-The registry's `impl NotificationOps` routes via `plugin_ids::EMAIL` internally —
-that knowledge stays inside the registry crate, which is the approved crossing point.
+`TenantDb` (not `DatabaseConnection`) is the right parameter: it already carries
+the tenant scoping, and the registry impl uses `tenant_db.db()` +
+`tenant_db.tenant_id` internally. The default returns `Err(NotConfigured)` so
+existing test stubs compile without changes. The default body is deliberately
+explicit (not a one-liner) so reviewers see the noop is intentional, not an
+oversight.
+
+The registry's `impl NotificationOps` overrides this default, routing via
+`plugin_ids::EMAIL` internally — that knowledge stays inside the registry.
 `SmtpNotConfigured` is mapped to `TransactionalEmailError::NotConfigured` within the
 registry impl.
 
@@ -321,7 +368,8 @@ registry impl.
 - Remove imports of `plugin_ids`, `NotificationPluginError`, and
   `notification_settings::build_settings_bag`.
 - Replace the ad-hoc send sequence with
-  `state.notification_ops().send_transactional_email(db, tenant_id, to, subject, text, html).await`.
+  `state.notification_ops().send_transactional_email(&tenant_db, to, subject, text, html).await`
+  where `tenant_db` is constructed from `state.db()` + `tenant_id`.
 - Match `TransactionalEmailError::NotConfigured` where `SmtpNotConfigured` was matched.
 
 `web-api-queries/notification_settings.rs` is **not** deleted here — `dispatcher.rs` and
@@ -349,13 +397,13 @@ is refactored.
 
 ### Moves
 
-| Source (`shared-db/entity/`) | Destination (`proxmox/src/entity/`) |
-| ---------------------------- | ----------------------------------- |
-| `proxmox_host_mapping.rs` | `proxmox_host_mapping.rs` |
-| `proxmox_protection_audit.rs` | `proxmox_protection_audit.rs` |
-| `proxmox_protection_default.rs` | `proxmox_protection_default.rs` |
+| Source (`shared-db/entity/`)          | Destination (`proxmox/src/entity/`)   |
+| ------------------------------------- | ------------------------------------- |
+| `proxmox_host_mapping.rs`             | `proxmox_host_mapping.rs`             |
+| `proxmox_protection_audit.rs`         | `proxmox_protection_audit.rs`         |
+| `proxmox_protection_default.rs`       | `proxmox_protection_default.rs`       |
 | `proxmox_protection_item_override.rs` | `proxmox_protection_item_override.rs` |
-| `proxmox_backup_target_cache.rs` | `proxmox_backup_target_cache.rs` |
+| `proxmox_backup_target_cache.rs`      | `proxmox_backup_target_cache.rs`      |
 
 New file: `crates/plugins/infrastructure/proxmox/src/entity/mod.rs` — pub re-exports for
 all five modules. Visibility is `pub(crate)` unless the reset fn in Wave 6 requires wider
@@ -401,8 +449,8 @@ After this wave `roles.rs` must contain only:
   `SoftwareItemLifecycleContext`, `SoftwareItemPatch`)
 - `ControllerUpdateProtection`, `ControllerProtectionContext`, `ControllerProtectionDecision`,
   `ControllerPostUpdateContext`, `PostUpdateOutcome`
-- `SurfaceActionController`, `UpdateProtectionController`
-  (both now containing only `tenant_id()`, `user_id()`, `tenant_db()`)
+- `SurfaceActionController` (now containing only `tenant_id()`, `user_id()`, `tenant_db()`)
+- `UpdateProtectionController` (now containing only `tenant_db()`)
 
 ### Registry re-export tidy
 
@@ -449,13 +497,19 @@ pub type ResetTenantDataFn =
 
 ### `PluginDescriptor` field addition
 
+Add the field to `PluginDescriptor`:
+
 ```rust
 #[cfg(feature = "migrations")]
 pub reset_tenant_data: Option<ResetTenantDataFn>,
 ```
 
-All existing `PluginDescriptor` static initializers gain `reset_tenant_data: None`.
-`#[non_exhaustive]` already covers external construction.
+All `PluginDescriptor` initializers are generated by the `declare_plugin!` macro.
+Update the macro to include `reset_tenant_data: None` in the generated struct
+literal — this sweeps all plugin crates atomically. Do NOT add `#[non_exhaustive]`
+to `PluginDescriptor`: all construction goes through `declare_plugin!` already, so
+`#[non_exhaustive]` would break the macro-generated struct literals without providing
+any practical benefit.
 
 ### Proxmox plugin registration
 
@@ -470,10 +524,20 @@ fn proxmox_reset_tenant_data<'a>(
     txn: &'a DatabaseTransaction,
 ) -> Pin<Box<dyn Future<Output = Result<(), DbErr>> + Send + 'a>> {
     Box::pin(async move {
-        // FK order: item_overrides → defaults → backup_target_cache → host_mappings
+        // proxmox_protection_item_override has no tenant_id column.
+        // It has Restrict FKs to both plugin_config and software_items.
+        // Delete via plugin_config_id subquery.
+        let config_ids: Vec<Uuid> = plugin_config::Entity::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .select_only()
+            .column(plugin_config::Column::Id)
+            .into_tuple::<Uuid>()
+            .all(txn)
+            .await?;
         proxmox_protection_item_override::Entity::delete_many()
-            .filter(proxmox_protection_item_override::Column::TenantId.eq(tenant_id))
+            .filter(proxmox_protection_item_override::Column::PluginConfigId.is_in(config_ids))
             .exec(txn).await?;
+        // The remaining tables have direct tenant_id columns.
         proxmox_protection_default::Entity::delete_many()
             .filter(proxmox_protection_default::Column::TenantId.eq(tenant_id))
             .exec(txn).await?;
@@ -488,6 +552,12 @@ fn proxmox_reset_tenant_data<'a>(
     })
 }
 ```
+
+`plugin_config` is from `uptrakit_shared_db::entity::plugin_config` — the proxmox
+plugin already depends on `shared-db`, so this import is already available. After
+Wave 4 moves the Proxmox entities out of `shared-db`, the proxmox plugin's `shared-db`
+dep must be **retained** (not removed) because `reset.rs` references `plugin_config::Entity`.
+Add a comment in `Cargo.toml` at the `shared-db` dep line to make this explicit.
 
 ### Registry: `reset_tenant_data` helper
 
@@ -508,14 +578,23 @@ pub async fn reset_plugin_tenant_data(
 
 ### `web-api-queries/reset_data.rs`
 
-- Remove the explicit step 6 (`proxmox_host_mapping::Entity::delete_many()...`).
-- Add call to `uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data(tenant_id, &txn).await?`
-  **before step 10** (plugin_configs deletion). Rationale: `proxmox_protection_defaults` and
-  `proxmox_protection_item_overrides` both have FK to `plugin_config` with `Restrict` — the
-  callback must delete them first or step 10 fails with a constraint violation. This also
-  fixes a pre-existing bug: the current `reset_data.rs` never deleted those tables, making
-  step 10 silently fail for any tenant that has Proxmox protection defaults configured.
+- **Replace step 6** (`proxmox_host_mapping::Entity::delete_many()...`) with a call to
+  `uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data(tenant_id, &txn).await.context_to()?`.
+  (`reset_plugin_tenant_data` returns `Result<(), sea_orm::DbErr>`; the existing
+  `impl_report_conversion!(sea_orm::DbErr => ResetDataQueryError::Database)` makes
+  `context_to()?` work without additional conversion.)
+  Running at the step-6 position is required for correctness:
+  - `proxmox_protection_item_override` has a `Restrict` FK to `software_items` (deleted
+    at step 8) — the callback must precede step 8.
+  - `proxmox_protection_default` and `proxmox_protection_item_override` also have
+    `Restrict` FKs to `plugin_config` (deleted at step 10) — the callback must
+    precede step 10.
+  - Step 6 satisfies both constraints and was already the Proxmox-specific step.
 - Remove `proxmox_host_mapping` from the entity import list.
+- This also fixes a pre-existing bug: the current `reset_data.rs` never deleted
+  `proxmox_protection_defaults` or `proxmox_protection_item_overrides`, making step 10
+  fail with a FK constraint violation for any tenant that has Proxmox protection
+  defaults configured.
 
 ### Final boundary audit
 
@@ -525,8 +604,12 @@ Run across all non-plugin crates:
 grep -rn "Proxmox\|proxmox_host_mapping\|proxmox_protection\|DockerSurface\|EmailSmtp\|TelegramGlobal\|NotificationChannelStore" \
   crates/ui/ crates/core/ crates/shared/ --include="*.rs" \
   | grep "use " \
-  | grep -v 'plugin_ids\|"discovery_proxmox'
+  | grep -v '"discovery_proxmox'
 ```
+
+Do not exclude `plugin_ids` here — after Wave 3h removes `plugin_ids::EMAIL` from
+`users.rs`, any remaining `plugin_ids` reference in non-plugin code is a genuine
+violation that the CI shell script should catch independently.
 
 Zero results expected. Fix any remaining hits.
 
@@ -637,10 +720,17 @@ Note: no new rule is needed for the store-trait violations
 (`ProxmoxProtectionStore`, `EmailSmtpSettings`, etc.) — those types are deleted
 in Waves 3–5 and will no longer exist in the registry to be imported.
 
+**Structural gap (out of scope for this spec):** `ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES`
+allows any type from the registry to be imported by non-plugin code. This means a
+future developer who adds a plugin-specific type to the registry re-export surface
+will not be detected by any checker. Add a comment at `ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES`
+in `check_plugin_semantic_boundary.py` explicitly noting this limitation, so the next
+person understands what the allowlist does and does not enforce.
+
 ### Acceptance
 
 - Before Wave 3h: `./ci/check_plugin_semantic_boundary.sh` reports `plugin_ids
-  token references` violation for `users.rs` (confirming Gap 2 is real).
+token references` violation for `users.rs` (confirming Gap 2 is real).
 - Before Wave 7 Python fix A: `python3 ci/check_plugin_semantic_boundary.py` does
   NOT flag `plugin_ids::EMAIL` inline path in `users.rs` (confirming Gap 3 is real).
 - After Wave 7: Python checker flags both `plugin_ids::EMAIL` inline paths and
@@ -654,19 +744,19 @@ in Waves 3–5 and will no longer exist in the registry to be imported.
 
 ## Full Acceptance Criteria
 
-| Check | Expected |
-| ----- | -------- |
-| `roles.rs` plugin-named identifiers | Zero |
-| `SurfaceActionController` plugin-named methods | Zero (only `tenant_id`, `user_id`, `tenant_db`) |
-| `UpdateProtectionController` plugin-named methods | Zero (only `tenant_db`) |
-| Plugin-specific store trait impls in `surface-proxy` | Zero |
-| Plugin-specific store trait impls in `web-api-queries` | Zero |
-| Proxmox entity imports in `web-api-queries` | Zero |
-| `uptrakit-tenant-db` SeaORM entity definitions | Zero |
-| `plugin_ids::EMAIL` in `users.rs` | Zero |
-| `NotificationPluginError::SmtpNotConfigured` in non-plugin code | Zero |
-| `./ci/check_plugin_semantic_boundary.sh` | Exits 0 |
-| `python3 ci/check_plugin_semantic_boundary.py` | Exits 0 |
-| `cargo check --all-features` | Clean |
-| `cargo clippy --all-targets --all-features` | Clean |
-| `cargo test --all-features` | Passes |
+| Check                                                           | Expected                                              |
+| --------------------------------------------------------------- | ----------------------------------------------------- |
+| `roles.rs` plugin-named identifiers                             | Zero                                                  |
+| `SurfaceActionController` plugin-named methods                  | Zero (only `tenant_id()`, `user_id()`, `tenant_db()`) |
+| `UpdateProtectionController` plugin-named methods               | Zero (only `tenant_db()`)                             |
+| Plugin-specific store trait impls in `surface-proxy`            | Zero                                                  |
+| Plugin-specific store trait impls in `web-api-queries`          | Zero                                                  |
+| Proxmox entity imports in `web-api-queries`                     | Zero                                                  |
+| `uptrakit-tenant-db` SeaORM entity definitions                  | Zero                                                  |
+| `plugin_ids::EMAIL` in `users.rs`                               | Zero                                                  |
+| `NotificationPluginError::SmtpNotConfigured` in non-plugin code | Zero                                                  |
+| `./ci/check_plugin_semantic_boundary.sh`                        | Exits 0                                               |
+| `python3 ci/check_plugin_semantic_boundary.py`                  | Exits 0                                               |
+| `cargo check --all-features`                                    | Clean                                                 |
+| `cargo clippy --all-targets --all-features`                     | Clean                                                 |
+| `cargo test --all-features`                                     | Passes                                                |
