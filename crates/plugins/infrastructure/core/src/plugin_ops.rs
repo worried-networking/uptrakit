@@ -14,9 +14,6 @@
 //! - [`SoftwareItemLifecycleOps`] — enhancement plugin hooks
 //! - [`ControllerUpdateProtectionOps`] — controller-side pre/post update protection singleton
 
-use std::future::Future;
-use std::pin::Pin;
-
 use async_trait::async_trait;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uptrakit_surfaces as surfaces;
@@ -283,21 +280,16 @@ pub trait PluginConfigOps: PluginMetadataOps {
 // ── Trait 3: PluginSurfaceActionOps ─────────────────────────────────────────
 
 /// Surface action routing.
+#[async_trait]
 pub trait PluginSurfaceActionOps: Send + Sync + 'static {
     /// Handle a surface action invocation.
-    fn handle_surface_action<'a>(
-        &'a self,
-        ctx: &'a SurfaceActionContext<'a>,
-        surface_id: &'a str,
-        action_id: &'a str,
+    async fn handle_surface_action(
+        &self,
+        ctx: &SurfaceActionContext<'_>,
+        surface_id: &str,
+        action_id: &str,
         params: serde_json::Value,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
-                + Send
-                + 'a,
-        >,
-    >;
+    ) -> std::result::Result<serde_json::Value, SurfaceActionError>;
 }
 
 // ── Trait 4: PluginSurfaceOps ───────────────────────────────────────────────
@@ -340,13 +332,14 @@ pub trait NotificationOps: Send + Sync + 'static {
 // ── Trait 6: SoftwareItemLifecycleOps ───────────────────────────────────────
 
 /// Software item lifecycle enhancement hooks.
+#[async_trait]
 pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
     /// Fire `on_software_item_created` across all lifecycle plugins.
-    fn on_software_item_created<'a>(
-        &'a self,
-        event: &'a SoftwareItemCreatedEvent,
-        ctx: &'a SoftwareItemLifecycleContext,
-    ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>>;
+    async fn on_software_item_created(
+        &self,
+        event: &SoftwareItemCreatedEvent,
+        ctx: &SoftwareItemLifecycleContext,
+    ) -> Option<SoftwareItemPatch>;
 
     /// All registered software-item lifecycle enhancement plugins.
     fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>];

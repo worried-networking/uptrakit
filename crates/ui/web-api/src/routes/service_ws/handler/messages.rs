@@ -1877,26 +1877,18 @@ mod tests {
 
     impl PluginConfigOps for TestPluginOps {}
 
+    #[async_trait::async_trait]
     impl PluginSurfaceActionOps for TestPluginOps {
-        fn handle_surface_action<'a>(
-            &'a self,
-            _ctx: &'a uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'a>,
-            _surface_id: &'a str,
-            _action_id: &'a str,
+        async fn handle_surface_action(
+            &self,
+            _ctx: &uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'_>,
+            _surface_id: &str,
+            _action_id: &str,
             _params: serde_json::Value,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = std::result::Result<serde_json::Value, SurfaceActionError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async {
-                Err(SurfaceActionError::PluginInternal(
-                    "not implemented".to_string(),
-                ))
-            })
+        ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+            Err(SurfaceActionError::PluginInternal(
+                "not implemented".to_string(),
+            ))
         }
     }
 
@@ -1919,36 +1911,32 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl SoftwareItemLifecycleOps for TestPluginOps {
-        fn on_software_item_created<'a>(
-            &'a self,
-            event: &'a SoftwareItemCreatedEvent,
-            ctx: &'a SoftwareItemLifecycleContext,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Option<SoftwareItemPatch>> + Send + 'a>,
-        > {
-            Box::pin(async move {
-                let enabled = ctx
-                    .typed_type_setting::<TestLifecycleTypeSettings>(
-                        &plugin_ids::ENHANCEMENT_DASHBOARD_ICONS,
-                    )
-                    .map(|cfg| cfg.enabled)
-                    .unwrap_or(true);
+        async fn on_software_item_created(
+            &self,
+            event: &SoftwareItemCreatedEvent,
+            ctx: &SoftwareItemLifecycleContext,
+        ) -> Option<SoftwareItemPatch> {
+            let enabled = ctx
+                .typed_type_setting::<TestLifecycleTypeSettings>(
+                    &plugin_ids::ENHANCEMENT_DASHBOARD_ICONS,
+                )
+                .map(|cfg| cfg.enabled)
+                .unwrap_or(true);
 
-                if !enabled {
-                    return None;
-                }
+            if !enabled {
+                return None;
+            }
 
-                if event.name == "Actual Budget" {
-                    Some(
-                        SoftwareItemPatch::new().with_icon_url(Some(
-                            "https://cdn.example.test/actual-budget.svg".into(),
-                        )),
-                    )
-                } else {
-                    None
-                }
-            })
+            if event.name == "Actual Budget" {
+                Some(
+                    SoftwareItemPatch::new()
+                        .with_icon_url(Some("https://cdn.example.test/actual-budget.svg".into())),
+                )
+            } else {
+                None
+            }
         }
 
         fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>] {
