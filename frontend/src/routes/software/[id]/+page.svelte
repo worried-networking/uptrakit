@@ -38,8 +38,15 @@
 		SoftwareItemHostSummary
 	} from '$lib/types';
 	import type { SurfaceResponse } from '$lib/surfaces/contract';
-	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import {
+		getSurfaceReadModel,
+		getSurfacesBySlot,
+		getSurfaceRegistryLoaded,
+		getSurfaceReadRequested,
+		getSurfaceReadLoading,
+		loadSurfaceReadModels
+	} from '$lib/surfaces/registry.svelte';
+	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import {
 		ActionBadge,
 		Callout,
@@ -50,7 +57,9 @@
 		PageShell,
 		ReleaseNotes,
 		SectionCard,
-		StatusBadge
+		StatusBadge,
+		TabStrip,
+		type TabStripItem
 	} from '$lib/components/ui';
 	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
@@ -179,6 +188,17 @@
 	const softwareItemTabBaseParams = $derived.by<Record<string, string | undefined>>(() => ({
 		software_item_id: id
 	}));
+
+	const tabItems = $derived.by<TabStripItem[]>(() => {
+		const items: TabStripItem[] = [{ id: 'overview', label: 'Overview' }];
+		for (const surface of softwareItemTabSurfaces) {
+			items.push({ id: surface.surface_id, label: surface.label });
+		}
+		return items;
+	});
+
+	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'overview');
+
 	let softwareItemTabsReloadToken = $state(0);
 	const hostContextSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('software_item.host_context_menu'), (requiredPermission) =>
@@ -273,6 +293,33 @@
 				if (document.visibilityState === 'visible') loadItem(true);
 			}, 300_000);
 		}
+	});
+
+	// Validate activeTab — must be declared before URL-sync $effect
+	$effect(() => {
+		const surfaceRegistryLoaded = getSurfaceRegistryLoaded();
+		const isSurfaceAccessible = softwareItemTabSurfaces.some((s) => s.surface_id === activeTab);
+		const isPending = isSurfaceTabPending({
+			activeTab,
+			slotSurfaces: softwareItemTabSurfaces,
+			readBySurface: softwareItemTabReads,
+			isReadRequested: getSurfaceReadRequested(activeTab),
+			isReadLoading: getSurfaceReadLoading(activeTab)
+		});
+		if (!surfaceRegistryLoaded && activeTab !== 'overview') return;
+		if (activeTab !== 'overview' && !isSurfaceAccessible && !isPending) {
+			activeTab = 'overview';
+		}
+	});
+
+	// Sync activeTab to URL — declared after validation $effect
+	$effect(() => {
+		const search = activeTab !== 'overview' ? `?tab=${activeTab}` : '';
+		goto(search ? `${location.pathname}${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
 	});
 
 	$effect(() => {
@@ -769,7 +816,7 @@
 				<Button variant="primary" size="sm" class="mt-2" onclick={() => loadItem()}>Retry</Button>
 			</Callout>
 		{:else if item}
-			<!-- Header -->
+			<!-- Header — always visible -->
 			<SectionCard>
 				<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 					<div>
@@ -832,169 +879,186 @@
 						</div>
 					{/if}
 				</div>
-
-				{#if softwareItemTabSurfaces.length > 0}
-					<div class="mb-6 space-y-4">
-						{#each softwareItemTabSurfaces as surface (surface.surface_id)}
-							<SectionCard title={surface.label}>
-								<SurfaceReadPanel
-									{surface}
-									read={softwareItemTabReads[surface.surface_id]}
-									baseParams={softwareItemTabBaseParams}
-									reloadToken={softwareItemTabsReloadToken}
-								/>
-							</SectionCard>
-						{/each}
-					</div>
-				{/if}
-
-				<!-- Hosts table -->
-				<DataTable
-					columns={[]}
-					rows={item.hosts as unknown as Record<string, unknown>[]}
-					emptyTitle="No hosts assigned"
-					emptyDescription="Assign hosts to this software item to start tracking."
-					rowKey={(row) => (row as unknown as SoftwareItemHostSummary).id}
-				>
-					{#snippet header()}
-						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col">Hostname</th
-							>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col"
-							>
-								Installed Version
-							</th>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col"
-							>
-								Latest Version
-							</th>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col">Status</th
-							>
-							<th
-								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-								scope="col"
-							>
-								Detected At
-							</th>
-							{#if canManage}
-								<th
-									class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
-									scope="col"
-								></th>
-							{/if}
-						</tr>
-					{/snippet}
-					{#snippet row(rowValue, _index)}
-						{@const host = rowValue as unknown as SoftwareItemHostSummary}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-							<td class="table-cell-pad text-[var(--text-primary)]">
-								<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
-								>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}
-								{#if host.friendly_name && host.friendly_name !== host.hostname}
-									<span class="block text-xs text-[var(--text-muted)]">{host.friendly_name}</span>
-								{/if}
-								{#if host.plugins.length > 0}
-									<div class="mt-1 space-y-0.5">
-										{#each groupHostPlugins(host.plugins) as group (group.name)}
-											<div class="text-xs text-[var(--text-muted)]">
-												<span class="font-medium">{group.name}</span><span class="opacity-60">
-													· {group.roles.join(' · ')}</span
-												>
-											</div>
-										{/each}
-									</div>
-								{:else}
-									<span class="mt-1 block text-xs italic text-[var(--text-muted)]">No plugins configured</span>
-								{/if}
-							</td>
-							<td
-								class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]"
-								title={host.installed_version ?? undefined}
-								>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
-							>
-							<td class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]">
-								<span title={host.latest_version ?? item?.latest_version ?? undefined}
-									>{formatVersion(
-										resolveDisplayVersion(
-											host.latest_version ?? item?.latest_version,
-											getReleaseMeta(host)?.display_version
-										)
-									)}</span
-								>
-								{#if getReleaseMeta(host)}
-									<button
-										class="mt-0.5 block text-xs text-[var(--accent)] hover:underline"
-										onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
-									>
-								{/if}
-								{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
-									<span class="mt-0.5 block" title="GitHub Actions attestation verified">
-										<StatusBadge tone="success" label="Attested" />
-									</span>
-								{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
-									<span class="mt-0.5 block" title="No GitHub Actions attestation found">
-										<StatusBadge tone="danger" label="Not Attested" />
-									</span>
-								{/if}
-							</td>
-							<td class="table-cell-pad text-[var(--text-primary)]">
-								{#if canView && host.active_update_history_id}
-									<span class="inline-flex" title="View update progress">
-										<ActionBadge
-											variant="navigation"
-											tone="info"
-											idleLabel="In Progress"
-											hoverLabel="→ Log"
-											onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
-										/>
-									</span>
-								{:else if canTriggerUpdates && host.update_available}
-									<span
-										class="inline-flex"
-										title={`Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item?.latest_version, getReleaseMeta(host)?.display_version))}`}
-									>
-										<ActionBadge
-											variant="navigation"
-											tone="accent"
-											idleLabel="Update"
-											hoverLabel="Update"
-											onclick={() => openUpdateModal(host)}
-										/>
-									</span>
-								{:else}
-									<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
-								{/if}
-							</td>
-							<td class="table-cell-pad whitespace-nowrap text-sm text-[var(--text-muted)]"
-								>{formatDate(host.installed_version_detected_at)}</td
-							>
-							{#if canManage}
-								<td class="table-cell-pad">
-									<div class="actions-menu">
-										<Button
-											variant="ghost"
-											size="sm"
-											ariaLabel="Actions for {host.hostname}"
-											onclick={(e) => {
-												e.stopPropagation();
-												toggleMenu(host.id, e.currentTarget);
-											}}>&#8943;</Button
-										>
-									</div>
-								</td>
-							{/if}
-						</tr>
-					{/snippet}
-				</DataTable>
 			</SectionCard>
+
+			<!-- TabStrip — only shown when surfaces are registered -->
+			{#if softwareItemTabSurfaces.length > 0}
+				<TabStrip
+					items={tabItems}
+					activeId={activeTab}
+					ariaLabel="Software detail tabs"
+					idBase="software-detail"
+					onSelect={(id) => (activeTab = id)}
+				/>
+			{/if}
+
+			<!-- Tab content -->
+			{#if activeTab === 'overview' || softwareItemTabSurfaces.length === 0}
+				<SectionCard>
+					<!-- Hosts table -->
+					<DataTable
+						columns={[]}
+						rows={item.hosts as unknown as Record<string, unknown>[]}
+						emptyTitle="No hosts assigned"
+						emptyDescription="Assign hosts to this software item to start tracking."
+						rowKey={(row) => (row as unknown as SoftwareItemHostSummary).id}
+					>
+						{#snippet header()}
+							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Hostname</th
+								>
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
+									Installed Version
+								</th>
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
+									Latest Version
+								</th>
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Status</th
+								>
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
+									Detected At
+								</th>
+								{#if canManage}
+									<th
+										class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+										scope="col"
+									></th>
+								{/if}
+							</tr>
+						{/snippet}
+						{#snippet row(rowValue, _index)}
+							{@const host = rowValue as unknown as SoftwareItemHostSummary}
+							<tr
+								class="border-b border-[var(--border-subtle)] last:border-b-0"
+								class:bg-[var(--bg-subtle)]={_index % 2 === 0}
+							>
+								<td class="table-cell-pad text-[var(--text-primary)]">
+									<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
+									>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}
+									{#if host.friendly_name && host.friendly_name !== host.hostname}
+										<span class="block text-xs text-[var(--text-muted)]">{host.friendly_name}</span>
+									{/if}
+									{#if host.plugins.length > 0}
+										<div class="mt-1 space-y-0.5">
+											{#each groupHostPlugins(host.plugins) as group (group.name)}
+												<div class="text-xs text-[var(--text-muted)]">
+													<span class="font-medium">{group.name}</span><span class="opacity-60">
+														· {group.roles.join(' · ')}</span
+													>
+												</div>
+											{/each}
+										</div>
+									{:else}
+										<span class="mt-1 block text-xs italic text-[var(--text-muted)]">No plugins configured</span>
+									{/if}
+								</td>
+								<td
+									class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]"
+									title={host.installed_version ?? undefined}
+									>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
+								>
+								<td class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]">
+									<span title={host.latest_version ?? item?.latest_version ?? undefined}
+										>{formatVersion(
+											resolveDisplayVersion(
+												host.latest_version ?? item?.latest_version,
+												getReleaseMeta(host)?.display_version
+											)
+										)}</span
+									>
+									{#if getReleaseMeta(host)}
+										<button
+											class="mt-0.5 block text-xs text-[var(--accent)] hover:underline"
+											onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
+										>
+									{/if}
+									{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
+										<span class="mt-0.5 block" title="GitHub Actions attestation verified">
+											<StatusBadge tone="success" label="Attested" />
+										</span>
+									{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
+										<span class="mt-0.5 block" title="No GitHub Actions attestation found">
+											<StatusBadge tone="danger" label="Not Attested" />
+										</span>
+									{/if}
+								</td>
+								<td class="table-cell-pad text-[var(--text-primary)]">
+									{#if canView && host.active_update_history_id}
+										<span class="inline-flex" title="View update progress">
+											<ActionBadge
+												variant="navigation"
+												tone="info"
+												idleLabel="In Progress"
+												hoverLabel="→ Log"
+												onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
+											/>
+										</span>
+									{:else if canTriggerUpdates && host.update_available}
+										<span
+											class="inline-flex"
+											title={`Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item?.latest_version, getReleaseMeta(host)?.display_version))}`}
+										>
+											<ActionBadge
+												variant="navigation"
+												tone="accent"
+												idleLabel="Update"
+												hoverLabel="Update"
+												onclick={() => openUpdateModal(host)}
+											/>
+										</span>
+									{:else}
+										<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
+									{/if}
+								</td>
+								<td class="table-cell-pad whitespace-nowrap text-sm text-[var(--text-muted)]"
+									>{formatDate(host.installed_version_detected_at)}</td
+								>
+								{#if canManage}
+									<td class="table-cell-pad">
+										<div class="actions-menu">
+											<Button
+												variant="ghost"
+												size="sm"
+												ariaLabel="Actions for {host.hostname}"
+												onclick={(e) => {
+													e.stopPropagation();
+													toggleMenu(host.id, e.currentTarget);
+												}}>&#8943;</Button
+											>
+										</div>
+									</td>
+								{/if}
+							</tr>
+						{/snippet}
+					</DataTable>
+				</SectionCard>
+			{:else}
+				{#each softwareItemTabSurfaces as surface (surface.surface_id)}
+					{#if activeTab === surface.surface_id}
+						<SectionCard title={surface.label}>
+							<SurfaceReadPanel
+								{surface}
+								read={softwareItemTabReads[surface.surface_id]}
+								baseParams={softwareItemTabBaseParams}
+								reloadToken={softwareItemTabsReloadToken}
+							/>
+						</SectionCard>
+					{/if}
+				{/each}
+			{/if}
 		{/if}
 	</PageShell>
 {/if}

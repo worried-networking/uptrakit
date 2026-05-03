@@ -57,7 +57,10 @@ vi.mock('$lib/stores/events.svelte', () => ({
 vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfacesBySlot: vi.fn(() => []),
-	loadSurfaceReadModels: vi.fn(() => Promise.resolve())
+	loadSurfaceReadModels: vi.fn(() => Promise.resolve()),
+	getSurfaceRegistryLoaded: vi.fn(() => true),
+	getSurfaceReadRequested: vi.fn(() => false),
+	getSurfaceReadLoading: vi.fn(() => false)
 }));
 
 vi.mock('$lib/interactive', () => ({
