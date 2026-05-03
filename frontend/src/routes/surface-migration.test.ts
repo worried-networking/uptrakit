@@ -69,6 +69,10 @@ vi.mock('$lib/stores/network.svelte', () => ({
 	getIsOnline: vi.fn(() => true)
 }));
 
+vi.mock('$lib/stores/events.svelte', () => ({
+	subscribeToEvent: vi.fn(() => vi.fn())
+}));
+
 vi.mock('$lib/surfaces/registry.svelte', () => ({
 	loadSurfaceRegistry: vi.fn(),
 	clearSurfaceRegistry: vi.fn(),
