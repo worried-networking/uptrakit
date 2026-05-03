@@ -78,6 +78,10 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	resolveSurfacePageNavItems: vi.fn(() => [])
 }));
 
+vi.mock('$lib/stores/events.svelte', () => ({
+	subscribeToEvent: vi.fn(() => vi.fn())
+}));
+
 describe('layout Button migration', () => {
 	it('theme toggle renders as ghost Button with aria-label', () => {
 		render(Layout, {
