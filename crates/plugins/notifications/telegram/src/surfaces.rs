@@ -1,8 +1,8 @@
 //! Surface action handlers for the Telegram notification plugin.
 
-use uptrakit_plugin_infrastructure_core::{
-    NotificationChannelListRequest, SurfaceActionContext, SurfaceActionError,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use uptrakit_plugin_infrastructure_core::{SurfaceActionContext, SurfaceActionError};
+use uptrakit_shared_db::entity::notification_log;
 
 // ── Raw settings key constants ────────────────────────────────────────────────
 
@@ -58,43 +58,15 @@ async fn handle_list(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    let store = require_notification_channel_store(ctx)?;
-    let page = store
-        .list_channels(NotificationChannelListRequest {
-            tenant_id: ctx.tenant_id(),
-            channel_type: "telegram",
-            page: parse_page(params),
-            per_page: parse_per_page(params),
-        })
-        .await
-        .map_err(|error| {
-            tracing::error!(error = ?error, "failed to list telegram channels");
-            SurfaceActionError::ControllerIntegration("failed to list channels".to_string())
-        })?;
-
-    let mut items = Vec::with_capacity(page.items.len());
-    for channel in page.items {
-        let mut row = serde_json::json!({
-            "id": channel.id,
-            "name": channel.name,
-            "enabled": channel.enabled,
-            "created_at": channel.created_at_rfc3339,
-        });
-        if let (Some(config), Some(row_obj)) = (channel.config.as_object(), row.as_object_mut()) {
-            for (key, value) in config {
-                row_obj.insert(key.clone(), value.clone());
-            }
-        }
-        items.push(row);
-    }
-
-    Ok(serde_json::json!({
-        "items": items,
-        "total": page.total,
-        "page": page.page,
-        "per_page": page.per_page,
-        "total_pages": page.total_pages,
-    }))
+    uptrakit_notification_plugin_core::list_channels::list_channels(
+        ctx.tenant_db().db(),
+        ctx.tenant_id(),
+        "telegram",
+        params,
+        |_channel_type, config| config.clone(),
+    )
+    .await
+    .map_err(SurfaceActionError::ControllerIntegration)
 }
 
 /// Load global Telegram settings and return `{ "has_bot_token": bool }`.
@@ -191,11 +163,10 @@ async fn handle_callback(
         }
     };
 
-    let store = require_notification_channel_store(ctx)?;
-
     // Look up notification log by action token
-    let log_entry = store
-        .resolve_action_token(action_token)
+    let model = notification_log::Entity::find()
+        .filter(notification_log::Column::ActionToken.eq(action_token))
+        .one(ctx.tenant_db().db())
         .await
         .map_err(|error| {
             tracing::error!(error = ?error, %action_token, "failed to look up action token");
@@ -204,7 +175,7 @@ async fn handle_callback(
             )
         })?;
 
-    let Some(log_entry) = log_entry else {
+    let Some(log_entry) = model else {
         tracing::warn!(%action_token, "no notification log found for action token");
         return Ok(serde_json::json!({}));
     };
@@ -215,46 +186,26 @@ async fn handle_callback(
     }
 
     // Update action_taken
-    store
-        .mark_action_token_triggered(action_token)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = ?error, %action_token, "failed to update action token state");
-            SurfaceActionError::ControllerIntegration(
-                CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED.to_string(),
+    {
+        use sea_orm::sea_query::Expr;
+
+        notification_log::Entity::update_many()
+            .col_expr(
+                notification_log::Column::ActionTaken,
+                Expr::value(Some("triggered".to_string())),
             )
-        })?;
+            .filter(notification_log::Column::ActionToken.eq(action_token))
+            .exec(ctx.tenant_db().db())
+            .await
+            .map_err(|error| {
+                tracing::error!(error = ?error, %action_token, "failed to update action token state");
+                SurfaceActionError::ControllerIntegration(
+                    CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED.to_string(),
+                )
+            })?;
+    }
 
     Ok(serde_json::json!({}))
-}
-
-fn require_notification_channel_store<'a>(
-    ctx: &'a SurfaceActionContext<'a>,
-) -> std::result::Result<
-    &'a dyn uptrakit_plugin_infrastructure_core::NotificationChannelStore,
-    SurfaceActionError,
-> {
-    ctx.controller.notification_channel_store().ok_or_else(|| {
-        SurfaceActionError::ControllerIntegration(
-            "notification channel store is not available".to_string(),
-        )
-    })
-}
-
-fn parse_page(params: &serde_json::Value) -> u64 {
-    params
-        .get("page")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1)
-        .max(1)
-}
-
-fn parse_per_page(params: &serde_json::Value) -> u64 {
-    params
-        .get("per_page")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(50)
-        .clamp(1, 100)
 }
 
 async fn db_load_global_bot_token(

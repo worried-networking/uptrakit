@@ -241,61 +241,6 @@ pub trait NotificationTransport: PluginMeta {
     ) -> uptrakit_notification_plugin_core::Result<()>;
 }
 
-/// Typed paging request for listing notification channels for a plugin type.
-#[derive(Debug, Clone, Copy)]
-pub struct NotificationChannelListRequest<'a> {
-    pub tenant_id: Uuid,
-    pub channel_type: &'a str,
-    pub page: u64,
-    pub per_page: u64,
-}
-
-/// Typed notification-channel row used by first-wave controller surface actions.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NotificationChannelListItem {
-    pub id: Uuid,
-    pub name: String,
-    pub enabled: bool,
-    pub created_at_rfc3339: String,
-    pub config: serde_json::Value,
-}
-
-/// Typed paginated channel list response for controller surface actions.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NotificationChannelListPage {
-    pub items: Vec<NotificationChannelListItem>,
-    pub total: u64,
-    pub page: u64,
-    pub per_page: u64,
-    pub total_pages: u64,
-}
-
-/// Notification action-token state used by Telegram callback handling.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NotificationActionTokenRecord {
-    pub action_token: Uuid,
-    pub action_taken: Option<String>,
-}
-
-/// Typed notification-channel persistence boundary for controller-side actions.
-#[async_trait]
-pub trait NotificationChannelStore: Send + Sync {
-    /// List channels by tenant + channel type using typed paging inputs.
-    async fn list_channels(
-        &self,
-        req: NotificationChannelListRequest<'_>,
-    ) -> Result<NotificationChannelListPage>;
-
-    /// Resolve a notification action token to its current delivery state.
-    async fn resolve_action_token(
-        &self,
-        action_token: Uuid,
-    ) -> Result<Option<NotificationActionTokenRecord>>;
-
-    /// Mark an action token as triggered if it exists and is not already set.
-    async fn mark_action_token_triggered(&self, action_token: Uuid) -> Result<()>;
-}
-
 /// Typed list request for paginated Proxmox host mappings.
 ///
 /// `plugin_config_id` is optional: when absent, mappings for all Proxmox
@@ -532,11 +477,6 @@ pub trait SurfaceActionController: Send + Sync {
     /// Only available when the `plugin-ops` feature is active.
     #[cfg(feature = "plugin-ops")]
     fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
-
-    /// Notification channel persistence capability.
-    fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-        None
-    }
 
     /// Proxmox host/policy surface-actions capability.
     fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
@@ -924,45 +864,8 @@ mod execute_update_result_tests {
 mod controller_boundary_tests {
     use super::*;
 
-    struct TestNotificationStore;
     struct TestProxmoxSurfaceStore;
     struct TestProxmoxStore;
-
-    #[async_trait]
-    impl NotificationChannelStore for TestNotificationStore {
-        async fn list_channels(
-            &self,
-            req: NotificationChannelListRequest<'_>,
-        ) -> Result<NotificationChannelListPage> {
-            Ok(NotificationChannelListPage {
-                items: vec![NotificationChannelListItem {
-                    id: Uuid::new_v4(),
-                    name: "primary".to_string(),
-                    enabled: true,
-                    created_at_rfc3339: "2026-01-01T00:00:00Z".to_string(),
-                    config: serde_json::json!({"token": "***"}),
-                }],
-                total: 1,
-                page: req.page,
-                per_page: req.per_page,
-                total_pages: 1,
-            })
-        }
-
-        async fn resolve_action_token(
-            &self,
-            action_token: Uuid,
-        ) -> Result<Option<NotificationActionTokenRecord>> {
-            Ok(Some(NotificationActionTokenRecord {
-                action_token,
-                action_taken: None,
-            }))
-        }
-
-        async fn mark_action_token_triggered(&self, _action_token: Uuid) -> Result<()> {
-            Ok(())
-        }
-    }
 
     #[async_trait]
     impl ProxmoxProtectionStore for TestProxmoxStore {
@@ -1105,7 +1008,6 @@ mod controller_boundary_tests {
     struct TestController {
         tenant_id: Uuid,
         user_id: Option<Uuid>,
-        notification_store: TestNotificationStore,
         proxmox_surface_store: TestProxmoxSurfaceStore,
         proxmox_store: TestProxmoxStore,
     }
@@ -1125,10 +1027,6 @@ mod controller_boundary_tests {
         )]
         fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
             unimplemented!("tenant_db not used in roles.rs surface action tests")
-        }
-
-        fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-            Some(&self.notification_store)
         }
 
         fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
@@ -1155,34 +1053,14 @@ mod controller_boundary_tests {
     }
 
     #[tokio::test]
-    async fn notification_channel_store_lists_channels() {
-        let store = TestNotificationStore;
-        let page = store
-            .list_channels(NotificationChannelListRequest {
-                tenant_id: Uuid::new_v4(),
-                channel_type: "email",
-                page: 2,
-                per_page: 10,
-            })
-            .await
-            .expect("list should succeed");
-
-        assert_eq!(page.items.len(), 1);
-        assert_eq!(page.page, 2);
-        assert_eq!(page.per_page, 10);
-    }
-
-    #[tokio::test]
     async fn controller_capabilities_expose_first_wave_stores() {
         let controller = TestController {
             tenant_id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
-            notification_store: TestNotificationStore,
             proxmox_surface_store: TestProxmoxSurfaceStore,
             proxmox_store: TestProxmoxStore,
         };
 
-        assert!(controller.notification_channel_store().is_some());
         assert!(controller.proxmox_surface_store().is_some());
         assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
         assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());

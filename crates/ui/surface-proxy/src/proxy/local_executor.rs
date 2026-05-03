@@ -77,7 +77,6 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         })?;
         let controller = AppStateSurfaceActionController::from_database_connection(
             db,
-            self.plugin_ops.as_ref(),
             tenant_id,
             caller_user_id,
         );

@@ -1149,7 +1149,6 @@ pub async fn notification_callback(
     let controller =
         uptrakit_surface_proxy::AppStateSurfaceActionController::from_database_connection(
             state.db(),
-            state.plugin_ops.as_ref(),
             channel_model.tenant_id,
             None,
         );
