@@ -467,10 +467,79 @@ After this wave `roles.rs` must contain only:
 `NotificationChannelStore` trait usage. Ensure `uptrakit-tenant-db` is a dep of
 `uptrakit-notification-plugin-core`.
 
+### Convert remaining `Pin<Box<dyn Future>>` trait methods
+
+Wave 3h already annotates `NotificationOps` with `#[async_trait]`. Two more traits in
+`plugin_ops.rs` still use manual `Pin<Box<dyn Future<...>>>` signatures. Convert both.
+
+**`PluginSurfaceActionOps`** — before:
+
+```rust
+fn handle_surface_action<'a>(
+    &'a self,
+    ctx: &'a SurfaceActionContext<'a>,
+    surface_id: &'a str,
+    action_id: &'a str,
+    params: serde_json::Value,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, SurfaceActionError>> + Send + 'a>>;
+```
+
+After:
+
+```rust
+#[async_trait]
+pub trait PluginSurfaceActionOps: Send + Sync + 'static {
+    async fn handle_surface_action(
+        &self,
+        ctx: &SurfaceActionContext<'_>,
+        surface_id: &str,
+        action_id: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, SurfaceActionError>;
+}
+```
+
+**`SoftwareItemLifecycleOps`** — before:
+
+```rust
+fn on_software_item_created<'a>(
+    &'a self,
+    event: &'a SoftwareItemCreatedEvent,
+    ctx: &'a SoftwareItemLifecycleContext,
+) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>>;
+```
+
+After:
+
+```rust
+#[async_trait]
+pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
+    async fn on_software_item_created(
+        &self,
+        event: &SoftwareItemCreatedEvent,
+        ctx: &SoftwareItemLifecycleContext,
+    ) -> Option<SoftwareItemPatch>;
+
+    fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>];
+}
+```
+
+`#[async_trait]` is already a dep of `plugin-infrastructure-core`. Add the macro import
+to `plugin_ops.rs`. Update `#[async_trait]` annotations on every `impl` of both traits
+in `uptrakit-plugin-infrastructure-registry` (`PluginCatalog`) and any test stubs.
+Callers using `.await` at call sites are unaffected — `async_trait` expands to the same
+`Pin<Box<dyn Future>>` boxing internally.
+
+**Exception:** `SurfaceActionHandler` in `descriptor.rs` is a `fn` pointer type alias
+stored in a struct field — `#[async_trait]` only applies to trait methods. That type
+alias keeps its `for<'a> fn(...) -> Pin<Box<dyn Future<...> + Send + 'a>>` signature.
+
 ### Acceptance
 
 - `roles.rs` contains zero plugin-named identifiers (grep clean).
 - Registry `lib.rs` contains zero plugin-named store-trait re-exports.
+- `plugin_ops.rs` contains zero `Pin<Box<dyn Future` outside the `ResetTenantDataFn`
+  type alias and the `SurfaceActionHandler` fn-pointer type in `descriptor.rs`.
 - `cargo check --all-features` clean.
 - `cargo clippy --all-targets --all-features` clean.
 
