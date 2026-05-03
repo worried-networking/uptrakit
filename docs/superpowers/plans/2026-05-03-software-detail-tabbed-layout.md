@@ -247,14 +247,15 @@ it("renders flat layout when no surfaces are registered", async () => {
 });
 ```
 
-- [ ] **Step 4: Run the tests — confirm the two new tests and the updated test all fail**
+- [ ] **Step 4: Run the tests — confirm all three tab-behaviour tests fail**
 
 ```bash
 cd frontend && npx vitest run src/routes/software/\\[id\\]/software-detail.test.ts --reporter=verbose 2>&1 | tail -40
 ```
 
-Expected: the three tests that cover tab behaviour FAIL (implementation not yet done). The
-`'keeps host-context menu surface behavior active'` test should still PASS.
+Expected: all three tab-related tests FAIL — the updated `'loads software-item tab surfaces…'`
+test (its new body asserts `getByRole('tab', ...)` which doesn't exist until Task 5) plus both
+new tests. The `'keeps host-context menu surface behavior active'` test should still PASS.
 
 ---
 
@@ -348,8 +349,8 @@ import {
   SectionCard,
   StatusBadge,
   TabStrip,
+  type TabStripItem,
 } from "$lib/components/ui";
-import type { TabStripItem } from "$lib/components/ui";
 ```
 
 - [ ] **Step 4: Verify the file compiles**
