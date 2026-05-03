@@ -736,14 +736,15 @@ mod tests {
     )]
 
     use super::*;
+    use crate::entity::{
+        proxmox_backup_target_cache,
+        proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache,
+    };
     use async_trait::async_trait;
     use sea_orm::{ColumnTrait, DbBackend, EntityTrait, MockDatabase, MockExecResult, QueryFilter};
     use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_core::{
         ControllerProtectionContext, SecretString, UpdateProtectionController,
-    };
-    use uptrakit_shared_db::entity::{
-        prelude::ProxmoxBackupTargetCache, proxmox_backup_target_cache,
     };
 
     use crate::protection_store::{
