@@ -22,7 +22,7 @@ use axum::{
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    TransactionTrait,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -260,7 +260,14 @@ pub async fn register(
 
     // Run user creation + first-user check + role assignment inside a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state.db().begin().await {
+    let txn = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
@@ -1532,7 +1539,14 @@ pub async fn confirm_email_change(
     let token_hash = crate::auth::token::hash_token(&raw_token);
     let now = time::OffsetDateTime::now_utc();
 
-    let txn = match state.db().begin().await {
+    let txn = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "failed to begin transaction");
