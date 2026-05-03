@@ -129,8 +129,8 @@ pub use roles::{
     ProxmoxMappingRequest, ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord,
     ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
     ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
-    ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController, TelegramGlobalSettingsStore,
-    UpdateExecutor, UpdateProtectionController, VersionDetector,
+    ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController, UpdateExecutor,
+    UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};

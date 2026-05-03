@@ -34,8 +34,7 @@ pub use uptrakit_plugin_infrastructure_core::{
     ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore, ProxmoxScopeSelectionRequest,
     ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest, SoftwareItemCreatedEvent,
     SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
-    SudoHelperScript, SurfaceActionController, SurfaceActionError, TelegramGlobalSettingsStore,
-    UpdateProtectionController,
+    SudoHelperScript, SurfaceActionController, SurfaceActionError, UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 

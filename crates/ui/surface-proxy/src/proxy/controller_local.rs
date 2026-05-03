@@ -10,10 +10,9 @@ use uptrakit_plugin_infrastructure_registry::{
     ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
     ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
     ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
-    SurfaceActionController, SurfaceActionError, TelegramGlobalSettingsStore,
-    execute_proxmox_controller_approve_match, execute_proxmox_controller_discover_hosts,
-    execute_proxmox_controller_get_host_info, execute_proxmox_controller_list_all_unmatched,
-    execute_proxmox_controller_list_host_mappings,
+    SurfaceActionController, SurfaceActionError, execute_proxmox_controller_approve_match,
+    execute_proxmox_controller_discover_hosts, execute_proxmox_controller_get_host_info,
+    execute_proxmox_controller_list_all_unmatched, execute_proxmox_controller_list_host_mappings,
     execute_proxmox_controller_load_backup_target_options, execute_proxmox_controller_manual_match,
     execute_proxmox_controller_preload_global_defaults,
     execute_proxmox_controller_preload_item_overrides,
@@ -29,7 +28,6 @@ mod notifications;
 mod params;
 mod proxmox_add_config;
 mod proxmox_update_protection;
-mod settings_store;
 
 pub(crate) use docker::{
     allowlisted_docker_switch_tag_controller_local_action, emit_docker_switch_tag_audit_event,
@@ -120,10 +118,6 @@ impl SurfaceActionController for AppStateSurfaceActionController<'_> {
     }
 
     fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
-        Some(self)
-    }
-
-    fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
         Some(self)
     }
 
