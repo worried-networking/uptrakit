@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
 use uptrakit_shared_db::entity::{prelude::*, session};
@@ -115,7 +115,14 @@ impl SessionService {
 
         // Wrap find → revoke → insert in a transaction to prevent token-reuse
         // races in multi-controller HA deployments.
-        let txn = self.db.begin().await.context_to()?;
+        let txn = self
+            .db
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await
+            .context_to()?;
 
         // Find the session by refresh token hash
         let session_model = Session::find()

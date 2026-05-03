@@ -26,7 +26,8 @@ use openidconnect::{
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -828,7 +829,14 @@ async fn resolve_or_create_oidc_user(
 
     // Resolve user inside a transaction to prevent the race where two concurrent
     // OIDC callbacks both see user_count == 1 and both get the owner role.
-    let txn = match state.db().begin().await {
+    let txn = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start OIDC callback transaction");
@@ -1471,7 +1479,14 @@ pub async fn oidc_complete_registration(
 
     // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state.db().begin().await {
+    let txn = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start OIDC complete-registration transaction");
