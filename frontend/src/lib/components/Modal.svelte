@@ -1,6 +1,9 @@
 <script lang="ts">
 	import ModalBackdrop from './ModalBackdrop.svelte';
 	import type { Snippet } from 'svelte';
+	import { FormLayout, setFormLayout } from '$lib/components/forms/form-layout-context';
+
+	setFormLayout(FormLayout.Modal);
 
 	let {
 		onclose,

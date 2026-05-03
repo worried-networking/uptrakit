@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { setContext } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import { getFormLayout, LABEL_COL } from './form-layout-context';
+
+	const labelColClass = LABEL_COL[getFormLayout()];
 
 	let {
 		label,
@@ -26,7 +29,7 @@
 	});
 </script>
 
-<div class="grid gap-3 md:grid-cols-[minmax(0,8rem)_minmax(0,1fr)] md:items-start" data-ui="form-field-row">
+<div class="grid gap-3 md:items-start {labelColClass}" data-ui="form-field-row">
 	<div class="space-y-1">
 		<div class="flex items-center gap-1">
 			<label class="text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
