@@ -58,6 +58,7 @@ macro_rules! declare_plugin {
                 registrations: $surface_registrations_fn:expr $(,)?
             } )?
             $(, migrations: $migrations_fn:expr )?
+            $(, reset_tenant_data: $reset_fn:expr )?
             $(,)?
         }
     ) => {
@@ -265,6 +266,7 @@ macro_rules! declare_plugin {
                 $( &[ $( $crate::GlobalProviderConsumerDecl::new($global_provider_consumer) ),+ ] )?
             ),
             migrations: $crate::__option_expr!( $( $migrations_fn )? ),
+            reset_tenant_data: $crate::__option_expr!( $( $reset_fn )? ),
         };
     };
 }
