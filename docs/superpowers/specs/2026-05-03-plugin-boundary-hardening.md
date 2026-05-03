@@ -192,6 +192,16 @@ fast-follow commit series with CI green at each step).
 - `impl EmailSmtpSettingsStore for AppStateSurfaceActionController` deleted.
 - `email_smtp_settings_store()` deleted from `SurfaceActionController`.
 
+**`web-api-queries/notification_settings.rs` fix:**
+
+`notification_settings.rs:4` imports `EmailSmtpSettings` from the registry to build
+the settings bag for email delivery. Once `EmailSmtpSettings` is removed from the
+registry re-exports, this import breaks. Fix: rewrite `build_settings_bag` to query
+the `setting` and `global_setting` tables directly via raw DB calls and build the
+`serde_json::Value` result without using the typed struct. The public signature
+(`async fn build_settings_bag(db: &DatabaseConnection, tenant_id: Uuid) -> serde_json::Value`)
+stays unchanged — callers in `dispatcher.rs` and `notifications.rs` remain unmodified.
+
 ### 3c — Telegram plugin
 
 Same pattern as Email.
@@ -326,6 +336,8 @@ is refactored.
   anywhere in the codebase.
 - `web-api-queries/update_dispatch.rs` imports no `proxmox_*` entities.
 - `surface-proxy/proxy/controller_local.rs` implements no plugin-specific store traits.
+- `web-api-queries/notification_settings.rs` imports no `EmailSmtpSettings` or any other
+  plugin-specific type.
 - `cargo check --all-features` clean.
 
 ---
