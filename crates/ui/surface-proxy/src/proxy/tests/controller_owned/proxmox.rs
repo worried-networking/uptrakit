@@ -415,3 +415,237 @@ async fn invoke_proxmox_add_config_preserves_duplicate_name_conflict() {
         "expected duplicate-name conflict message, got: {message}"
     );
 }
+
+#[tokio::test]
+async fn invoke_proxmox_add_config_emits_audit_row_when_emitter_is_configured() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = Map::new();
+    params.insert("name".to_string(), json!("PVE Cluster"));
+    params.insert("api_url".to_string(), json!("https://pve.local:8006"));
+    params.insert(
+        "api_token".to_string(),
+        json!("root@pam!uptrakit=secret-token"),
+    );
+    params.insert("verify_tls".to_string(), json!(false));
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.hosts".to_string(),
+                interaction_id: "add-config".to_string(),
+                idempotency_key: "idem-proxmox-add-config-audit".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("proxmox add-config should succeed");
+
+    assert!(response.success);
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .await;
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.actor_id, Some(user_id()));
+    assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["create_source"],
+        json!("surface_proxy.proxmox_add_config")
+    );
+    assert_eq!(details["plugin_type"], json!("infrastructure_proxmox"));
+}
+
+#[tokio::test]
+async fn invoke_proxmox_add_config_validation_failure_emits_validation_failed_audit_row() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = Map::new();
+    params.insert("name".to_string(), json!("PVE Cluster"));
+    params.insert("api_url".to_string(), json!("https://pve.local:8006"));
+    params.insert(
+        "api_token".to_string(),
+        json!("root@pam!uptrakit=secret-token"),
+    );
+    params.insert("verify_tls".to_string(), json!("definitely-not-bool"));
+
+    let err = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.hosts".to_string(),
+                interaction_id: "add-config".to_string(),
+                idempotency_key: "idem-proxmox-add-config-audit-validation-failed".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect_err("invalid verify_tls should be rejected");
+    assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .await;
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+    );
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["create_source"],
+        json!("surface_proxy.proxmox_add_config")
+    );
+    assert_eq!(details["reason_code"], json!("validation_failed"));
+}
+
+#[tokio::test]
+async fn invoke_proxmox_add_config_duplicate_conflict_emits_failed_audit_row() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = Map::new();
+    params.insert("name".to_string(), json!("PVE Cluster"));
+    params.insert("api_url".to_string(), json!("https://pve.local:8006"));
+    params.insert(
+        "api_token".to_string(),
+        json!("root@pam!uptrakit=secret-token"),
+    );
+
+    proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.hosts".to_string(),
+                interaction_id: "add-config".to_string(),
+                idempotency_key: "idem-proxmox-add-config-audit-conflict-first".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: params.clone(),
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("initial create should succeed");
+
+    let err = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.hosts".to_string(),
+                interaction_id: "add-config".to_string(),
+                idempotency_key: "idem-proxmox-add-config-audit-conflict-second".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect_err("duplicate create should fail");
+    assert!(matches!(err, SurfaceProxyError::Conflict { .. }));
+
+    let row = super::latest_tenant_audit_row_for_action_and_outcome(
+        &db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        uptrakit_audit_log::AuditOutcome::Failed,
+    )
+    .await;
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["create_source"],
+        json!("surface_proxy.proxmox_add_config")
+    );
+    assert_eq!(details["reason_code"], json!("duplicate_name"));
+    assert_eq!(details["error_kind"], json!("conflict"));
+}
