@@ -150,7 +150,7 @@
 	});
 
 	function zebraClass(idx: number): string {
-		return idx % 2 !== 0 ? 'bg-[var(--bg-raised)]' : '';
+		return idx % 2 === 0 ? 'bg-[var(--bg-raised)]' : '';
 	}
 </script>
 
@@ -463,10 +463,9 @@
 	{#each items as item, i (item.id)}
 		{@const compactSingleHost = singleHost(item)}
 		{@const isCompactSingleHost = isSingleHostItem(item)}
+		{@const rowZebraClass = zebraClass(i)}
 		<div
-			class="px-4 py-3 {i % 2 !== 0
-				? 'bg-[var(--bg-raised)]'
-				: ''} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast"
+			class="px-4 py-3 {rowZebraClass} hover:bg-[var(--bg-hover)] transition-[background,border-color,color] duration-fast"
 			data-testid={'software-group-mobile-' + item.id}
 			role="listitem"
 		>
