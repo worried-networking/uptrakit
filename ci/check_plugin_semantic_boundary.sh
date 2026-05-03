@@ -61,6 +61,7 @@ ALLOWLIST_DASHBOARD=(
 )
 
 ALLOWLIST_HELPERS=(
+  'ui/web-api/src/routes/plugin_configs.rs'
 )
 
 ALLOWLIST_PLUGIN_IDS=(
