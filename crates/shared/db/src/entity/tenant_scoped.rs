@@ -1,4 +1,4 @@
-use sea_orm::EntityTrait;
+use uptrakit_tenant_db::TenantScoped;
 
 use super::{
     audit_log, enrollment_token, host, host_discovery_allowlist, host_tag, notification_channel,
@@ -6,15 +6,6 @@ use super::{
     proxmox_host_mapping, scheduled_task, service, setting, settings_version, software_ignore,
     software_item, tenant_discovery_allowlist, update_batch, update_history, user_role,
 };
-
-/// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
-///
-/// Implementing this trait allows `TenantDb` (in the web-api crate) to automatically
-/// apply tenant-scoping filters in query helpers, eliminating repeated
-/// `.filter(Column::TenantId.eq(...))` call sites throughout the codebase.
-pub trait TenantScoped: EntityTrait {
-    fn tenant_id_column() -> Self::Column;
-}
 
 impl TenantScoped for audit_log::Entity {
     fn tenant_id_column() -> Self::Column {
