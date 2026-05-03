@@ -28,6 +28,7 @@ RULE_PLUGIN_IDS_REFERENCE = "plugin-ids-reference"
 RULE_FORBIDDEN_PLUGIN_HELPER = "forbidden-plugin-helper"
 RULE_HARDCODED_PLUGIN_TYPE_LITERAL = "hardcoded-plugin-type-literal"
 RULE_MANIFEST_PLUGIN_DEPENDENCY = "manifest-plugin-dependency"
+RULE_PLUGIN_TRANSPORT_ESCAPE = "plugin-transport-escape"
 # Migration-only parity rule for the legacy shell checker surface.
 # Intentionally excluded from KNOWN_RULE_IDS so allowlists remain spec-canonical only.
 RULE_LEGACY_DASHBOARD_BESPOKE_SURFACE = "legacy-dashboard-bespoke-surface"
@@ -39,6 +40,7 @@ KNOWN_RULE_IDS = {
     RULE_FORBIDDEN_PLUGIN_HELPER,
     RULE_HARDCODED_PLUGIN_TYPE_LITERAL,
     RULE_MANIFEST_PLUGIN_DEPENDENCY,
+    RULE_PLUGIN_TRANSPORT_ESCAPE,
 }
 
 RULE_MATCH_KINDS: dict[str, set[str]] = {
@@ -48,6 +50,7 @@ RULE_MATCH_KINDS: dict[str, set[str]] = {
     RULE_FORBIDDEN_PLUGIN_HELPER: {"api_name"},
     RULE_HARDCODED_PLUGIN_TYPE_LITERAL: {"literal_string"},
     RULE_MANIFEST_PLUGIN_DEPENDENCY: {"manifest_dependency"},
+    RULE_PLUGIN_TRANSPORT_ESCAPE: {"symbol_name"},
 }
 
 ALLOWED_MATCH_KINDS = {kind for kinds in RULE_MATCH_KINDS.values() for kind in kinds}
@@ -161,6 +164,11 @@ ALL_LIST_RE = re.compile(
     re.DOTALL,
 )
 ALL_ENTRY_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\b")
+
+NOTIFICATION_PLUGIN_TRANSPORT_VARIANT_RE = re.compile(
+    r"\bNotificationPluginError\s*::\s*(?:SmtpNotConfigured|SmtpDeliveryFailed"
+    r"|TelegramApiError|TelegramNotConfigured)\b"
+)
 
 RUST_RAW_STRING_RE = re.compile(
     r'(?:br|r)(?P<hashes>#{0,16})"(?P<body>.*?)"(?P=hashes)'
@@ -2692,6 +2700,14 @@ def collect_findings(root: Path) -> list[Finding]:
                 regex=IDENTITY_SPECIFIC_HELPER_RE,
                 match_kind="api_name",
                 match_value_fn=_extract_first_non_empty_group,
+            )
+            add_regex_findings(
+                findings,
+                rule_id=RULE_PLUGIN_TRANSPORT_ESCAPE,
+                rel_path=rel,
+                text=regex_scan_text,
+                regex=NOTIFICATION_PLUGIN_TRANSPORT_VARIANT_RE,
+                match_kind="symbol_name",
             )
 
         exempt_lines = canonical.exempt_lines_by_path.get(rel, frozenset())
