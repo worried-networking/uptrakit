@@ -1,15 +1,6 @@
-// All functions in this module are called exclusively from `local_executor.rs`, which is not
-// yet wired into the module tree. `local_executor.rs` shares function names with inline
-// helpers in `surface_proxy.rs` (the legacy path) that must be deduplicated first. Until
-// that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
-// this allow once `local_executor.rs` is incorporated.
 #![expect(
     dead_code,
-    reason = "all helpers are called from local_executor.rs which is not yet wired"
-)]
-#![expect(
-    unreachable_pub,
-    reason = "items are `pub` for downstream `local_executor.rs` wiring; the parent module gates visibility"
+    reason = "all functions will be called from local_executor.rs when wired"
 )]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
@@ -20,7 +11,7 @@ use super::params::{
     strict_bool_param_with_default, strict_optional_bool_param,
 };
 
-pub fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&str> {
+pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&str> {
     // Notification channel surfaces follow the naming convention "notifications.{channel_type}".
     // Extracting the suffix avoids hardcoding individual plugin-type identifiers here.
     surface_id.strip_prefix("notifications.")
@@ -36,7 +27,7 @@ fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &s
         || provider_id == format!("plugin.notifications_{channel_type}")
 }
 
-pub fn allowlisted_notification_channel_controller_local_action<'a>(
+pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     provider_id: &str,
     surface_id: &'a str,
     interaction_id: &str,
@@ -48,7 +39,7 @@ pub fn allowlisted_notification_channel_controller_local_action<'a>(
     allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
 }
 
-pub async fn execute_allowlisted_notification_channel_action(
+pub(crate) async fn execute_allowlisted_notification_channel_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     channel_type: &str,
@@ -175,7 +166,7 @@ async fn require_notification_channel_type(
     Ok(model)
 }
 
-pub fn build_notification_channel_create_request(
+pub(crate) fn build_notification_channel_create_request(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::CreateNotificationChannelRequest, String> {
@@ -191,7 +182,7 @@ pub fn build_notification_channel_create_request(
     )
 }
 
-pub fn build_notification_channel_update_request(
+pub(crate) fn build_notification_channel_update_request(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest, String> {
@@ -331,140 +322,163 @@ fn parse_to_addresses_param(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        allowlisted_notification_channel_controller_local_action,
-        build_notification_channel_create_request, build_notification_channel_update_request,
-        parse_to_addresses_param,
+use super::SurfaceProxyError;
+
+pub(crate) fn notification_channel_action_type(
+    interaction_id: &str,
+) -> Option<uptrakit_audit_log::RegisteredAuditAction> {
+    match interaction_id {
+        "create" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE),
+        "edit" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE),
+        "delete" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE),
+        "test" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST),
+        _ => None,
+    }
+}
+
+fn classify_notification_channel_error(
+    interaction_id: &str,
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    let message = match error {
+        SurfaceProxyError::SchemaValidationFailed(message)
+        | SurfaceProxyError::SensitiveFieldRejected(message)
+        | SurfaceProxyError::PermissionDenied(message) => message.as_str(),
+        SurfaceProxyError::Conflict { code, .. } => {
+            return (uptrakit_audit_log::AuditOutcome::Failed, code);
+        }
+        _ => "",
     };
 
-    #[test]
-    fn allowlist_mapping_requires_matching_surface_provider_and_action() {
-        assert_eq!(
-            allowlisted_notification_channel_controller_local_action(
-                "plugin.notifications_email",
-                "notifications.email",
-                "create",
-            ),
-            Some("email")
-        );
-        assert_eq!(
-            allowlisted_notification_channel_controller_local_action(
-                "plugin.email",
-                "notifications.email",
-                "edit",
-            ),
-            Some("email")
-        );
-        assert_eq!(
-            allowlisted_notification_channel_controller_local_action(
-                "plugin.notifications_email",
-                "notifications.telegram",
-                "create",
-            ),
-            None
-        );
-        assert_eq!(
-            allowlisted_notification_channel_controller_local_action(
-                "plugin.notifications_email",
-                "notifications.email",
-                "configure_smtp",
-            ),
-            None
+    if message.contains("Channel not found") {
+        return if interaction_id == "test" {
+            (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "channel_not_found",
+            )
+        } else {
+            (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "channel_not_found",
+            )
+        };
+    }
+    if message.contains("Channel type mismatch") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "channel_type_mismatch",
         );
     }
-
-    #[test]
-    fn build_notification_channel_create_request_rejects_non_boolean_enabled() {
-        let params = serde_json::json!({
-            "name": "Ops Hook",
-            "url": "https://example.invalid/hook",
-            "enabled": { "bad": true }
-        });
-        let params = params.as_object().expect("params should be an object");
-
-        let result = build_notification_channel_create_request("webhook", params);
-        let err = result.expect_err("non-boolean enabled must be rejected");
-        assert!(
-            err.contains("enabled"),
-            "expected enabled validation error, got: {err}"
+    if message.contains("Unsupported channel type") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "unsupported_channel_type",
         );
     }
-
-    #[test]
-    fn build_notification_channel_update_request_rejects_non_boolean_enabled() {
-        let params = serde_json::json!({
-            "url": "https://example.invalid/hook",
-            "enabled": 1
-        });
-        let params = params.as_object().expect("params should be an object");
-
-        let result = build_notification_channel_update_request("webhook", params);
-        let err = result.expect_err("non-boolean enabled must be rejected");
-        assert!(
-            err.contains("enabled"),
-            "expected enabled validation error, got: {err}"
+    if message.contains("Failed to parse channel config") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "channel_config_parse_failed",
         );
     }
-
-    #[test]
-    fn build_notification_channel_requests_normalize_email_to_addresses_from_nested_config() {
-        let create_params = serde_json::json!({
-            "name": "Email Alerts",
-            "channel_type": "email",
-            "config": {
-                "to_addresses": "alice@example.com\nbob@example.com"
-            },
-            "enabled": true
-        });
-        let create_params = create_params
-            .as_object()
-            .expect("create params should be an object");
-        let create_request = build_notification_channel_create_request("email", create_params)
-            .expect("create request should build");
-        let expected_create_config = serde_json::json!({
-            "to_addresses": ["alice@example.com", "bob@example.com"]
-        });
-        assert_eq!(create_request.config.as_value(), &expected_create_config);
-
-        let update_params = serde_json::json!({
-            "config": {
-                "to_addresses": "carol@example.com\ndave@example.com"
-            }
-        });
-        let update_params = update_params
-            .as_object()
-            .expect("update params should be an object");
-        let update_request = build_notification_channel_update_request("email", update_params)
-            .expect("update request should build");
-        let expected_update_config = serde_json::json!({
-            "to_addresses": ["carol@example.com", "dave@example.com"]
-        });
-        assert_eq!(
-            update_request
-                .config
-                .as_ref()
-                .map(|config| config.as_value()),
-            Some(&expected_update_config),
+    if message.contains("field `")
+        || message.contains("invalid")
+        || message.contains("must be")
+        || matches!(error, SurfaceProxyError::SensitiveFieldRejected(_))
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_request",
         );
     }
+    (uptrakit_audit_log::AuditOutcome::Failed, "failed")
+}
 
-    #[test]
-    fn parse_to_addresses_param_normalizes_csv_and_newlines() {
-        let params = serde_json::json!({
-            "to_addresses": "alice@example.com, bob@example.com\ncarol@example.com"
-        });
-        let params = params.as_object().expect("params should be an object");
+pub(crate) fn emit_notification_channel_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    interaction_id: &str,
+    channel_type: &str,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
+) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
+    let Some(caller_user_id) = caller_user_id else {
+        return;
+    };
+    let Some(action_type) = notification_channel_action_type(interaction_id) else {
+        return;
+    };
 
-        let parsed = parse_to_addresses_param(params, "to_addresses").expect("parse should work");
-        assert_eq!(
-            parsed,
-            vec![
-                "alice@example.com".to_string(),
-                "bob@example.com".to_string(),
-                "carol@example.com".to_string()
-            ]
-        );
+    let requested_id = request_params
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_name = request_params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+
+    let (outcome, reason_code, target_id, target_display) = match result {
+        Ok(response) => {
+            let target_id = response
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(std::string::ToString::to_string)
+                .or_else(|| requested_id.clone())
+                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+            let target_display = response
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(std::string::ToString::to_string)
+                .or_else(|| requested_name.clone());
+            (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                target_id,
+                target_display,
+            )
+        }
+        Err(error) => {
+            let (outcome, reason_code) = classify_notification_channel_error(interaction_id, error);
+            let target_id = requested_id
+                .clone()
+                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+            (
+                outcome,
+                Some(reason_code),
+                target_id,
+                requested_name.clone(),
+            )
+        }
+    };
+
+    let mut details = serde_json::json!({
+        "channel_type": channel_type,
+        "create_source": format!("surface_proxy.notification_channel.{interaction_id}"),
+    });
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(
+            uptrakit_audit_log::AuditActorType::User,
+            Some(caller_user_id),
+        )
+        .target_opt(
+            Some("notification_channel".to_string()),
+            target_id,
+            target_display,
+        )
+        .outcome(outcome)
+        .details(details)
+        .build()
+    {
+        audit_emitter.emit_best_effort(entry);
     }
 }

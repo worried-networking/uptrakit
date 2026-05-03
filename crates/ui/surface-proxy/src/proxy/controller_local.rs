@@ -1,8 +1,3 @@
-#![expect(
-    unreachable_pub,
-    reason = "items re-exported as `pub` for downstream `local_executor.rs` wiring; the host crate gates visibility"
-)]
-
 use super::SurfaceProxyError;
 use async_trait::async_trait;
 use rootcause::report;
@@ -37,52 +32,51 @@ use uuid::Uuid;
 /// `Column::PluginType` reference would trigger the plugin-type identity check.
 const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
 
+mod notification_settings;
 mod notifications;
 mod params;
 mod proxmox_add_config;
 mod settings_store;
 
-// These re-exports are consumed by `local_executor.rs`, which is not yet wired into the
-// module tree because it shares helper function names with the inline implementations in
-// `surface_proxy.rs` (the legacy path) that are pending deduplication. Until that step
-// lands, the functions exist here but have no compiled callers, triggering unused-import
-// warnings. Remove these allow attributes once `local_executor.rs` is incorporated.
 #[expect(
     unused_imports,
-    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+    reason = "re-exports for local_executor.rs wiring not yet implemented"
 )]
-pub use notifications::{
-    allowlisted_notification_channel_controller_local_action,
-    execute_allowlisted_notification_channel_action, notification_channel_type_for_surface_id,
+pub(crate) use notification_settings::{
+    NotificationSettingsAction, allowlisted_notification_settings_controller_local_action,
+    emit_notification_settings_audit_event,
 };
-// The two builder helpers below are used by `tests/controller_owned/notifications.rs`.
-// They are behind `#[cfg(test)]` because only tests reach them today; production callers
-// (again, `local_executor.rs`) are pending wiring.
+#[expect(
+    unused_imports,
+    reason = "re-exports for local_executor.rs wiring not yet implemented"
+)]
+pub(crate) use notifications::{
+    allowlisted_notification_channel_controller_local_action,
+    emit_notification_channel_audit_event, execute_allowlisted_notification_channel_action,
+    notification_channel_action_type, notification_channel_type_for_surface_id,
+};
 #[cfg(test)]
 #[expect(
     unused_imports,
-    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+    reason = "re-exports consumed by tests/controller_owned/notifications.rs"
 )]
-pub use notifications::{
+pub(crate) use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
 #[expect(
     unused_imports,
-    reason = "re-exports consumed by local_executor.rs which is not yet wired"
+    reason = "re-exports for local_executor.rs wiring not yet implemented"
 )]
-pub use proxmox_add_config::{
+pub(crate) use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
 
-// Called from `local_executor.rs` to map a controller-local surface action error into a
-// `SurfaceProxyError` for the HTTP response layer. Not yet reachable because
-// `local_executor.rs` is pending wiring (see comments above).
 #[expect(
     dead_code,
     reason = "consumed by local_executor.rs which is not yet wired"
 )]
-pub fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
+pub(crate) fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {
             SurfaceProxyError::SchemaValidationFailed(message)
