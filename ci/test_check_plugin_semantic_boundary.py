@@ -874,6 +874,27 @@ class PluginSemanticBoundaryTests(unittest.TestCase):
         self.assertIn("unmatched brace", output, msg=output)
         self.assertNotIn("Traceback", output, msg=output)
 
+    def test_notification_plugin_error_transport_variant_in_non_plugin_code_is_rejected(self) -> None:
+        result = run_checker("fail/plugin_transport_escape", output_format="json")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        payload = json.loads(result.stdout)
+        findings = [
+            f for f in payload["findings"]
+            if f["rule_id"] == "plugin-transport-escape"
+        ]
+        self.assertTrue(len(findings) > 0, msg=f"Expected plugin-transport-escape findings\n{output}")
+        values = {f["match_value"] for f in findings}
+        self.assertTrue(
+            any("SmtpNotConfigured" in v for v in values),
+            msg=f"Expected SmtpNotConfigured in findings, got {values}\n{output}",
+        )
+
+    def test_non_transport_notification_error_is_not_flagged(self) -> None:
+        result = run_checker("pass/plugin_transport_escape_ok", output_format="json")
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=output)
+
 
 if __name__ == "__main__":
     unittest.main()
