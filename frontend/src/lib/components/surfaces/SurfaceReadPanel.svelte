@@ -361,8 +361,7 @@
 				selectedId={selectedProviderId}
 				providers={availableProviders.map((provider) => ({
 					id: provider.provider_id,
-					label: provider.display_label,
-					description: undefined
+					label: provider.display_label
 				}))}
 				onSelect={(providerId) => {
 					selectedProviderId = providerId;
