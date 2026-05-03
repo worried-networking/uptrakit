@@ -430,6 +430,10 @@ impl ServiceConnectionRegistry {
                 .collect()
         };
         for sender in senders {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "fire-and-forget broadcast; receiver may be gone"
+            )]
             let _ = sender.try_send(msg.clone());
         }
     }

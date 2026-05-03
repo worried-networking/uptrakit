@@ -119,7 +119,10 @@ impl SurfaceInvokeRequest {
     ///
     /// External crates must use this constructor rather than a struct literal
     /// because the type is `#[non_exhaustive]`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "constructor mirrors the eight fields of #[non_exhaustive] SurfaceInvokeRequest"
+    )]
     pub fn new(
         tenant_id: Uuid,
         surface_id: String,
