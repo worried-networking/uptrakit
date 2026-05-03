@@ -296,6 +296,49 @@ impl NotificationOps for PluginCatalog {
             .map(|k| PluginTypeId::from_static(k))
             .collect()
     }
+
+    #[cfg(feature = "plugin-ops")]
+    async fn send_transactional_email(
+        &self,
+        tenant_db: &uptrakit_tenant_db::TenantDb,
+        to: &str,
+        subject: &str,
+        text_body: &str,
+        html_body: &str,
+    ) -> std::result::Result<(), crate::plugin_ops::TransactionalEmailError> {
+        use crate::plugin_ops::TransactionalEmailError;
+        use uptrakit_shared_types::plugin_ids;
+
+        let transport = self
+            .transport(&plugin_ids::EMAIL)
+            .ok_or(TransactionalEmailError::NotConfigured)?;
+
+        let settings = build_email_settings_bag(tenant_db).await;
+
+        let config = serde_json::json!({ "to_addresses": [to] });
+        let message = uptrakit_notification_plugin_core::DeliveryMessage::new(
+            subject.to_string(),
+            text_body.to_string(),
+            Some(html_body.to_string()),
+            serde_json::Value::Null,
+            vec![],
+        );
+
+        transport
+            .deliver(&config, &settings, &message)
+            .await
+            .map_err(|e| {
+                use uptrakit_notification_plugin_core::NotificationPluginError;
+                if matches!(
+                    e.current_context(),
+                    NotificationPluginError::SmtpNotConfigured
+                ) {
+                    TransactionalEmailError::NotConfigured
+                } else {
+                    TransactionalEmailError::DeliveryFailed(e.to_string())
+                }
+            })
+    }
 }
 
 impl SoftwareItemLifecycleOps for PluginCatalog {
@@ -338,6 +381,131 @@ impl SoftwareItemLifecycleOps for PluginCatalog {
 impl ControllerUpdateProtectionOps for PluginCatalog {
     fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
         self.controller_update_protection.clone()
+    }
+}
+
+// ── Transactional email helpers (plugin-ops feature only) ──────────────────
+
+#[cfg(feature = "plugin-ops")]
+async fn build_email_settings_bag(tenant_db: &uptrakit_tenant_db::TenantDb) -> serde_json::Value {
+    const SMTP_PREFIX: &str = "smtp.";
+    const GLOBAL_SMTP_PREFIX: &str = "global_smtp.";
+    const GLOBAL_TELEGRAM_PREFIX: &str = "global_telegram.";
+    const SMTP_PASSWORD_AAD: &str = "uptrakit:settings:smtp_password";
+    const GLOBAL_SMTP_PASSWORD_AAD: &str = "uptrakit:settings:global_smtp_password";
+
+    let tenant_map = load_and_process_smtp_map(
+        tenant_db.db(),
+        tenant_db.tenant_id(),
+        SMTP_PREFIX,
+        SMTP_PASSWORD_AAD,
+        "tenant",
+    )
+    .await;
+
+    let mut global_map = load_and_process_global_smtp_map(
+        tenant_db.db(),
+        GLOBAL_SMTP_PREFIX,
+        GLOBAL_SMTP_PASSWORD_AAD,
+        "global",
+    )
+    .await;
+
+    if let Ok(telegram_raw) = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
+        tenant_db.db(),
+        GLOBAL_TELEGRAM_PREFIX,
+    )
+    .await
+    {
+        global_map.extend(telegram_raw);
+    }
+
+    serde_json::json!({ "tenant": tenant_map, "global": global_map })
+}
+
+#[cfg(feature = "plugin-ops")]
+async fn load_and_process_smtp_map(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    prefix: &str,
+    password_aad: &'static str,
+    scope: &'static str,
+) -> serde_json::Map<String, serde_json::Value> {
+    match uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, prefix).await {
+        Ok(raw) => process_smtp_raw_map(raw, password_aad, scope, Some(tenant_id)),
+        Err(e) => {
+            tracing::warn!(error = ?e, %tenant_id, scope, "failed to load SMTP settings; using empty");
+            serde_json::Map::new()
+        }
+    }
+}
+
+#[cfg(feature = "plugin-ops")]
+async fn load_and_process_global_smtp_map(
+    db: &sea_orm::DatabaseConnection,
+    prefix: &str,
+    password_aad: &'static str,
+    scope: &'static str,
+) -> serde_json::Map<String, serde_json::Value> {
+    match uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix).await {
+        Ok(raw) => process_smtp_raw_map(raw, password_aad, scope, None),
+        Err(e) => {
+            tracing::warn!(error = ?e, scope, "failed to load global SMTP settings; using empty");
+            serde_json::Map::new()
+        }
+    }
+}
+
+#[cfg(feature = "plugin-ops")]
+fn process_smtp_raw_map(
+    raw: std::collections::HashMap<String, serde_json::Value>,
+    password_aad: &str,
+    scope: &'static str,
+    tenant_id: Option<uuid::Uuid>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for (k, v) in raw {
+        let str_val = match &v {
+            serde_json::Value::String(s) if s.is_empty() => continue,
+            serde_json::Value::String(s) => s.clone(),
+            _ => {
+                map.insert(k, v);
+                continue;
+            }
+        };
+        if k.ends_with(".password") {
+            if let Some(decrypted) = decrypt_smtp_password(str_val, password_aad, scope, tenant_id)
+            {
+                map.insert(k, serde_json::Value::String(decrypted));
+            }
+        } else {
+            map.insert(k, serde_json::Value::String(str_val));
+        }
+    }
+    map
+}
+
+#[cfg(feature = "plugin-ops")]
+fn decrypt_smtp_password(
+    raw: String,
+    aad: &str,
+    scope: &'static str,
+    tenant_id: Option<uuid::Uuid>,
+) -> Option<String> {
+    if !uptrakit_crypto::is_encrypted(&raw) {
+        return if raw.is_empty() { None } else { Some(raw) };
+    }
+    match uptrakit_crypto::decrypt_str(&raw, aad) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => Some(v),
+        Err(e) => {
+            if let Some(tid) = tenant_id {
+                tracing::warn!(error = ?e, %tid, scope, "failed to decrypt SMTP password; using empty");
+            } else {
+                tracing::warn!(error = ?e, scope, "failed to decrypt SMTP password; using empty");
+            }
+            None
+        }
     }
 }
 
