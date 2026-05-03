@@ -10,8 +10,6 @@ use super::{tenant_id, user_id};
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
 use uptrakit_service_connections::ServiceConnectionRegistry;
 
-mod rollout;
-
 fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -32,28 +30,28 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
             tenant_id: Some(service_tenant.to_string()),
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                label: "SSH".to_string(),
-                priority: 100,
-                slot: "software.tabs".to_string(),
-                scope: surfaces::Scope::Tenant,
-                targeting: surfaces::Targeting::Targeted,
-                required_permission: Some("view_software".to_string()),
-                provider_kind: surfaces::ProviderKind::Service,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                .label("SSH")
+                .priority(100)
+                .slot("software.tabs")
+                .scope(surfaces::Scope::Tenant)
+                .targeting(surfaces::Targeting::Targeted)
+                .required_permission("view_software")
+                .provider_kind(surfaces::ProviderKind::Service)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::TargetedTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: Some("update_software".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),

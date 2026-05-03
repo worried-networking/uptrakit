@@ -40,60 +40,32 @@ mod proxmox_add_config;
 mod proxmox_update_protection;
 mod settings_store;
 
-#[expect(
-    unused_imports,
-    reason = "re-exports for local_executor.rs wiring not yet implemented"
-)]
 pub(crate) use docker::{
     allowlisted_docker_switch_tag_controller_local_action, emit_docker_switch_tag_audit_event,
 };
-#[expect(
-    unused_imports,
-    reason = "re-exports for local_executor.rs wiring not yet implemented"
-)]
 pub(crate) use notification_settings::{
-    NotificationSettingsAction, allowlisted_notification_settings_controller_local_action,
+    allowlisted_notification_settings_controller_local_action,
     emit_notification_settings_audit_event,
 };
-#[expect(
-    unused_imports,
-    reason = "re-exports for local_executor.rs wiring not yet implemented"
-)]
 pub(crate) use notifications::{
     allowlisted_notification_channel_controller_local_action,
     emit_notification_channel_audit_event, execute_allowlisted_notification_channel_action,
-    notification_channel_action_type, notification_channel_type_for_surface_id,
+    notification_channel_type_for_surface_id,
 };
 #[cfg(test)]
-#[expect(
-    unused_imports,
-    reason = "re-exports consumed by tests/controller_owned/notifications.rs"
-)]
 pub(crate) use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
-#[expect(
-    unused_imports,
-    reason = "re-exports for local_executor.rs wiring not yet implemented"
-)]
 pub(crate) use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
-#[expect(
-    unused_imports,
-    reason = "re-exports for local_executor.rs wiring not yet implemented"
-)]
 pub(crate) use proxmox_update_protection::{
-    ProxmoxUpdateProtectionAction, allowlisted_proxmox_update_protection_controller_local_action,
+    allowlisted_proxmox_update_protection_controller_local_action,
     emit_proxmox_update_protection_audit_event,
 };
 
-#[expect(
-    dead_code,
-    reason = "consumed by local_executor.rs which is not yet wired"
-)]
-pub(crate) fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
+pub fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {
             SurfaceProxyError::SchemaValidationFailed(message)

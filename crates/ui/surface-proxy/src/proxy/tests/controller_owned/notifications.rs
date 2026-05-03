@@ -10,8 +10,8 @@ use super::super::super::controller_local::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
 use super::super::super::{
-    PluginOpsSurfaceActionInvoker, PluginSurfaceLocalExecutor, ServiceConnectionRegistry,
-    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
+    PluginSurfaceLocalExecutor, ServiceConnectionRegistry, SurfaceCallerOrigin,
+    SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
 };
 use super::super::{tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
@@ -40,28 +40,27 @@ fn notification_channel_registration(
             tenant_id: None,
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                label: "Notification Channels".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                .label("Notification Channels")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: None,
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -100,7 +99,7 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -168,7 +167,7 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
 
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -304,7 +303,7 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
     let service_connections = ServiceConnectionRegistry::new();
     let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
         Arc::new(db),
-        Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+        Arc::clone(&plugin_ops),
     )));
 
     for interaction_id in ["edit", "test", "delete"] {

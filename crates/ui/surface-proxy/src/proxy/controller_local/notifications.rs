@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "all functions called from local_executor.rs which is not yet wired"
-)]
-
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uuid::Uuid;
 

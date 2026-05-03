@@ -10,7 +10,7 @@ use super::super::super::{
     SurfaceInvokeRequest, SurfaceProxy,
 };
 use super::super::{tenant_id, user_id};
-use super::{ensure_master_key, setup_notification_db};
+use super::ensure_master_key;
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
 
 fn proxmox_update_protection_registration(
@@ -29,34 +29,34 @@ fn proxmox_update_protection_registration(
             surfaces::Capability::TextBlockNode,
             surfaces::Capability::UniversalTargeting,
             surfaces::Capability::MutationAction,
+            surfaces::Capability::FormSubmit,
         ]),
         effective_tenant_binding: surfaces::EffectiveTenantBinding {
             scope: surfaces::Scope::Global,
             tenant_id: None,
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                label: "Update Protection".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                .label("Update Protection")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: None,
+                label: "Action".to_string(),
                 required_permission: None,
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -73,6 +73,21 @@ fn proxmox_update_protection_registration(
     }
 }
 
+async fn setup_proxmox_db() -> sea_orm::DatabaseConnection {
+    use sea_orm::{ConnectOptions, Database};
+
+    let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+    let db = Database::connect(opt).await.expect("test db");
+    uptrakit_shared_db::migration::run_migrations_with_plugins(
+        &db,
+        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations(),
+    )
+    .await
+    .expect("shared + proxmox migrations should run");
+    super::insert_tenant(&db, super::super::tenant_id()).await;
+    db
+}
+
 async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -> Uuid {
     use sea_orm::{ActiveModelTrait, Set};
     use uptrakit_shared_db::entity::plugin_config;
@@ -84,12 +99,16 @@ async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -
         tenant_id: Set(tenant_id()),
         name: Set("test-proxmox".to_string()),
         plugin_type: Set("infrastructure_proxmox".to_string()),
-        config: Set(uptrakit_crypto::EncryptedString::plaintext_for_test(
-            r#"{"api_url":"https://pve.test:8006","api_token":"tok","verify_tls":true,"node_filter":[]}"#,
-        )),
+        config: Set(serde_json::json!({
+            "api_url": "https://pve.test:8006",
+            "api_token": "tok",
+            "verify_tls": true,
+            "node_filter": []
+        })),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
+        deactivated_at: sea_orm::ActiveValue::NotSet,
     }
     .insert(db)
     .await
@@ -100,7 +119,7 @@ async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -
 #[tokio::test]
 async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     ensure_master_key();
-    let db = setup_notification_db().await;
+    let db = setup_proxmox_db().await;
     let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
