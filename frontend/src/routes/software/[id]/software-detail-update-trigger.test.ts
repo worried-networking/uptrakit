@@ -70,6 +70,7 @@ import * as auth from '$lib/auth.svelte';
 import * as notifications from '$lib/notifications.svelte';
 import * as interactive from '$lib/interactive';
 import { page } from '$app/state';
+import { AdminEventType } from '$lib/sse';
 
 const adminUser = {
 	id: '00000000-0000-0000-0000-000000000001',
@@ -228,7 +229,7 @@ describe('Software Detail Update Triggers', () => {
 			})
 		);
 		// Fire the update_protection_started SSE event to trigger modal opening
-		eventMocks.fireEvent('update_protection_started', {
+		eventMocks.fireEvent(AdminEventType.UpdateProtectionStarted, {
 			update_history_id: 'uh-live',
 			software_item_id: 'software-1'
 		});
@@ -310,7 +311,7 @@ describe('Software Detail Update Triggers', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 
 		// Fire the update_protection_started SSE event to trigger modal opening
-		eventMocks.fireEvent('update_protection_started', {
+		eventMocks.fireEvent(AdminEventType.UpdateProtectionStarted, {
 			update_history_id: 'uh-live',
 			software_item_id: 'software-1'
 		});

@@ -181,26 +181,27 @@ interface ParsedSseEvent {
 // ── Admin event stream ────────────────────────────────────────────────
 
 /** Known admin event types pushed by `GET /api/v1/events/stream`. */
-export type AdminEventType =
-	| 'host_updated'
-	| 'host_created'
-	| 'host_deleted'
-	| 'service_status_changed'
-	| 'software_item_updated'
-	| 'software_item_created'
-	| 'version_check_completed'
-	| 'update_triggered'
-	| 'update_protection_started'
-	| 'update_started'
-	| 'update_completed'
-	| 'discovery_completed'
-	| 'batch_update_completed'
-	| 'system_service_status_changed'
-	| 'scheduler_task_completed'
-	| 'host_tag_created'
-	| 'host_tag_updated'
-	| 'host_tag_deleted'
-	| 'host_tags_changed';
+export enum AdminEventType {
+	HostUpdated = 'host_updated',
+	HostCreated = 'host_created',
+	HostDeleted = 'host_deleted',
+	ServiceStatusChanged = 'service_status_changed',
+	SoftwareItemUpdated = 'software_item_updated',
+	SoftwareItemCreated = 'software_item_created',
+	VersionCheckCompleted = 'version_check_completed',
+	UpdateTriggered = 'update_triggered',
+	UpdateProtectionStarted = 'update_protection_started',
+	UpdateStarted = 'update_started',
+	UpdateCompleted = 'update_completed',
+	DiscoveryCompleted = 'discovery_completed',
+	BatchUpdateCompleted = 'batch_update_completed',
+	SystemServiceStatusChanged = 'system_service_status_changed',
+	SchedulerTaskCompleted = 'scheduler_task_completed',
+	HostTagCreated = 'host_tag_created',
+	HostTagUpdated = 'host_tag_updated',
+	HostTagDeleted = 'host_tag_deleted',
+	HostTagsChanged = 'host_tags_changed'
+}
 
 /** Callbacks for the admin event SSE connection. */
 export interface AdminEventCallbacks {

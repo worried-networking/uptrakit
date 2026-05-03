@@ -32,6 +32,7 @@
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -286,11 +287,11 @@
 		if (canView) {
 			loadAll(currentPage);
 			unsubscribers.push(
-				subscribeToEvent('software_item_updated', () => loadAll(currentPage, true)),
-				subscribeToEvent('software_item_created', () => loadAll(currentPage, true)),
-				subscribeToEvent('version_check_completed', () => loadAll(currentPage, true)),
-				subscribeToEvent('update_completed', () => loadAll(currentPage, true)),
-				subscribeToEvent('update_protection_started', (data) => {
+				subscribeToEvent(AdminEventType.SoftwareItemUpdated, () => loadAll(currentPage, true)),
+				subscribeToEvent(AdminEventType.SoftwareItemCreated, () => loadAll(currentPage, true)),
+				subscribeToEvent(AdminEventType.VersionCheckCompleted, () => loadAll(currentPage, true)),
+				subscribeToEvent(AdminEventType.UpdateCompleted, () => loadAll(currentPage, true)),
+				subscribeToEvent(AdminEventType.UpdateProtectionStarted, (data) => {
 					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
 						const histId = pendingLiveHistoryId;
 						const hostName = pendingLiveHostName;
@@ -301,7 +302,7 @@
 						openLiveModal(histId, hostName, itemName);
 					}
 				}),
-				subscribeToEvent('update_started', (data) => {
+				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
 					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
 						const histId = pendingLiveHistoryId;
 						const hostName = pendingLiveHostName;

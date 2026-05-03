@@ -17,6 +17,7 @@
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import Button from '$lib/components/Button.svelte';
 	import { Checkbox, Input, Textarea } from '$lib/components/forms';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
@@ -90,9 +91,9 @@
 	onMount(() => {
 		loadTags(currentPage);
 		unsubscribers.push(
-			subscribeToEvent('host_tag_created', () => loadTags(currentPage, true)),
-			subscribeToEvent('host_tag_updated', () => loadTags(currentPage, true)),
-			subscribeToEvent('host_tag_deleted', () => loadTags(currentPage, true))
+			subscribeToEvent(AdminEventType.HostTagCreated, () => loadTags(currentPage, true)),
+			subscribeToEvent(AdminEventType.HostTagUpdated, () => loadTags(currentPage, true)),
+			subscribeToEvent(AdminEventType.HostTagDeleted, () => loadTags(currentPage, true))
 		);
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadTags(currentPage, true);

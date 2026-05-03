@@ -4,6 +4,7 @@
 	import { getHosts, getServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { ServiceResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
 	import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
@@ -41,13 +42,13 @@
 		loadDashboard();
 
 		unsubscribers.push(
-			subscribeToEvent('host_updated', () => loadDashboard(true)),
-			subscribeToEvent('host_created', () => loadDashboard(true)),
-			subscribeToEvent('service_status_changed', () => loadDashboard(true)),
-			subscribeToEvent('software_item_updated', () => loadDashboard(true)),
-			subscribeToEvent('software_item_created', () => loadDashboard(true)),
-			subscribeToEvent('version_check_completed', () => loadDashboard(true)),
-			subscribeToEvent('update_completed', () => loadDashboard(true))
+			subscribeToEvent(AdminEventType.HostUpdated, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.HostCreated, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.ServiceStatusChanged, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.SoftwareItemUpdated, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.SoftwareItemCreated, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.VersionCheckCompleted, () => loadDashboard(true)),
+			subscribeToEvent(AdminEventType.UpdateCompleted, () => loadDashboard(true))
 		);
 
 		refreshInterval = setInterval(() => {

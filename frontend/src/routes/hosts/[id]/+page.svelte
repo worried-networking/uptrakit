@@ -21,6 +21,7 @@
 	import { formatDate, formatVersion, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/types';
@@ -141,13 +142,13 @@
 			loadAssignedSoftware();
 		}
 		unsubscribers.push(
-			subscribeToEvent('host_updated', (data) => {
+			subscribeToEvent(AdminEventType.HostUpdated, (data) => {
 				if (data.id === id) loadData(true);
 			}),
-			subscribeToEvent('discovery_completed', (data) => {
+			subscribeToEvent(AdminEventType.DiscoveryCompleted, (data) => {
 				if (data.host_id === id) loadData(true);
 			}),
-			subscribeToEvent('update_completed', (data) => {
+			subscribeToEvent(AdminEventType.UpdateCompleted, (data) => {
 				if (data.host_id === id) loadData(true);
 			})
 		);

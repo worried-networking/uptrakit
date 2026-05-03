@@ -17,7 +17,7 @@
 	import { Input, Select } from '$lib/components/forms';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
-	import { connectEventStream } from '$lib/sse';
+	import { connectEventStream, AdminEventType } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
@@ -121,7 +121,7 @@
 			// Subscribe to admin events for real-time list updates.
 			disconnectEventStream = connectEventStream({
 				onEvent: (eventType, data) => {
-					if (eventType === 'update_triggered') {
+					if (eventType === AdminEventType.UpdateTriggered) {
 						// Reload page 1 when a new update is created so the entry
 						// appears immediately, but only when the active filter would
 						// include it (pending / queued / all).
@@ -131,7 +131,7 @@
 						) {
 							loadHistory(1);
 						}
-					} else if (eventType === 'update_protection_started') {
+					} else if (eventType === AdminEventType.UpdateProtectionStarted) {
 						const historyId = data.update_history_id as string;
 						items = items.map((i) => (i.id === historyId ? { ...i, status: 'in_progress' as const } : i));
 						if (
@@ -141,7 +141,7 @@
 						) {
 							loadHistory(1);
 						}
-					} else if (eventType === 'update_started') {
+					} else if (eventType === AdminEventType.UpdateStarted) {
 						const historyId = data.update_history_id as string;
 						const interactive = data.interactive as boolean;
 						const alreadyInList = items.some((i) => i.id === historyId);
@@ -153,7 +153,7 @@
 						if (!alreadyInList && currentPage === 1 && (statusFilter === 'all' || statusFilter === 'in_progress')) {
 							loadHistory(1);
 						}
-					} else if (eventType === 'update_completed') {
+					} else if (eventType === AdminEventType.UpdateCompleted) {
 						const historyId = data.update_history_id as string;
 						const status = data.status as string;
 						if (items.some((i) => i.id === historyId)) {
