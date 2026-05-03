@@ -204,6 +204,11 @@ describe('Textarea primitive', () => {
 		expect(container.querySelector('textarea')!.hasAttribute('aria-describedby')).toBe(false);
 	});
 
+	it('has data-ui="textarea" attribute', () => {
+		const { container } = render(Textarea, base());
+		expect(container.querySelector('textarea')!.getAttribute('data-ui')).toBe('textarea');
+	});
+
 	it('fires oninput callback on input event', async () => {
 		const oninput = vi.fn();
 		const { container } = render(Textarea, base({ oninput }));

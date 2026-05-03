@@ -147,6 +147,11 @@ describe('Input primitive', () => {
 		expect(container.querySelector('input')!.hasAttribute('aria-describedby')).toBe(false);
 	});
 
+	it('has data-ui="input" attribute', () => {
+		const { container } = render(Input, baseInput());
+		expect(container.querySelector('input')!.getAttribute('data-ui')).toBe('input');
+	});
+
 	it('fires oninput callback on input event', async () => {
 		const oninput = vi.fn();
 		const { container } = render(Input, baseInput({ oninput }));
