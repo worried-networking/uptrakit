@@ -439,17 +439,23 @@ fn proxmox_mode_to_db(value: ProxmoxProtectionMode) -> &'static str {
 
 struct QueryUpdateProtectionController<'a> {
     proxmox_store: QueryProxmoxProtectionStore<'a>,
+    tenant_db: crate::TenantDb,
 }
 
 impl<'a> QueryUpdateProtectionController<'a> {
-    fn new(db: &'a DatabaseConnection) -> Self {
+    fn new(db: &'a DatabaseConnection, tenant_id: Uuid) -> Self {
         Self {
             proxmox_store: QueryProxmoxProtectionStore { db },
+            tenant_db: crate::TenantDb::new(db.clone(), tenant_id),
         }
     }
 }
 
 impl UpdateProtectionController for QueryUpdateProtectionController<'_> {
+    fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
+        &self.tenant_db
+    }
+
     fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
         Some(&self.proxmox_store)
     }
@@ -839,7 +845,7 @@ pub async fn prepare_pre_update_protection(
         return Ok(PreUpdateProtectionOutcome::Proceed);
     };
 
-    let controller = QueryUpdateProtectionController::new(db);
+    let controller = QueryUpdateProtectionController::new(db, target.item.tenant_id);
     let ctx = build_controller_protection_context(&controller, target, update_history_id);
     let ctx = if let Some(tx) = output_tx {
         ctx.with_output_tx(tx)
@@ -895,7 +901,7 @@ async fn finalize_post_update_inner(
         return Ok(());
     };
 
-    let controller = QueryUpdateProtectionController::new(db);
+    let controller = QueryUpdateProtectionController::new(db, record.tenant_id);
     let ctx = build_controller_post_update_context(&controller, record);
     let outcome = match per_row_timeout {
         Some(deadline) => match timeout(deadline, protection.finalize_post_update(&ctx)).await {
