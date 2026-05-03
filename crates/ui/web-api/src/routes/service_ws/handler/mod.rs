@@ -2710,12 +2710,39 @@ async fn finalize_authenticated_session(state: &Arc<AppState>, session: Authenti
     match authenticated_session_ownership(state, &session).await {
         AuthenticatedSessionOwnership::Replaced => {
             let AuthenticatedSessionState {
+                service_id,
+                service_tenant_id,
                 processor_cancel,
                 processor_handle,
                 ..
             } = session;
             processor_cancel.cancel();
             let _ = processor_handle.await;
+
+            if let Some(provider_id) = state
+                .surface_proxy_deps
+                .registry
+                .provider_id_for_service(&service_id)
+            {
+                state
+                    .surface_proxy_deps
+                    .proxy
+                    .fail_in_flight_for_provider(&provider_id);
+                if let Some(tenant_id) = service_tenant_id {
+                    state
+                        .notification
+                        .event_broadcaster
+                        .send(tenant_id, AdminEvent::SurfacesChanged)
+                        .await;
+                }
+            }
+            // Always call unregister_service — idempotent no-op when nothing is registered.
+            // Matches the unconditional placement in cleanup_embedded_service_session and
+            // cleanup_authenticated_session.
+            state
+                .surface_proxy_deps
+                .registry
+                .unregister_service(&service_id);
         }
         AuthenticatedSessionOwnership::Current | AuthenticatedSessionOwnership::Removed => {
             cleanup_authenticated_session(state, session).await;
@@ -5751,12 +5778,13 @@ mod tests {
             )
             .await;
 
-            assert_eq!(
+            assert!(
                 state
                     .surface_proxy_deps
                     .registry
-                    .provider_id_for_service(&service_id),
-                Some("provider-a".to_string())
+                    .provider_id_for_service(&service_id)
+                    .is_none(),
+                "Replaced branch now unregisters the old provider so the replacement session re-registers"
             );
             assert!(state.service_connections.is_connected(&service_id).await);
         }
@@ -5778,14 +5806,179 @@ mod tests {
             )
             .await;
 
-            assert_eq!(
+            assert!(
                 state
                     .surface_proxy_deps
                     .registry
-                    .provider_id_for_service(&service_id),
-                Some("provider-a".to_string())
+                    .provider_id_for_service(&service_id)
+                    .is_none(),
+                "Replaced branch now unregisters the old provider so the replacement session re-registers"
             );
             assert!(state.service_connections.is_connected(&service_id).await);
+        }
+
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn finalize_replaced_session_broadcasts_surfaces_changed_when_provider_registered() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+            let service_id = uuid::Uuid::now_v7();
+            register_test_runtime_state(&state, service_id, tenant_id);
+            let superseded_at = register_test_connection(&state, service_id).await;
+            let _replacement_at = register_test_connection(&state, service_id).await;
+
+            let mut rx = state
+                .notification
+                .event_broadcaster
+                .subscribe(tenant_id)
+                .await;
+
+            let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+            let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+            let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+            finalize_authenticated_session(
+                &state,
+                AuthenticatedSessionState {
+                    service_id,
+                    connected_at: superseded_at,
+                    is_system: false,
+                    has_update_tracking: false,
+                    has_software_discovery: false,
+                    has_workload_claims: false,
+                    service_tenant_id: Some(tenant_id),
+                    linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                    push_rx,
+                    cancel_token: tokio_util::sync::CancellationToken::new(),
+                    msg_tx,
+                    resp_rx,
+                    processor_cancel: tokio_util::sync::CancellationToken::new(),
+                    processor_handle: tokio::spawn(async {}),
+                    rate_limiter: MessageRateLimiter::new(
+                        WS_MESSAGE_RATE_WINDOW,
+                        WS_MESSAGE_RATE_LIMIT,
+                    ),
+                },
+            )
+            .await;
+
+            match rx.try_recv() {
+                Ok(AdminEvent::SurfacesChanged) => {}
+                other => panic!("expected SurfacesChanged from Replaced branch, got {other:?}"),
+            }
+            assert!(
+                state
+                    .surface_proxy_deps
+                    .registry
+                    .provider_id_for_service(&service_id)
+                    .is_none(),
+                "provider should be removed by Replaced branch"
+            );
+        }
+
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn finalize_replaced_session_skips_broadcast_when_no_provider() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+            let service_id = uuid::Uuid::now_v7();
+            // Do NOT register a provider — this service never had UiSurfaces.
+            let superseded_at = register_test_connection(&state, service_id).await;
+            let _replacement_at = register_test_connection(&state, service_id).await;
+
+            let mut rx = state
+                .notification
+                .event_broadcaster
+                .subscribe(tenant_id)
+                .await;
+
+            let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+            let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+            let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+            finalize_authenticated_session(
+                &state,
+                AuthenticatedSessionState {
+                    service_id,
+                    connected_at: superseded_at,
+                    is_system: false,
+                    has_update_tracking: false,
+                    has_software_discovery: false,
+                    has_workload_claims: false,
+                    service_tenant_id: Some(tenant_id),
+                    linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                    push_rx,
+                    cancel_token: tokio_util::sync::CancellationToken::new(),
+                    msg_tx,
+                    resp_rx,
+                    processor_cancel: tokio_util::sync::CancellationToken::new(),
+                    processor_handle: tokio::spawn(async {}),
+                    rate_limiter: MessageRateLimiter::new(
+                        WS_MESSAGE_RATE_WINDOW,
+                        WS_MESSAGE_RATE_LIMIT,
+                    ),
+                },
+            )
+            .await;
+
+            assert!(
+                rx.try_recv().is_err(),
+                "no broadcast when service had no surface provider"
+            );
+        }
+
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn finalize_replaced_session_skips_broadcast_when_no_tenant_id() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+            let service_id = uuid::Uuid::now_v7();
+            register_test_runtime_state(&state, service_id, tenant_id);
+            let superseded_at = register_test_connection(&state, service_id).await;
+            let _replacement_at = register_test_connection(&state, service_id).await;
+
+            let mut rx = state
+                .notification
+                .event_broadcaster
+                .subscribe(tenant_id)
+                .await;
+
+            let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+            let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+            let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+            finalize_authenticated_session(
+                &state,
+                AuthenticatedSessionState {
+                    service_id,
+                    connected_at: superseded_at,
+                    is_system: true,
+                    has_update_tracking: false,
+                    has_software_discovery: false,
+                    has_workload_claims: false,
+                    service_tenant_id: None,
+                    linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                    push_rx,
+                    cancel_token: tokio_util::sync::CancellationToken::new(),
+                    msg_tx,
+                    resp_rx,
+                    processor_cancel: tokio_util::sync::CancellationToken::new(),
+                    processor_handle: tokio::spawn(async {}),
+                    rate_limiter: MessageRateLimiter::new(
+                        WS_MESSAGE_RATE_WINDOW,
+                        WS_MESSAGE_RATE_LIMIT,
+                    ),
+                },
+            )
+            .await;
+
+            assert!(
+                rx.try_recv().is_err(),
+                "no broadcast for system service (no tenant_id)"
+            );
         }
 
         #[tokio::test]
