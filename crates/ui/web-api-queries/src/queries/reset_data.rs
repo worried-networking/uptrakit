@@ -6,8 +6,8 @@ use thiserror::Error;
 use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, host_software_item, host_software_item_plugin, host_tag,
     host_tag_assignment, notification_channel, notification_log, notification_rule, plugin_config,
-    plugin_type_setting, proxmox_host_mapping, service_host, software_ignore, software_item,
-    tenant_discovery_allowlist, update_batch, update_history, update_output_line,
+    plugin_type_setting, service_host, software_ignore, software_item, tenant_discovery_allowlist,
+    update_batch, update_history, update_output_line,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::settings_reset::ResetDeletedCounts;
@@ -86,10 +86,9 @@ pub async fn reset_tenant_data(tenant_db: &TenantDb) -> Result<ResetDeletedCount
         .await
         .context_to()?;
 
-    // -- 6. proxmox_host_mappings: has tenant_id --
-    proxmox_host_mapping::Entity::delete_many()
-        .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+    // -- 6. Plugin-owned tables: called before software_items (step 8) and plugin_config (step 10)
+    //    to satisfy Restrict FK constraints on those tables.
+    uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data(tenant_id, &txn)
         .await
         .context_to()?;
 
@@ -199,4 +198,34 @@ pub async fn reset_tenant_data(tenant_db: &TenantDb) -> Result<ResetDeletedCount
         update_history: update_history_result.rows_affected,
         update_batches: update_batches_result.rows_affected,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{Database, TransactionTrait};
+    use uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data;
+    use uuid::Uuid;
+
+    async fn make_db() -> sea_orm::DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_crypto::enable_plaintext_mode();
+        uptrakit_shared_db::migration::run_migrations_with_plugins(
+            &db,
+            uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations(),
+        )
+        .await
+        .unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn reset_plugin_tenant_data_runs_without_fk_error() {
+        let db = make_db().await;
+        let tenant_id = Uuid::new_v4();
+        let txn = db.begin().await.unwrap();
+        reset_plugin_tenant_data(tenant_id, &txn)
+            .await
+            .expect("reset_plugin_tenant_data must not fail on empty DB");
+        txn.commit().await.unwrap();
+    }
 }

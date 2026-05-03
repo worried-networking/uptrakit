@@ -93,3 +93,25 @@ pub fn build_catalog(
 ) -> uptrakit_plugin_infrastructure_core::Result<PluginCatalog> {
     PluginCatalog::new(all_descriptors(), config)
 }
+
+/// Call all registered plugin `reset_tenant_data` callbacks within the given transaction.
+///
+/// Only available when `migrations` feature is active (matching `ResetTenantDataFn` real type).
+///
+/// # Ordering note
+/// Currently only Proxmox registers a callback. If a future plugin's tables have Restrict FK
+/// dependencies on another plugin's tables, the iteration order (registration order in
+/// `all_descriptors()`) could cause a FK violation.
+/// TODO: add a `reset_order` field to `PluginDescriptor` if multiple plugins need ordered teardown.
+#[cfg(feature = "migrations")]
+pub async fn reset_plugin_tenant_data(
+    tenant_id: uuid::Uuid,
+    txn: &sea_orm::DatabaseTransaction,
+) -> std::result::Result<(), sea_orm::DbErr> {
+    for descriptor in all_descriptors() {
+        if let Some(reset_fn) = descriptor.reset_tenant_data {
+            reset_fn(tenant_id, txn).await?;
+        }
+    }
+    Ok(())
+}
