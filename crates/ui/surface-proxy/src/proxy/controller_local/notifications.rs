@@ -331,18 +331,13 @@ pub(crate) fn notification_channel_action_type(
 }
 
 fn classify_notification_channel_error(
-    _interaction_id: &str,
+    interaction_id: &str,
     error: &SurfaceProxyError,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    if matches!(error, SurfaceProxyError::PermissionDenied(_)) {
-        return (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "permission_denied",
-        );
-    }
     let message = match error {
         SurfaceProxyError::SchemaValidationFailed(message)
-        | SurfaceProxyError::SensitiveFieldRejected(message) => message.as_str(),
+        | SurfaceProxyError::SensitiveFieldRejected(message)
+        | SurfaceProxyError::PermissionDenied(message) => message.as_str(),
         SurfaceProxyError::Conflict { code, .. } => {
             return (uptrakit_audit_log::AuditOutcome::Failed, code);
         }
@@ -350,10 +345,17 @@ fn classify_notification_channel_error(
     };
 
     if message.contains("Channel not found") {
-        return (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "channel_not_found",
-        );
+        return if interaction_id == "test" {
+            (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "channel_not_found",
+            )
+        } else {
+            (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "channel_not_found",
+            )
+        };
     }
     if message.contains("Channel type mismatch") {
         return (
@@ -450,7 +452,7 @@ pub(crate) fn emit_notification_channel_audit_event(
 
     let mut details = serde_json::json!({
         "channel_type": channel_type,
-        "action_source": format!("surface_proxy.notification_channel.{interaction_id}"),
+        "create_source": format!("surface_proxy.notification_channel.{interaction_id}"),
     });
     if let Some(reason_code) = reason_code {
         details["reason_code"] = serde_json::json!(reason_code);
