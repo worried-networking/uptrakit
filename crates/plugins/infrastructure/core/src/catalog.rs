@@ -735,6 +735,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        reset_tenant_data: None,
     };
 
     static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -770,6 +771,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        reset_tenant_data: None,
         global_provider_consumers: &[],
     };
 
@@ -806,6 +808,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        reset_tenant_data: None,
         global_provider_consumers: &[],
     };
 
@@ -843,6 +846,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        reset_tenant_data: None,
     };
 
     static TEST_MULTI_PROVIDER_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -882,6 +886,7 @@ mod tests {
             GlobalProviderConsumerDecl::new("gitlab"),
         ],
         migrations: None,
+        reset_tenant_data: None,
     };
 
     /// Empty catalog builds successfully.

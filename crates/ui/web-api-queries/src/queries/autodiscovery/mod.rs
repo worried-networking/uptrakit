@@ -99,6 +99,7 @@ pub async fn process_discovery_results(
     clippy::expect_used,
     reason = "test helpers: panics on setup failure are acceptable"
 )]
+#[cfg(test)]
 pub(crate) mod tests_common {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
