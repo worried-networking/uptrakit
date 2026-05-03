@@ -273,7 +273,7 @@
 					{#if profileError}
 						<Callout tone="danger" message={profileError} />
 					{/if}
-					<div class="flex justify-end">
+					<div class="mt-4 flex justify-end">
 						<Button variant="primary" loading={profileSaving} onclick={handleSaveProfile}>Save</Button>
 					</div>
 				</div>

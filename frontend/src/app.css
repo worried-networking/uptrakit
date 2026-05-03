@@ -151,3 +151,7 @@
 [data-ui='modal-shell'] {
 	z-index: 910;
 }
+
+[data-ui='form-field-row'] + [data-ui='form-field-row'] {
+	margin-top: 1rem;
+}
