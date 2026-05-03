@@ -1,0 +1,46 @@
+version = 1
+
+# surface-proxy/controller_local/proxmox_add_config.rs: proxmox-specific surface action
+# handler that must use the Proxmox plugin type ID literal directly. No cross-crate plugin
+# import — all hardcoded strings are within this proxmox-specific file.
+[[entries]]
+path = "crates/ui/surface-proxy/src/proxy/controller_local/proxmox_add_config.rs"
+rule_id = "hardcoded-plugin-type-literal"
+match_kind = "literal_string"
+match_value = "infrastructure_proxmox"
+reason = "proxmox-specific surface-proxy handler; hardcoded plugin type ID is intentional and confined to this proxmox-specific file"
+
+# agent-runtime/Cargo.toml and agent-runtime/src/lib.rs: agent-runtime uses
+# ServiceMetadataProvider from plugin-infrastructure-core to expose plugin metadata to the
+# agent process without depending on the full registry. This is a deliberate architectural
+# exception: the agent is a thin runtime that needs plugin capability introspection.
+[[entries]]
+path = "crates/core/agent-runtime/Cargo.toml"
+rule_id = "manifest-plugin-dependency"
+match_kind = "manifest_dependency"
+match_value = "uptrakit-plugin-infrastructure-core"
+reason = "agent-runtime needs ServiceMetadataProvider from plugin-infrastructure-core for capability introspection; no plugin-specific types cross the boundary"
+
+[[entries]]
+path = "crates/core/agent-runtime/src/lib.rs"
+rule_id = "plugin-core-import"
+match_kind = "import_path"
+match_value = "uptrakit_plugin_infrastructure_core::ServiceMetadataProvider"
+reason = "agent-runtime uses ServiceMetadataProvider for plugin capability introspection; this is a stable, non-plugin-specific trait from plugin-infrastructure-core"
+
+# controller-runtime/Cargo.toml and metadata_runtime.rs: controller-runtime embeds plugin
+# service metadata for the embedded controller mode. Uses only service_metadata module, not
+# plugin-specific types.
+[[entries]]
+path = "crates/core/controller-runtime/Cargo.toml"
+rule_id = "manifest-plugin-dependency"
+match_kind = "manifest_dependency"
+match_value = "uptrakit-plugin-infrastructure-core"
+reason = "controller-runtime uses service_metadata from plugin-infrastructure-core for embedded mode; no plugin-specific types cross the boundary"
+
+[[entries]]
+path = "crates/core/controller-runtime/src/embedded/metadata_runtime.rs"
+rule_id = "plugin-core-import"
+match_kind = "import_path"
+match_value = "uptrakit_plugin_infrastructure_core::service_metadata"
+reason = "embedded controller needs service_metadata for runtime metadata; this is a stable, non-plugin-specific module"
