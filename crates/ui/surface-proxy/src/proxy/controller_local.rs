@@ -32,12 +32,20 @@ use uuid::Uuid;
 /// `Column::PluginType` reference would trigger the plugin-type identity check.
 const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
 
+mod docker;
 mod notification_settings;
 mod notifications;
 mod params;
 mod proxmox_add_config;
 mod settings_store;
 
+#[expect(
+    unused_imports,
+    reason = "re-exports for local_executor.rs wiring not yet implemented"
+)]
+pub(crate) use docker::{
+    allowlisted_docker_switch_tag_controller_local_action, emit_docker_switch_tag_audit_event,
+};
 #[expect(
     unused_imports,
     reason = "re-exports for local_executor.rs wiring not yet implemented"
