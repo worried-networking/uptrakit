@@ -8,7 +8,6 @@ use uuid::Uuid;
 use super::SurfaceProxyError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub(crate) enum NotificationSettingsAction {
     ConfigureSmtp,
     SaveGlobalSmtp,
@@ -23,7 +22,9 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     let channel_type = surface_id
         .strip_prefix("notifications.")
         .and_then(|rest| rest.split('.').next())?;
-    if provider_id.strip_prefix("plugin.") != Some(channel_type) {
+    let short_form = format!("plugin.{channel_type}");
+    let long_form = format!("plugin.notifications_{channel_type}");
+    if provider_id != short_form && provider_id != long_form {
         return None;
     }
     match (surface_id, interaction_id) {
@@ -164,8 +165,9 @@ pub(crate) fn emit_notification_settings_audit_event(
     let mut requested_keys = request_params.keys().cloned().collect::<Vec<_>>();
     requested_keys.sort();
 
+    let (target_type, target_id) = notification_settings_target(action);
     let mut details = serde_json::json!({
-        "setting_area": notification_settings_target(action).1,
+        "setting_area": target_id,
         "setting_scope": notification_settings_scope(action),
         "mutation_source": notification_settings_mutation_source(action),
         "requested_keys": requested_keys,
@@ -173,8 +175,6 @@ pub(crate) fn emit_notification_settings_audit_event(
     if let Some(reason_code) = reason_code {
         details["reason_code"] = serde_json::json!(reason_code);
     }
-
-    let (target_type, target_id) = notification_settings_target(action);
     let builder =
         uptrakit_audit_log::AuditEntry::builder(notification_settings_audit_action_type(action))
             .tenant_scope(tenant_id)
