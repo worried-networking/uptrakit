@@ -360,37 +360,6 @@ pub trait TelegramGlobalSettingsStore: Send + Sync {
     async fn save_global_bot_token(&self, bot_token: String) -> Result<String>;
 }
 
-/// Typed Docker surface-action persistence boundary for controller-side actions.
-#[async_trait]
-pub trait DockerSurfaceStore: Send + Sync {
-    /// Load the current image reference for a host/software-item assignment.
-    async fn load_current_image_ref(&self, host_id: Uuid, software_item_id: Uuid)
-    -> Result<String>;
-
-    /// Switch image reference for a host/software-item assignment.
-    async fn switch_image_ref(
-        &self,
-        host_id: Uuid,
-        software_item_id: Uuid,
-        new_image_ref: String,
-    ) -> Result<()>;
-}
-
-/// Typed host/software-item request for Docker surface actions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DockerItemHostRequest {
-    pub host_id: Uuid,
-    pub software_item_id: Uuid,
-}
-
-/// Typed switch-tag request for Docker surface actions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DockerSwitchTagRequest {
-    pub host_id: Uuid,
-    pub software_item_id: Uuid,
-    pub new_image_ref: String,
-}
-
 /// Typed list request for paginated Proxmox host mappings.
 ///
 /// `plugin_config_id` is optional: when absent, mappings for all Proxmox
@@ -640,11 +609,6 @@ pub trait SurfaceActionController: Send + Sync {
 
     /// Global Telegram settings capability.
     fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
-        None
-    }
-
-    /// Docker surface-actions persistence capability.
-    fn docker_surface_store(&self) -> Option<&dyn DockerSurfaceStore> {
         None
     }
 
@@ -1037,7 +1001,6 @@ mod controller_boundary_tests {
     struct TestNotificationStore;
     struct TestEmailStore;
     struct TestTelegramStore;
-    struct TestDockerStore;
     struct TestProxmoxSurfaceStore;
     struct TestProxmoxStore;
 
@@ -1166,26 +1129,6 @@ mod controller_boundary_tests {
     }
 
     #[async_trait]
-    impl DockerSurfaceStore for TestDockerStore {
-        async fn load_current_image_ref(
-            &self,
-            _host_id: Uuid,
-            _software_item_id: Uuid,
-        ) -> Result<String> {
-            Ok("ghcr.io/example/app:1.0.0".to_string())
-        }
-
-        async fn switch_image_ref(
-            &self,
-            _host_id: Uuid,
-            _software_item_id: Uuid,
-            _new_image_ref: String,
-        ) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    #[async_trait]
     impl ProxmoxSurfaceStore for TestProxmoxSurfaceStore {
         async fn list_host_mappings(
             &self,
@@ -1282,7 +1225,6 @@ mod controller_boundary_tests {
         notification_store: TestNotificationStore,
         email_store: TestEmailStore,
         telegram_store: TestTelegramStore,
-        docker_store: TestDockerStore,
         proxmox_surface_store: TestProxmoxSurfaceStore,
         proxmox_store: TestProxmoxStore,
     }
@@ -1314,10 +1256,6 @@ mod controller_boundary_tests {
 
         fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
             Some(&self.telegram_store)
-        }
-
-        fn docker_surface_store(&self) -> Option<&dyn DockerSurfaceStore> {
-            Some(&self.docker_store)
         }
 
         fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
@@ -1369,7 +1307,6 @@ mod controller_boundary_tests {
             notification_store: TestNotificationStore,
             email_store: TestEmailStore,
             telegram_store: TestTelegramStore,
-            docker_store: TestDockerStore,
             proxmox_surface_store: TestProxmoxSurfaceStore,
             proxmox_store: TestProxmoxStore,
         };
@@ -1377,7 +1314,6 @@ mod controller_boundary_tests {
         assert!(controller.notification_channel_store().is_some());
         assert!(controller.email_smtp_settings_store().is_some());
         assert!(controller.telegram_global_settings_store().is_some());
-        assert!(controller.docker_surface_store().is_some());
         assert!(controller.proxmox_surface_store().is_some());
         assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
         assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());

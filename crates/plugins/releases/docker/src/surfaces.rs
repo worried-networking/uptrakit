@@ -19,13 +19,47 @@ use std::pin::Pin;
 use serde::de::DeserializeOwned;
 
 use uptrakit_plugin_infrastructure_core::{
-    DockerItemHostRequest, DockerSwitchTagRequest, FormFieldDescriptor, FormFieldType,
-    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi,
-    SurfaceFormDescriptor,
+    FormFieldDescriptor, FormFieldType, SurfaceActionContext, SurfaceActionDescriptor,
+    SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
 };
 use uptrakit_shared_types::Permission;
 
 use crate::image_ref::{ImageRef, validate_identifier};
+
+// ── Docker surface-action request types ─────────────────────────────────────
+
+/// Typed host/software-item request for the `get-current-tag` surface action.
+#[derive(Debug, serde::Deserialize)]
+struct DockerItemHostRequest {
+    pub host_id: uuid::Uuid,
+    pub software_item_id: uuid::Uuid,
+}
+
+/// Typed switch-tag request for the `switch-tag` surface action.
+#[derive(Debug, serde::Deserialize)]
+struct DockerSwitchTagRequest {
+    pub host_id: uuid::Uuid,
+    pub software_item_id: uuid::Uuid,
+    pub new_image_ref: String,
+}
+
+// ── String helpers ───────────────────────────────────────────────────────────
+
+/// Docker releases plugin type identifier used as a DB filter value.
+const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
+
+/// Return the image reference without the `#container_name` suffix.
+fn strip_container_suffix(id: &str) -> String {
+    id.split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(id)
+        .to_string()
+}
+
+/// Return the container name from the `#container_name` suffix, if present.
+fn extract_container_suffix(id: &str) -> Option<&str> {
+    id.split_once('#').map(|(_, suffix)| suffix)
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -77,7 +111,7 @@ fn get_current_tag_action() -> SurfaceActionDescriptor {
 ///
 /// Routes based on `(surface_id, action_id)` to the appropriate handler.
 ///
-/// Surface handlers now receive a typed `SurfaceActionContext` and must return
+/// Surface handlers receive a typed `SurfaceActionContext` and must return
 /// typed `SurfaceActionError` values at the boundary.
 pub fn handle_surface_action<'a>(
     ctx: &'a SurfaceActionContext<'a>,
@@ -125,19 +159,6 @@ async fn handle_surface_action_inner(
     result
 }
 
-fn require_docker_store<'a>(
-    ctx: &'a SurfaceActionContext<'a>,
-) -> std::result::Result<
-    &'a dyn uptrakit_plugin_infrastructure_core::DockerSurfaceStore,
-    SurfaceActionError,
-> {
-    ctx.controller.docker_surface_store().ok_or_else(|| {
-        SurfaceActionError::ControllerIntegration(
-            "docker surface store is not available".to_string(),
-        )
-    })
-}
-
 // ── Action handlers ──────────────────────────────────────────────────────────
 
 /// Pre-load handler: return the current image reference (without `#container`
@@ -146,16 +167,30 @@ async fn handle_get_current_tag(
     ctx: &SurfaceActionContext<'_>,
     request: DockerItemHostRequest,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    use sea_orm::ColumnTrait as _;
+    use sea_orm::EntityTrait as _;
+    use sea_orm::QueryFilter as _;
+    use uptrakit_shared_db::entity::host_software_item_plugin;
+
     let host_id = request.host_id;
     let software_item_id = request.software_item_id;
 
     tracing::debug!(%host_id, %software_item_id, "fetching current Docker tag");
 
-    let store = require_docker_store(ctx)?;
-    let image_ref = store
-        .load_current_image_ref(host_id, software_item_id)
+    let db = ctx.tenant_db().db();
+    let plugin_rows = host_software_item_plugin::Entity::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .filter(host_software_item_plugin::Column::PluginType.eq(DOCKER_RELEASES_CONFIG_TYPE))
+        .all(db)
         .await
-        .map_err(map_store_error)?;
+        .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
+
+    let image_ref = plugin_rows
+        .into_iter()
+        .next()
+        .map(|r| strip_container_suffix(&r.package_identifier))
+        .unwrap_or_default();
 
     tracing::debug!(%host_id, %software_item_id, image_ref = %image_ref, "resolved current Docker tag");
 
@@ -171,6 +206,12 @@ async fn handle_switch_tag(
     ctx: &SurfaceActionContext<'_>,
     request: DockerSwitchTagRequest,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    use sea_orm::{
+        ActiveModelTrait as _, ColumnTrait as _, EntityTrait as _, QueryFilter as _, Set,
+        TransactionTrait as _,
+    };
+    use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
+
     let host_id = request.host_id;
     let software_item_id = request.software_item_id;
     let new_image_ref = request.new_image_ref.trim().to_string();
@@ -181,14 +222,81 @@ async fn handle_switch_tag(
     let new_ref: ImageRef = new_image_ref
         .parse()
         .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
-
     validate_identifier(&new_image_ref)
         .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
-    let store = require_docker_store(ctx)?;
-    store
-        .switch_image_ref(host_id, software_item_id, new_ref.full_ref.clone())
+
+    let db = ctx.tenant_db().db();
+
+    let plugin_rows = host_software_item_plugin::Entity::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .all(db)
         .await
-        .map_err(map_store_error)?;
+        .map_err(|e| {
+            SurfaceActionError::ControllerIntegration(format!(
+                "database error loading plugin rows: {e}"
+            ))
+        })?;
+
+    if plugin_rows.is_empty() {
+        return Err(SurfaceActionError::ControllerIntegration(
+            "no plugin assignments found for this host".to_string(),
+        ));
+    }
+
+    let hsi_row = host_software_item::Entity::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+        .one(db)
+        .await
+        .map_err(|e| {
+            SurfaceActionError::ControllerIntegration(format!(
+                "database error loading host_software_item: {e}"
+            ))
+        })?
+        .ok_or_else(|| {
+            SurfaceActionError::ControllerIntegration(format!(
+                "host_software_item not found for host {host_id} / item {software_item_id}"
+            ))
+        })?;
+
+    let txn = db.begin().await.map_err(|e| {
+        SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
+    })?;
+
+    for row in plugin_rows {
+        if row.plugin_type != DOCKER_RELEASES_CONFIG_TYPE {
+            continue;
+        }
+        let new_pkg_id = match extract_container_suffix(&row.package_identifier) {
+            Some(container) => format!("{new_image_ref}#{container}"),
+            None => new_image_ref.clone(),
+        };
+        let mut active: host_software_item_plugin::ActiveModel = row.into();
+        active.package_identifier = Set(new_pkg_id);
+        active.update(&txn).await.map_err(|e| {
+            SurfaceActionError::ControllerIntegration(format!("failed to update plugin row: {e}"))
+        })?;
+    }
+
+    let mut hsi_active: host_software_item::ActiveModel = hsi_row.into();
+    hsi_active.package_identifier = Set(Some(new_image_ref.clone()));
+    hsi_active.installed_version = Set(None);
+    hsi_active.installed_display_version = Set(None);
+    hsi_active.installed_version_detected_at = Set(None);
+    hsi_active.latest_version = Set(None);
+    hsi_active.latest_version_fetched_at = Set(None);
+    hsi_active.latest_release_metadata = Set(None);
+    hsi_active.update_category = Set("unknown".to_string());
+    hsi_active.update(&txn).await.map_err(|e| {
+        SurfaceActionError::ControllerIntegration(format!(
+            "failed to update host_software_item: {e}"
+        ))
+    })?;
+
+    txn.commit().await.map_err(|e| {
+        SurfaceActionError::ControllerIntegration(format!("failed to commit transaction: {e}"))
+    })?;
 
     tracing::info!(
         %host_id,
@@ -215,12 +323,6 @@ where
             "invalid params for action '{action_id}': {error}"
         ))
     })
-}
-
-fn map_store_error(
-    error: rootcause::Report<uptrakit_plugin_infrastructure_core::PluginError>,
-) -> SurfaceActionError {
-    SurfaceActionError::ControllerIntegration(error.to_string())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -302,5 +404,34 @@ mod tests {
                 .contains("invalid params for action 'switch-tag'"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn strip_container_suffix_with_suffix() {
+        assert_eq!(
+            strip_container_suffix("ghcr.io/example/app:1.0#web"),
+            "ghcr.io/example/app:1.0"
+        );
+    }
+
+    #[test]
+    fn strip_container_suffix_without_suffix() {
+        assert_eq!(
+            strip_container_suffix("ghcr.io/example/app:1.0"),
+            "ghcr.io/example/app:1.0"
+        );
+    }
+
+    #[test]
+    fn extract_container_suffix_with_suffix() {
+        assert_eq!(
+            extract_container_suffix("ghcr.io/example/app:1.0#web"),
+            Some("web")
+        );
+    }
+
+    #[test]
+    fn extract_container_suffix_without_suffix() {
+        assert_eq!(extract_container_suffix("ghcr.io/example/app:1.0"), None);
     }
 }
