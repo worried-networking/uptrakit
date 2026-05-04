@@ -296,9 +296,9 @@ mod journald_tests {
     }
 
     impl Visit for FieldValueVisitor {
-        fn record_debug(&mut self, field: &Field, _value: &dyn std::fmt::Debug) {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
             self.values
-                .insert(field.name().to_string(), format!("{_value:?}"));
+                .insert(field.name().to_string(), format!("{value:?}"));
         }
 
         fn record_str(&mut self, field: &Field, value: &str) {

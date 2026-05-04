@@ -520,11 +520,10 @@ pub async fn handle_execute_update_ssh(
         let mut early_result_rx = in_flight.early_result_rx;
         let update_history_id = in_flight.update_history_id;
         // Extract the attention channel (feature-gated in InFlightUpdate).
-        let mut _attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
         #[cfg(feature = "interactive")]
-        {
-            _attention_rx = in_flight.attention_rx;
-        }
+        let mut attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = in_flight.attention_rx;
+        #[cfg(not(feature = "interactive"))]
+        let mut attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
         loop {
             tokio::select! {
                 biased;
@@ -549,7 +548,7 @@ pub async fn handle_execute_update_ssh(
                     let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
                     break;
                 }
-                Some(()) = recv_attention_opt(&mut _attention_rx) => {
+                Some(()) = recv_attention_opt(&mut attention_rx) => {
                     let _ = tx.send((host_id.clone(), UpdateEvent::Attention(update_history_id))).await;
                 }
             }

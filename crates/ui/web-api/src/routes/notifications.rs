@@ -1088,15 +1088,15 @@ pub async fn list_log(
 #[tracing::instrument(skip_all)]
 pub async fn notification_callback(
     State(state): State<Arc<AppState>>,
-    Path((_channel_type, _channel_id)): Path<(String, Uuid)>,
-    _headers: axum::http::HeaderMap,
-    _body: axum::body::Bytes,
+    Path((channel_type, channel_id)): Path<(String, Uuid)>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
 ) -> Response {
     use sea_orm::EntityTrait;
     use uptrakit_shared_db::entity::notification_channel;
 
     // Load channel directly from DB (no TenantDb — this is a public endpoint)
-    let channel_model = match notification_channel::Entity::find_by_id(_channel_id)
+    let channel_model = match notification_channel::Entity::find_by_id(channel_id)
         .one(state.db())
         .await
     {
@@ -1109,7 +1109,7 @@ pub async fn notification_callback(
     };
 
     // Verify channel type matches the URL path
-    if channel_model.channel_type != _channel_type {
+    if channel_model.channel_type != channel_type {
         return error_response(StatusCode::NOT_FOUND, "Channel not found");
     }
 
@@ -1128,15 +1128,15 @@ pub async fn notification_callback(
 
     // Serialize headers into a JSON map
     let mut headers_map = serde_json::Map::new();
-    for (name, value) in &_headers {
+    for (name, value) in &headers {
         if let Ok(v) = value.to_str() {
             headers_map.insert(name.as_str().to_string(), serde_json::json!(v));
         }
     }
 
     // Parse body as JSON if possible, otherwise pass as string
-    let body_value: serde_json::Value = serde_json::from_slice(&_body)
-        .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&_body).to_string()));
+    let body_value: serde_json::Value = serde_json::from_slice(&body)
+        .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&body).to_string()));
 
     let params = serde_json::json!({
         "channel_config": config_json,
@@ -1145,7 +1145,7 @@ pub async fn notification_callback(
     });
 
     // Delegate to the plugin's surface action handler.
-    let surface_id = format!("notifications.{_channel_type}");
+    let surface_id = format!("notifications.{channel_type}");
     let controller =
         uptrakit_surface_proxy::AppStateSurfaceActionController::from_database_connection(
             state.db(),
