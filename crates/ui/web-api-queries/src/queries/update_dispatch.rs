@@ -1222,6 +1222,7 @@ pub fn enrich_release_info_with_attestation(
 
 #[cfg(all(test, feature = "plugin-ops"))]
 mod hook_dispatch_tests {
+    #[cfg(feature = "plugin-ops")]
     use super::*;
 
     /// Verify that `prepare_pre_update_hook` exists with the expected shape by
