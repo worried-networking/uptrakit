@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+commit_msg=$(cat "$1")
+
+# Skip git revert's auto-generated messages
+if echo "$commit_msg" | grep -qE '^Revert "'; then
+    exit 0
+fi
+
+if ! echo "$commit_msg" | grep -qE '^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert|security)(\(.+\))?!?:.+'; then
+    printf '[commit-msg] Invalid commit message format.\n\n' >&2
+    printf 'Must follow Conventional Commits:\n' >&2
+    printf '  type(scope): description\n\n' >&2
+    printf 'Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert, security\n\n' >&2
+    printf 'Examples:\n' >&2
+    printf '  feat(agent): add retry logic\n' >&2
+    printf '  fix: handle null pointer exception\n' >&2
+    printf '  feat(api)!: remove deprecated endpoint\n' >&2
+    exit 1
+fi
