@@ -227,6 +227,7 @@ export interface InteractionDescriptor {
 	interaction_id: InteractionId;
 	kind: InteractionKind;
 	label: string;
+	icon?: string;
 	required_permission?: string;
 	input_schema?: SchemaContract;
 	result_schema?: SchemaContract;
