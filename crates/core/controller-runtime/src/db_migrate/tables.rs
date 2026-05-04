@@ -19,6 +19,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "tenants",
     "users",
     "ca_certificates",
+    "crl_cache",
     "roles",
     "permissions",
     "global_settings",
@@ -29,8 +30,11 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "user_oidc_links",
     "sessions",
     "api_tokens",
+    "revoked_token_jtis",
+    "revoked_token_users",
+    "email_change_requests",
     "settings",
-    "settings_versions",
+    "settings_version",
     "enrollment_tokens",
     "services",
     "service_certificates",
@@ -43,6 +47,9 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "host_tags",
     "host_tag_assignments",
     "plugin_configs",
+    "plugin_type_settings",
+    "tenant_discovery_allowlist",
+    "host_discovery_allowlist",
     "software_items",
     "host_software_items",
     "host_software_item_plugins",
@@ -85,6 +92,7 @@ pub(crate) async fn copy_all(
     copy!(Tenant, "tenants");
     copy!(User, "users");
     copy!(CaCertificate, "ca_certificates");
+    copy!(CrlCache, "crl_cache");
     copy!(Role, "roles");
     copy!(Permission, "permissions");
     copy!(GlobalSetting, "global_settings");
@@ -95,8 +103,11 @@ pub(crate) async fn copy_all(
     copy!(UserOidcLink, "user_oidc_links");
     copy!(Session, "sessions");
     copy!(ApiToken, "api_tokens");
+    copy!(RevokedTokenJti, "revoked_token_jtis");
+    copy!(RevokedTokenUser, "revoked_token_users");
+    copy!(EmailChangeRequest, "email_change_requests");
     copy!(Setting, "settings");
-    copy!(SettingsVersion, "settings_versions");
+    copy!(SettingsVersion, "settings_version");
     copy!(EnrollmentToken, "enrollment_tokens");
     copy!(Service, "services");
     copy!(ServiceCertificate, "service_certificates");
@@ -112,6 +123,9 @@ pub(crate) async fn copy_all(
     copy!(HostTag, "host_tags");
     copy!(HostTagAssignment, "host_tag_assignments");
     copy!(PluginConfig, "plugin_configs");
+    copy!(PluginTypeSetting, "plugin_type_settings");
+    copy!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
+    copy!(HostDiscoveryAllowlist, "host_discovery_allowlist");
     copy!(SoftwareItem, "software_items");
     copy!(HostSoftwareItem, "host_software_items");
     copy!(HostSoftwareItemPlugin, "host_software_item_plugins");
@@ -177,6 +191,9 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(HostSoftwareItemPlugin, "host_software_item_plugins");
     clean!(HostSoftwareItem, "host_software_items");
     clean!(SoftwareItem, "software_items");
+    clean!(HostDiscoveryAllowlist, "host_discovery_allowlist");
+    clean!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
+    clean!(PluginTypeSetting, "plugin_type_settings");
     clean!(PluginConfig, "plugin_configs");
     clean!(HostTagAssignment, "host_tag_assignments");
     clean!(HostTag, "host_tags");
@@ -192,8 +209,11 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(ServiceCertificate, "service_certificates");
     clean!(Service, "services");
     clean!(EnrollmentToken, "enrollment_tokens");
-    clean!(SettingsVersion, "settings_versions");
+    clean!(SettingsVersion, "settings_version");
     clean!(Setting, "settings");
+    clean!(EmailChangeRequest, "email_change_requests");
+    clean!(RevokedTokenUser, "revoked_token_users");
+    clean!(RevokedTokenJti, "revoked_token_jtis");
     clean!(ApiToken, "api_tokens");
     clean!(Session, "sessions");
     clean!(UserOidcLink, "user_oidc_links");
@@ -204,6 +224,7 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(GlobalSetting, "global_settings");
     clean!(Permission, "permissions");
     clean!(Role, "roles");
+    clean!(CrlCache, "crl_cache");
     clean!(CaCertificate, "ca_certificates");
     clean!(User, "users");
     clean!(Tenant, "tenants");
@@ -227,6 +248,7 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(Tenant, "tenants");
     verify!(User, "users");
     verify!(CaCertificate, "ca_certificates");
+    verify!(CrlCache, "crl_cache");
     verify!(Role, "roles");
     verify!(Permission, "permissions");
     verify!(GlobalSetting, "global_settings");
@@ -237,8 +259,11 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(UserOidcLink, "user_oidc_links");
     verify!(Session, "sessions");
     verify!(ApiToken, "api_tokens");
+    verify!(RevokedTokenJti, "revoked_token_jtis");
+    verify!(RevokedTokenUser, "revoked_token_users");
+    verify!(EmailChangeRequest, "email_change_requests");
     verify!(Setting, "settings");
-    verify!(SettingsVersion, "settings_versions");
+    verify!(SettingsVersion, "settings_version");
     verify!(EnrollmentToken, "enrollment_tokens");
     verify!(Service, "services");
     verify!(ServiceCertificate, "service_certificates");
@@ -254,6 +279,9 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(HostTag, "host_tags");
     verify!(HostTagAssignment, "host_tag_assignments");
     verify!(PluginConfig, "plugin_configs");
+    verify!(PluginTypeSetting, "plugin_type_settings");
+    verify!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
+    verify!(HostDiscoveryAllowlist, "host_discovery_allowlist");
     verify!(SoftwareItem, "software_items");
     verify!(HostSoftwareItem, "host_software_items");
     verify!(HostSoftwareItemPlugin, "host_software_item_plugins");
@@ -407,12 +435,74 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn copy_order_has_all_tables() {
-        assert_eq!(
-            COPY_ORDER.len(),
-            48,
-            "COPY_ORDER must list all 48 core app tables; plugin tables register via PluginDescriptor"
+    /// Schema-driven completeness check.
+    ///
+    /// Every live application table (after running migrations) must be
+    /// covered by either `COPY_ORDER` (core tables), a registered plugin's
+    /// `db_migrate_tables` entry, or the explicit `AGENT_ONLY_TABLES` exclusion
+    /// list below.
+    ///
+    /// `AGENT_ONLY_TABLES` are created by controller-side migrations so agents
+    /// can use them without running their own schema setup, but the tables hold
+    /// transient agent-local state that is NOT copied during `db-migrate`
+    /// (they are re-populated by agents after each migration).
+    ///
+    /// Failure modes caught:
+    /// - New entity migration without registering the table for db-migrate.
+    /// - Stale entry in `COPY_ORDER` or a plugin descriptor pointing at a
+    ///   dropped table.
+    #[tokio::test]
+    #[ignore = "integration — runs schema migrations on in-memory SQLite"]
+    async fn migration_coverage_complete() {
+        use sea_orm::{
+            ConnectOptions, ConnectionTrait, Database, DbBackend, Statement, TryGetable as _,
+        };
+        use std::collections::HashSet;
+
+        /// Tables created by migrations but intentionally excluded from db-migrate.
+        /// These hold transient agent-local state that agents re-populate after migration.
+        const AGENT_ONLY_TABLES: &[&str] =
+            &["ssh_hosts", "proxmox_host_state", "proxmox_pending_matches"];
+
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("source db");
+        crate::migration::run_migrations(&db)
+            .await
+            .expect("source migrations");
+
+        let live: HashSet<String> = db
+            .query_all_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT name FROM sqlite_master \
+                 WHERE type='table' \
+                   AND name NOT LIKE 'sqlite_%' \
+                   AND name != 'seaql_migrations'"
+                    .to_owned(),
+            ))
+            .await
+            .expect("query live tables")
+            .into_iter()
+            .map(|row| String::try_get(&row, "", "name").expect("name"))
+            .filter(|name| !AGENT_ONLY_TABLES.contains(&name.as_str()))
+            .collect();
+
+        let mut covered: HashSet<String> = COPY_ORDER.iter().map(|s| (*s).to_owned()).collect();
+        for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
+            if let Some(tables_fn) = descriptor.db_migrate_tables {
+                for td in tables_fn() {
+                    covered.insert(td.name.to_owned());
+                }
+            }
+        }
+
+        let missing: Vec<_> = live.difference(&covered).cloned().collect();
+        let extra: Vec<_> = covered.difference(&live).cloned().collect();
+
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "schema drift between migrations and db-migrate coverage:\n  \
+             missing from migration: {missing:?}\n  \
+             extra in lists: {extra:?}"
         );
     }
 }
