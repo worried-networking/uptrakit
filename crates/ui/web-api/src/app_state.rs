@@ -1067,6 +1067,14 @@ impl AppState {
     pub fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
         self.plugin_ops.controller_update_protection()
     }
+
+    /// Returns the controller-side update-hook singleton, if registered.
+    #[cfg(feature = "plugin-ops")]
+    pub fn controller_update_hook(
+        &self,
+    ) -> Option<Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>> {
+        self.plugin_ops.controller_update_hook()
+    }
 }
 
 impl FromRef<Arc<AppState>> for DbState {

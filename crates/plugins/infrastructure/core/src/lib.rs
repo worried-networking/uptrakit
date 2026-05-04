@@ -52,9 +52,9 @@ pub use version::Version;
 
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
-    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
-    TransactionalEmailError,
+    ControllerUpdateHookOps, ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps,
+    PluginMetadataOps, PluginOps, PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps,
+    SoftwareItemLifecycleOps, TransactionalEmailError,
 };
 
 // Catalog (feature-gated)

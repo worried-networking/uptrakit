@@ -93,6 +93,23 @@ pub(super) async fn validate_host_link_visibility(
 }
 
 async fn finalize_post_update_best_effort(state: &Arc<AppState>, record: &update_history::Model) {
+    // Hook first (scale down) — must run before protection finalization.
+    #[cfg(feature = "plugin-ops")]
+    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
+        state.db(),
+        state.controller_update_hook(),
+        state.plugin_ops.as_ref(),
+        record,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %error,
+            update_id = %record.id,
+            "post-update hook (resource restore) failed"
+        );
+    }
+    // Then protection finalization (existing call, unchanged).
     if let Err(error) = crate::queries::update_dispatch::finalize_post_update(
         state.db(),
         state.controller_update_protection(),
@@ -112,6 +129,23 @@ async fn finalize_post_update_with_recovery_timeout_best_effort(
     state: &Arc<AppState>,
     record: &update_history::Model,
 ) {
+    // Hook first (scale down) — must run before protection finalization.
+    #[cfg(feature = "plugin-ops")]
+    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
+        state.db(),
+        state.controller_update_hook(),
+        state.plugin_ops.as_ref(),
+        record,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %error,
+            update_id = %record.id,
+            "post-update hook (resource restore) failed during reconnect recovery"
+        );
+    }
+    // Then protection finalization (existing call, unchanged).
     if let Err(error) = crate::queries::update_dispatch::finalize_post_update_with_timeout(
         state.db(),
         state.controller_update_protection(),
@@ -2538,12 +2572,12 @@ mod tests {
     use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_registry::{
         CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
-        ControllerProtectionDecision, ControllerUpdateProtection, ControllerUpdateProtectionOps,
-        NotificationOps, NotificationTransport, PluginConfigOps, PluginError, PluginMetadataOps,
-        PluginOps, PluginResult, PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome,
-        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, SurfaceActionError,
-        build_catalog,
+        ControllerProtectionDecision, ControllerUpdateHookOps, ControllerUpdateProtection,
+        ControllerUpdateProtectionOps, NotificationOps, NotificationTransport, PluginConfigOps,
+        PluginError, PluginMetadataOps, PluginOps, PluginResult, PluginSurfaceActionOps,
+        PluginSurfaceOps, PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+        SoftwareItemLifecycleContext, SoftwareItemLifecycleOps, SoftwareItemPatch,
+        SurfaceActionContext, SurfaceActionError, build_catalog,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, service_host, software_item,
@@ -2709,6 +2743,8 @@ mod tests {
             Some(self.protection.clone())
         }
     }
+
+    impl ControllerUpdateHookOps for ProtectionOverridePluginOps {}
 
     async fn build_test_state_with_protection(
         db: sea_orm::DatabaseConnection,

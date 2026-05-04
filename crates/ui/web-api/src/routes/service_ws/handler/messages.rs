@@ -1738,11 +1738,11 @@ mod tests {
     use serde::Deserialize;
     use std::sync::{Arc, OnceLock};
     use uptrakit_plugin_infrastructure_registry::{
-        ControllerUpdateProtection, ControllerUpdateProtectionOps, NotificationOps,
-        NotificationTransport, PluginConfigOps, PluginDescriptor, PluginMetadataOps, PluginOps,
-        PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId, SoftwareItemCreatedEvent,
-        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, SurfaceActionError, plugin_ids,
+        ControllerUpdateHookOps, ControllerUpdateProtection, ControllerUpdateProtectionOps,
+        NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
+        PluginMetadataOps, PluginOps, PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId,
+        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionError, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         audit_log, ca_certificate, host, host_software_item, plugin_config, service, service_host,
@@ -1951,6 +1951,8 @@ mod tests {
             None
         }
     }
+
+    impl ControllerUpdateHookOps for TestPluginOps {}
 
     #[async_trait::async_trait]
     impl crate::cert_signer::AgentCertSigner for TestSuccessfulCertSigner {
