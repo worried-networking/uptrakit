@@ -340,18 +340,16 @@
 {#if actionLabel.length === 0 || showContractIssue}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
-	<div class="@container/buttons inline-flex">
-		<SurfaceActionButton
-			label={actionLabel}
-			icon={interaction.icon}
-			{labelDisplay}
-			variant={confirmVariantForSeverity}
-			{size}
-			{loading}
-			onclick={startWorkflow}
-			dataUi="workflow-trigger"
-		/>
-	</div>
+	<SurfaceActionButton
+		label={actionLabel}
+		icon={interaction.icon}
+		{labelDisplay}
+		variant={confirmVariantForSeverity}
+		{size}
+		{loading}
+		onclick={startWorkflow}
+		dataUi="workflow-trigger"
+	/>
 {/if}
 
 {#if showModal && step}
