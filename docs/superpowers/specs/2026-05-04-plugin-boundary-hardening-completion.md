@@ -172,24 +172,32 @@ New file `crates/shared/db/src/migrate_core_tables.rs`:
 /// Errors produced by per-table copy / clean / verify operations.
 ///
 /// Surfaces the table name in both variants so the orchestrator in
-/// `controller-runtime/db_migrate/tables.rs` can map directly to the
+/// `controller-runtime/db_migrate/tables.rs` can convert into the
 /// existing `DbMigrateError::TableOp` and `DbMigrateError::Mismatch`
-/// variants without losing context.
+/// variants via a single `.context_to()?` boundary, without losing
+/// context.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TableMigrateError {
     /// A SeaORM driver error occurred for `table`.
+    #[error("table `{table}` operation failed: {err}")]
     Db {
         table: &'static str,
+        #[source]
         err: sea_orm::DbErr,
     },
     /// `verify` found different row counts for `table`.
+    #[error("row count mismatch for table `{table}`: source={src}, target={dst}")]
     Mismatch {
         table: &'static str,
         src: u64,
         dst: u64,
     },
 }
+
+/// Module-local `Result` alias following the project's `Report<E>`
+/// convention (see `docs/development/error-handling.md`).
+pub type Result<T> = std::result::Result<T, rootcause::Report<TableMigrateError>>;
 ```
 
 Wave C extends this module with `copy`, `clean`, `verify` functions plus
@@ -441,12 +449,13 @@ match to `Some(expr)` when present and `None` when absent.
 
 Add three async helpers under `#[cfg(feature = "migrations")]`, following
 the existing `reset_plugin_tenant_data` pattern (lines 97–117). All three
-return `Result<_, TableMigrateError>` (re-exported from
-`uptrakit_shared_db::migrate_core_tables`) so the orchestrator can map
-directly to `DbMigrateError::TableOp` / `Mismatch` without losing the
-table name:
+return `Result<_, Report<TableMigrateError>>` (the project's standard
+`Report<E>` shape; see `docs/development/error-handling.md`). The
+orchestrator converts to `DbMigrateError` via `.context_to()?` enabled
+by `impl_report_conversion!` (defined in Wave B):
 
 ```rust
+use rootcause::prelude::*;
 use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
 
 /// Copy every plugin's tables from `src` to `dst`. Returns total rows.
@@ -468,14 +477,14 @@ pub async fn copy_plugin_tables(
     src: &sea_orm::DatabaseConnection,
     dst: &sea_orm::DatabaseConnection,
     batch_size: u64,
-) -> Result<u64, TableMigrateError> {
+) -> Result<u64, Report<TableMigrateError>> {
     let mut total = 0u64;
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             for table in tables_fn() {
                 let copied = (table.copy_batch)(src, dst, batch_size)
                     .await
-                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
+                    .map_err(|err| report!(TableMigrateError::Db { table: table.name, err }))?;
                 eprintln!("  {}: {copied} rows", table.name);
                 total += copied;
             }
@@ -487,14 +496,14 @@ pub async fn copy_plugin_tables(
 #[cfg(feature = "migrations")]
 pub async fn clean_plugin_tables(
     dst: &sea_orm::DatabaseConnection,
-) -> Result<(), TableMigrateError> {
+) -> Result<(), Report<TableMigrateError>> {
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             // Reverse for FK-safe deletion (children before parents).
             for table in tables_fn().into_iter().rev() {
                 (table.clean)(dst)
                     .await
-                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
+                    .map_err(|err| report!(TableMigrateError::Db { table: table.name, err }))?;
             }
         }
     }
@@ -505,16 +514,16 @@ pub async fn clean_plugin_tables(
 pub async fn verify_plugin_tables(
     src: &sea_orm::DatabaseConnection,
     dst: &sea_orm::DatabaseConnection,
-) -> Result<u64, TableMigrateError> {
+) -> Result<u64, Report<TableMigrateError>> {
     let mut total = 0u64;
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             for table in tables_fn() {
                 let (src_count, dst_count) = (table.verify)(src, dst)
                     .await
-                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
+                    .map_err(|err| report!(TableMigrateError::Db { table: table.name, err }))?;
                 if src_count != dst_count {
-                    return Err(TableMigrateError::Mismatch {
+                    bail!(TableMigrateError::Mismatch {
                         table: table.name,
                         src: src_count,
                         dst: dst_count,
@@ -527,6 +536,14 @@ pub async fn verify_plugin_tables(
     Ok(total)
 }
 ```
+
+The inner generic helpers (`copy_one`, `clean_one`, `verify_one` in
+`plugin-infrastructure-core::db_migrate`) keep their bare
+`Result<_, sea_orm::DbErr>` shape — they have no table name in scope, so
+they cannot construct `TableMigrateError`. The registry helpers attach
+table-name context at the boundary via `report!()`, which is the
+canonical project pattern (see `docs/development/error-handling.md`
+Pattern 4).
 
 `uptrakit-plugin-infrastructure-registry/Cargo.toml` must declare a direct
 dependency on `uptrakit-shared-db` to use the `TableMigrateError` name in
@@ -727,9 +744,9 @@ Update `crates/core/controller-runtime/src/db_migrate/error.rs` — add
 public-shaped enums; see `docs/development/coding-standards.md`). No new
 variants are added: the existing `TableOp { table, db_err }` and
 `Mismatch { table, src, dst }` variants cover both core and plugin paths
-because the registry helpers return `TableMigrateError` which carries the
-table name, and the orchestrator maps each variant directly to the
-matching `DbMigrateError` variant.
+because the registry helpers return `Report<TableMigrateError>` which
+carries the table name, and the cross-boundary `ReportConversion` impl
+maps each variant directly to the matching `DbMigrateError` variant.
 
 ```rust
 #[non_exhaustive]
@@ -739,27 +756,27 @@ pub(crate) enum DbMigrateError {
 }
 ```
 
-Insert calls to the new registry helpers in `tables.rs`. The helper
-return type is `TableMigrateError`; map each variant to the existing
-`DbMigrateError` shape:
+Add the `ReportConversion` impl alongside `DbMigrateError` so the
+orchestrator can use `.context_to()?` directly (see
+`docs/development/error-handling.md` Pattern 2 — `impl_report_conversion!`
+with custom mapping closure):
 
 ```rust
 use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+use uptrakit_shared_macros::impl_report_conversion;
 
-fn map_plugin_err(e: TableMigrateError) -> Report<DbMigrateError> {
-    match e {
-        TableMigrateError::Db { table, err } => {
-            report!(DbMigrateError::TableOp { table, db_err: err })
-        }
-        TableMigrateError::Mismatch { table, src, dst } => {
-            report!(DbMigrateError::Mismatch { table, src, dst })
-        }
+impl_report_conversion!(TableMigrateError => DbMigrateError, |e| match e {
+    TableMigrateError::Db { table, err } => {
+        DbMigrateError::TableOp { table, db_err: err }
     }
-}
+    TableMigrateError::Mismatch { table, src, dst } => {
+        DbMigrateError::Mismatch { table, src, dst }
+    }
+});
 ```
 
-(Define `map_plugin_err` near the top of `tables.rs` — used by all three
-orchestrator functions below.)
+Insert calls to the new registry helpers in `tables.rs` using
+`.context_to()?` (no manual `map_err` mapping function needed):
 
 - `copy_all`: at the very end (after the last `copy!(...)` macro),
   before `Ok(total)`:
@@ -767,7 +784,7 @@ orchestrator functions below.)
   ```rust
   total += uptrakit_plugin_infrastructure_registry::copy_plugin_tables(src, dst, batch_size)
       .await
-      .map_err(map_plugin_err)?;
+      .context_to()?;
   ```
 
 - `clean_all`: at the very start (before the first `clean!(...)`):
@@ -775,7 +792,7 @@ orchestrator functions below.)
   ```rust
   uptrakit_plugin_infrastructure_registry::clean_plugin_tables(dst)
       .await
-      .map_err(map_plugin_err)?;
+      .context_to()?;
   ```
 
   (Plugin tables come first in clean because they are leaves of the FK
@@ -787,7 +804,7 @@ orchestrator functions below.)
   ```rust
   total += uptrakit_plugin_infrastructure_registry::verify_plugin_tables(src, dst)
       .await
-      .map_err(map_plugin_err)?;
+      .context_to()?;
   ```
 
 The test-only `COPY_ORDER` length assertion (`assert_eq!(COPY_ORDER.len(), 49,
@@ -1075,11 +1092,18 @@ dep.
 Create `crates/shared/db/src/migrate_core_tables.rs`. Under
 `#[cfg(feature = "db-migrate")]`, host:
 
-- `pub async fn copy(src, dst, batch_size) -> Result<u64, sea_orm::DbErr>`
-- `pub async fn clean(dst) -> Result<(), sea_orm::DbErr>`
-- `pub async fn verify(src, dst) -> Result<u64, sea_orm::DbErr>`
+- `pub async fn copy(src, dst, batch_size) -> Result<u64, Report<TableMigrateError>>`
+- `pub async fn clean(dst) -> Result<(), Report<TableMigrateError>>`
+- `pub async fn verify(src, dst) -> Result<u64, Report<TableMigrateError>>`
 - `pub const CORE_COPY_ORDER: &[&str] = &[ … ];` — the 48 core tables
   (today's `COPY_ORDER` minus `proxmox_host_mappings`).
+
+Each helper attaches the table name via `report!(TableMigrateError::Db { table, err })`
+when wrapping a `sea_orm::DbErr` from the per-table primitive
+(`copy_one` / `clean_one` / `verify_one`), and via
+`bail!(TableMigrateError::Mismatch { table, src, dst })` when row counts
+disagree. Wrapping happens in the boundary helper, not in the inner
+generic primitive — same pattern as the registry helpers.
 
 Implementation: copy the macro bodies of `copy_all`, `clean_all`,
 `verify_all` from
@@ -1090,23 +1114,25 @@ Implementation: copy the macro bodies of `copy_all`, `clean_all`,
   might shift; ensure `proxmox_host_mappings` is absent from the moved
   `CORE_COPY_ORDER`).
 - Change error type from `Result<_, Report<DbMigrateError>>` to
-  `Result<_, TableMigrateError>` (the same enum introduced in Wave A).
-  Core helpers preserve the table name via `TableMigrateError::Db { table, err }`
-  and `TableMigrateError::Mismatch { table, src, dst }` — identical to
-  the plugin helpers. The orchestrator in `tables.rs` reuses the same
-  `map_plugin_err` mapping function for both core and plugin errors,
-  preserving the existing `DbMigrateError::TableOp { table, db_err }`
-  and `DbMigrateError::Mismatch { table, src, dst }` rendering.
+  `Result<_, Report<TableMigrateError>>` (the alias `Result<T>` declared
+  in Wave A's module). Core helpers preserve the table name via
+  `report!(TableMigrateError::Db { table, err })` and
+  `bail!(TableMigrateError::Mismatch { table, src, dst })`. The
+  orchestrator uses `.context_to()?` (powered by the
+  `impl_report_conversion!(TableMigrateError => DbMigrateError, ...)`
+  block defined in Wave B) to fold both into the existing
+  `DbMigrateError::TableOp` and `DbMigrateError::Mismatch` variants.
 
 - Move generic helpers `migrate_table<E>`, `clean_table<E>`,
   `verify_table<E>` (lines 287–397 of `tables.rs`) into
   `migrate_core_tables.rs` as private helpers, adapted to return
-  `TableMigrateError` (each helper takes the table name and constructs
-  the appropriate variant on error). The same logic that
-  `plugin-infrastructure-core::db_migrate` uses for plugins applies here;
-  consider extracting the per-entity helpers into a shared private
-  function inside `shared-db::migrate_core_tables` if the duplication is
-  meaningful — but YAGNI applies: a single use site is fine.
+  `Result<_, Report<TableMigrateError>>` (each helper takes the table
+  name and constructs the appropriate variant on error via `report!()` /
+  `bail!()`). The same logic that `plugin-infrastructure-core::db_migrate`
+  uses for plugins applies here; consider extracting the per-entity
+  helpers into a shared private function inside
+  `shared-db::migrate_core_tables` if the duplication is meaningful — but
+  YAGNI applies: a single use site is fine.
 
 ### `controller-runtime` becomes thin orchestrator
 
@@ -1126,18 +1152,6 @@ use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 
 use super::error::{DbMigrateError, Result};
-use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
-
-fn map_table_err(e: TableMigrateError) -> Report<DbMigrateError> {
-    match e {
-        TableMigrateError::Db { table, err } => {
-            report!(DbMigrateError::TableOp { table, db_err: err })
-        }
-        TableMigrateError::Mismatch { table, src, dst } => {
-            report!(DbMigrateError::Mismatch { table, src, dst })
-        }
-    }
-}
 
 pub(crate) async fn copy_all(
     src: &DatabaseConnection,
@@ -1146,10 +1160,10 @@ pub(crate) async fn copy_all(
 ) -> Result<u64> {
     let mut total = uptrakit_shared_db::migrate_core_tables::copy(src, dst, batch_size)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     total += uptrakit_plugin_infrastructure_registry::copy_plugin_tables(src, dst, batch_size)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     Ok(total)
 }
 
@@ -1157,10 +1171,10 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     // Plugin tables first (FK leaves of the core graph).
     uptrakit_plugin_infrastructure_registry::clean_plugin_tables(dst)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     uptrakit_shared_db::migrate_core_tables::clean(dst)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     Ok(())
 }
 
@@ -1170,19 +1184,19 @@ pub(crate) async fn verify_all(
 ) -> Result<u64> {
     let mut total = uptrakit_shared_db::migrate_core_tables::verify(src, dst)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     total += uptrakit_plugin_infrastructure_registry::verify_plugin_tables(src, dst)
         .await
-        .map_err(map_table_err)?;
+        .context_to()?;
     Ok(total)
 }
 ```
 
-Both core and plugin paths return `TableMigrateError`, which carries the
-table name in both `Db` and `Mismatch` variants. The single `map_table_err`
-helper folds them back into the existing `DbMigrateError::TableOp` and
-`DbMigrateError::Mismatch` variants — no new variants are introduced and
-no variant becomes orphaned.
+Both core and plugin paths return `Report<TableMigrateError>`. The single
+`impl_report_conversion!(TableMigrateError => DbMigrateError, ...)` block
+defined alongside `DbMigrateError` (Wave B) folds variants back into
+the existing `DbMigrateError::TableOp` and `DbMigrateError::Mismatch` —
+no new variants are introduced and no variant becomes orphaned.
 
 ### Update `migration_coverage_complete`
 
