@@ -1180,6 +1180,119 @@ impl MigrationTrait for ProxmoxHmVmidUniquePerConfig {
     }
 }
 
+// ── Migration: add resource scaling policy columns ──────────────────────────
+
+/// Add `update_cores` and `update_memory_mb` to both Proxmox protection policy
+/// tables. NULL means no scaling configured for that policy row.
+pub struct AddProxmoxResourceScalingPolicyColumns;
+
+impl MigrationName for AddProxmoxResourceScalingPolicyColumns {
+    fn name(&self) -> &str {
+        "m20260503_000001_proxmox_resource_scaling_policy"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddProxmoxResourceScalingPolicyColumns {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                            .integer()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                            .integer()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                            .integer()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                            .integer()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum ProxmoxResourceScalingPolicyCols {
+    UpdateCores,
+    UpdateMemoryMb,
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -1197,6 +1310,7 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxProtectionAudit),
         Box::new(AddProxmoxHmUniqueHostIdIndex),
         Box::new(ProxmoxHmVmidUniquePerConfig),
+        Box::new(AddProxmoxResourceScalingPolicyColumns),
     ]
 }
 
@@ -1240,6 +1354,31 @@ mod tests {
         assert!(defaults.contains(&"backup_timeout_seconds".to_string()));
         assert!(overrides.contains(&"snapshot_timeout_seconds".to_string()));
         assert!(overrides.contains(&"backup_timeout_seconds".to_string()));
+    }
+
+    #[tokio::test]
+    async fn migration_a_adds_update_cores_and_memory_mb_columns() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        // Run all existing migrations so the table exists
+        CreateProxmoxProtectionPolicyTables
+            .up(&manager)
+            .await
+            .unwrap();
+
+        AddProxmoxResourceScalingPolicyColumns
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let defaults_cols = column_names(&db, "proxmox_protection_defaults").await;
+        assert!(defaults_cols.contains(&"update_cores".to_string()));
+        assert!(defaults_cols.contains(&"update_memory_mb".to_string()));
+
+        let overrides_cols = column_names(&db, "proxmox_protection_item_overrides").await;
+        assert!(overrides_cols.contains(&"update_cores".to_string()));
+        assert!(overrides_cols.contains(&"update_memory_mb".to_string()));
     }
 
     #[tokio::test]
