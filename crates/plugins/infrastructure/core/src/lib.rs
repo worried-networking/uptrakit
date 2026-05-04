@@ -120,6 +120,10 @@ pub use host_runtime::{
     HostRuntime, MetadataAwareHostRuntime, StandardHostRuntime, construct_host_runtime,
 };
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
+#[cfg(feature = "plugin-ops")]
+pub use roles::{
+    ControllerUpdateHook, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
+};
 pub use roles::{
     ControllerUpdateProtection, Discoverer, ExecuteUpdateResult, LifecycleHook,
     NotificationTransport, PackageIndexer, PluginMeta, ReleaseFetcher, SoftwareItemLifecycle,
