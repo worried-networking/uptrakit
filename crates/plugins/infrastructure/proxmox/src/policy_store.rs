@@ -204,6 +204,8 @@ pub async fn upsert_global_default(
             backup_target_key: Set(policy.backup_target_key.clone()),
             snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
             backup_timeout_seconds: Set(policy.backup_timeout_seconds),
+            update_cores: Set(None),
+            update_memory_mb: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -281,6 +283,8 @@ pub async fn upsert_item_override(
             backup_target_key: Set(policy.backup_target_key.clone()),
             snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
             backup_timeout_seconds: Set(policy.backup_timeout_seconds),
+            update_cores: Set(None),
+            update_memory_mb: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };

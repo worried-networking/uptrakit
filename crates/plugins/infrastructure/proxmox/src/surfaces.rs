@@ -2010,6 +2010,8 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: Some(240),
             backup_timeout_seconds: None,
+            update_cores: None,
+            update_memory_mb: None,
             created_at: now,
             updated_at: now,
         };
