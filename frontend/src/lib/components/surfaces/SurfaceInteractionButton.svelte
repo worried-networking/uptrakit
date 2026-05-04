@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import Button from '$lib/components/Button.svelte';
+	import SurfaceActionButton from './SurfaceActionButton.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
@@ -9,6 +9,7 @@
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { InteractionDescriptor } from '$lib/surfaces/contract';
+	import type { LabelDisplay } from '$lib/surfaces/label-display';
 
 	let {
 		surfaceId,
@@ -19,6 +20,7 @@
 		baseParams = {},
 		rowSeed,
 		size = 'md',
+		labelDisplay = 'always',
 		oncomplete,
 		requiredContextParam
 	}: {
@@ -30,6 +32,7 @@
 		baseParams?: Record<string, unknown>;
 		rowSeed?: Record<string, unknown>;
 		size?: 'sm' | 'md';
+		labelDisplay?: LabelDisplay;
 		oncomplete?: (result: unknown) => void | Promise<void>;
 		requiredContextParam?: string;
 	} = $props();
@@ -100,19 +103,25 @@
 {:else}
 	{#if isContextGated}
 		<span title="Select a configuration first">
-			<Button variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'} {size} disabled>
-				{actionLabel}
-			</Button>
+			<SurfaceActionButton
+				label={actionLabel}
+				icon={interaction.icon}
+				{labelDisplay}
+				variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
+				{size}
+				disabled
+			/>
 		</span>
 	{:else}
-		<Button
+		<SurfaceActionButton
+			label={actionLabel}
+			icon={interaction.icon}
+			{labelDisplay}
 			variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
 			{size}
 			{loading}
 			onclick={requestAction}
-		>
-			{actionLabel}
-		</Button>
+		/>
 	{/if}
 
 	{#if showModal}
