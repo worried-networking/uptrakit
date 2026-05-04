@@ -711,6 +711,9 @@ fn compute_required_capabilities(
             InteractionKind::ConfirmableAction => {
                 caps.insert(surfaces::Capability::ConfirmableAction);
             }
+            _ => {
+                tracing::warn!("unknown interaction kind — update match arm");
+            }
         }
         if !interaction.sensitive_fields.is_empty() {
             caps.insert(surfaces::Capability::SensitiveFields);

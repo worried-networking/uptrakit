@@ -6,6 +6,7 @@ use crate::{BuiltInApiOperationId, FormUiDescriptor, InteractionId, ProviderKind
 pub const MIN_INTERACTION_TIMEOUT_SECONDS: u16 = 1;
 pub const MAX_INTERACTION_TIMEOUT_SECONDS: u16 = 300;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InteractionKind {
@@ -17,6 +18,7 @@ pub enum InteractionKind {
     ConfirmableAction,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "mode")]
 pub enum InteractionTransport {
@@ -76,6 +78,7 @@ pub struct InteractionConfirmation {
     pub severity: ConfirmationSeverity,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfirmationSeverity {

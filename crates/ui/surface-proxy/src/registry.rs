@@ -728,6 +728,9 @@ impl SurfaceRegistry {
                                 surface_id: surface_id.clone(),
                             });
                         }
+                        &_ => {
+                            tracing::warn!("unknown interaction transport — update match arm");
+                        }
                     }
                 }
 
