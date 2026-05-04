@@ -198,6 +198,8 @@ pub(crate) async fn register_scheduler(
     let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
     let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
     let ca_tx_sub = ca_tx.subscribe();
+    #[cfg(feature = "plugin-ops")]
+    let controller_update_hook = app_state.controller_update_hook();
 
     let add_result = host
         .add(
@@ -229,6 +231,8 @@ pub(crate) async fn register_scheduler(
                             ca_snapshot: ca_tx_sub,
                             ca_rotation_trigger,
                             revocation_notify,
+                            #[cfg(feature = "plugin-ops")]
+                            controller_update_hook,
                         },
                         tokens.drain,
                         tokens.abort,

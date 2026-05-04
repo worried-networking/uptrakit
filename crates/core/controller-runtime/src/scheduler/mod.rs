@@ -25,6 +25,9 @@ pub(crate) struct EmbeddedSchedulerConfig {
     pub ca_snapshot: tokio::sync::watch::Receiver<pki::CaSnapshot>,
     pub ca_rotation_trigger: Arc<Notify>,
     pub revocation_notify: Arc<Notify>,
+    #[cfg(feature = "plugin-ops")]
+    pub controller_update_hook:
+        Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>>,
 }
 
 #[cfg(feature = "embedded-scheduler")]
@@ -44,6 +47,8 @@ pub(crate) async fn run_embedded_scheduler(
         config.db.clone(),
         Arc::clone(&config.ca_rotation_trigger),
         Arc::clone(&config.revocation_notify),
+        #[cfg(feature = "plugin-ops")]
+        config.controller_update_hook,
     ));
     let db = config.db.clone();
     let notifier_for_extras = Arc::clone(&notifier);
@@ -158,6 +163,9 @@ pub(crate) struct ControllerSchedulerNotifier {
     db: sea_orm::DatabaseConnection,
     ca_rotation_trigger: Arc<Notify>,
     revocation_notify: Arc<Notify>,
+    #[cfg(feature = "plugin-ops")]
+    controller_update_hook:
+        Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>>,
 }
 
 impl ControllerSchedulerNotifier {
@@ -166,12 +174,17 @@ impl ControllerSchedulerNotifier {
         db: sea_orm::DatabaseConnection,
         ca_rotation_trigger: Arc<Notify>,
         revocation_notify: Arc<Notify>,
+        #[cfg(feature = "plugin-ops")] controller_update_hook: Option<
+            std::sync::Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>,
+        >,
     ) -> Self {
         Self {
             notification_service,
             db,
             ca_rotation_trigger,
             revocation_notify,
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook,
         }
     }
 }
@@ -226,7 +239,7 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
             notifier: &self.notification_service,
             protection: None,
             #[cfg(feature = "plugin-ops")]
-            hook: None,
+            hook: self.controller_update_hook.clone(),
             #[cfg(feature = "plugin-ops")]
             notification_ops: None,
         };
