@@ -272,6 +272,10 @@ pub(super) async fn handle_service_trigger_host_batch_update(
         crate::queries::update_dispatch::DispatchContext {
             notifier: &state.notification.notification_service,
             protection: state.controller_update_protection(),
+            #[cfg(feature = "plugin-ops")]
+            hook: state.controller_update_hook(),
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: Some(state.plugin_ops.as_ref()),
         },
         &params,
         outdated,

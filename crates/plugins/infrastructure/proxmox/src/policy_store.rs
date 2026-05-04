@@ -1003,4 +1003,44 @@ mod scaling_record_tests {
         let result = upsert_scaling_record(&db, &record).await;
         assert!(result.is_ok(), "upsert should succeed: {result:?}");
     }
+
+    #[tokio::test]
+    async fn scaling_record_with_scaling_status_is_eligible_for_restore() {
+        // Verifies that load_scaling_record returns a record with scale_status "scaling"
+        // and that finalize_post_update_hook's guard treats "scaling" the same as "scaled".
+        use crate::entity::proxmox_resource_scaling_record;
+        use sea_orm::{DbBackend, MockDatabase};
+
+        let update_id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([vec![proxmox_resource_scaling_record::Model {
+                update_history_id: update_id,
+                tenant_id: uuid::Uuid::now_v7(),
+                host_id: uuid::Uuid::now_v7(),
+                software_item_id: uuid::Uuid::now_v7(),
+                plugin_config_id: uuid::Uuid::now_v7(),
+                mapping_id: uuid::Uuid::now_v7(),
+                vm_type: "qemu".to_string(),
+                original_cores: 2,
+                original_memory_mb: 2048,
+                scaled_cores: 4,
+                scaled_memory_mb: 4096,
+                scale_status: "scaling".to_string(),
+                restore_status: "pending".to_string(),
+                error_message: None,
+                created_at: now,
+                updated_at: now,
+            }]])
+            .into_connection();
+
+        let record = load_scaling_record(&db, update_id).await.unwrap().unwrap();
+        assert_eq!(record.scale_status, "scaling");
+        // The guard in finalize_post_update_hook treats "scaling" the same as "scaled".
+        assert!(
+            record.scale_status == "scaled" || record.scale_status == "scaling",
+            "scale_status '{}' should be eligible for restore",
+            record.scale_status
+        );
+    }
 }

@@ -145,6 +145,10 @@ pub async fn trigger_host_batch_update(
         ctx: &ctx,
         protection: state.controller_update_protection(),
         batch_progress: &state.broadcast.batch_progress_broadcaster,
+        #[cfg(feature = "plugin-ops")]
+        hook: state.controller_update_hook(),
+        #[cfg(feature = "plugin-ops")]
+        notification_ops: Some(state.plugin_ops.as_ref()),
     };
     let resp = match batch_actions::trigger_host_batch(
         &bctx,
@@ -247,6 +251,10 @@ pub async fn trigger_item_batch_update(
         ctx: &ctx,
         protection: state.controller_update_protection(),
         batch_progress: &state.broadcast.batch_progress_broadcaster,
+        #[cfg(feature = "plugin-ops")]
+        hook: state.controller_update_hook(),
+        #[cfg(feature = "plugin-ops")]
+        notification_ops: Some(state.plugin_ops.as_ref()),
     };
     let resp = match batch_actions::trigger_item_batch(
         &bctx,

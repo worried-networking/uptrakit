@@ -249,6 +249,10 @@ pub async fn create_batch(
                     DispatchContext {
                         notifier: dispatch.notifier,
                         protection: dispatch.protection.clone(),
+                        #[cfg(feature = "plugin-ops")]
+                        hook: dispatch.hook.clone(),
+                        #[cfg(feature = "plugin-ops")]
+                        notification_ops: dispatch.notification_ops,
                     },
                     batch_id,
                     candidate.host_id,
@@ -266,6 +270,16 @@ pub async fn create_batch(
                 });
                 continue;
             }
+
+            #[cfg(feature = "plugin-ops")]
+            crate::queries::update_dispatch::prepare_pre_update_hook(
+                db,
+                dispatch.hook.clone(),
+                target,
+                update_history_id,
+                None,
+            )
+            .await;
 
             let connected = super::update_dispatch::dispatch_update_to_agent(
                 dispatch.notifier,
@@ -711,6 +725,10 @@ pub(crate) mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: None,
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             &CreateBatchParams {
                 tenant_id: f.tenant_id,
@@ -802,6 +820,10 @@ pub(crate) mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: Some(protection.clone()),
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             &CreateBatchParams {
                 tenant_id: f.tenant_id,

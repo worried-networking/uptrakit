@@ -1099,6 +1099,10 @@ async fn trigger_host_progression_after_awaiting_restart(
     let dispatch = crate::queries::update_dispatch::DispatchContext {
         notifier: &state.notification.notification_service,
         protection: state.controller_update_protection(),
+        #[cfg(feature = "plugin-ops")]
+        hook: state.controller_update_hook(),
+        #[cfg(feature = "plugin-ops")]
+        notification_ops: Some(state.plugin_ops.as_ref()),
     };
 
     if let Some(batch_id) = record.batch_id {

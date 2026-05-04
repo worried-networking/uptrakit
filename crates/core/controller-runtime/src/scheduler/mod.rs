@@ -225,6 +225,10 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
         let dispatch = uptrakit_web_api::queries::update_dispatch::DispatchContext {
             notifier: &self.notification_service,
             protection: None,
+            #[cfg(feature = "plugin-ops")]
+            hook: None,
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: None,
         };
         if let Err(e) = uptrakit_web_api::queries::update_batches::dispatch_next_queued_for_host(
             &self.db, dispatch, host_id, tenant_id,

@@ -29,6 +29,7 @@ journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
 mcp = ["dep:uptrakit-mcp"]
+plugin-ops = ["uptrakit-web-api/plugin-ops", "uptrakit-plugin-infrastructure-registry/plugin-ops"]
 
 [dependencies]
 uptrakit-wire = { workspace = true }
