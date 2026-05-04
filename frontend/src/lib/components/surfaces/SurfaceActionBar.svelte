@@ -54,7 +54,7 @@
 {:else if resolvedActions.length === 0}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
-	<div class="flex flex-wrap justify-end gap-2" data-ui="surface-action-bar">
+	<div class="@container/buttons flex flex-wrap justify-end gap-2" data-ui="surface-action-bar">
 		{#each resolvedActions as interaction (interaction.interaction_id)}
 			<SurfaceInteractionButton
 				{surfaceId}
@@ -63,6 +63,7 @@
 				{targetProviderId}
 				{encryptionContext}
 				{baseParams}
+				labelDisplay={interaction.icon ? 'auto' : 'always'}
 				requiredContextParam={requiredForInteractionIds.includes(interaction.interaction_id)
 					? requiredContextParam
 					: undefined}
