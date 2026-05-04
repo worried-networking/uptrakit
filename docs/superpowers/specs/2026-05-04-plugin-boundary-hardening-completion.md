@@ -115,9 +115,96 @@ Order rationale:
 ## Wave A — Type-system primitives
 
 **Goal:** Add `PluginTableDescriptor`, `DbMigrateTablesFn`,
-`db_migrate_tables` descriptor field, and registry helpers
-(`copy_plugin_tables` / `clean_plugin_tables` / `verify_plugin_tables`). No
-plugin populates the new field yet. Purely additive.
+`db_migrate_tables` descriptor field, the shared `TableMigrateError`
+enum, and registry helpers (`copy_plugin_tables` / `clean_plugin_tables` /
+`verify_plugin_tables`). No plugin populates the new field yet. Purely
+additive.
+
+**Why typed descriptors instead of a `sqlite_master`-driven schema-less
+copy?** A schema-less approach (read every table via `sqlite_master`,
+`INSERT … SELECT *`) is simpler but only works for SQLite ↔ SQLite. The
+real use case is SQLite ↔ Postgres: metadata catalogs differ
+(`sqlite_master` vs `information_schema.tables`), `PRAGMA foreign_keys`
+has no Postgres analogue, and column-type coercions (booleans, JSON,
+timestamps with offsets) need SeaORM's typed model layer to round-trip
+correctly. The typed-entity descriptor approach reuses the same
+`IntoActiveModel` path that already works in `migrate_table<E>` today
+and keeps cross-backend semantics correct without per-table special-casing
+in the orchestrator.
+
+**Why does `TableMigrateError` live in `shared-db` even though Wave A
+adds no `shared-db` helpers using it yet?** Cycle direction:
+`plugin-infrastructure-core` already takes `uptrakit-shared-db` as an
+optional dep. Reversing the edge for shared types would create a cycle.
+`shared-db` is the only crate downstream-of-nothing-relevant that all
+migration consumers (core helpers in Wave C, registry helpers from Wave
+A, orchestrator in Waves B + C) can import without rearranging the
+dependency graph. The enum has only one external consumer between Waves
+A and C (the registry); Wave C adds the second (core helpers). The
+intermediate state is brief and the location is justified by graph
+shape, not by usage count at any single moment.
+
+### `shared-db` — new `db-migrate` feature + shared error type
+
+Add a `db-migrate` feature flag in `crates/shared/db/Cargo.toml`:
+
+```toml
+[features]
+db-migrate = []
+```
+
+Wave A introduces only the new error enum under this flag; Wave C adds the
+core helpers later. Hosting the enum in `shared-db` (rather than
+`plugin-infrastructure-core`) avoids a dependency cycle: `shared-db` is a
+parallel/upstream crate to `plugin-infrastructure-core`
+(`plugin-infrastructure-core` already takes `uptrakit-shared-db` as an
+optional dep), so reversing the direction is impossible. `shared-db` is
+also the natural home for migration-related types.
+
+New file `crates/shared/db/src/migrate_core_tables.rs`:
+
+```rust
+//! Shared types and (in Wave C) per-table operations for the `db-migrate`
+//! subcommand.
+
+#![cfg(feature = "db-migrate")]
+
+/// Errors produced by per-table copy / clean / verify operations.
+///
+/// Surfaces the table name in both variants so the orchestrator in
+/// `controller-runtime/db_migrate/tables.rs` can map directly to the
+/// existing `DbMigrateError::TableOp` and `DbMigrateError::Mismatch`
+/// variants without losing context.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum TableMigrateError {
+    /// A SeaORM driver error occurred for `table`.
+    Db {
+        table: &'static str,
+        err: sea_orm::DbErr,
+    },
+    /// `verify` found different row counts for `table`.
+    Mismatch {
+        table: &'static str,
+        src: u64,
+        dst: u64,
+    },
+}
+```
+
+Wave C extends this module with `copy`, `clean`, `verify` functions plus
+the `CORE_COPY_ORDER` const. Wave A only adds the enum.
+
+`plugin-infrastructure-core/Cargo.toml` already declares
+`uptrakit-shared-db = { workspace = true, optional = true }`. Pull it
+in under the `migrations` feature (matching how `sea-orm` is gated):
+
+```toml
+[features]
+migrations = ["sea-orm", "uptrakit-shared-db/db-migrate", "uptrakit-tenant-db"]
+```
+
+(Replace any existing `migrations` feature definition with the union.)
 
 ### `plugin-infrastructure-core/src/descriptor.rs`
 
@@ -156,12 +243,16 @@ pub struct PluginTableDescriptor {
         Box<dyn std::future::Future<Output = Result<(), sea_orm::DbErr>> + Send + 'a>,
     >,
 
-    /// Verify row counts match between `src` and `dst`. Returns the count.
+    /// Count rows on both `src` and `dst`. Returns `(src_count, dst_count)`.
+    /// The caller (registry helper) compares the pair and constructs a
+    /// structured `TableMigrateError::Mismatch` with the table name on
+    /// disagreement — the descriptor itself does not carry the table name
+    /// into the closure body.
     pub verify: for<'a> fn(
         src: &'a sea_orm::DatabaseConnection,
         dst: &'a sea_orm::DatabaseConnection,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<u64, sea_orm::DbErr>> + Send + 'a>,
+        Box<dyn std::future::Future<Output = Result<(u64, u64), sea_orm::DbErr>> + Send + 'a>,
     >,
 }
 
@@ -266,7 +357,7 @@ Bodies copied verbatim from
 #![cfg(feature = "migrations")]
 
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, DatabaseConnection, EntityTrait,
+    ActiveModelBehavior, ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait,
     IntoActiveModel, PaginatorTrait,
 };
 
@@ -274,44 +365,54 @@ pub(crate) async fn copy_one<E>(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
     batch_size: u64,
-) -> Result<u64, sea_orm::DbErr>
+) -> Result<u64, DbErr>
 where
     E: EntityTrait + 'static,
     E::Model: IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
     E::ActiveModel: ActiveModelTrait<Entity = E> + ActiveModelBehavior + Send + 'static,
 {
-    // Body: paginated batch copy. Identical to existing migrate_table<E>
-    // body in controller-runtime/db_migrate/tables.rs, modulo error type.
-    todo!("see migration of body in implementation plan")
+    // Paginated batch copy — body adapted from the existing
+    // `migrate_table<E>` helper in
+    // `controller-runtime/db_migrate/tables.rs` (lines 287–349). Error
+    // type is `DbErr` directly; the registry helper attaches the table
+    // name via `TableMigrateError::Db { table, err }`.
+    // Caller (registry helper / shared-db core helper) wraps this call
+    // with `eprintln!("{name}: copying...")` / `"{name}: {copied} rows"`
+    // before/after — `copy_one` has no `name` in scope and intentionally
+    // does not emit progress lines itself.
+    let mut copied = 0u64;
+    let mut offset = 0u64;
+    loop {
+        let batch = E::find()
+            .offset(offset)
+            .limit(batch_size)
+            .all(src)
+            .await?;
+        if batch.is_empty() {
+            break;
+        }
+        let n = batch.len() as u64;
+        let active: Vec<_> = batch.into_iter().map(IntoActiveModel::into_active_model).collect();
+        E::insert_many(active).exec(dst).await?;
+        copied += n;
+        offset += n;
+    }
+    Ok(copied)
 }
 
 pub(crate) async fn clean_one<E: EntityTrait>(
     dst: &DatabaseConnection,
-) -> Result<(), sea_orm::DbErr> {
-    // Body: E::delete_many().exec(dst).await.map(|_| ())
-    todo!("see migration of body in implementation plan")
+) -> Result<(), DbErr> {
+    E::delete_many().exec(dst).await.map(|_| ())
 }
 
-pub(crate) async fn verify_one<E>(
+pub(crate) async fn verify_one<E: EntityTrait>(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
-) -> Result<u64, sea_orm::DbErr>
-where
-    E: EntityTrait + 'static,
-    E::Model: Send + Sync + 'static,
-{
-    // Body: count src + dst, compare, return count or DbErr equivalent of
-    // mismatch. Cannot use the controller-runtime DbMigrateError::Mismatch
-    // variant from this crate; either:
-    //   (a) define a local sentinel via DbErr::Custom(format!(...)), or
-    //   (b) add a uptrakit-plugin-infrastructure-core::db_migrate::Error
-    //       enum and surface a richer error.
-    //
-    // Choice for the plan: (a). The orchestrator in tables.rs already
-    // wraps DbErr into DbMigrateError::Mismatch via inspection at the
-    // call site; the helper just needs to return a DbErr that survives
-    // round-trip. Concrete shape decided in implementation.
-    todo!("see migration of body in implementation plan")
+) -> Result<(u64, u64), DbErr> {
+    let src_count = E::find().count(src).await?;
+    let dst_count = E::find().count(dst).await?;
+    Ok((src_count, dst_count))
 }
 ```
 
@@ -339,9 +440,15 @@ match to `Some(expr)` when present and `None` when absent.
 ### `plugin-infrastructure-registry/src/lib.rs`
 
 Add three async helpers under `#[cfg(feature = "migrations")]`, following
-the existing `reset_plugin_tenant_data` pattern (lines 97–117):
+the existing `reset_plugin_tenant_data` pattern (lines 97–117). All three
+return `Result<_, TableMigrateError>` (re-exported from
+`uptrakit_shared_db::migrate_core_tables`) so the orchestrator can map
+directly to `DbMigrateError::TableOp` / `Mismatch` without losing the
+table name:
 
 ```rust
+use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
 /// Copy every plugin's tables from `src` to `dst`. Returns total rows.
 ///
 /// Iterates plugin descriptors in registration order. Within each plugin,
@@ -361,12 +468,16 @@ pub async fn copy_plugin_tables(
     src: &sea_orm::DatabaseConnection,
     dst: &sea_orm::DatabaseConnection,
     batch_size: u64,
-) -> Result<u64, sea_orm::DbErr> {
+) -> Result<u64, TableMigrateError> {
     let mut total = 0u64;
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             for table in tables_fn() {
-                total += (table.copy_batch)(src, dst, batch_size).await?;
+                let copied = (table.copy_batch)(src, dst, batch_size)
+                    .await
+                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
+                eprintln!("  {}: {copied} rows", table.name);
+                total += copied;
             }
         }
     }
@@ -376,12 +487,14 @@ pub async fn copy_plugin_tables(
 #[cfg(feature = "migrations")]
 pub async fn clean_plugin_tables(
     dst: &sea_orm::DatabaseConnection,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<(), TableMigrateError> {
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             // Reverse for FK-safe deletion (children before parents).
             for table in tables_fn().into_iter().rev() {
-                (table.clean)(dst).await?;
+                (table.clean)(dst)
+                    .await
+                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
             }
         }
     }
@@ -392,18 +505,52 @@ pub async fn clean_plugin_tables(
 pub async fn verify_plugin_tables(
     src: &sea_orm::DatabaseConnection,
     dst: &sea_orm::DatabaseConnection,
-) -> Result<u64, sea_orm::DbErr> {
+) -> Result<u64, TableMigrateError> {
     let mut total = 0u64;
     for descriptor in all_descriptors() {
         if let Some(tables_fn) = descriptor.db_migrate_tables {
             for table in tables_fn() {
-                total += (table.verify)(src, dst).await?;
+                let (src_count, dst_count) = (table.verify)(src, dst)
+                    .await
+                    .map_err(|err| TableMigrateError::Db { table: table.name, err })?;
+                if src_count != dst_count {
+                    return Err(TableMigrateError::Mismatch {
+                        table: table.name,
+                        src: src_count,
+                        dst: dst_count,
+                    });
+                }
+                total += src_count;
             }
         }
     }
     Ok(total)
 }
 ```
+
+`uptrakit-plugin-infrastructure-registry/Cargo.toml` must declare a direct
+dependency on `uptrakit-shared-db` to use the `TableMigrateError` name in
+`use` paths and signatures (Rust requires a direct edge — transitive deps
+are not enough for name resolution). Add under `[dependencies]`, gated
+behind the registry's `migrations` feature so it stays out of agent-side
+builds:
+
+```toml
+[dependencies]
+# ... existing entries ...
+uptrakit-shared-db = { workspace = true, optional = true }
+
+[features]
+migrations = [
+    # ... existing activations ...
+    "dep:uptrakit-shared-db",
+    "uptrakit-shared-db/db-migrate",
+]
+```
+
+If `uptrakit-shared-db` is already declared optional, only extend the
+`migrations` feature list. Verify the existing `Cargo.toml` shape during
+implementation.
 
 ### Acceptance
 
@@ -474,6 +621,14 @@ Replace `use uptrakit_shared_db::entity::proxmox_host_mapping` with
 | `crates/plugins/infrastructure/proxmox/src/discovery.rs`        | 260                                                                                          |
 | `crates/plugins/infrastructure/proxmox/src/matching.rs`         | 15 (with `host`)                                                                             |
 | `crates/plugins/infrastructure/proxmox/src/protection_store.rs` | 22                                                                                           |
+
+`mock_proxmox_host_mapping` at `surfaces.rs:1970-1971` has return type
+`uptrakit_shared_db::entity::proxmox_host_mapping::Model` and constructs
+`proxmox_host_mapping::Model { ... }` in its body. After the move, both
+the return type **and** the construction expression must use
+`crate::entity::proxmox_host_mapping::Model`. Search for any other
+`proxmox_host_mapping::Model` references in the plugin and update all
+hits, not only the use-statement on line 1971.
 
 `protection_store.rs:22` currently reads:
 
@@ -567,19 +722,44 @@ Edit `crates/core/controller-runtime/src/db_migrate/tables.rs`:
 - Delete `clean!(ProxmoxHostMapping, "proxmox_host_mappings");` (line 154).
 - Delete `verify!(ProxmoxHostMapping, "proxmox_host_mappings");` (line 274).
 
-Add a new error variant in `crates/core/controller-runtime/src/db_migrate/error.rs`:
+Update `crates/core/controller-runtime/src/db_migrate/error.rs` — add
+`#[non_exhaustive]` to `DbMigrateError` (project convention for extensible
+public-shaped enums; see `docs/development/coding-standards.md`). No new
+variants are added: the existing `TableOp { table, db_err }` and
+`Mismatch { table, src, dst }` variants cover both core and plugin paths
+because the registry helpers return `TableMigrateError` which carries the
+table name, and the orchestrator maps each variant directly to the
+matching `DbMigrateError` variant.
 
 ```rust
-/// A plugin-table operation (copy / clean / verify) failed.
-#[error("plugin table operation failed: {0}")]
-PluginTableOp(#[source] sea_orm::DbErr),
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub(crate) enum DbMigrateError {
+    // ... existing variants unchanged ...
+}
 ```
 
-(Existing `TableOp { table: &'static str, db_err }` cannot be reused —
-the registry helper does not surface a single static table name; the
-inner `DbErr` already includes the table context for SeaORM errors.)
+Insert calls to the new registry helpers in `tables.rs`. The helper
+return type is `TableMigrateError`; map each variant to the existing
+`DbMigrateError` shape:
 
-Insert calls to the new registry helpers in `tables.rs`:
+```rust
+use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
+fn map_plugin_err(e: TableMigrateError) -> Report<DbMigrateError> {
+    match e {
+        TableMigrateError::Db { table, err } => {
+            report!(DbMigrateError::TableOp { table, db_err: err })
+        }
+        TableMigrateError::Mismatch { table, src, dst } => {
+            report!(DbMigrateError::Mismatch { table, src, dst })
+        }
+    }
+}
+```
+
+(Define `map_plugin_err` near the top of `tables.rs` — used by all three
+orchestrator functions below.)
 
 - `copy_all`: at the very end (after the last `copy!(...)` macro),
   before `Ok(total)`:
@@ -587,7 +767,7 @@ Insert calls to the new registry helpers in `tables.rs`:
   ```rust
   total += uptrakit_plugin_infrastructure_registry::copy_plugin_tables(src, dst, batch_size)
       .await
-      .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+      .map_err(map_plugin_err)?;
   ```
 
 - `clean_all`: at the very start (before the first `clean!(...)`):
@@ -595,7 +775,7 @@ Insert calls to the new registry helpers in `tables.rs`:
   ```rust
   uptrakit_plugin_infrastructure_registry::clean_plugin_tables(dst)
       .await
-      .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+      .map_err(map_plugin_err)?;
   ```
 
   (Plugin tables come first in clean because they are leaves of the FK
@@ -607,7 +787,7 @@ Insert calls to the new registry helpers in `tables.rs`:
   ```rust
   total += uptrakit_plugin_infrastructure_registry::verify_plugin_tables(src, dst)
       .await
-      .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+      .map_err(map_plugin_err)?;
   ```
 
 The test-only `COPY_ORDER` length assertion (`assert_eq!(COPY_ORDER.len(), 49,
@@ -667,40 +847,65 @@ Add to `KNOWN_RULE_IDS` and to `RULE_MATCH_KINDS`:
 RULE_PLUGIN_ENTITY_IN_SHARED_DB: {"file_path", "module_token"},
 ```
 
-Plugin-owned entity prefixes (the rule's allowlist of forbidden filename
-stems and module names) is a hardcoded constant near
-`ALLOWED_REGISTRY_CATALOGUE_IMPORT_CRATES`:
+Plugin-owned entity stems are derived **dynamically** at checker startup
+by scanning `crates/plugins/**/entity/*.rs` files. The set of "stems
+owned by plugins" is the union of those filenames (without the `.rs`
+suffix), excluding `mod.rs`, `prelude.rs`, and `tenant_scoped.rs`.
+Hardcoding a fixed prefix list (`proxmox_`, `docker_`, …) would silently
+miss future plugin families; dynamic discovery keeps the checker in lock-step
+with the actual plugin tree.
 
 ```python
-# Entity-name prefixes owned by plugins. shared-db must not host entity
-# files or re-exports starting with these prefixes. Update when adding a
-# new plugin family that owns DB tables.
-PLUGIN_OWNED_ENTITY_PREFIXES = (
-    "proxmox_",
-    "docker_",
-    "telegram_",
-    "email_",
-)
+def _plugin_owned_entity_stems(repo_root: Path) -> frozenset[str]:
+    """Return entity-file stems owned by plugins.
+
+    Scans every `crates/plugins/**/src/entity/*.rs` file (non-recursive
+    inside the entity directory) and returns the set of stems. These
+    stems must not appear under `crates/shared/db/src/entity/`.
+    """
+    plugins_root = repo_root / "crates" / "plugins"
+    skip = {"mod.rs", "prelude.rs", "tenant_scoped.rs"}
+    stems: set[str] = set()
+    for entity_dir in plugins_root.glob("*/*/src/entity"):
+        for path in entity_dir.glob("*.rs"):
+            if path.name in skip:
+                continue
+            stems.add(path.stem)
+    return frozenset(stems)
 ```
 
 Two checks:
 
-**Check (a) — filename scan.** For each `.rs` file directly under
+**Check (a) — filename collision.** For each `.rs` file directly under
 `crates/shared/db/src/entity/` (non-recursive; `mod.rs`, `prelude.rs`, and
 `tenant_scoped.rs` are not entities), fail with `match_kind="file_path"` if
-the filename stem starts with any prefix in
-`PLUGIN_OWNED_ENTITY_PREFIXES`.
+the filename stem appears in `_plugin_owned_entity_stems(...)`.
 
 **Check (b) — `mod.rs` / `prelude.rs` token scan.** In
 `crates/shared/db/src/entity/mod.rs` and
 `crates/shared/db/src/entity/prelude.rs`, fail with
-`match_kind="module_token"` if a line matches:
+`match_kind="module_token"` if a line declares or re-exports a module
+whose name appears in `_plugin_owned_entity_stems(...)`:
 
-- `pub mod <prefix>_*;`
-- `pub use super::<prefix>_*::...;`
+- `pub mod <stem>;`
+- `pub use super::<stem>::...;`
 
-for any prefix in `PLUGIN_OWNED_ENTITY_PREFIXES`. Both checks emit
-`Finding(rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB, ...)`.
+Both checks emit `Finding(rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB, ...)`.
+
+This design self-updates: a new plugin entity automatically blocks any
+attempt to host the same entity in `shared-db`, with no checker change
+required.
+
+**Naming-convention implication.** Because the rule fires on stem
+collisions, plugin entity files must use plugin-prefixed names
+(`proxmox_*`, `docker_*`, …) to avoid clashing with core entities like
+`host.rs`, `service.rs`, `tag.rs`. This is already the established
+convention; the rule turns it into a hard requirement. If a plugin
+author legitimately needs to introduce a new entity whose stem matches a
+core entity, the resolution is to rename the plugin entity (with a
+prefix), not to weaken the rule. Document this expectation in
+`docs/development/plugin-guidelines.md` alongside the existing plugin
+naming guidance.
 
 Per-rule allowlist support is reused from the existing checker
 infrastructure. No allowlist entries are added by this spec.
@@ -802,6 +1007,19 @@ the Python rule fires. If any shell pattern lacks Python coverage, port it
 before deleting the shell file. (Current expectation: all five have
 equivalents.)
 
+**Caveat on `RULE_LEGACY_DASHBOARD_BESPOKE_SURFACE`.** The Python checker
+intentionally excludes this rule ID from `KNOWN_RULE_IDS` (see comment at
+the constant definition: "Intentionally excluded from KNOWN_RULE_IDS so
+allowlists remain spec-canonical only"). Findings emitted with this
+`rule_id` still surface as violations, but the rule cannot be referenced
+by allowlists. The implementation plan must verify that the rule's
+detection logic is equivalent to the shell rule and that the existing
+Python rule still fires on the same inputs that triggered the shell
+rule — without adding the rule ID to `KNOWN_RULE_IDS` (that would
+contradict the existing comment). If a discrepancy is found, fix the
+Python rule's pattern to match shell behaviour rather than touching
+`KNOWN_RULE_IDS`.
+
 Then:
 
 - Delete `ci/check_plugin_semantic_boundary.sh`.
@@ -817,12 +1035,15 @@ Then:
 
 - `python3 ci/check_plugin_semantic_boundary.py` exits 0 against the
   post-Wave-B codebase.
-- Adding a fixture file `crates/shared/db/src/entity/docker_test.rs`
-  (entity stub) causes the checker to exit non-zero with
-  `RULE_PLUGIN_ENTITY_IN_SHARED_DB` (`match_kind="file_path"`).
-- Adding a fixture line `pub use super::proxmox_test::Foo;` to
-  `entity/prelude.rs` causes the checker to exit non-zero with
-  `RULE_PLUGIN_ENTITY_IN_SHARED_DB` (`match_kind="module_token"`).
+- Fixture: copying any existing plugin entity file
+  (e.g. `crates/plugins/infrastructure/proxmox/src/entity/proxmox_host_mapping.rs`)
+  back into `crates/shared/db/src/entity/` causes the checker to exit
+  non-zero with `RULE_PLUGIN_ENTITY_IN_SHARED_DB` (`match_kind="file_path"`).
+- Fixture: adding `pub use super::proxmox_host_mapping::Foo;` to
+  `crates/shared/db/src/entity/prelude.rs` causes the checker to exit
+  non-zero with `RULE_PLUGIN_ENTITY_IN_SHARED_DB` (`match_kind="module_token"`)
+  — the stem `proxmox_host_mapping` is dynamically discovered as
+  plugin-owned because it lives at `crates/plugins/infrastructure/proxmox/src/entity/proxmox_host_mapping.rs`.
 - `migration_coverage_complete` passes against the post-Wave-B codebase.
 - Artificially deleting one entry from a plugin's `db_migrate_tables`
   causes `migration_coverage_complete` to fail with a helpful diff
@@ -840,17 +1061,14 @@ Then:
 `shared-db::migrate_core_tables` module, leaving `tables.rs` as a thin
 "core then plugins" orchestrator.
 
-### New `shared-db` feature `db-migrate`
+### `shared-db` feature `db-migrate` (added in Wave A; helpers added here)
 
-In `crates/shared/db/Cargo.toml`:
-
-```toml
-[features]
-db-migrate = []
-```
-
-The feature gates the new module and any helper imports. `sea-orm` is
-already a workspace dep; no new dependencies.
+The `db-migrate` feature flag was already declared in
+`crates/shared/db/Cargo.toml` during Wave A (alongside the
+`TableMigrateError` enum). Wave C extends `migrate_core_tables` with the
+actual `copy` / `clean` / `verify` functions plus `CORE_COPY_ORDER`. No
+new feature flag, no new dependencies — `sea-orm` is already a workspace
+dep.
 
 ### New module `shared-db::migrate_core_tables`
 
@@ -872,32 +1090,30 @@ Implementation: copy the macro bodies of `copy_all`, `clean_all`,
   might shift; ensure `proxmox_host_mappings` is absent from the moved
   `CORE_COPY_ORDER`).
 - Change error type from `Result<_, Report<DbMigrateError>>` to
-  `Result<_, sea_orm::DbErr>`. Per-table error wrapping
-  (`DbMigrateError::TableOp { table, db_err }`) happens at the
-  orchestrator level in `tables.rs`. The simplest path: `migrate_core_tables`
-  just propagates `DbErr`, and `tables.rs` wraps at the call site.
-
-  Caveat: the original `migrate_table<E>` helper wraps each per-table error
-  with the table name. Moving error-wrapping to `tables.rs` would lose the
-  per-table name in the `DbErr` propagated up. Either:
-  - Keep `DbMigrateError::TableOp` semantics by returning an enum-like
-    `(table_name, DbErr)` tuple from helpers.
-  - Use `sea_orm::DbErr::Custom(format!("table {name}: {db_err}"))` to
-    preserve the name in the message.
-
-  Choice for the plan: the latter. `DbMigrateError::TableOp` becomes
-  unused for core (only `PluginTableOp` and `Mismatch` survive). Simplifies
-  the orchestrator. The display string is the same shape users see today.
+  `Result<_, TableMigrateError>` (the same enum introduced in Wave A).
+  Core helpers preserve the table name via `TableMigrateError::Db { table, err }`
+  and `TableMigrateError::Mismatch { table, src, dst }` — identical to
+  the plugin helpers. The orchestrator in `tables.rs` reuses the same
+  `map_plugin_err` mapping function for both core and plugin errors,
+  preserving the existing `DbMigrateError::TableOp { table, db_err }`
+  and `DbMigrateError::Mismatch { table, src, dst }` rendering.
 
 - Move generic helpers `migrate_table<E>`, `clean_table<E>`,
   `verify_table<E>` (lines 287–397 of `tables.rs`) into
-  `migrate_core_tables.rs` as private helpers.
+  `migrate_core_tables.rs` as private helpers, adapted to return
+  `TableMigrateError` (each helper takes the table name and constructs
+  the appropriate variant on error). The same logic that
+  `plugin-infrastructure-core::db_migrate` uses for plugins applies here;
+  consider extracting the per-entity helpers into a shared private
+  function inside `shared-db::migrate_core_tables` if the duplication is
+  meaningful — but YAGNI applies: a single use site is fine.
 
 ### `controller-runtime` becomes thin orchestrator
 
-`crates/core/controller-runtime/Cargo.toml`: add
-`uptrakit-shared-db = { workspace = true, features = ["db-migrate"] }` to
-the dep list (or extend the existing dep features).
+`crates/core/controller-runtime/Cargo.toml` already declares
+`uptrakit-shared-db = { workspace = true, features = ["migration"] }`.
+Extend the feature list with `"db-migrate"` (do not add a new `dependencies`
+entry).
 
 `crates/core/controller-runtime/src/db_migrate/tables.rs` is rewritten
 (target ≤ 50 LoC):
@@ -910,6 +1126,18 @@ use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 
 use super::error::{DbMigrateError, Result};
+use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
+fn map_table_err(e: TableMigrateError) -> Report<DbMigrateError> {
+    match e {
+        TableMigrateError::Db { table, err } => {
+            report!(DbMigrateError::TableOp { table, db_err: err })
+        }
+        TableMigrateError::Mismatch { table, src, dst } => {
+            report!(DbMigrateError::Mismatch { table, src, dst })
+        }
+    }
+}
 
 pub(crate) async fn copy_all(
     src: &DatabaseConnection,
@@ -918,10 +1146,10 @@ pub(crate) async fn copy_all(
 ) -> Result<u64> {
     let mut total = uptrakit_shared_db::migrate_core_tables::copy(src, dst, batch_size)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     total += uptrakit_plugin_infrastructure_registry::copy_plugin_tables(src, dst, batch_size)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     Ok(total)
 }
 
@@ -929,10 +1157,10 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     // Plugin tables first (FK leaves of the core graph).
     uptrakit_plugin_infrastructure_registry::clean_plugin_tables(dst)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     uptrakit_shared_db::migrate_core_tables::clean(dst)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     Ok(())
 }
 
@@ -942,20 +1170,19 @@ pub(crate) async fn verify_all(
 ) -> Result<u64> {
     let mut total = uptrakit_shared_db::migrate_core_tables::verify(src, dst)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     total += uptrakit_plugin_infrastructure_registry::verify_plugin_tables(src, dst)
         .await
-        .map_err(|db_err| report!(DbMigrateError::PluginTableOp(db_err)))?;
+        .map_err(map_table_err)?;
     Ok(total)
 }
 ```
 
-Note: a single `PluginTableOp` variant covers both core and plugin errors
-because the inner `DbErr::Custom(...)` (used by the helper for per-table
-context) carries the table name in its message. Renaming the variant to
-something neutral like `TableOp(DbErr)` is fine; the implementation plan
-can decide. The constraint is that the rendered error messages preserve
-table-name context.
+Both core and plugin paths return `TableMigrateError`, which carries the
+table name in both `Db` and `Mismatch` variants. The single `map_table_err`
+helper folds them back into the existing `DbMigrateError::TableOp` and
+`DbMigrateError::Mismatch` variants — no new variants are introduced and
+no variant becomes orphaned.
 
 ### Update `migration_coverage_complete`
 
