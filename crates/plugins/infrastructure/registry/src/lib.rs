@@ -122,3 +122,112 @@ pub async fn reset_plugin_tenant_data(
     }
     Ok(())
 }
+
+// ── db-migrate dispatch ────────────────────────────────────────────────────
+
+/// Copy every plugin's tables from `src` to `dst`. Returns total rows.
+///
+/// Iterates plugin descriptors in registration order. Within each plugin,
+/// iterates tables in the order returned by `db_migrate_tables` (FK-safe:
+/// parent tables first).
+///
+/// # Ordering note
+///
+/// Currently only Proxmox registers `db_migrate_tables`. If multiple
+/// plugins register tables with FKs across plugin boundaries, registration
+/// order would matter. We do not have such cross-plugin FKs today; if a
+/// future plugin introduces one, add a `migration_order` hint to
+/// `PluginDescriptor` (mirroring the same TODO already documented for
+/// `reset_plugin_tenant_data`).
+#[cfg(feature = "migrations")]
+pub async fn copy_plugin_tables(
+    src: &sea_orm::DatabaseConnection,
+    dst: &sea_orm::DatabaseConnection,
+    batch_size: u64,
+) -> std::result::Result<
+    u64,
+    rootcause::Report<uptrakit_shared_db::migrate_core_tables::TableMigrateError>,
+> {
+    use rootcause::prelude::*;
+    use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
+    let mut total = 0u64;
+    for descriptor in all_descriptors() {
+        if let Some(tables_fn) = descriptor.db_migrate_tables {
+            for table in tables_fn() {
+                let copied = (table.copy_batch)(src, dst, batch_size)
+                    .await
+                    .map_err(|err| {
+                        report!(TableMigrateError::Db {
+                            table: table.name,
+                            err
+                        })
+                    })?;
+                eprintln!("  {}: {copied} rows", table.name);
+                total += copied;
+            }
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "migrations")]
+pub async fn clean_plugin_tables(
+    dst: &sea_orm::DatabaseConnection,
+) -> std::result::Result<
+    (),
+    rootcause::Report<uptrakit_shared_db::migrate_core_tables::TableMigrateError>,
+> {
+    use rootcause::prelude::*;
+    use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
+    for descriptor in all_descriptors() {
+        if let Some(tables_fn) = descriptor.db_migrate_tables {
+            // Reverse for FK-safe deletion (children before parents).
+            for table in tables_fn().into_iter().rev() {
+                (table.clean)(dst).await.map_err(|err| {
+                    report!(TableMigrateError::Db {
+                        table: table.name,
+                        err
+                    })
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "migrations")]
+pub async fn verify_plugin_tables(
+    src: &sea_orm::DatabaseConnection,
+    dst: &sea_orm::DatabaseConnection,
+) -> std::result::Result<
+    u64,
+    rootcause::Report<uptrakit_shared_db::migrate_core_tables::TableMigrateError>,
+> {
+    use rootcause::prelude::*;
+    use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+
+    let mut total = 0u64;
+    for descriptor in all_descriptors() {
+        if let Some(tables_fn) = descriptor.db_migrate_tables {
+            for table in tables_fn() {
+                let (src_count, dst_count) = (table.verify)(src, dst).await.map_err(|err| {
+                    report!(TableMigrateError::Db {
+                        table: table.name,
+                        err
+                    })
+                })?;
+                if src_count != dst_count {
+                    bail!(TableMigrateError::Mismatch {
+                        table: table.name,
+                        src: src_count,
+                        dst: dst_count,
+                    });
+                }
+                total += src_count;
+            }
+        }
+    }
+    Ok(total)
+}
