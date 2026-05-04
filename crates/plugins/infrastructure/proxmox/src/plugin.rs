@@ -24,7 +24,14 @@ use crate::update_protection::{DEFAULT_BACKUP_TIMEOUT_SECONDS, DEFAULT_SNAPSHOT_
 ///
 /// All user interaction goes through the shared-surface framework (pages and panels).
 pub struct ProxmoxPlugin {
-    pub(crate) _config: Option<ProxmoxConfig>,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "stored by controller-side constructor for future surface-action wiring; currently only validated in tests"
+        )
+    )]
+    pub(crate) config: Option<ProxmoxConfig>,
 }
 
 impl ProxmoxPlugin {
@@ -38,13 +45,13 @@ impl ProxmoxPlugin {
         _runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
         Ok(Self {
-            _config: Some(config),
+            config: Some(config),
         })
     }
 
     /// Create a new agent-side Proxmox VE plugin instance (no config).
     pub fn new_agent() -> Self {
-        Self { _config: None }
+        Self { config: None }
     }
 
     /// Return surface action definitions for the Proxmox VE plugin.
@@ -869,6 +876,7 @@ fn __proxmox_create_controller_update_protection(
     crate::update_protection::ControllerUpdateProtectionPlugin::create(config)
 }
 
+#[cfg(feature = "plugin-ops")]
 fn __proxmox_create_controller_update_hook(
     config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
 ) -> uptrakit_plugin_infrastructure_core::error::Result<
@@ -995,7 +1003,7 @@ mod tests {
     fn default_creates_agent_variant() {
         let plugin = ProxmoxPlugin::default();
         assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
-        assert!(plugin._config.is_none());
+        assert!(plugin.config.is_none());
     }
 
     // ── descriptor capabilities ─────────────────────────────────────────

@@ -237,6 +237,10 @@ allow_attributes_without_reason = "deny"
 dbg_macro = "deny"
 rc_mutex = "deny"
 
+# Underscore-prefix hygiene
+used_underscore_binding = "deny"
+used_underscore_items = "deny"
+
 [profile.dev]
 # Reduce debug info to line tables only — backtraces still work,
 # but variables are not inspectable in a debugger.

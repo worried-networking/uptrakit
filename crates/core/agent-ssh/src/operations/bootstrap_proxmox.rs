@@ -291,7 +291,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
     let (_db, pve_host) = load_and_validate_pve_host(state_dir, params).await?;
     let pve_host_name = pve_host.name.clone();
 
-    let (session, pve_executor, guest_executor, _guest_cmd_executor) =
+    let (session, pve_executor, guest_executor, guest_cmd_executor) =
         connect_and_create_executors(&pve_host, params).await?;
 
     // Probe: does the target user exist?
@@ -339,7 +339,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
 
     // Disconnect.
     drop(guest_executor);
-    drop(_guest_cmd_executor);
+    drop(guest_cmd_executor);
     drop(pve_executor);
     SshSession::disconnect_shared(session).await;
 

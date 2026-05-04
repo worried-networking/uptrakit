@@ -17,11 +17,12 @@ use time::OffsetDateTime;
 use tokio::time::timeout;
 use uptrakit_plugin_infrastructure_registry::{
     ControllerPostUpdateContext, ControllerProtectionContext, ControllerUpdateProtection,
-    NotificationOps, UpdateProtectionController, is_interactive_dispatch_plugin,
+    UpdateProtectionController, is_interactive_dispatch_plugin,
 };
 #[cfg(feature = "plugin-ops")]
 use uptrakit_plugin_infrastructure_registry::{
-    ControllerUpdateHook, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
+    ControllerUpdateHook, NotificationOps, UpdateHookController, UpdateHookPostContext,
+    UpdateHookPreContext,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
@@ -1219,7 +1220,7 @@ pub fn enrich_release_info_with_attestation(
     Some(ri)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "plugin-ops"))]
 mod hook_dispatch_tests {
     use super::*;
 
@@ -1227,7 +1228,6 @@ mod hook_dispatch_tests {
     /// taking its address as a bare item path. Async fn items are not directly
     /// coercible to a `fn(...)` pointer (they return an opaque `impl Future`),
     /// so we use a type-erased item reference instead of a fn-pointer cast.
-    #[cfg(feature = "plugin-ops")]
     const _PREPARE_PRE_UPDATE_HOOK_EXISTS: () = {
         // Taking the address of the function verifies its name and that it is
         // accessible. The `let _` suppresses the unused-value warning.
@@ -1235,7 +1235,6 @@ mod hook_dispatch_tests {
     };
 
     /// Verify that `finalize_post_update_hook` exists with the expected shape.
-    #[cfg(feature = "plugin-ops")]
     const _FINALIZE_POST_UPDATE_HOOK_EXISTS: () = {
         let _ = finalize_post_update_hook;
     };

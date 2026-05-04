@@ -260,11 +260,10 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
         })?
         .timeout(SMTP_CONNECT_TIMEOUT);
 
-    let has_credentials = if let (Some(user), Some(_pass)) =
-        (&cfg.smtp_username, &cfg.smtp_password)
+    let has_credentials = if let (Some(user), Some(pass)) = (&cfg.smtp_username, &cfg.smtp_password)
         && !user.is_empty()
     {
-        builder = builder.credentials((user.as_str(), _pass.as_str()));
+        builder = builder.credentials((user.as_str(), pass.as_str()));
         true
     } else {
         false
