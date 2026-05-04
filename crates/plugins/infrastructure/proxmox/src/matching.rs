@@ -12,7 +12,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
+use crate::entity::proxmox_host_mapping;
+use uptrakit_shared_db::entity::host;
 
 use crate::error::{ProxmoxError, Result};
 

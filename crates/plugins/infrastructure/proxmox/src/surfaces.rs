@@ -640,7 +640,8 @@ async fn handle_list(
     tenant_id: Option<Uuid>,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::{host, plugin_config, proxmox_host_mapping};
+    use crate::entity::proxmox_host_mapping;
+    use uptrakit_shared_db::entity::{host, plugin_config};
 
     let plugin_config_id: Option<Uuid> = parse_optional_uuid_param(&params, "plugin_config_id")?;
     let page = parse_pagination_page(&params);
@@ -921,7 +922,7 @@ async fn handle_get_info(
     tenant_id: Option<Uuid>,
     request: ProxmoxHostInfoRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::proxmox_host_mapping;
+    use crate::entity::proxmox_host_mapping;
 
     let host_id = request.host_id;
     tracing::debug!(%host_id, "fetching Proxmox info for host");
@@ -975,7 +976,7 @@ async fn handle_list_all_unmatched(
     tenant_id: Option<Uuid>,
     request: ProxmoxUnmatchedGuestsRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::proxmox_host_mapping;
+    use crate::entity::proxmox_host_mapping;
 
     let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
     let page = request.page.unwrap_or(1).max(1);
@@ -1971,8 +1972,8 @@ mod tests {
         tenant_id: Uuid,
         plugin_config_id: Uuid,
         name: &str,
-    ) -> uptrakit_shared_db::entity::proxmox_host_mapping::Model {
-        use uptrakit_shared_db::entity::proxmox_host_mapping;
+    ) -> crate::entity::proxmox_host_mapping::Model {
+        use crate::entity::proxmox_host_mapping;
         let now = OffsetDateTime::now_utc();
         proxmox_host_mapping::Model {
             id: Uuid::now_v7(),

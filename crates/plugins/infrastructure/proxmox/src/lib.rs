@@ -20,6 +20,7 @@ pub mod client;
 pub mod config;
 #[cfg(feature = "migrations")]
 pub mod controller_migration;
+pub(crate) mod db_migrate;
 pub mod discovery;
 pub(crate) mod entity;
 pub mod error;

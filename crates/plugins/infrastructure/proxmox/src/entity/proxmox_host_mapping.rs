@@ -1,5 +1,12 @@
+#![allow(
+    unreachable_pub,
+    reason = "entity lives in pub(crate) mod entity; pub items are crate-internal by design"
+)]
+
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
+
+use uptrakit_shared_db::entity::{host, plugin_config, tenant};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "proxmox_host_mappings")]
@@ -25,41 +32,49 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::tenant::Entity",
+        belongs_to = "tenant::Entity",
         from = "Column::TenantId",
-        to = "super::tenant::Column::Id"
+        to = "tenant::Column::Id"
     )]
     Tenant,
     #[sea_orm(
-        belongs_to = "super::plugin_config::Entity",
+        belongs_to = "plugin_config::Entity",
         from = "Column::PluginConfigId",
-        to = "super::plugin_config::Column::Id"
+        to = "plugin_config::Column::Id"
     )]
     PluginConfig,
     #[sea_orm(
-        belongs_to = "super::host::Entity",
+        belongs_to = "host::Entity",
         from = "Column::HostId",
-        to = "super::host::Column::Id"
+        to = "host::Column::Id"
     )]
     Host,
 }
 
-impl Related<super::tenant::Entity> for Entity {
+impl Related<tenant::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Tenant.def()
     }
 }
 
-impl Related<super::plugin_config::Entity> for Entity {
+impl Related<plugin_config::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::PluginConfig.def()
     }
 }
 
-impl Related<super::host::Entity> for Entity {
+impl Related<host::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Host.def()
     }
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+// ── TenantScoped impl (moved from shared-db tenant_scoped.rs) ──────────
+
+impl uptrakit_tenant_db::TenantScoped for Entity {
+    fn tenant_id_column() -> Self::Column {
+        Column::TenantId
+    }
+}

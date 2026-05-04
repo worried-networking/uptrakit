@@ -935,6 +935,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     },
     migrations: __proxmox_migrations,
     reset_tenant_data: crate::reset::proxmox_reset_tenant_data,
+    db_migrate_tables: crate::db_migrate::proxmox_db_migrate_tables,
 });
 
 // ── Stub trait implementations for declare_plugin! roles ─────────────────

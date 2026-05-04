@@ -257,7 +257,7 @@ pub async fn persist_discovered_guests(
     plugin_config_id: Uuid,
     guests: &[DiscoveredGuest],
 ) -> Result<usize> {
-    use uptrakit_shared_db::entity::proxmox_host_mapping;
+    use crate::entity::proxmox_host_mapping;
 
     tracing::debug!(guest_count = guests.len(), "persisting discovered guests");
 
