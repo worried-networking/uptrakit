@@ -99,6 +99,7 @@
 		baseParams={formBaseParams}
 		{size}
 		{oncomplete}
+		{labelDisplay}
 	/>
 {:else}
 	{#if isContextGated}
