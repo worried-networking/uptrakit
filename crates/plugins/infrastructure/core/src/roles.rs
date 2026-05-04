@@ -410,6 +410,109 @@ impl PostUpdateOutcome {
     }
 }
 
+/// Typed controller boundary for update hook workflows.
+#[cfg(feature = "plugin-ops")]
+pub trait UpdateHookController: Send + Sync {
+    /// Tenant-scoped database access for the update hook workflow.
+    fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb;
+}
+
+/// Context provided to the pre-update hook.
+#[cfg(feature = "plugin-ops")]
+#[non_exhaustive]
+pub struct UpdateHookPreContext<'a> {
+    pub controller: &'a dyn UpdateHookController,
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub update_history_id: Uuid,
+    pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+}
+
+#[cfg(feature = "plugin-ops")]
+impl<'a> UpdateHookPreContext<'a> {
+    pub fn new(
+        controller: &'a dyn UpdateHookController,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        update_history_id: Uuid,
+    ) -> Self {
+        Self {
+            controller,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+            output_tx: None,
+        }
+    }
+
+    pub fn with_output_tx(mut self, tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Self {
+        self.output_tx = Some(tx);
+        self
+    }
+}
+
+/// Context provided to the post-update hook.
+#[cfg(feature = "plugin-ops")]
+#[non_exhaustive]
+pub struct UpdateHookPostContext<'a> {
+    pub controller: &'a dyn UpdateHookController,
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub update_history_id: Uuid,
+    pub final_status: uptrakit_shared_types::UpdateStatus,
+    pub notification_ops: &'a dyn crate::plugin_ops::NotificationOps,
+    /// Tenant-scoped DB handle required by `NotificationOps::send_transactional_email`.
+    pub tenant_db: uptrakit_tenant_db::TenantDb,
+}
+
+#[cfg(feature = "plugin-ops")]
+impl<'a> UpdateHookPostContext<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        controller: &'a dyn UpdateHookController,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        update_history_id: Uuid,
+        final_status: uptrakit_shared_types::UpdateStatus,
+        notification_ops: &'a dyn crate::plugin_ops::NotificationOps,
+        tenant_db: uptrakit_tenant_db::TenantDb,
+    ) -> Self {
+        Self {
+            controller,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+            final_status,
+            notification_ops,
+            tenant_db,
+        }
+    }
+}
+
+/// Controller-side pre/post-update hook plugin (e.g. resource scaling).
+///
+/// Singleton created at catalog construction.
+#[cfg(feature = "plugin-ops")]
+#[async_trait]
+pub trait ControllerUpdateHook: PluginMeta + Send + Sync {
+    /// Called before update execution. Best-effort: returns `()` so that
+    /// scale-up failure cannot accidentally block the Update.
+    async fn prepare_pre_update_hook(&self, ctx: &UpdateHookPreContext<'_>);
+
+    /// Called after update completion. Returns `Result<()>` so restore
+    /// failures propagate to the dispatch wrapper for logging.
+    async fn finalize_post_update_hook(
+        &self,
+        ctx: &UpdateHookPostContext<'_>,
+    ) -> crate::error::Result<()>;
+}
+
 // ── Software item lifecycle types ────────────────────────────────────────
 
 /// Snapshot of a just-created software item, decoupled from SeaORM.
@@ -670,5 +773,18 @@ mod controller_boundary_tests {
         // requiring any Proxmox-specific capability injection.
         let _surface: &dyn SurfaceActionController = &controller;
         let _protection: &dyn UpdateProtectionController = &controller;
+    }
+
+    #[cfg(feature = "plugin-ops")]
+    #[test]
+    fn update_hook_controller_trait_is_object_safe() {
+        struct TestHookCtrl;
+        impl UpdateHookController for TestHookCtrl {
+            fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+                unimplemented!()
+            }
+        }
+        let ctrl = TestHookCtrl;
+        let _dyn: &dyn UpdateHookController = &ctrl;
     }
 }
