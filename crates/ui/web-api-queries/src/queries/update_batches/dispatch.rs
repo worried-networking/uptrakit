@@ -995,16 +995,28 @@ pub async fn fail_pending_unowned_update(
         failed.output = final_output.clone();
         failed.output_bytes = final_output.len() as i64;
         #[cfg(feature = "plugin-ops")]
-        if let Some(ops) = notification_ops {
-            if let Err(error) =
-                crate::queries::update_dispatch::finalize_post_update_hook(db, hook, ops, &failed)
+        {
+            match (hook.as_ref(), notification_ops) {
+                (Some(_), None) => {
+                    tracing::warn!(
+                        update_id = %update_history_id,
+                        "post-update hook skipped: notification_ops unavailable in this dispatch context"
+                    );
+                }
+                (_, Some(ops)) => {
+                    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
+                        db, hook, ops, &failed,
+                    )
                     .await
-            {
-                tracing::warn!(
-                    update_id = %update_history_id,
-                    error = %error,
-                    "post-update hook (resource restore) failed while failing unowned pending update"
-                );
+                    {
+                        tracing::warn!(
+                            update_id = %update_history_id,
+                            error = %error,
+                            "post-update hook (resource restore) failed while failing unowned pending update"
+                        );
+                    }
+                }
+                (None, _) => {}
             }
         }
         if let Err(error) = finalize_post_update(db, protection, &failed).await {
