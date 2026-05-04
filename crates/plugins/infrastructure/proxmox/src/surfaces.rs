@@ -1135,8 +1135,6 @@ async fn handle_save_global_defaults(
             backup_target_key,
             snapshot_timeout_seconds: snapshot_timeout,
             backup_timeout_seconds: backup_timeout,
-            update_cores: None,
-            update_memory_mb: None,
         },
     )
     .await
@@ -1268,8 +1266,6 @@ async fn handle_save_item_overrides(
             backup_target_key,
             snapshot_timeout_seconds: snapshot_timeout,
             backup_timeout_seconds: backup_timeout,
-            update_cores: None,
-            update_memory_mb: None,
         },
     )
     .await
@@ -2015,8 +2011,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: Some(240),
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
             created_at: now,
             updated_at: now,
         };

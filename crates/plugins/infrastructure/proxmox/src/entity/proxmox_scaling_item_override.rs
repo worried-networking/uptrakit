@@ -7,16 +7,18 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "proxmox_protection_defaults")]
+#[sea_orm(table_name = "proxmox_scaling_item_overrides")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     pub tenant_id: Uuid,
-    #[sea_orm(primary_key, auto_increment = false)]
+    pub software_item_id: Uuid,
     pub plugin_config_id: Uuid,
-    pub mode: String,
-    pub backup_target_key: Option<String>,
-    pub snapshot_timeout_seconds: Option<i64>,
-    pub backup_timeout_seconds: Option<i64>,
+    pub scaling_mode: String,
+    pub absolute_cores: Option<i32>,
+    pub absolute_memory_mb: Option<i32>,
+    pub delta_cores: Option<i32>,
+    pub delta_memory_mb: Option<i32>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

@@ -245,8 +245,6 @@ fn map_policy_record(policy: ProxmoxProtectionPolicyRecord) -> ProtectionPolicy 
                 .backup_timeout_seconds
                 .unwrap_or(DEFAULT_BACKUP_TIMEOUT_SECONDS),
         ),
-        update_cores: policy.update_cores,
-        update_memory_mb: policy.update_memory_mb,
     }
 }
 
@@ -865,8 +863,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         };
         let audit = ProtectionAudit {
             update_history_id: Uuid::now_v7(),
@@ -893,8 +889,6 @@ mod tests {
             backup_target_key: Some("node:local:dir".to_string()),
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         };
         let audit = ProtectionAudit {
             update_history_id: Uuid::now_v7(),
@@ -945,8 +939,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         };
         let proxmox_cfg = dummy_proxmox_config();
         let ctx = ControllerProtectionContext::new(
@@ -1005,8 +997,6 @@ mod tests {
             backup_target_key: Some(target_key.clone()),
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         };
         let proxmox_cfg = dummy_proxmox_config();
         let ctx = ControllerProtectionContext::new(
@@ -1095,8 +1085,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: Some(240),
             backup_timeout_seconds: Some(900),
-            update_cores: None,
-            update_memory_mb: None,
         };
 
         assert_eq!(snapshot_wait_timeout(&policy), Duration::from_secs(240));
@@ -1109,8 +1097,6 @@ mod tests {
             backup_target_key: Some("pbs-home:pbs".to_string()),
             snapshot_timeout_seconds: Some(120),
             backup_timeout_seconds: Some(900),
-            update_cores: None,
-            update_memory_mb: None,
         };
 
         assert_eq!(backup_wait_timeout(&policy), Duration::from_secs(900));
@@ -1123,8 +1109,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         });
         assert_eq!(snapshot_wait_timeout(&policy), Duration::from_secs(120));
     }
@@ -1136,8 +1120,6 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
-            update_cores: None,
-            update_memory_mb: None,
         });
         assert_eq!(backup_wait_timeout(&policy), Duration::from_secs(900));
     }

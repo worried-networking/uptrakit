@@ -17,8 +17,6 @@ pub struct Model {
     pub backup_target_key: Option<String>,
     pub snapshot_timeout_seconds: Option<i64>,
     pub backup_timeout_seconds: Option<i64>,
-    pub update_cores: Option<i32>,
-    pub update_memory_mb: Option<i32>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
