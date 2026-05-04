@@ -361,4 +361,49 @@ describe('SurfaceInteractionButton', () => {
 			expect(button.closest('span[title]')).toBeNull();
 		});
 	});
+
+	it('passes labelDisplay and icon down to SurfaceActionButton', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sync-host',
+			kind: 'mutation_action',
+			label: 'Sync',
+			transport: { mode: 'controller_local' },
+			icon: 'refresh-cw'
+		};
+
+		const { container } = render(SurfaceInteractionButton, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions: [interaction],
+			labelDisplay: 'icon-only'
+		});
+
+		expect(container.querySelector('.sr-only')?.textContent).toBe('Sync');
+		expect(container.querySelector('span[title="Sync"]')).not.toBeNull();
+		expect(container.querySelector('svg')).not.toBeNull();
+	});
+
+	it('keeps the context-gated outer span and disables the inner button', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sync-host',
+			kind: 'mutation_action',
+			label: 'Sync',
+			transport: { mode: 'controller_local' },
+			icon: 'refresh-cw'
+		};
+
+		const { container } = render(SurfaceInteractionButton, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions: [interaction],
+			baseParams: {},
+			labelDisplay: 'icon-only',
+			requiredContextParam: 'config_id'
+		});
+
+		const gateSpan = container.querySelector('span[title="Select a configuration first"]');
+		expect(gateSpan).not.toBeNull();
+		const button = container.querySelector('button');
+		expect(button?.disabled).toBe(true);
+	});
 });
