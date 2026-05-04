@@ -8,6 +8,7 @@
 //! name recorded in `seaql_migrations` matches the original name from when
 //! these migrations lived in `crates/shared/db`.
 
+use sea_orm::TransactionTrait as _;
 use sea_orm_migration::prelude::*;
 
 // ── Migration: create proxmox_host_mappings ─────────────────────────────────
@@ -1312,6 +1313,7 @@ enum ProxmoxResourceScalingRecords {
     ErrorMessage,
     CreatedAt,
     UpdatedAt,
+    ScalingModeUsed,
 }
 
 // ── Scaling tables DeriveIden enums ────────────────────────────────────────
@@ -1419,6 +1421,181 @@ impl MigrationTrait for CreateProxmoxScalingItemOverrides {
             .drop_table(
                 Table::drop()
                     .table(ProxmoxScalingItemOverrides::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+// ── Migration C: migrate scaling config from protection tables ──────────────
+
+pub struct MigrateProxmoxScalingFromProtectionTables;
+
+impl MigrationName for MigrateProxmoxScalingFromProtectionTables {
+    fn name(&self) -> &str {
+        "m20260504_000003_migrate_scaling_from_protection_tables"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Wrap all five statements in an explicit transaction.
+        // Without this, if C.2 fails after C.1 succeeds, the migration is permanently
+        // broken: on retry, C.1 hits the UNIQUE constraint and fails again with no recovery path.
+        let txn = manager.get_connection().begin().await?;
+
+        // C.1 — copy from proxmox_protection_defaults
+        txn.execute_unprepared(
+            "INSERT INTO proxmox_scaling_defaults \
+             (id, tenant_id, plugin_config_id, scaling_mode, \
+              absolute_cores, absolute_memory_mb, delta_cores, delta_memory_mb, \
+              created_at, updated_at) \
+             SELECT \
+               lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || \
+               lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || \
+               lower(hex(randomblob(6))), \
+               tenant_id, plugin_config_id, 'absolute', \
+               update_cores, update_memory_mb, NULL, NULL, \
+               created_at, updated_at \
+             FROM proxmox_protection_defaults \
+             WHERE update_cores IS NOT NULL OR update_memory_mb IS NOT NULL",
+        )
+        .await?;
+
+        // C.2 — copy from proxmox_protection_item_overrides (join plugin_configs for tenant_id)
+        txn.execute_unprepared(
+            "INSERT INTO proxmox_scaling_item_overrides \
+             (id, tenant_id, software_item_id, plugin_config_id, scaling_mode, \
+              absolute_cores, absolute_memory_mb, delta_cores, delta_memory_mb, \
+              created_at, updated_at) \
+             SELECT \
+               lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || \
+               lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || \
+               lower(hex(randomblob(6))), \
+               pc.tenant_id, \
+               pio.software_item_id, pio.plugin_config_id, 'absolute', \
+               pio.update_cores, pio.update_memory_mb, NULL, NULL, \
+               pio.created_at, pio.updated_at \
+             FROM proxmox_protection_item_overrides pio \
+             JOIN plugin_configs pc ON pc.id = pio.plugin_config_id \
+             WHERE pio.update_cores IS NOT NULL OR pio.update_memory_mb IS NOT NULL",
+        )
+        .await?;
+
+        // C.3 — null out source columns (D will drop them; C leaves DB coherent if D fails)
+        txn.execute_unprepared(
+            "UPDATE proxmox_protection_defaults SET update_cores = NULL, update_memory_mb = NULL",
+        )
+        .await?;
+        txn.execute_unprepared(
+            "UPDATE proxmox_protection_item_overrides SET update_cores = NULL, update_memory_mb = NULL",
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared("DELETE FROM proxmox_scaling_defaults")
+            .await?;
+        manager
+            .get_connection()
+            .execute_unprepared("DELETE FROM proxmox_scaling_item_overrides")
+            .await?;
+        Ok(())
+    }
+}
+
+// ── Migration D: drop scaling columns from protection tables ────────────────
+
+pub struct DropProxmoxScalingColumnsFromProtectionTables;
+
+impl MigrationName for DropProxmoxScalingColumnsFromProtectionTables {
+    fn name(&self) -> &str {
+        "m20260504_000004_drop_scaling_columns_from_protection_tables"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for DropProxmoxScalingColumnsFromProtectionTables {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateCores)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .drop_column(ProxmoxResourceScalingPolicyCols::UpdateMemoryMb)
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
+        Ok(())
+    }
+}
+
+// ── Migration E: add scaling_mode_used to scaling records ──────────────────
+
+pub struct AddScalingModeUsedToScalingRecord;
+
+impl MigrationName for AddScalingModeUsedToScalingRecord {
+    fn name(&self) -> &str {
+        "m20260504_000005_add_scaling_mode_used_to_scaling_record"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddScalingModeUsedToScalingRecord {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxResourceScalingRecords::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::ScalingModeUsed)
+                            .string_len(16)
+                            .not_null()
+                            .default("absolute"),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxResourceScalingRecords::Table)
+                    .drop_column(ProxmoxResourceScalingRecords::ScalingModeUsed)
                     .to_owned(),
             )
             .await
@@ -1560,6 +1737,9 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxResourceScalingRecord),
         Box::new(CreateProxmoxScalingDefaults),
         Box::new(CreateProxmoxScalingItemOverrides),
+        Box::new(MigrateProxmoxScalingFromProtectionTables),
+        Box::new(DropProxmoxScalingColumnsFromProtectionTables),
+        Box::new(AddScalingModeUsedToScalingRecord),
     ]
 }
 
@@ -1744,6 +1924,298 @@ mod tests {
                 "missing column: {expected}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn migration_c_transfers_protection_rows_to_scaling_tables() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        // Create stub parent tables so FK constraints on protection tables are satisfied
+        db.execute_unprepared("CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY)")
+            .await
+            .unwrap();
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS plugin_configs \
+             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
+              config TEXT, created_at TEXT, updated_at TEXT)",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared(
+            "INSERT INTO tenants (id) VALUES \
+             ('aaaaaaaa-0000-0000-0000-000000000001'), \
+             ('aaaaaaaa-0000-0000-0000-000000000002')",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared(
+            "INSERT INTO plugin_configs (id, tenant_id, name, plugin_type, config, created_at, updated_at) \
+             VALUES \
+             ('bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', \
+              'cfg1', 'infrastructure_proxmox', '{}', '2026-01-01', '2026-01-01'), \
+             ('bbbbbbbb-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', \
+              'cfg2', 'infrastructure_proxmox', '{}', '2026-01-01', '2026-01-01')",
+        )
+        .await
+        .unwrap();
+
+        // Run prerequisites
+        CreateProxmoxProtectionPolicyTables
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxProtectionTimeoutColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxResourceScalingPolicyColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+        CreateProxmoxScalingItemOverrides
+            .up(&manager)
+            .await
+            .unwrap();
+
+        // Seed: one row with scaling, one without
+        db.execute_unprepared(
+            "INSERT INTO proxmox_protection_defaults \
+             (tenant_id, plugin_config_id, mode, update_cores, update_memory_mb, \
+              created_at, updated_at) \
+             VALUES \
+             ('aaaaaaaa-0000-0000-0000-000000000001', \
+              'bbbbbbbb-0000-0000-0000-000000000001', \
+              'do_nothing', 8, 4096, '2026-01-01', '2026-01-01'), \
+             ('aaaaaaaa-0000-0000-0000-000000000002', \
+              'bbbbbbbb-0000-0000-0000-000000000002', \
+              'do_nothing', NULL, NULL, '2026-01-01', '2026-01-01')",
+        )
+        .await
+        .unwrap();
+
+        MigrateProxmoxScalingFromProtectionTables
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let count: i64 = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) as c FROM proxmox_scaling_defaults WHERE scaling_mode = 'absolute'",
+            ))
+            .await.unwrap().unwrap()
+            .try_get("", "c").unwrap();
+        assert_eq!(count, 1, "one row should be migrated");
+
+        let count2: i64 = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) as c FROM proxmox_scaling_defaults",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "c")
+            .unwrap();
+        assert_eq!(count2, 1, "null-only row must not generate a scaling row");
+
+        let cores: Option<i64> = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT update_cores FROM proxmox_protection_defaults \
+                 WHERE tenant_id = 'aaaaaaaa-0000-0000-0000-000000000001'",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "update_cores")
+            .unwrap();
+        assert!(
+            cores.is_none(),
+            "source update_cores must be NULL'd after migration C"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_c_transfers_item_override_rows_to_scaling_tables() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        // Create stub parent tables before protection tables (they have FKs to these)
+        db.execute_unprepared("CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY)")
+            .await
+            .unwrap();
+        db.execute_unprepared("CREATE TABLE IF NOT EXISTS software_items (id TEXT PRIMARY KEY)")
+            .await
+            .unwrap();
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS plugin_configs \
+             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
+              config TEXT, created_at TEXT, updated_at TEXT)",
+        )
+        .await
+        .unwrap();
+
+        CreateProxmoxProtectionPolicyTables
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxProtectionTimeoutColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxResourceScalingPolicyColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+        CreateProxmoxScalingItemOverrides
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let tid = "cccccccc-0000-0000-0000-000000000001";
+        let cid = "dddddddd-0000-0000-0000-000000000001";
+        let sid = "eeeeeeee-0000-0000-0000-000000000001";
+        db.execute_unprepared(&format!("INSERT INTO tenants (id) VALUES ('{tid}')"))
+            .await
+            .unwrap();
+        db.execute_unprepared(&format!("INSERT INTO software_items (id) VALUES ('{sid}')"))
+            .await
+            .unwrap();
+        db.execute_unprepared(&format!(
+            "INSERT INTO plugin_configs (id, tenant_id, name, plugin_type, config, created_at, updated_at) \
+             VALUES ('{cid}', '{tid}', 'test', 'infrastructure_proxmox', '{{}}', '2026-01-01', '2026-01-01')"
+        ))
+        .await
+        .unwrap();
+        db.execute_unprepared(&format!(
+            "INSERT INTO proxmox_protection_item_overrides \
+             (software_item_id, plugin_config_id, mode, update_cores, update_memory_mb, created_at, updated_at) \
+             VALUES ('{sid}', '{cid}', 'do_nothing', 4, 2048, '2026-01-01', '2026-01-01')"
+        ))
+        .await
+        .unwrap();
+
+        MigrateProxmoxScalingFromProtectionTables
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let count: i64 = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) as c FROM proxmox_scaling_item_overrides WHERE scaling_mode = 'absolute'",
+            ))
+            .await.unwrap().unwrap()
+            .try_get("", "c").unwrap();
+        assert_eq!(
+            count, 1,
+            "item override row must be migrated to proxmox_scaling_item_overrides"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_d_drops_scaling_columns_from_protection_tables() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        // Create plugin_configs stub before protection tables (they have FK to plugin_configs)
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS plugin_configs \
+             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
+              config TEXT, created_at TEXT, updated_at TEXT)",
+        )
+        .await
+        .unwrap();
+
+        CreateProxmoxProtectionPolicyTables
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxProtectionTimeoutColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxResourceScalingPolicyColumns
+            .up(&manager)
+            .await
+            .unwrap();
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+        CreateProxmoxScalingItemOverrides
+            .up(&manager)
+            .await
+            .unwrap();
+        MigrateProxmoxScalingFromProtectionTables
+            .up(&manager)
+            .await
+            .unwrap();
+        DropProxmoxScalingColumnsFromProtectionTables
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let defaults = column_names(&db, "proxmox_protection_defaults").await;
+        assert!(
+            !defaults.contains(&"update_cores".to_string()),
+            "update_cores must be dropped"
+        );
+        assert!(
+            !defaults.contains(&"update_memory_mb".to_string()),
+            "update_memory_mb must be dropped"
+        );
+
+        let overrides = column_names(&db, "proxmox_protection_item_overrides").await;
+        assert!(
+            !overrides.contains(&"update_cores".to_string()),
+            "update_cores must be dropped"
+        );
+        assert!(
+            !overrides.contains(&"update_memory_mb".to_string()),
+            "update_memory_mb must be dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_e_adds_scaling_mode_used_to_scaling_records() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        CreateProxmoxResourceScalingRecord
+            .up(&manager)
+            .await
+            .unwrap();
+        AddScalingModeUsedToScalingRecord
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let cols = column_names(&db, "proxmox_resource_scaling_records").await;
+        assert!(
+            cols.contains(&"scaling_mode_used".to_string()),
+            "scaling_mode_used must exist"
+        );
+
+        db.execute_unprepared(
+            "INSERT INTO proxmox_resource_scaling_records \
+             (update_history_id, tenant_id, host_id, software_item_id, plugin_config_id, \
+              mapping_id, vm_type, original_cores, original_memory_mb, scaled_cores, \
+              scaled_memory_mb, scale_status, restore_status, created_at, updated_at) \
+             VALUES ('h1', 't1', 'h2', 's1', 'p1', 'm1', 'qemu', 4, 4096, 8, 8192, \
+                     'scaled', 'pending', '2026-01-01', '2026-01-01')",
+        )
+        .await
+        .unwrap();
+        let mode: String = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT scaling_mode_used FROM proxmox_resource_scaling_records WHERE update_history_id = 'h1'",
+            ))
+            .await.unwrap().unwrap()
+            .try_get("", "scaling_mode_used").unwrap();
+        assert_eq!(mode, "absolute");
     }
 
     #[tokio::test]
