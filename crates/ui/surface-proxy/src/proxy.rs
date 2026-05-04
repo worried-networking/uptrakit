@@ -406,6 +406,12 @@ impl SurfaceProxy {
                 self.store_cached_response(idem_key, request_fingerprint, response.clone());
                 Ok(response)
             }
+            &_ => {
+                tracing::warn!("unknown interaction transport — update match arm");
+                Err(SurfaceProxyError::SchemaValidationFailed(
+                    "unsupported interaction transport".to_string(),
+                ))
+            }
         }
     }
 

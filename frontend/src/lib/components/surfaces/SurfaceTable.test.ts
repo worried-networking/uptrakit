@@ -693,6 +693,9 @@ describe('SurfaceTable', () => {
 		expect(screen.getByText('Alpha')).toBeInTheDocument();
 		const wrapper = container.querySelector('div.flex.flex-nowrap.\\@container\\/buttons');
 		expect(wrapper).toBeInTheDocument();
+		const td = container.querySelector('td.table-cell-pad.whitespace-nowrap');
+		expect(td).toBeInTheDocument();
+		expect(td?.classList.contains('whitespace-nowrap')).toBe(true);
 	});
 
 	it('entity-link path: icon-only labelDisplay hides label in sr-only when icon present', async () => {

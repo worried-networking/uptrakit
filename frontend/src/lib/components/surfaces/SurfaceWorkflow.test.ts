@@ -961,6 +961,33 @@ describe('SurfaceWorkflow', () => {
 		expect(container.querySelector('svg')).not.toBeNull();
 	});
 
+	it('trigger is wrapped in @container/buttons container', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		const { container } = render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const wrapper = container.querySelector('div.\\@container\\/buttons');
+		expect(wrapper).toBeInTheDocument();
+		expect(wrapper?.classList.contains('inline-flex')).toBe(true);
+	});
+
 	it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
 		const interaction: InteractionDescriptor = {
