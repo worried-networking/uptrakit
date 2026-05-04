@@ -558,6 +558,23 @@ class PluginSemanticBoundaryTests(unittest.TestCase):
                     msg=output,
                 )
 
+    def test_plugin_entity_in_shared_db_file_path_match(self) -> None:
+        result = run_checker("fail/plugin_entity_in_shared_db_file_path")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        self.assertIn("plugin-entity-in-shared-db", output, msg=output)
+        self.assertIn("match_kind=file_path", output, msg=output)
+        self.assertIn("fake_plugin_entity", output, msg=output)
+
+    def test_plugin_entity_in_shared_db_module_token_match(self) -> None:
+        result = run_checker("fail/plugin_entity_in_shared_db_module_token")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        self.assertIn("plugin-entity-in-shared-db", output, msg=output)
+        self.assertIn("match_kind=module_token", output, msg=output)
+        self.assertIn("mod.rs", output, msg=output)
+        self.assertIn("prelude.rs", output, msg=output)
+
     def test_rust_raw_payload_literals_are_detected_without_external_context(self) -> None:
         result = run_checker("fail/rust_raw_payload_literals")
         output = result.stdout + result.stderr
