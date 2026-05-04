@@ -1,5 +1,7 @@
 pub mod db_error;
 pub mod entity;
+#[cfg(feature = "db-migrate")]
+pub mod migrate_core_tables;
 #[cfg(feature = "migration")]
 pub mod migration;
 pub mod provider_settings;
