@@ -252,7 +252,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                icon: None,
+                icon: Some("radar".to_string()),
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("test-connection").expect("literal"),
@@ -267,7 +267,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                icon: None,
+                icon: Some("plug-zap".to_string()),
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("approve-match").expect("literal"),
@@ -282,7 +282,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                icon: None,
+                icon: Some("check".to_string()),
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("match").expect("literal"),
@@ -333,7 +333,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                     ],
                     pre_load_interaction_id: None,
                 }),
-                icon: None,
+                icon: Some("link".to_string()),
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("unmatch").expect("literal"),
@@ -354,7 +354,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                icon: None,
+                icon: Some("unlink".to_string()),
             },
         ],
         data_sources: vec![surfaces::DataSourceDescriptor {
@@ -1419,6 +1419,33 @@ mod tests {
         assert!(DESCRIPTOR.migrations.is_some());
         let migrations = (DESCRIPTOR.migrations.unwrap())();
         assert!(!migrations.is_empty());
+    }
+
+    #[test]
+    fn proxmox_hosts_surface_interactions_carry_icons() {
+        let registrations = proxmox_surface_registrations();
+        let proxmox = registrations
+            .first()
+            .expect("plugin returns at least one registration");
+        let hosts_surface = proxmox
+            .surfaces
+            .iter()
+            .find(|s| s.descriptor.surface_id.as_str() == "proxmox.hosts")
+            .expect("proxmox.hosts surface present");
+
+        let by_id: std::collections::HashMap<&str, &surfaces::InteractionDescriptor> =
+            hosts_surface
+                .interactions
+                .iter()
+                .map(|i| (i.interaction_id.as_str(), i))
+                .collect();
+
+        assert_eq!(by_id["discover"].icon.as_deref(), Some("radar"));
+        assert_eq!(by_id["test-connection"].icon.as_deref(), Some("plug-zap"));
+        assert_eq!(by_id["approve-match"].icon.as_deref(), Some("check"));
+        assert_eq!(by_id["match"].icon.as_deref(), Some("link"));
+        assert_eq!(by_id["unmatch"].icon.as_deref(), Some("unlink"));
+        assert!(by_id["list"].icon.is_none());
     }
 
     /// Helper to create a test runtime.
