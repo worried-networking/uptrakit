@@ -126,4 +126,60 @@ describe('SurfaceActionBar', () => {
 		expect(discoverBtn).toBeDisabled();
 		expect(testBtn).toBeDisabled();
 	});
+
+	it('marks the outer wrapper as a button container query parent', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sync',
+			kind: 'mutation_action',
+			label: 'Sync',
+			transport: { mode: 'controller_local' },
+			icon: 'refresh-cw'
+		};
+
+		const { container } = render(SurfaceActionBar, {
+			surfaceId: 'demo',
+			actionIds: ['sync'],
+			interactions: [interaction]
+		});
+
+		const bar = container.querySelector('[data-ui="surface-action-bar"]');
+		expect(bar).not.toBeNull();
+		expect(bar?.classList.contains('@container/buttons')).toBe(true);
+	});
+
+	it('passes labelDisplay="auto" to children when interaction has icon', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sync',
+			kind: 'mutation_action',
+			label: 'Sync',
+			transport: { mode: 'controller_local' },
+			icon: 'refresh-cw'
+		};
+
+		const { container } = render(SurfaceActionBar, {
+			surfaceId: 'demo',
+			actionIds: ['sync'],
+			interactions: [interaction]
+		});
+
+		expect(container.querySelector('.button-label-auto')?.textContent).toBe('Sync');
+	});
+
+	it('passes labelDisplay="always" to children when interaction has no icon', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sync',
+			kind: 'mutation_action',
+			label: 'Sync',
+			transport: { mode: 'controller_local' }
+		};
+
+		const { container } = render(SurfaceActionBar, {
+			surfaceId: 'demo',
+			actionIds: ['sync'],
+			interactions: [interaction]
+		});
+
+		expect(container.querySelector('.button-label-auto')).toBeNull();
+		expect(container.textContent).toContain('Sync');
+	});
 });
