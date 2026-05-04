@@ -13,6 +13,7 @@ use crate::{
     config::ProxmoxConfig,
     policy_store::{self, ScalingRecord},
     protection_store::{DbProxmoxProtectionStore, ProxmoxProtectionStore as _},
+    scaling_store::{self as ss, ScalingMode, ScalingPolicy},
 };
 
 pub(crate) struct ControllerUpdateHookPlugin;
@@ -53,22 +54,26 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             }
         };
 
-        // Load effective policy
-        let policy = match store
-            .load_effective_policy(tenant_id, software_item_id, mapping.plugin_config_id)
-            .await
+        // Load effective scaling policy (v2 path: scaling_store)
+        let scaling_policy = match ss::resolve_effective_scaling_policy(
+            db,
+            tenant_id,
+            software_item_id,
+            mapping.plugin_config_id,
+        )
+        .await
         {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(
                     %update_history_id, error = %e,
-                    "resource scaling: failed to load effective policy"
+                    "resource scaling: failed to load effective scaling policy"
                 );
                 return;
             }
         };
 
-        if policy.update_cores.is_none() && policy.update_memory_mb.is_none() {
+        if !scaling_policy.is_active() {
             return;
         }
 
@@ -144,7 +149,12 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                 }
             }
             "lxc" => {
-                if policy.update_memory_mb.is_some() {
+                let lxc_memory_scaling = match scaling_policy.mode {
+                    ScalingMode::Absolute => scaling_policy.absolute_memory_mb.is_some(),
+                    ScalingMode::Delta => scaling_policy.delta_memory_mb.is_some(),
+                    ScalingMode::None => false,
+                };
+                if lxc_memory_scaling {
                     tracing::warn!(
                         %update_history_id, node, vmid,
                         "resource scaling: LXC memory scaling may only take effect on next \
@@ -181,15 +191,9 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             }
         };
 
-        // Compute target values
-        let target_cores = policy
-            .update_cores
-            .map(|c| c as u32)
-            .unwrap_or(original_cores_u32);
-        let target_memory_mb = policy
-            .update_memory_mb
-            .map(|m| m as u64)
-            .unwrap_or(original_memory_u64);
+        // Compute target values from ScalingPolicy (v2)
+        let target_cores = compute_target_cores(&scaling_policy, original_cores_u32);
+        let target_memory_mb = compute_target_memory_mb(&scaling_policy, original_memory_u64);
 
         // Persist record with scale_status = "scaling" BEFORE API call (crash-safe)
         let scaling_record = ScalingRecord {
@@ -207,6 +211,7 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             scale_status: "scaling".to_string(),
             restore_status: "pending".to_string(),
             error_message: None,
+            scaling_mode_used: scaling_policy.mode,
         };
         if let Err(e) = policy_store::upsert_scaling_record(db, &scaling_record).await {
             tracing::warn!(
@@ -455,6 +460,44 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
     }
 }
 
+/// Compute target core count from a `ScalingPolicy`.
+///
+/// - `Absolute` mode: use `absolute_cores` if set, else keep original.
+/// - `Delta` mode: clamp-add `delta_cores` to original (minimum 1 core).
+/// - `None`: keep original.
+fn compute_target_cores(policy: &ScalingPolicy, original: u32) -> u32 {
+    match policy.mode {
+        ScalingMode::Absolute => policy
+            .absolute_cores
+            .map(|c| c.max(1) as u32)
+            .unwrap_or(original),
+        ScalingMode::Delta => policy
+            .delta_cores
+            .map(|d| (original as i64 + i64::from(d)).max(1) as u32)
+            .unwrap_or(original),
+        ScalingMode::None => original,
+    }
+}
+
+/// Compute target memory (MB) from a `ScalingPolicy`.
+///
+/// - `Absolute` mode: use `absolute_memory_mb` if set, else keep original.
+/// - `Delta` mode: clamp-add `delta_memory_mb` to original (minimum 16 MB).
+/// - `None`: keep original.
+fn compute_target_memory_mb(policy: &ScalingPolicy, original: u64) -> u64 {
+    match policy.mode {
+        ScalingMode::Absolute => policy
+            .absolute_memory_mb
+            .map(|m| m.max(1) as u64)
+            .unwrap_or(original),
+        ScalingMode::Delta => policy
+            .delta_memory_mb
+            .map(|d| (original as i64 + i64::from(d)).max(16) as u64)
+            .unwrap_or(original),
+        ScalingMode::None => original,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,20 +568,20 @@ mod tests {
         }
     }
 
-    fn mock_protection_default_with_scaling(
+    fn mock_scaling_default_absolute(
         tenant_id: Uuid,
         plugin_config_id: Uuid,
-    ) -> crate::entity::proxmox_protection_default::Model {
+    ) -> crate::entity::proxmox_scaling_default::Model {
         let now = OffsetDateTime::now_utc();
-        crate::entity::proxmox_protection_default::Model {
+        crate::entity::proxmox_scaling_default::Model {
+            id: Uuid::now_v7(),
             tenant_id,
             plugin_config_id,
-            mode: "do_nothing".to_string(),
-            backup_target_key: None,
-            snapshot_timeout_seconds: None,
-            backup_timeout_seconds: None,
-            update_cores: Some(8),
-            update_memory_mb: Some(4096),
+            scaling_mode: "absolute".to_string(),
+            absolute_cores: Some(8),
+            absolute_memory_mb: Some(4096),
+            delta_cores: None,
+            delta_memory_mb: None,
             created_at: now,
             updated_at: now,
         }
@@ -591,6 +634,7 @@ mod tests {
             scale_status: "scaled".to_string(),
             restore_status: "pending".to_string(),
             error_message: None,
+            scaling_mode_used: "absolute".to_string(),
             created_at: now,
             updated_at: now,
         }
@@ -645,12 +689,11 @@ mod tests {
 
     #[tokio::test]
     async fn pre_update_hook_no_op_when_no_scaling_configured() {
-        use crate::entity::{proxmox_protection_default, proxmox_protection_item_override};
+        use crate::entity::{proxmox_scaling_default, proxmox_scaling_item_override};
 
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let plugin_config_id = Uuid::now_v7();
-        let now = OffsetDateTime::now_utc();
 
         let db = MockDatabase::new(DbBackend::Sqlite)
             .append_query_results([vec![mock_host_mapping(
@@ -660,21 +703,10 @@ mod tests {
                 100,
                 "qemu",
             )]])
-            // load_item_override → None
-            .append_query_results([Vec::<proxmox_protection_item_override::Model>::new()])
-            // load_global_default → Some, but both scaling fields are None
-            .append_query_results([vec![proxmox_protection_default::Model {
-                tenant_id,
-                plugin_config_id,
-                mode: "do_nothing".to_string(),
-                backup_target_key: None,
-                snapshot_timeout_seconds: None,
-                backup_timeout_seconds: None,
-                update_cores: None,
-                update_memory_mb: None,
-                created_at: now,
-                updated_at: now,
-            }]])
+            // load_scaling_item_override → None
+            .append_query_results([Vec::<proxmox_scaling_item_override::Model>::new()])
+            // load_scaling_global_default → None (no row → ScalingPolicy::none())
+            .append_query_results([Vec::<proxmox_scaling_default::Model>::new()])
             .into_connection();
 
         let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
@@ -694,7 +726,7 @@ mod tests {
 
     #[tokio::test]
     async fn pre_update_hook_skips_scaling_when_qemu_hotplug_absent() {
-        use crate::entity::proxmox_protection_item_override;
+        use crate::entity::proxmox_scaling_item_override;
         use httpmock::prelude::*;
 
         let tenant_id = Uuid::now_v7();
@@ -718,8 +750,10 @@ mod tests {
                 100,
                 "qemu",
             )]])
-            .append_query_results([Vec::<proxmox_protection_item_override::Model>::new()])
-            .append_query_results([vec![mock_protection_default_with_scaling(
+            // load_scaling_item_override → None
+            .append_query_results([Vec::<proxmox_scaling_item_override::Model>::new()])
+            // load_scaling_global_default → Some with absolute scaling configured
+            .append_query_results([vec![mock_scaling_default_absolute(
                 tenant_id,
                 plugin_config_id,
             )]])

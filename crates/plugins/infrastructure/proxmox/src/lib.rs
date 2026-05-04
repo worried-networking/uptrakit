@@ -33,6 +33,7 @@ pub mod pve_setup;
 pub(crate) mod reset;
 #[cfg(feature = "plugin-ops")]
 pub(crate) mod resource_scaling;
+pub mod scaling_store;
 pub mod surfaces;
 pub mod update_protection;
 

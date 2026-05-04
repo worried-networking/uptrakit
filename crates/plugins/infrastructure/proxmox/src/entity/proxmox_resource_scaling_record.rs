@@ -2,10 +2,6 @@
     unreachable_pub,
     reason = "entity lives in pub(crate) mod entity; pub items are crate-internal by design"
 )]
-#![allow(
-    dead_code,
-    reason = "entity fields and types will be consumed by store modules in subsequent tasks"
-)]
 
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
@@ -28,6 +24,7 @@ pub struct Model {
     pub scale_status: String,
     pub restore_status: String,
     pub error_message: Option<String>,
+    pub scaling_mode_used: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
