@@ -130,6 +130,7 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     raw_settings_keys: &[],
     migrations: None,
     reset_tenant_data: None,
+    db_migrate_tables: None,
     global_provider_consumers: &[],
 };
 
@@ -171,5 +172,6 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     raw_settings_keys: &[],
     migrations: None,
     reset_tenant_data: None,
+    db_migrate_tables: None,
     global_provider_consumers: &[],
 };
