@@ -162,6 +162,13 @@ pub(crate) async fn load_scaling_item_override(
 /// Resolve effective scaling policy. Item override wins over global default.
 /// Dimension cascade is gated by the resolved effective mode — cross-mode
 /// inheritance is forbidden.
+#[cfg_attr(
+    not(feature = "plugin-ops"),
+    expect(
+        dead_code,
+        reason = "used by resource_scaling which is gated on plugin-ops"
+    )
+)]
 pub(crate) async fn resolve_effective_scaling_policy(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -203,10 +210,6 @@ pub(crate) async fn resolve_effective_scaling_policy(
 }
 
 /// Upsert global scaling default. Uses `BEGIN IMMEDIATE` (read-then-write).
-#[expect(
-    dead_code,
-    reason = "will be wired to surface action handlers in a subsequent task"
-)]
 pub(crate) async fn upsert_scaling_global_default(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -279,10 +282,6 @@ pub(crate) async fn upsert_scaling_global_default(
 }
 
 /// Upsert per-item scaling override. Uses `BEGIN IMMEDIATE`.
-#[expect(
-    dead_code,
-    reason = "will be wired to surface action handlers in a subsequent task"
-)]
 pub(crate) async fn upsert_scaling_item_override(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -357,10 +356,6 @@ pub(crate) async fn upsert_scaling_item_override(
 }
 
 /// Delete per-item scaling override (revert item to global inheritance).
-#[expect(
-    dead_code,
-    reason = "will be wired to surface action handlers in a subsequent task"
-)]
 pub(crate) async fn delete_scaling_item_override(
     db: &DatabaseConnection,
     software_item_id: Uuid,

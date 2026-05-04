@@ -19,7 +19,8 @@ pub(crate) fn proxmox_reset_tenant_data<'a>(
         use crate::entity::proxmox_host_mapping;
         use crate::entity::{
             proxmox_backup_target_cache, proxmox_protection_default,
-            proxmox_protection_item_override,
+            proxmox_protection_item_override, proxmox_scaling_default,
+            proxmox_scaling_item_override,
         };
 
         // proxmox_protection_item_override has no tenant_id column.
@@ -44,6 +45,16 @@ pub(crate) fn proxmox_reset_tenant_data<'a>(
 
         proxmox_backup_target_cache::Entity::delete_many()
             .filter(proxmox_backup_target_cache::Column::TenantId.eq(tenant_id))
+            .exec(txn)
+            .await?;
+
+        proxmox_scaling_item_override::Entity::delete_many()
+            .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))
+            .exec(txn)
+            .await?;
+
+        proxmox_scaling_default::Entity::delete_many()
+            .filter(proxmox_scaling_default::Column::TenantId.eq(tenant_id))
             .exec(txn)
             .await?;
 
