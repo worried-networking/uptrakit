@@ -252,6 +252,12 @@ pub struct ValidatedUpdateTarget {
 pub struct DispatchContext<'a> {
     pub notifier: &'a dyn ServiceNotifier,
     pub protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    #[cfg(feature = "plugin-ops")]
+    pub hook: Option<Arc<dyn ControllerUpdateHook>>,
+    /// Required when `hook` is `Some(_)`. Used by `finalize_post_update_hook` to send
+    /// notifications after resource restore. May be `None` when hook is also `None`.
+    #[cfg(feature = "plugin-ops")]
+    pub notification_ops: Option<&'a dyn NotificationOps>,
 }
 
 /// Parameters for [`create_update_history_record`].

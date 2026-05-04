@@ -1523,6 +1523,10 @@ pub(super) async fn handle_update_result(
             match crate::queries::update_batches::fail_pending_unowned_update(
                 state.db(),
                 state.controller_update_protection(),
+                #[cfg(feature = "plugin-ops")]
+                state.controller_update_hook(),
+                #[cfg(feature = "plugin-ops")]
+                Some(state.plugin_ops.as_ref()),
                 payload.update_history_id,
                 payload.error.clone(),
                 final_output.clone(),
@@ -1850,6 +1854,10 @@ async fn dispatch_next_batch_update_with_notifier(
         crate::queries::update_dispatch::DispatchContext {
             notifier,
             protection,
+            #[cfg(feature = "plugin-ops")]
+            hook: state.controller_update_hook(),
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: Some(state.plugin_ops.as_ref()),
         },
         batch_id,
         host_id,

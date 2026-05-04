@@ -525,6 +525,23 @@ async fn run_server(args: cli::Args) -> Result<()> {
         );
 
         for record in &recovered {
+            #[cfg(feature = "plugin-ops")]
+            if let Err(error) =
+                uptrakit_web_api::queries::update_dispatch::finalize_post_update_hook(
+                    app_state.db(),
+                    app_state.controller_update_hook(),
+                    app_state.plugin_ops.as_ref(),
+                    record,
+                )
+                .await
+            {
+                tracing::warn!(
+                    error = %error,
+                    update_id = %record.id,
+                    "post-update hook (resource restore) failed during startup cleanup"
+                );
+            }
+
             if let Err(error) =
                 uptrakit_web_api::queries::update_dispatch::finalize_post_update_with_timeout(
                     app_state.db(),
@@ -547,6 +564,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
                     uptrakit_web_api::queries::update_dispatch::DispatchContext {
                         notifier: &app_state.notification.notification_service,
                         protection: app_state.controller_update_protection(),
+                        #[cfg(feature = "plugin-ops")]
+                        hook: app_state.controller_update_hook(),
+                        #[cfg(feature = "plugin-ops")]
+                        notification_ops: Some(app_state.plugin_ops.as_ref()),
                     },
                     batch_id,
                     record.host_id,
@@ -579,6 +600,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
                     uptrakit_web_api::queries::update_dispatch::DispatchContext {
                         notifier: &app_state.notification.notification_service,
                         protection: app_state.controller_update_protection(),
+                        #[cfg(feature = "plugin-ops")]
+                        hook: app_state.controller_update_hook(),
+                        #[cfg(feature = "plugin-ops")]
+                        notification_ops: Some(app_state.plugin_ops.as_ref()),
                     },
                     record.host_id,
                     record.tenant_id,

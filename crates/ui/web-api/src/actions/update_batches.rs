@@ -20,6 +20,11 @@ pub(crate) struct BatchDispatchCtx<'a> {
     pub(crate) ctx: &'a MutationContext<'a>,
     pub(crate) protection: Option<Arc<dyn ControllerUpdateProtection>>,
     pub(crate) batch_progress: &'a BatchProgressBroadcaster,
+    #[cfg(feature = "plugin-ops")]
+    pub(crate) hook: Option<Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>>,
+    #[cfg(feature = "plugin-ops")]
+    pub(crate) notification_ops:
+        Option<&'a dyn uptrakit_plugin_infrastructure_registry::NotificationOps>,
 }
 
 /// Trigger a host-wide batch update for all outdated software items on one host.
@@ -49,6 +54,10 @@ pub(crate) async fn trigger_host_batch(
         DispatchContext {
             notifier: bctx.ctx.notification_service,
             protection: bctx.protection.clone(),
+            #[cfg(feature = "plugin-ops")]
+            hook: bctx.hook.clone(),
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: bctx.notification_ops,
         },
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id(),
@@ -198,6 +207,10 @@ mod tests {
             ctx: &ctx,
             protection: None,
             batch_progress: &batch_progress,
+            #[cfg(feature = "plugin-ops")]
+            hook: None,
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: None,
         };
         let resp = trigger_host_batch(&bctx, host_id, ActorType::User, &actor_id, None, None)
             .await
@@ -236,6 +249,10 @@ mod tests {
             ctx: &ctx,
             protection: None,
             batch_progress: &batch_progress,
+            #[cfg(feature = "plugin-ops")]
+            hook: None,
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: None,
         };
         let resp = trigger_item_batch(
             &bctx,
@@ -287,6 +304,10 @@ pub(crate) async fn trigger_item_batch(
         DispatchContext {
             notifier: bctx.ctx.notification_service,
             protection: bctx.protection.clone(),
+            #[cfg(feature = "plugin-ops")]
+            hook: bctx.hook.clone(),
+            #[cfg(feature = "plugin-ops")]
+            notification_ops: bctx.notification_ops,
         },
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id(),

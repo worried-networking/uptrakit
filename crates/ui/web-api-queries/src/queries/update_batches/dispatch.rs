@@ -203,6 +203,16 @@ pub async fn dispatch_next_queued_for_host(
             continue;
         }
 
+        #[cfg(feature = "plugin-ops")]
+        crate::queries::update_dispatch::prepare_pre_update_hook(
+            db,
+            dispatch.hook.clone(),
+            &target,
+            next_record.id,
+            None,
+        )
+        .await;
+
         let dispatch_result = super::super::update_dispatch::dispatch_update_to_agent(
             dispatch.notifier,
             &target,
@@ -927,6 +937,12 @@ pub async fn fail_pending_unowned_update(
     protection: Option<
         Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
     >,
+    #[cfg(feature = "plugin-ops")] hook: Option<
+        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>,
+    >,
+    #[cfg(feature = "plugin-ops")] notification_ops: Option<
+        &dyn uptrakit_plugin_infrastructure_registry::NotificationOps,
+    >,
     update_history_id: Uuid,
     error: Option<String>,
     output: String,
@@ -978,6 +994,19 @@ pub async fn fail_pending_unowned_update(
         failed.completed_at = Some(completed_at);
         failed.output = final_output.clone();
         failed.output_bytes = final_output.len() as i64;
+        #[cfg(feature = "plugin-ops")]
+        if let Some(ops) = notification_ops {
+            if let Err(error) =
+                crate::queries::update_dispatch::finalize_post_update_hook(db, hook, ops, &failed)
+                    .await
+            {
+                tracing::warn!(
+                    update_id = %update_history_id,
+                    error = %error,
+                    "post-update hook (resource restore) failed while failing unowned pending update"
+                );
+            }
+        }
         if let Err(error) = finalize_post_update(db, protection, &failed).await {
             tracing::warn!(
                 update_id = %update_history_id,
@@ -1419,6 +1448,10 @@ mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: None,
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             batch_id,
             f.host_id,
@@ -1478,6 +1511,10 @@ mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: None,
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             batch_id,
             f.host_id,
@@ -1519,6 +1556,10 @@ mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: Some(protection.clone()),
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             f.host_id,
             f.tenant_id,
@@ -1583,6 +1624,10 @@ mod tests {
             DispatchContext {
                 notifier: &NoopNotifier,
                 protection: None,
+                #[cfg(feature = "plugin-ops")]
+                hook: None,
+                #[cfg(feature = "plugin-ops")]
+                notification_ops: None,
             },
             f.host_id,
             f.tenant_id,
@@ -2247,6 +2292,10 @@ mod tests {
         let rows = fail_pending_unowned_update(
             &db,
             None,
+            #[cfg(feature = "plugin-ops")]
+            None,
+            #[cfg(feature = "plugin-ops")]
+            None,
             pending.id,
             Some("ssh pre-start failure".to_string()),
             String::new(),
@@ -2275,6 +2324,10 @@ mod tests {
         let rows = fail_pending_unowned_update(
             &db,
             Some(Arc::new(FinalizeErrorProtection)),
+            #[cfg(feature = "plugin-ops")]
+            None,
+            #[cfg(feature = "plugin-ops")]
+            None,
             pending.id,
             Some("ssh pre-start failure".to_string()),
             String::new(),
