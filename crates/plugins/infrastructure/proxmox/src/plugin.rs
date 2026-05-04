@@ -104,8 +104,8 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_surface(),
         proxmox_host_info_surface(),
-        proxmox_settings_update_protection_surface(),
-        proxmox_software_item_update_protection_surface(),
+        proxmox_settings_update_hooks_surface(),
+        proxmox_software_item_update_hooks_surface(),
     ];
     vec![surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -436,7 +436,7 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
     }
 }
 
-fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
+fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
     let callout = "Backup targets in this form come from Proxmox discovery cache. \
         If the dropdown is empty, run Discover on the Proxmox VE Hosts page first."
         .to_string();
@@ -444,10 +444,10 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
     surfaces::RegisteredSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
-                surfaces::SurfaceId::new("proxmox.settings.update-protection")
+                surfaces::SurfaceId::new("proxmox.settings.update-hooks")
                     .expect("literal surface id is valid"),
             )
-            .label("Proxmox Update Protection")
+            .label("Proxmox Update Hooks")
             .priority(720)
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(surfaces::Scope::Global)
@@ -469,9 +469,25 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
                     },
-                    surfaces::SurfaceNode::Form {
-                        interaction_id: surfaces::InteractionId::new("save-global-defaults")
-                            .expect("literal interaction id is valid"),
+                    surfaces::SurfaceNode::Section {
+                        title: Some("Update Protection".to_string()),
+                        children: vec![
+                            surfaces::SurfaceNode::Form {
+                                interaction_id: surfaces::InteractionId::new("save-global-defaults")
+                                    .expect("literal interaction id is valid"),
+                            },
+                        ],
+                    },
+                    surfaces::SurfaceNode::Section {
+                        title: Some("Resource Scaling".to_string()),
+                        children: vec![
+                            surfaces::SurfaceNode::Form {
+                                interaction_id: surfaces::InteractionId::new(
+                                    "save-scaling-global-defaults",
+                                )
+                                .expect("literal interaction id is valid"),
+                            },
+                        ],
                     },
                 ],
             })
@@ -640,12 +656,178 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 }),
                         icon: None,
 },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("preload-scaling-global-defaults")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: "Preload Scaling Global Defaults".to_string(),
+                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+                icon: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Save Scaling Global Defaults".to_string(),
+                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "plugin_config_id".to_string(),
+                            label: "Proxmox Configuration".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "Select the Proxmox plugin configuration this default applies to."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: Some(surfaces::FormSelectSource::RestApi {
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                    .to_string(),
+                                value_field: "id".to_string(),
+                                label_field: "name".to_string(),
+                            }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "scaling_mode".to_string(),
+                            label: "Scaling Mode".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "None: no scaling. Absolute: set fixed cores/memory. \
+                                 Delta: add cores/memory to current values."
+                                    .to_string(),
+                            ),
+                            default_value: Some("none".to_string()),
+                            options: vec![
+                                surfaces::FormSelectOption {
+                                    value: "none".to_string(),
+                                    label: "None (disabled)".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "absolute".to_string(),
+                                    label: "Absolute".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "delta".to_string(),
+                                    label: "Delta (+N)".to_string(),
+                                },
+                            ],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "absolute_cores".to_string(),
+                            label: "CPU Cores (absolute)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("4".to_string()),
+                            help_text: Some(
+                                "Fixed number of vCPU cores during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["absolute".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "absolute_memory_mb".to_string(),
+                            label: "Memory MB (absolute)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("4096".to_string()),
+                            help_text: Some("Fixed RAM in MB during update.".to_string()),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["absolute".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "delta_cores".to_string(),
+                            label: "CPU Cores (+delta)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("2".to_string()),
+                            help_text: Some(
+                                "Cores to add to current vCPU count during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["delta".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "delta_memory_mb".to_string(),
+                            label: "Memory MB (+delta)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("1024".to_string()),
+                            help_text: Some(
+                                "MB to add to current RAM during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["delta".to_string()],
+                            }),
+                        },
+                    ],
+                    pre_load_interaction_id: Some(
+                        surfaces::InteractionId::new("preload-scaling-global-defaults")
+                            .expect("literal interaction id is valid"),
+                    ),
+                }),
+                icon: None,
+            },
         ],
         data_sources: vec![],
     }
 }
 
-fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurface {
+fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
     let callout = "Per-item override values are stored in Proxmox policy tables. \
         Backup target options come from sync cache and stay empty until discover/sync populates them."
         .to_string();
@@ -653,10 +835,10 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
     surfaces::RegisteredSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
-                surfaces::SurfaceId::new("proxmox.software-item.update-protection")
+                surfaces::SurfaceId::new("proxmox.software-item.update-hooks")
                     .expect("literal surface id is valid"),
             )
-            .label("Proxmox Update Protection")
+            .label("Proxmox Update Hooks")
             .priority(520)
             .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
             .scope(surfaces::Scope::Global)
@@ -678,9 +860,25 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
                     },
-                    surfaces::SurfaceNode::Form {
-                        interaction_id: surfaces::InteractionId::new("save-item-overrides")
-                            .expect("literal interaction id is valid"),
+                    surfaces::SurfaceNode::Section {
+                        title: Some("Update Protection".to_string()),
+                        children: vec![
+                            surfaces::SurfaceNode::Form {
+                                interaction_id: surfaces::InteractionId::new("save-item-overrides")
+                                    .expect("literal interaction id is valid"),
+                            },
+                        ],
+                    },
+                    surfaces::SurfaceNode::Section {
+                        title: Some("Resource Scaling".to_string()),
+                        children: vec![
+                            surfaces::SurfaceNode::Form {
+                                interaction_id: surfaces::InteractionId::new(
+                                    "save-scaling-item-overrides",
+                                )
+                                .expect("literal interaction id is valid"),
+                            },
+                        ],
                     },
                 ],
             })
@@ -858,6 +1056,182 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 }),
                         icon: None,
 },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("preload-scaling-item-overrides")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: "Preload Per-item Scaling Overrides".to_string(),
+                required_permission: Some(Permission::ViewSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+                icon: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Save Per-item Scaling Overrides".to_string(),
+                required_permission: Some(Permission::UpdateSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "software_item_id".to_string(),
+                            label: "Software Item".to_string(),
+                            field_type: "hidden".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "plugin_config_id".to_string(),
+                            label: "Proxmox Configuration".to_string(),
+                            field_type: "hidden".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "scaling_mode".to_string(),
+                            label: "Scaling Mode".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "Inherit: use global default. None: opt out. \
+                                 Absolute: set fixed values. Delta: add to current values."
+                                    .to_string(),
+                            ),
+                            default_value: Some("inherit".to_string()),
+                            options: vec![
+                                surfaces::FormSelectOption {
+                                    value: "inherit".to_string(),
+                                    label: "Inherit global default".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "none".to_string(),
+                                    label: "None (opt out)".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "absolute".to_string(),
+                                    label: "Absolute".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "delta".to_string(),
+                                    label: "Delta (+N)".to_string(),
+                                },
+                            ],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "absolute_cores".to_string(),
+                            label: "CPU Cores (absolute)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("4".to_string()),
+                            help_text: Some(
+                                "Fixed number of vCPU cores during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["absolute".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "absolute_memory_mb".to_string(),
+                            label: "Memory MB (absolute)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("4096".to_string()),
+                            help_text: Some("Fixed RAM in MB during update.".to_string()),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["absolute".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "delta_cores".to_string(),
+                            label: "CPU Cores (+delta)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("2".to_string()),
+                            help_text: Some(
+                                "Cores to add to current vCPU count during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["delta".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "delta_memory_mb".to_string(),
+                            label: "Memory MB (+delta)".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("1024".to_string()),
+                            help_text: Some(
+                                "MB to add to current RAM during update.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "scaling_mode".to_string(),
+                                values: vec!["delta".to_string()],
+                            }),
+                        },
+                    ],
+                    pre_load_interaction_id: Some(
+                        surfaces::InteractionId::new("preload-scaling-item-overrides")
+                            .expect("literal interaction id is valid"),
+                    ),
+                }),
+                icon: None,
+            },
         ],
         data_sources: vec![],
     }
@@ -1089,14 +1463,14 @@ mod tests {
         assert!(
             all_surface_ids
                 .iter()
-                .any(|id| id == "proxmox.settings.update-protection"),
-            "settings.tab Proxmox update-protection surface should be represented in shared surfaces"
+                .any(|id| id == "proxmox.settings.update-hooks"),
+            "settings.tab Proxmox update-hooks surface should be represented in shared surfaces"
         );
         assert!(
             all_surface_ids
                 .iter()
-                .any(|id| id == "proxmox.software-item.update-protection"),
-            "software_item.tabs Proxmox update-protection surface should be represented in shared surfaces"
+                .any(|id| id == "proxmox.software-item.update-hooks"),
+            "software_item.tabs Proxmox update-hooks surface should be represented in shared surfaces"
         );
         let host_info = registrations
             .iter()
@@ -1123,9 +1497,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-protection"
+                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-hooks"
             })
-            .expect("settings update-protection surface should be registered");
+            .expect("settings update-hooks surface should be registered");
         assert_eq!(
             settings_policy.descriptor.slot,
             surfaces::SLOT_SETTINGS_TABS,
@@ -1140,9 +1514,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-protection"
+                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-hooks"
             })
-            .expect("software-item update-protection surface should be registered");
+            .expect("software-item update-hooks surface should be registered");
         assert_eq!(
             software_policy.descriptor.slot,
             surfaces::SLOT_SOFTWARE_ITEM_TABS,
@@ -1309,9 +1683,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-protection"
+                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-hooks"
             })
-            .expect("settings update-protection surface should be present");
+            .expect("settings update-hooks surface should be present");
 
         let save_global = settings_policy
             .interactions
@@ -1344,9 +1718,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-protection"
+                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-hooks"
             })
-            .expect("software-item update-protection surface should be present");
+            .expect("software-item update-hooks surface should be present");
         let save_item = software_policy
             .interactions
             .iter()
