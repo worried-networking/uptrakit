@@ -932,6 +932,35 @@ describe('SurfaceWorkflow', () => {
 		expect(screen.queryByText('Processing...')).not.toBeInTheDocument();
 	});
 
+	it('renders the workflow trigger via SurfaceActionButton with icon', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'wizard',
+			kind: 'workflow',
+			label: 'Run Wizard',
+			transport: { mode: 'controller_local' },
+			icon: 'server-cog',
+			workflow_steps: [
+				{
+					step_id: 's1',
+					label: 'Step 1',
+					input_schema: 'object',
+					result_schema: 'any'
+				}
+			]
+		};
+
+		const { container } = render(SurfaceWorkflow, {
+			surfaceId: 'demo',
+			interaction,
+			interactions: [interaction],
+			labelDisplay: 'icon-only'
+		});
+
+		expect(container.querySelector('.sr-only')?.textContent).toBe('Run Wizard');
+		expect(container.querySelector('span[title="Run Wizard"]')).not.toBeNull();
+		expect(container.querySelector('svg')).not.toBeNull();
+	});
+
 	it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
 		const interaction: InteractionDescriptor = {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import SurfaceActionButton from './SurfaceActionButton.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
@@ -8,6 +9,7 @@
 	import SectionCard from '$lib/components/ui/SectionCard.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import type { LabelDisplay } from '$lib/surfaces/label-display';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/types';
 	import type { InteractionDescriptor, WorkflowStepDescriptor } from '$lib/surfaces/contract';
@@ -21,6 +23,7 @@
 		encryptionContext,
 		baseParams = {},
 		size = 'md',
+		labelDisplay = 'always',
 		oncomplete
 	}: {
 		surfaceId: string;
@@ -30,6 +33,7 @@
 		encryptionContext?: SurfaceEncryptionContext;
 		baseParams?: Record<string, unknown>;
 		size?: 'sm' | 'md';
+		labelDisplay?: LabelDisplay;
 		oncomplete?: (result: unknown) => void | Promise<void>;
 	} = $props();
 
@@ -336,9 +340,16 @@
 {#if actionLabel.length === 0 || showContractIssue}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
-	<Button variant={confirmVariantForSeverity} {size} {loading} data-ui="workflow-trigger" onclick={startWorkflow}>
-		{actionLabel}
-	</Button>
+	<SurfaceActionButton
+		label={actionLabel}
+		icon={interaction.icon}
+		{labelDisplay}
+		variant={confirmVariantForSeverity}
+		{size}
+		{loading}
+		onclick={startWorkflow}
+		dataUi="workflow-trigger"
+	/>
 {/if}
 
 {#if showModal && step}
