@@ -2,15 +2,16 @@
 
 use crate::entity::{
     proxmox_backup_target_cache, proxmox_protection_audit, proxmox_protection_default,
-    proxmox_protection_item_override,
+    proxmox_protection_item_override, proxmox_resource_scaling_record,
 };
 use proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache;
 use proxmox_protection_audit::Entity as ProxmoxProtectionAudit;
 use proxmox_protection_default::Entity as ProxmoxProtectionDefault;
 use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
+use proxmox_resource_scaling_record::Entity as ProxmoxResourceScalingRecord;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -600,6 +601,136 @@ pub async fn upsert_protection_audit(
     Ok(())
 }
 
+/// Scaling record for one `update_history_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScalingRecord {
+    pub update_history_id: Uuid,
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub plugin_config_id: Uuid,
+    pub mapping_id: Uuid,
+    pub vm_type: String,
+    pub original_cores: i32,
+    pub original_memory_mb: i64,
+    pub scaled_cores: i32,
+    pub scaled_memory_mb: i64,
+    pub scale_status: String,
+    pub restore_status: String,
+    pub error_message: Option<String>,
+}
+
+/// Load a scaling record by `update_history_id`.
+pub async fn load_scaling_record(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+) -> Result<Option<ScalingRecord>> {
+    let row = ProxmoxResourceScalingRecord::find_by_id(update_history_id)
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query scaling record: {e}"
+            )))
+        })?;
+
+    Ok(row.map(|m| ScalingRecord {
+        update_history_id: m.update_history_id,
+        tenant_id: m.tenant_id,
+        host_id: m.host_id,
+        software_item_id: m.software_item_id,
+        plugin_config_id: m.plugin_config_id,
+        mapping_id: m.mapping_id,
+        vm_type: m.vm_type,
+        original_cores: m.original_cores,
+        original_memory_mb: m.original_memory_mb,
+        scaled_cores: m.scaled_cores,
+        scaled_memory_mb: m.scaled_memory_mb,
+        scale_status: m.scale_status,
+        restore_status: m.restore_status,
+        error_message: m.error_message,
+    }))
+}
+
+/// Upsert a scaling record. Uses `BEGIN IMMEDIATE` to prevent `SQLITE_BUSY_SNAPSHOT`.
+pub async fn upsert_scaling_record(db: &DatabaseConnection, record: &ScalingRecord) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let txn = db
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to begin transaction for scaling record upsert: {e}"
+            )))
+        })?;
+
+    let existing = ProxmoxResourceScalingRecord::find_by_id(record.update_history_id)
+        .one(&txn)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query existing scaling record: {e}"
+            )))
+        })?;
+
+    if let Some(existing) = existing {
+        let mut active: proxmox_resource_scaling_record::ActiveModel = existing.into();
+        active.tenant_id = Set(record.tenant_id);
+        active.host_id = Set(record.host_id);
+        active.software_item_id = Set(record.software_item_id);
+        active.plugin_config_id = Set(record.plugin_config_id);
+        active.mapping_id = Set(record.mapping_id);
+        active.vm_type = Set(record.vm_type.clone());
+        active.original_cores = Set(record.original_cores);
+        active.original_memory_mb = Set(record.original_memory_mb);
+        active.scaled_cores = Set(record.scaled_cores);
+        active.scaled_memory_mb = Set(record.scaled_memory_mb);
+        active.scale_status = Set(record.scale_status.clone());
+        active.restore_status = Set(record.restore_status.clone());
+        active.error_message = Set(record.error_message.clone());
+        active.updated_at = Set(now);
+        active.update(&txn).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to update scaling record: {e}"
+            )))
+        })?;
+    } else {
+        let active = proxmox_resource_scaling_record::ActiveModel {
+            update_history_id: Set(record.update_history_id),
+            tenant_id: Set(record.tenant_id),
+            host_id: Set(record.host_id),
+            software_item_id: Set(record.software_item_id),
+            plugin_config_id: Set(record.plugin_config_id),
+            mapping_id: Set(record.mapping_id),
+            vm_type: Set(record.vm_type.clone()),
+            original_cores: Set(record.original_cores),
+            original_memory_mb: Set(record.original_memory_mb),
+            scaled_cores: Set(record.scaled_cores),
+            scaled_memory_mb: Set(record.scaled_memory_mb),
+            scale_status: Set(record.scale_status.clone()),
+            restore_status: Set(record.restore_status.clone()),
+            error_message: Set(record.error_message.clone()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        active.insert(&txn).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to insert scaling record: {e}"
+            )))
+        })?;
+    }
+
+    txn.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit scaling record upsert: {e}"
+        )))
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,5 +932,75 @@ mod tests {
             prune_statement.contains("`target_key` NOT IN"),
             "prune must only remove stale target keys"
         );
+    }
+}
+
+#[cfg(test)]
+mod scaling_record_tests {
+    use crate::entity::proxmox_resource_scaling_record;
+    use sea_orm::{DbBackend, MockDatabase, MockExecResult};
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn scaling_record_round_trip() {
+        let update_id = Uuid::now_v7();
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let mapping_id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+
+        // Create the expected model to return from insert
+        let expected_model = proxmox_resource_scaling_record::Model {
+            update_history_id: update_id,
+            tenant_id,
+            host_id,
+            software_item_id,
+            plugin_config_id,
+            mapping_id,
+            vm_type: "qemu".to_string(),
+            original_cores: 2,
+            original_memory_mb: 2048,
+            scaled_cores: 4,
+            scaled_memory_mb: 4096,
+            scale_status: "scaling".to_string(),
+            restore_status: "pending".to_string(),
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Mock: no existing row → insert path
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([Vec::<proxmox_resource_scaling_record::Model>::new()])
+            .append_query_results([vec![expected_model]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let record = ScalingRecord {
+            update_history_id: update_id,
+            tenant_id,
+            host_id,
+            software_item_id,
+            plugin_config_id,
+            mapping_id,
+            vm_type: "qemu".to_string(),
+            original_cores: 2,
+            original_memory_mb: 2048,
+            scaled_cores: 4,
+            scaled_memory_mb: 4096,
+            scale_status: "scaling".to_string(),
+            restore_status: "pending".to_string(),
+            error_message: None,
+        };
+
+        let result = upsert_scaling_record(&db, &record).await;
+        assert!(result.is_ok(), "upsert should succeed: {result:?}");
     }
 }
