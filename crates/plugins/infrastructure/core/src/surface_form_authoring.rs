@@ -251,6 +251,9 @@ pub struct SurfaceActionDescriptor {
     pub action_id: String,
     /// Human-readable label for the action button/menu item.
     pub label: String,
+    /// Lucide-canonical kebab-case icon name (e.g. `"refresh-cw"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// Optional UI shown before the action is invoked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<SurfaceActionUi>,
@@ -283,6 +286,7 @@ impl SurfaceActionDescriptor {
         Self {
             action_id: action_id.into(),
             label: label.into(),
+            icon: None,
             ui: None,
             permission: String::new(),
             destructive: false,
@@ -292,6 +296,14 @@ impl SurfaceActionDescriptor {
             confirm_entity_field: None,
             batch_action: false,
         }
+    }
+
+    /// Set the lucide-canonical kebab-case icon name (e.g. `"refresh-cw"`).
+    /// Validation lives in the wire layer; this builder accepts the value verbatim.
+    #[must_use]
+    pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
     }
 
     /// Set the action UI (form or wizard shown before invocation).
@@ -1232,5 +1244,18 @@ mod tests {
         let action = SurfaceActionDescriptor::new("list", "List Items");
         let json = serde_json::to_string(&action).expect("serialize should succeed");
         assert!(!json.contains("confirm_entity_field"));
+    }
+
+    #[test]
+    fn surface_action_descriptor_with_icon_sets_field() {
+        let descriptor =
+            SurfaceActionDescriptor::new("sync-host", "Sync Host").with_icon("refresh-cw");
+        assert_eq!(descriptor.icon.as_deref(), Some("refresh-cw"));
+    }
+
+    #[test]
+    fn surface_action_descriptor_default_icon_is_none() {
+        let descriptor = SurfaceActionDescriptor::new("sync-host", "Sync Host");
+        assert!(descriptor.icon.is_none());
     }
 }
