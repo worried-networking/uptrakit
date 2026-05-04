@@ -92,9 +92,9 @@ Create table `proxmox_resource_scaling_records`:
 | `mapping_id` | `UUID` | Not null |
 | `vm_type` | `VARCHAR(16)` | Not null — `"qemu"` or `"lxc"` (from `mapping.proxmox_type`) |
 | `original_cores` | `INT` | Not null — value read from Proxmox before scaling |
-| `original_memory_mb` | `INT` | Not null |
+| `original_memory_mb` | `BIGINT` | Not null — use BIGINT to match `u64` Proxmox API type |
 | `scaled_cores` | `INT` | Not null — target value applied by pre-update hook |
-| `scaled_memory_mb` | `INT` | Not null |
+| `scaled_memory_mb` | `BIGINT` | Not null |
 | `scale_status` | `VARCHAR(32)` | Not null — `scaling` / `scaled` / `skipped` / `failed` |
 | `restore_status` | `VARCHAR(32)` | Not null — `pending` / `restored` / `restore_failed` / `skipped` (used when `scale_status = "failed"`) |
 | `error_message` | `TEXT` | Nullable |
@@ -122,7 +122,10 @@ pub update_memory_mb: Option<i32>,
 
 **New entity** `proxmox_resource_scaling_record.rs` placed directly in
 `crates/plugins/infrastructure/proxmox/src/entity/proxmox_resource_scaling_record.rs`.
-Add `pub mod proxmox_resource_scaling_record;` to `src/entity/mod.rs`.
+Add `pub mod proxmox_resource_scaling_record;` to `src/entity/mod.rs`. Entity field types
+follow SeaORM conventions: `INT` → `i32`, `BIGINT` → `i64`, `UUID` → `Uuid`, `TEXT` →
+`String`. `original_memory_mb` and `scaled_memory_mb` are `i64` (matching their `BIGINT`
+column type).
 
 ### Policy struct extensions
 
@@ -350,11 +353,12 @@ dep needed.
 ```rust
 #[async_trait]
 pub trait ControllerUpdateHook: PluginMeta + Send + Sync {
-    async fn prepare_pre_update_hook(
-        &self,
-        ctx: &UpdateHookPreContext<'_>,
-    ) -> Result<()>;
+    /// Called before the update executes. Always best-effort: returns `()` so that
+    /// callers cannot accidentally treat a scale-up failure as update-blocking.
+    async fn prepare_pre_update_hook(&self, ctx: &UpdateHookPreContext<'_>);
 
+    /// Called after the update completes. Returns `Result<()>` so restore failures
+    /// propagate to the dispatch wrapper, which logs them and then swallows.
     async fn finalize_post_update_hook(
         &self,
         ctx: &UpdateHookPostContext<'_>,
@@ -362,10 +366,10 @@ pub trait ControllerUpdateHook: PluginMeta + Send + Sync {
 }
 ```
 
-Both methods return `Result<()>`. `prepare_pre_update_hook` is fully best-effort and
-returns `Ok(())` for all scale-up failures (no error propagated). `finalize_post_update_hook`
-returns `Err` on restore failure so the dispatch wrapper can log the failure at the
-update-id level; the dispatch wrapper always swallows the error.
+`prepare_pre_update_hook` returns `()` — making the best-effort contract explicit at the
+type level and preventing future implementors from accidentally treating errors as
+blocking. `finalize_post_update_hook` returns `Result<()>` to surface restore failures
+for logging; the dispatch wrapper always swallows the error.
 
 ### `plugin_ops.rs` additions
 
@@ -448,29 +452,29 @@ let store = DbProxmoxProtectionStore { db: ctx.controller.tenant_db().db() };
 ```
 
 1. Call `store.load_host_mapping(tenant_id, host_id)`.
-   If no mapping → return `Ok(())`.
+   If no mapping → return early (no-op).
 2. Call `store.load_effective_policy(tenant_id, software_item_id, mapping.plugin_config_id)`.
-   If `update_cores.is_none() && update_memory_mb.is_none()` → return `Ok(())`.
+   If `update_cores.is_none() && update_memory_mb.is_none()` → return early (no-op).
 3. Call `store.load_plugin_config_payload(tenant_id, mapping.plugin_config_id)` then
    `serde_json::from_value(payload)` into `crate::config::ProxmoxConfig`.
-4. `ProxmoxClient::new(&proxmox_cfg)?`
+   On error → `tracing::warn!(...)`, return early.
+4. `ProxmoxClient::new(&proxmox_cfg)` — on error → `tracing::warn!(...)`, return early.
 5. Read current VM config using `mapping.proxmox_type` to branch:
-   - QEMU (`mapping.proxmox_type == "qemu"`): `client.get_qemu_config(node, vmid).await?`
+   - QEMU (`mapping.proxmox_type == "qemu"`): `client.get_qemu_config(node, vmid).await`
      Check `config.supports_live_resource_scaling()`. If `false` →
-     `tracing::warn!("QEMU VM {vmid} on {node} does not support hotplug — skipping resource scaling")` → return `Ok(())`.
-   - LXC (`mapping.proxmox_type == "lxc"`): `client.get_lxc_config(node, vmid).await?` (no hotplug check).
+     `tracing::warn!("QEMU VM {vmid} on {node} does not support hotplug — skipping resource scaling")` → return early.
+   - LXC (`mapping.proxmox_type == "lxc"`): `client.get_lxc_config(node, vmid).await` (no hotplug check).
+   On API error → `tracing::warn!(...)`, return early.
 6. Extract `original_cores` and `original_memory_mb` from the config response.
-   If either is absent (Proxmox did not return the field), log a warning and return
-   `Ok(())` — cannot restore what we don't know.
-   **Type notes:** `PveQemuConfig.cores: Option<u32>`, `memory: Option<u64>`.
-   DB columns `original_cores`/`scaled_cores` are `INT` → `i32`; `original_memory_mb`/
-   `scaled_memory_mb` are also `INT` → `i32`. Use checked narrowing casts (e.g.
-   `u32::try_into::<i32>()`) when writing to the entity, and cast back to `u32` when
-   passing to client methods (matching the existing `mapping.proxmox_vmid as u32` pattern).
-   The policy fields `update_cores: Option<i32>` / `update_memory_mb: Option<i32>` likewise
-   require a cast to `u32` before passing to `set_*_config_resources`.
+   If either is absent (Proxmox did not return the field) → `tracing::warn!(...)`, return early.
+   **Type notes:**
+   - `PveQemuConfig.cores: Option<u32>`, `memory: Option<u64>` — API types.
+   - DB `original_cores`/`scaled_cores` are `INT` → SeaORM `i32`.
+   - DB `original_memory_mb`/`scaled_memory_mb` are `BIGINT` → SeaORM `i64`.
+   - Policy fields `update_cores: Option<i32>` / `update_memory_mb: Option<i32>` require
+     cast to `u32`/`u64` before passing to `set_*_config_resources`.
 7. Determine final target values: use `update_cores.unwrap_or(original_cores)` and
-   `update_memory_mb.unwrap_or(original_memory_mb)`.
+   `update_memory_mb.unwrap_or(original_memory_mb)` (all in their native API types at this point).
 8. Persist `proxmox_resource_scaling_record` with `scale_status = "scaling"`,
    `restore_status = "pending"`, and `vm_type = mapping.proxmox_type` via `tenant_db()`.
    Writing before the API call captures `original_cores`/`original_memory_mb` so that a
@@ -480,10 +484,9 @@ let store = DbProxmoxProtectionStore { db: ctx.controller.tenant_db().db() };
 10. Call `client.set_qemu_config_resources()` or `client.set_lxc_config_resources()`.
     - On success: update record `scale_status = "scaled"`. Stream success line.
     - On error: update record `scale_status = "failed"`, `restore_status = "skipped"`,
-      `error_message = err.to_string()`. `tracing::warn!(...)`. Return `Ok(())` — best-effort.
-      (`"skipped"` is correct because scaling never succeeded; the post-update hook already
-      gates restore on `scale_status` being `"scaled"` or `"scaling"`, so this record will
-      be skipped there regardless — but the status must not falsely claim a restore occurred.)
+      `error_message = err.to_string()`. `tracing::warn!(...)`. Return early — best-effort.
+      (`"skipped"` because scaling never succeeded; the post-update hook already
+      gates restore on `scale_status` being `"scaled"` or `"scaling"`.)
 
 **`finalize_post_update_hook` logic:**
 
@@ -495,16 +498,18 @@ let store = DbProxmoxProtectionStore { db: ctx.controller.tenant_db().db() };
    If no record, or `scale_status` is not `"scaled"` or `"scaling"` → return `Ok(())`.
    (`"scaling"` means a crash occurred mid-scale; attempt restore anyway — a redundant
    restore is harmless.)
-2. Call `store.load_host_mapping(record.tenant_id, record.host_id)` to re-obtain
-   `proxmox_node` and `proxmox_vmid` needed for the restore API call. Call
-   `store.load_plugin_config_payload(record.tenant_id, record.plugin_config_id)` +
+2. Look up the mapping directly by `record.mapping_id` via
+   `ProxmoxHostMapping::find_by_id(record.mapping_id).one(db)` (not via
+   `store.load_host_mapping(tenant_id, host_id)` — keying on the mapping's primary key
+   is safer because the host mapping may have been re-pointed since the update started).
+   Call `store.load_plugin_config_payload(record.tenant_id, record.plugin_config_id)` +
    deserialize `ProxmoxConfig`. If either lookup fails, return `Err`.
-   (`load_host_mapping` takes `(tenant_id, host_id)` — use the fields from the scaling
-   record directly, not `mapping_id`.)
 3. `ProxmoxClient::new(&proxmox_cfg)?`
 4. Use `record.vm_type` to determine the restore call:
    - `"qemu"`: `client.set_qemu_config_resources(node, vmid, original_cores, original_memory_mb)`
    - `"lxc"`: `client.set_lxc_config_resources(node, vmid, original_cores, original_memory_mb)`
+   - Proxmox applies `cores` and `memory` config fields atomically within a single PUT
+     request; there is no partial-apply risk between the two fields.
    - On success: update record `restore_status = "restored"`. Return `Ok(())`.
    - On error: update record `restore_status = "restore_failed"`,
      `error_message = err.to_string()`. Then:
@@ -618,15 +623,16 @@ boundary-hardening Wave 2 (clone pool handle, pass tenant id).
 **New public functions:**
 
 ```rust
-/// Run the pre-update hook (resource scaling). Called after protection.
+/// Run the pre-update hook (resource scaling). Called after protection. Never fails.
 pub async fn prepare_pre_update_hook(
     db: &DatabaseConnection,
     hook: Option<Arc<dyn ControllerUpdateHook>>,
     target: &ValidatedUpdateTarget,
     output_tx: Option<UnboundedSender<Vec<u8>>>,
-) -> Result<()>
+)
 
 /// Run the post-update hook (resource restore). Called before protection finalization.
+/// Returns Err if restore failed; callers log and swallow.
 pub async fn finalize_post_update_hook(
     db: &DatabaseConnection,
     hook: Option<Arc<dyn ControllerUpdateHook>>,
@@ -634,9 +640,6 @@ pub async fn finalize_post_update_hook(
     record: &update_history::Model,
 ) -> Result<()>
 ```
-
-Both functions are best-effort wrappers: errors are logged and silently swallowed (matching
-the existing `finalize_post_update_best_effort` pattern at the call site).
 
 ### Call site changes
 
@@ -659,8 +662,7 @@ prepare_pre_update_hook(
     state.controller_update_hook(),
     &target,
     output_tx.clone(),
-).await;
-// pre-update hook is always best-effort; never blocks the Update
+).await; // returns () — never blocks the Update
 ```
 
 **Post-update hook — `finalize_post_update_best_effort`** (in `updates.rs`):
@@ -690,11 +692,20 @@ The `finalize_post_update_hook` dispatch function constructs a
 `UpdateHookPostContext::new(...)` as the `tenant_db` field, so the hook
 implementation can call `ctx.notification_ops.send_transactional_email(&ctx.tenant_db, ...)`.
 
-Apply the same pre-pending/post-hook pattern to:
+Apply the same pre/post-hook pattern to every update-finalization path — this is the
+set of paths that must call `finalize_post_update_hook` so that crash-recovered updates
+are also restored:
 
 - `finalize_post_update_with_recovery_timeout_best_effort` in `updates.rs`
 - The corresponding finalization path in `update_orchestrator.rs`
 - `update_batches/dispatch.rs` and `update_batches/mod.rs`
+- `controller-runtime/src/lib.rs` — the crash-recovery finalization path that runs when
+  a Controller restarts and discovers in-flight updates. This is the path that closes
+  the crash-safety loop: without it, `scale_status = "scaling"` / `restore_status =
+  "pending"` records written before a crash will never be acted on.
+
+The implementation of Wave 5 must audit all call sites of `finalize_post_update` (or
+equivalent) in the codebase and confirm each one also calls `finalize_post_update_hook`.
 
 Note: `prepare_pre_update_hook` in `update_dispatch.rs` is a best-effort wrapper that
 never propagates errors (the hook always returns `Ok(())` for pre-update failures).
