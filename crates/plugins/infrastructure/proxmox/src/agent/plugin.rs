@@ -595,6 +595,7 @@ async fn reconcile_pve_config(
 
 fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
     SurfaceActionDescriptor::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
+        .with_icon("boxes")
         .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
         .with_timeout(300)
         .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
@@ -621,4 +622,16 @@ fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
                      writing the new entry. Same-service keys are always removed regardless.",
                 ),
         ])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bootstrap_proxmox_guest_action;
+
+    #[test]
+    fn bootstrap_proxmox_guest_action_has_boxes_icon() {
+        let action = bootstrap_proxmox_guest_action();
+        assert_eq!(action.action_id, "bootstrap-proxmox-guest");
+        assert_eq!(action.icon.as_deref(), Some("boxes"));
+    }
 }
