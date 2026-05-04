@@ -60,7 +60,7 @@ hex = "0.4"
 subtle = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 arc-swap = "1.9.1"
-metrics = "0.24.3"
+metrics = "0.24.5"
 metrics-util = "0.20.1"
 utoipa = { version = "5.4", features = ["uuid"] }
 x509-ocsp = "0.2"
