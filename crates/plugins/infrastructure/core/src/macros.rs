@@ -41,6 +41,7 @@ macro_rules! declare_plugin {
             $(, notification_transport: $transport_fn:expr )?
             $(, software_item_lifecycle: $lifecycle_fn:expr )?
             $(, controller_update_protection: $controller_protection_fn:expr )?
+            $(, controller_update_hook: $controller_hook_fn:expr )?
             $(, infra: {
                 create: $infra_create_fn:expr,
                 host_requirements: $infra_hr:expr,
@@ -215,6 +216,7 @@ macro_rules! declare_plugin {
                     notification_transport: None,
                     software_item_lifecycle: None,
                     controller_update_protection: None,
+                    controller_update_hook: None,
                     infra: None,
                 };
                 $(
@@ -230,6 +232,12 @@ macro_rules! declare_plugin {
                 )?
                 $(
                     rc.controller_update_protection = Some($controller_protection_fn);
+                )?
+                $(
+                    #[cfg(feature = "plugin-ops")]
+                    {
+                        rc.controller_update_hook = Some($controller_hook_fn);
+                    }
                 )?
                 $(
                     #[cfg(feature = "agent-infra")]
