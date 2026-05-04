@@ -1893,7 +1893,8 @@ mod tests {
     #[test]
     fn surface_registration_rejects_oversized_nav_icon() {
         let mut payload = test_surface_registration();
-        payload.surfaces[0].descriptor.nav_icon = Some("x".repeat(65));
+        payload.surfaces[0].descriptor.nav_icon =
+            Some("x".repeat(uptrakit_surfaces::MAX_ICON_NAME_LEN + 1));
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].descriptor.nav_icon");
     }
@@ -1924,7 +1925,8 @@ mod tests {
     #[test]
     fn surface_registration_rejects_oversized_interaction_icon() {
         let mut payload = test_surface_registration();
-        payload.surfaces[0].interactions[0].icon = Some("a".repeat(65));
+        payload.surfaces[0].interactions[0].icon =
+            Some("a".repeat(uptrakit_surfaces::MAX_ICON_NAME_LEN + 1));
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].interactions[].icon");
     }
