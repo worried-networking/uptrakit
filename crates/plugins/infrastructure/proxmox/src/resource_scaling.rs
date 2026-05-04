@@ -15,9 +15,14 @@ use crate::{
     protection_store::{DbProxmoxProtectionStore, ProxmoxProtectionStore as _},
 };
 
+// The struct and create fn are referenced via a function pointer stored in a static
+// (DESCRIPTOR.controller_update_hook). Rustc's dead-code lint does not trace function
+// pointer usage through statics, so suppress it explicitly.
+#[allow(dead_code)]
 pub(crate) struct ControllerUpdateHookPlugin;
 
 impl ControllerUpdateHookPlugin {
+    #[allow(dead_code)]
     pub(crate) fn create(_config: &CatalogConfig) -> Result<Arc<dyn ControllerUpdateHook>> {
         Ok(Arc::new(Self))
     }

@@ -37,6 +37,12 @@ pub use uptrakit_plugin_infrastructure_core::{
     PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
+// Re-export update-hook types (require plugin-ops feature)
+#[cfg(feature = "plugin-ops")]
+pub use uptrakit_plugin_infrastructure_core::{
+    ControllerUpdateHook, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
+};
+
 // Re-export transactional email error for callers that use `send_transactional_email`.
 #[cfg(feature = "notifications")]
 pub use uptrakit_plugin_infrastructure_core::TransactionalEmailError;

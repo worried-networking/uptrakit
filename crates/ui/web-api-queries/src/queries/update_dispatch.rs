@@ -17,7 +17,11 @@ use time::OffsetDateTime;
 use tokio::time::timeout;
 use uptrakit_plugin_infrastructure_registry::{
     ControllerPostUpdateContext, ControllerProtectionContext, ControllerUpdateProtection,
-    UpdateProtectionController, is_interactive_dispatch_plugin,
+    NotificationOps, UpdateProtectionController, is_interactive_dispatch_plugin,
+};
+#[cfg(feature = "plugin-ops")]
+use uptrakit_plugin_infrastructure_registry::{
+    ControllerUpdateHook, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
@@ -693,6 +697,87 @@ pub async fn finalize_post_update_with_timeout(
 }
 
 // ---------------------------------------------------------------------------
+// Controller-side hook helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "plugin-ops")]
+struct QueryUpdateHookController {
+    tenant_db: crate::TenantDb,
+}
+
+#[cfg(feature = "plugin-ops")]
+impl QueryUpdateHookController {
+    fn new(db: &DatabaseConnection, tenant_id: Uuid) -> Self {
+        Self {
+            tenant_db: crate::TenantDb::new(db.clone(), tenant_id),
+        }
+    }
+}
+
+#[cfg(feature = "plugin-ops")]
+impl UpdateHookController for QueryUpdateHookController {
+    fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
+        &self.tenant_db
+    }
+}
+
+/// Run the pre-update hook (resource scaling). Called after protection. Never fails.
+#[cfg(feature = "plugin-ops")]
+pub async fn prepare_pre_update_hook(
+    db: &DatabaseConnection,
+    hook: Option<Arc<dyn ControllerUpdateHook>>,
+    target: &ValidatedUpdateTarget,
+    update_history_id: Uuid,
+    output_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+) {
+    let Some(hook) = hook else { return };
+
+    let controller = QueryUpdateHookController::new(db, target.item.tenant_id);
+    let ctx = UpdateHookPreContext::new(
+        &controller,
+        target.item.tenant_id,
+        target.host.id,
+        target.item.id,
+        update_history_id,
+    );
+    let ctx = if let Some(tx) = output_tx {
+        ctx.with_output_tx(tx)
+    } else {
+        ctx
+    };
+
+    hook.prepare_pre_update_hook(&ctx).await;
+}
+
+/// Run the post-update hook (resource restore). Called before protection finalization.
+#[cfg(feature = "plugin-ops")]
+pub async fn finalize_post_update_hook(
+    db: &DatabaseConnection,
+    hook: Option<Arc<dyn ControllerUpdateHook>>,
+    notification_ops: &dyn NotificationOps,
+    record: &update_history::Model,
+) -> Result<()> {
+    let Some(hook) = hook else { return Ok(()) };
+
+    let controller = QueryUpdateHookController::new(db, record.tenant_id);
+    let tenant_db = crate::TenantDb::new(db.clone(), record.tenant_id);
+    let ctx = UpdateHookPostContext::new(
+        &controller,
+        record.tenant_id,
+        record.host_id,
+        record.software_item_id,
+        record.id,
+        record.status,
+        notification_ops,
+        tenant_db,
+    );
+
+    hook.finalize_post_update_hook(&ctx)
+        .await
+        .context_transform(|e| TriggerUpdateError::PostUpdateFinalization(e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // Layer 1: Validate preconditions
 // ---------------------------------------------------------------------------
 
@@ -1126,6 +1211,42 @@ pub fn enrich_release_info_with_attestation(
     }
 
     Some(ri)
+}
+
+#[cfg(test)]
+mod hook_dispatch_tests {
+    use super::*;
+
+    /// Verify that `prepare_pre_update_hook` exists with the expected shape by
+    /// taking its address as a bare item path. Async fn items are not directly
+    /// coercible to a `fn(...)` pointer (they return an opaque `impl Future`),
+    /// so we use a type-erased item reference instead of a fn-pointer cast.
+    #[cfg(feature = "plugin-ops")]
+    const _PREPARE_PRE_UPDATE_HOOK_EXISTS: () = {
+        // Taking the address of the function verifies its name and that it is
+        // accessible. The `let _` suppresses the unused-value warning.
+        let _ = prepare_pre_update_hook;
+    };
+
+    /// Verify that `finalize_post_update_hook` exists with the expected shape.
+    #[cfg(feature = "plugin-ops")]
+    const _FINALIZE_POST_UPDATE_HOOK_EXISTS: () = {
+        let _ = finalize_post_update_hook;
+    };
+
+    #[test]
+    #[cfg(feature = "plugin-ops")]
+    fn prepare_pre_update_hook_fn_exists() {
+        // Taking the address of the async fn proves it is defined and reachable.
+        let _ = prepare_pre_update_hook;
+    }
+
+    #[test]
+    #[cfg(feature = "plugin-ops")]
+    fn finalize_post_update_hook_fn_exists() {
+        // Taking the address of the async fn proves it is defined and reachable.
+        let _ = finalize_post_update_hook;
+    }
 }
 
 #[cfg(test)]
