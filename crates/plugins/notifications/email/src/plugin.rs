@@ -668,6 +668,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("create")
@@ -731,6 +732,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                         ],
                         pre_load_interaction_id: None,
                     }),
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("edit")
@@ -808,6 +810,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                         ],
                         pre_load_interaction_id: None,
                     }),
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("test")
@@ -823,6 +826,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("delete")
@@ -844,6 +848,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("configure_smtp")
@@ -977,6 +982,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                                 .expect("literal interaction id is valid"),
                         ),
                     }),
+                    icon: None,
                 },
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("get_smtp")
@@ -992,6 +998,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 },
             ],
             data_sources: vec![surfaces::DataSourceDescriptor {
@@ -1067,7 +1074,8 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
-                },
+                                icon: None,
+},
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("test_global_smtp_email")
                         .expect("literal interaction id is valid"),
@@ -1082,7 +1090,8 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
                     form_ui: None,
-                },
+                                icon: None,
+},
                 surfaces::InteractionDescriptor {
                     interaction_id: save_global_smtp_interaction,
                     kind: surfaces::InteractionKind::MutationAction,
@@ -1230,7 +1239,8 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                                 .expect("literal interaction id is valid"),
                         ),
                     }),
-                },
+                                icon: None,
+},
             ],
             data_sources: vec![],
         }

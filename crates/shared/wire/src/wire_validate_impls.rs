@@ -1802,6 +1802,7 @@ mod tests {
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 }],
                 data_sources: vec![surfaces::DataSourceDescriptor {
                     data_source_id: surfaces::DataSourceId::new("guest.rows").unwrap(),
@@ -1870,6 +1871,7 @@ mod tests {
             transport: surfaces::InteractionTransport::ProviderProxied,
             workflow_steps: vec![],
             form_ui: None,
+            icon: None,
         };
 
         let err = payload.wire_validate().unwrap_err();

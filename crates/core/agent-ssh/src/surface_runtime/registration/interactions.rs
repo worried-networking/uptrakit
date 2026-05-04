@@ -90,6 +90,7 @@ pub(super) fn build_interactions(
             transport: InteractionTransport::ProviderProxied,
             workflow_steps,
             form_ui: merged_ref.form_ui,
+            icon: None,
         });
     }
     interactions

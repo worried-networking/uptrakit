@@ -930,6 +930,7 @@ mod tests {
                     }],
                     pre_load_interaction_id: None,
                 }),
+                icon: None,
             }],
             data_sources: vec![],
         };

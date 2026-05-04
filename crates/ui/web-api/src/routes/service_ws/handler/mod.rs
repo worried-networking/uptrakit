@@ -3407,6 +3407,7 @@ mod tests {
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: Vec::new(),
                     form_ui: None,
+                    icon: None,
                 }],
                 data_sources: Vec::new(),
             }],

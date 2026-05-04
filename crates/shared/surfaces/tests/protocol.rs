@@ -58,6 +58,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: None,
+            icon: None,
         }],
         data_sources: vec![DataSourceDescriptor {
             data_source_id: DataSourceId::new("surface.data").expect("valid data source id"),
@@ -157,6 +158,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: Vec::new(),
         form_ui: None,
+        icon: None,
     };
     registration.surfaces[0]
         .interactions
@@ -219,6 +221,7 @@ fn protocol_registration_rejects_missing_workflow_step_label_during_deserializat
             result_schema: SchemaContract::Any,
         }],
         form_ui: None,
+        icon: None,
     };
 
     let mut encoded = serde_json::to_value(&registration).expect("serialize registration");
@@ -257,6 +260,7 @@ fn protocol_registration_rejects_blank_workflow_step_label() {
             result_schema: SchemaContract::Any,
         }],
         form_ui: None,
+        icon: None,
     };
 
     let err = registration
@@ -414,6 +418,7 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: Vec::new(),
         form_ui: None,
+        icon: None,
     };
 
     let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
@@ -623,6 +628,7 @@ fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
             result_schema: SchemaContract::Any,
         }],
         form_ui: None,
+        icon: None,
     };
 
     let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
@@ -682,6 +688,7 @@ fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
                 result_schema: SchemaContract::Any,
             }],
             form_ui: None,
+            icon: None,
         });
 
     let err = registration

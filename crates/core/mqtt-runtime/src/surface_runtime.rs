@@ -687,6 +687,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: None,
+            icon: None,
         },
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
@@ -701,6 +702,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: Some(build_client_form_ui(false)),
+            icon: None,
         },
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_EDIT).expect("interaction id is valid"),
@@ -715,6 +717,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: Some(build_client_form_ui(true)),
+            icon: None,
         },
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_GET).expect("interaction id is valid"),
@@ -729,6 +732,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: None,
+            icon: None,
         },
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_DELETE).expect("interaction id is valid"),
@@ -749,6 +753,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
             form_ui: None,
+            icon: None,
         },
     ]
 }

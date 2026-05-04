@@ -193,6 +193,7 @@ fn sample_surface_read() -> SurfaceReadResponse {
                 }],
                 pre_load_interaction_id: None,
             }),
+            icon: None,
         }],
         data_sources: vec![],
     }
@@ -288,6 +289,7 @@ fn sample_proxied_surface_read() -> SurfaceReadResponse {
                 ],
                 pre_load_interaction_id: None,
             }),
+            icon: None,
         }],
         data_sources: vec![],
     }

@@ -788,7 +788,7 @@ mod controller_boundary_tests {
                 reason = "stub method body never executes; test only checks trait-object coercion"
             )]
             fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
-                unimplemented!()
+                unimplemented!("tenant_db not used in roles.rs hook controller tests")
             }
         }
         let ctrl = TestHookCtrl;
