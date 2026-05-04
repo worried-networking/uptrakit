@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/Button.svelte';
 	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
+	import SurfaceActionButton from '$lib/components/surfaces/SurfaceActionButton.svelte';
 	import type { ButtonVariant, ButtonSize } from '$lib/components/Button.svelte';
 
 	const VARIANTS: ButtonVariant[] = ['primary', 'ghost', 'danger', 'secondary'];
@@ -59,6 +60,27 @@
 		<div class="flex flex-wrap gap-3">
 			<UpdateAllButton state="idle" onclick={noop} />
 			<UpdateAllButton state="dim" ariaLabel="No updates available" onclick={noop} />
+		</div>
+	</section>
+
+	<section data-testid="surface-action-button">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">SurfaceActionButton — labelDisplay states</h2>
+		<div class="@container/buttons flex flex-wrap items-center gap-3">
+			<SurfaceActionButton label="Always" icon="refresh-cw" labelDisplay="always" variant="primary" onclick={noop} />
+			<SurfaceActionButton
+				label="Auto (collapses ≤ 28em)"
+				icon="refresh-cw"
+				labelDisplay="auto"
+				variant="primary"
+				onclick={noop}
+			/>
+			<SurfaceActionButton label="Icon only" icon="trash-2" labelDisplay="icon-only" variant="danger" onclick={noop} />
+			<SurfaceActionButton
+				label="Icon-only without icon (degrades)"
+				labelDisplay="icon-only"
+				variant="ghost"
+				onclick={noop}
+			/>
 		</div>
 	</section>
 </main>
