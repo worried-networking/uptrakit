@@ -29,6 +29,7 @@ RULE_FORBIDDEN_PLUGIN_HELPER = "forbidden-plugin-helper"
 RULE_HARDCODED_PLUGIN_TYPE_LITERAL = "hardcoded-plugin-type-literal"
 RULE_MANIFEST_PLUGIN_DEPENDENCY = "manifest-plugin-dependency"
 RULE_PLUGIN_TRANSPORT_ESCAPE = "plugin-transport-escape"
+RULE_PLUGIN_ENTITY_IN_SHARED_DB = "plugin-entity-in-shared-db"
 # Migration-only parity rule for the legacy shell checker surface.
 # Intentionally excluded from KNOWN_RULE_IDS so allowlists remain spec-canonical only.
 RULE_LEGACY_DASHBOARD_BESPOKE_SURFACE = "legacy-dashboard-bespoke-surface"
@@ -41,6 +42,7 @@ KNOWN_RULE_IDS = {
     RULE_HARDCODED_PLUGIN_TYPE_LITERAL,
     RULE_MANIFEST_PLUGIN_DEPENDENCY,
     RULE_PLUGIN_TRANSPORT_ESCAPE,
+    RULE_PLUGIN_ENTITY_IN_SHARED_DB,
 }
 
 RULE_MATCH_KINDS: dict[str, set[str]] = {
@@ -51,6 +53,7 @@ RULE_MATCH_KINDS: dict[str, set[str]] = {
     RULE_HARDCODED_PLUGIN_TYPE_LITERAL: {"literal_string"},
     RULE_MANIFEST_PLUGIN_DEPENDENCY: {"manifest_dependency"},
     RULE_PLUGIN_TRANSPORT_ESCAPE: {"symbol_name"},
+    RULE_PLUGIN_ENTITY_IN_SHARED_DB: {"file_path", "module_token"},
 }
 
 ALLOWED_MATCH_KINDS = {kind for kinds in RULE_MATCH_KINDS.values() for kind in kinds}
@@ -2604,6 +2607,85 @@ def validate_target_sets(root: Path) -> None:
         )
 
 
+def _plugin_owned_entity_stems(repo_root: Path) -> frozenset[str]:
+    """Return entity-file stems owned by plugins.
+
+    Scans every `crates/plugins/**/src/entity/*.rs` file and returns
+    the set of stems. These stems must not appear under
+    `crates/shared/db/src/entity/`.
+    """
+    plugins_root = repo_root / "crates" / "plugins"
+    skip = {"mod.rs", "prelude.rs", "tenant_scoped.rs"}
+    stems: set[str] = set()
+    for entity_dir in plugins_root.glob("*/*/src/entity"):
+        for path in entity_dir.glob("*.rs"):
+            if path.name in skip:
+                continue
+            stems.add(path.stem)
+    return frozenset(stems)
+
+
+def scan_plugin_entity_leaks_in_shared_db(repo_root: Path) -> list[Finding]:
+    """Detect plugin-owned entities re-exported by or hosted in shared-db.
+
+    Two complementary checks:
+      (a) filename collision — any `crates/shared/db/src/entity/<stem>.rs`
+          whose stem matches a stem in `crates/plugins/**/src/entity/`.
+      (b) module-token re-export — `pub mod <stem>;` or
+          `pub use super::<stem>::...;` inside
+          `crates/shared/db/src/entity/{mod,prelude}.rs` matching a
+          plugin-owned stem.
+    """
+    findings: list[Finding] = []
+    plugin_stems = _plugin_owned_entity_stems(repo_root)
+    if not plugin_stems:
+        return findings  # No plugins yet; nothing to check.
+
+    shared_entity_dir = repo_root / "crates" / "shared" / "db" / "src" / "entity"
+    skip = {"mod.rs", "prelude.rs", "tenant_scoped.rs"}
+
+    # Check (a): filename collisions.
+    for path in shared_entity_dir.glob("*.rs"):
+        if path.name in skip:
+            continue
+        if path.stem in plugin_stems:
+            rel = posix_rel(path, repo_root)
+            findings.append(
+                Finding(
+                    rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB,
+                    path=rel,
+                    line=1,
+                    match_kind="file_path",
+                    match_value=path.stem,
+                    excerpt=f"plugin-owned entity stem `{path.stem}` hosted in shared-db",
+                )
+            )
+
+    # Check (b): module-token re-exports inside mod.rs / prelude.rs.
+    pub_mod_re = re.compile(r"^\s*pub\s+mod\s+([A-Za-z0-9_]+)\s*;")
+    pub_use_re = re.compile(r"^\s*pub\s+use\s+super::([A-Za-z0-9_]+)\s*::")
+    for filename in ("mod.rs", "prelude.rs"):
+        path = shared_entity_dir / filename
+        if not path.is_file():
+            continue
+        rel = posix_rel(path, repo_root)
+        for line_no, line in enumerate(path.read_text().splitlines(), start=1):
+            for pattern in (pub_mod_re, pub_use_re):
+                m = pattern.match(line)
+                if m and m.group(1) in plugin_stems:
+                    findings.append(
+                        Finding(
+                            rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB,
+                            path=rel,
+                            line=line_no,
+                            match_kind="module_token",
+                            match_value=m.group(1),
+                            excerpt=line.rstrip(),
+                        )
+                    )
+    return findings
+
+
 def collect_findings(root: Path) -> list[Finding]:
     findings: set[Finding] = set()
     validate_target_sets(root)
@@ -2722,6 +2804,7 @@ def collect_findings(root: Path) -> list[Finding]:
             exempt_lines=exempt_lines,
         )
 
+    findings.update(scan_plugin_entity_leaks_in_shared_db(root))
     return sorted(findings)
 
 
