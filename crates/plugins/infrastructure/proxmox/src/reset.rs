@@ -16,11 +16,11 @@ pub(crate) fn proxmox_reset_tenant_data<'a>(
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
         use uptrakit_shared_db::entity::plugin_config;
 
+        use crate::entity::proxmox_host_mapping;
         use crate::entity::{
             proxmox_backup_target_cache, proxmox_protection_default,
             proxmox_protection_item_override,
         };
-        use uptrakit_shared_db::entity::proxmox_host_mapping;
 
         // proxmox_protection_item_override has no tenant_id column.
         // Delete via plugin_config_id subquery scoped to the tenant.

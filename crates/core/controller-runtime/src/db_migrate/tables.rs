@@ -64,7 +64,6 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "audit_logs",
     "system_audit_logs",
     "system_enrollment_tokens",
-    "proxmox_host_mappings",
 ];
 
 /// Batch-copy all rows from `src` to `dst` in FK-safe order.
@@ -134,7 +133,10 @@ pub(crate) async fn copy_all(
     copy!(AuditLog, "audit_logs");
     copy!(SystemAuditLog, "system_audit_logs");
     copy!(SystemEnrollmentToken, "system_enrollment_tokens");
-    copy!(ProxmoxHostMapping, "proxmox_host_mappings");
+
+    total += uptrakit_plugin_infrastructure_registry::copy_plugin_tables(src, dst, batch_size)
+        .await
+        .context_to()?;
 
     Ok(total)
 }
@@ -151,7 +153,9 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
         };
     }
 
-    clean!(ProxmoxHostMapping, "proxmox_host_mappings");
+    uptrakit_plugin_infrastructure_registry::clean_plugin_tables(dst)
+        .await
+        .context_to()?;
     clean!(SystemEnrollmentToken, "system_enrollment_tokens");
     clean!(SystemAuditLog, "system_audit_logs");
     clean!(AuditLog, "audit_logs");
@@ -271,7 +275,10 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(AuditLog, "audit_logs");
     verify!(SystemAuditLog, "system_audit_logs");
     verify!(SystemEnrollmentToken, "system_enrollment_tokens");
-    verify!(ProxmoxHostMapping, "proxmox_host_mappings");
+
+    total += uptrakit_plugin_infrastructure_registry::verify_plugin_tables(src, dst)
+        .await
+        .context_to()?;
 
     Ok(total)
 }
@@ -404,8 +411,8 @@ mod tests {
     fn copy_order_has_all_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            49,
-            "COPY_ORDER must list all 49 app tables"
+            48,
+            "COPY_ORDER must list all 48 core app tables; plugin tables register via PluginDescriptor"
         );
     }
 }

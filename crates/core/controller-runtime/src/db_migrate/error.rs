@@ -2,6 +2,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 
 /// Errors that can occur during a database migration.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub(crate) enum DbMigrateError {
     /// Failed to connect to the source or target database, or a setup step
@@ -41,3 +42,27 @@ pub(crate) enum DbMigrateError {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<DbMigrateError>>;
+
+use uptrakit_shared_db::migrate_core_tables::TableMigrateError;
+use uptrakit_shared_macros::impl_report_conversion;
+
+// Folds `TableMigrateError` (returned by both registry and shared-db core
+// helpers) into the existing `DbMigrateError::TableOp` and
+// `DbMigrateError::Mismatch` variants — no new variants needed.
+// `TableMigrateError` is `#[non_exhaustive]` and lives in another crate
+// (`shared-db`), so the closure's match must include a wildcard arm.
+// The wildcard maps unknown variants conservatively to `TableOp` with a
+// `DbErr::Custom` carrying the Debug rendering — guaranteed to fire only
+// when `shared-db` adds a new variant we have not yet handled here.
+impl_report_conversion!(TableMigrateError => DbMigrateError, |e| match e {
+    TableMigrateError::Db { table, err } => {
+        DbMigrateError::TableOp { table, db_err: err }
+    }
+    TableMigrateError::Mismatch { table, src, dst } => {
+        DbMigrateError::Mismatch { table, src, dst }
+    }
+    other => DbMigrateError::TableOp {
+        table: "<unknown>",
+        db_err: sea_orm::DbErr::Custom(format!("{other:?}")),
+    },
+});

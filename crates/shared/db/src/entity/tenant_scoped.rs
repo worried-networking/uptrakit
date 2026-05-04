@@ -3,8 +3,8 @@ use uptrakit_tenant_db::TenantScoped;
 use super::{
     audit_log, enrollment_token, host, host_discovery_allowlist, host_tag, notification_channel,
     notification_log, notification_rule, oidc_provider, plugin_config, plugin_type_setting,
-    proxmox_host_mapping, scheduled_task, service, setting, settings_version, software_ignore,
-    software_item, tenant_discovery_allowlist, update_batch, update_history, user_role,
+    scheduled_task, service, setting, settings_version, software_ignore, software_item,
+    tenant_discovery_allowlist, update_batch, update_history, user_role,
 };
 
 impl TenantScoped for audit_log::Entity {
@@ -131,11 +131,5 @@ impl TenantScoped for host_tag::Entity {
 impl TenantScoped for plugin_type_setting::Entity {
     fn tenant_id_column() -> Self::Column {
         plugin_type_setting::Column::TenantId
-    }
-}
-
-impl TenantScoped for proxmox_host_mapping::Entity {
-    fn tenant_id_column() -> Self::Column {
-        proxmox_host_mapping::Column::TenantId
     }
 }
