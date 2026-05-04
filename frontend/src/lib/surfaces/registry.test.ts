@@ -228,14 +228,14 @@ describe('surface registry', () => {
 				href: '/surfaces/surface.only',
 				label: 'Surface Only',
 				priority: 50,
-				icon: 'Box'
+				icon: 'box'
 			},
 			{
 				id: 'surface.settings',
 				href: '/surfaces/surface.settings',
 				label: 'Surface Settings',
 				priority: 100,
-				icon: 'Box'
+				icon: 'box'
 			}
 		]);
 	});
@@ -248,13 +248,13 @@ describe('surface registry', () => {
 				priority: 100,
 				slot: 'surface.page',
 				targeting: 'universal',
-				nav_icon: 'Package'
+				nav_icon: 'package'
 			})
 		];
-		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('Package');
+		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('package');
 	});
 
-	it('defaults icon to Box when nav_icon is absent', () => {
+	it("falls back to 'box' when nav_icon is absent", () => {
 		const slotSurfaces = [
 			makeSurface({
 				surfaceId: 'surface.plugin',
@@ -264,7 +264,7 @@ describe('surface registry', () => {
 				targeting: 'universal'
 			})
 		];
-		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('Box');
+		expect(resolveSurfacePageNavItems(slotSurfaces)[0].icon).toBe('box');
 	});
 
 	it('keeps canonical ordering stable when duplicate surface ids are present', () => {

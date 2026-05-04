@@ -44,7 +44,7 @@
 		Sun,
 		Tags
 	} from 'lucide-svelte';
-	import { resolveNavIcon } from '$lib/nav-icons';
+	import { resolveIcon } from '$lib/icons';
 	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
@@ -277,7 +277,7 @@
 					priority: item.priority,
 					origin: 'surface.page',
 					stableId: item.id,
-					icon: resolveNavIcon(item.icon)
+					icon: resolveIcon(item.icon).component
 				})
 			)
 		].sort(compareShellNavItems)

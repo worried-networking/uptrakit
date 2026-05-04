@@ -52,7 +52,7 @@ export function resolveSurfacePageNavItems(slotSurfaces: SurfaceResponse[]): Sur
 			href: `/surfaces/${surface.surface_id}`,
 			label: surface.label,
 			priority: surface.priority,
-			icon: surface.nav_icon ?? 'Box'
+			icon: surface.nav_icon ?? 'box'
 		});
 	}
 	return navItems;
