@@ -1293,6 +1293,141 @@ enum ProxmoxResourceScalingPolicyCols {
     UpdateMemoryMb,
 }
 
+#[derive(DeriveIden)]
+enum ProxmoxResourceScalingRecords {
+    Table,
+    UpdateHistoryId,
+    TenantId,
+    HostId,
+    SoftwareItemId,
+    PluginConfigId,
+    MappingId,
+    VmType,
+    OriginalCores,
+    OriginalMemoryMb,
+    ScaledCores,
+    ScaledMemoryMb,
+    ScaleStatus,
+    RestoreStatus,
+    ErrorMessage,
+    CreatedAt,
+    UpdatedAt,
+}
+
+// ── Migration: create proxmox_resource_scaling_records ─────────────────────
+
+pub struct CreateProxmoxResourceScalingRecord;
+
+impl MigrationName for CreateProxmoxResourceScalingRecord {
+    fn name(&self) -> &str {
+        "m20260503_000002_proxmox_resource_scaling_record"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxResourceScalingRecord {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProxmoxResourceScalingRecords::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::UpdateHistoryId)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::HostId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::MappingId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::VmType)
+                            .string_len(16)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::OriginalCores)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::OriginalMemoryMb)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::ScaledCores)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::ScaledMemoryMb)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::ScaleStatus)
+                            .string_len(32)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::RestoreStatus)
+                            .string_len(32)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::ErrorMessage)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxResourceScalingRecords::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxResourceScalingRecords::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -1311,6 +1446,7 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(AddProxmoxHmUniqueHostIdIndex),
         Box::new(ProxmoxHmVmidUniquePerConfig),
         Box::new(AddProxmoxResourceScalingPolicyColumns),
+        Box::new(CreateProxmoxResourceScalingRecord),
     ]
 }
 
@@ -1379,6 +1515,42 @@ mod tests {
         let overrides_cols = column_names(&db, "proxmox_protection_item_overrides").await;
         assert!(overrides_cols.contains(&"update_cores".to_string()));
         assert!(overrides_cols.contains(&"update_memory_mb".to_string()));
+    }
+
+    #[tokio::test]
+    async fn migration_b_creates_scaling_records_table() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        CreateProxmoxResourceScalingRecord
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let cols = column_names(&db, "proxmox_resource_scaling_records").await;
+        for expected in &[
+            "update_history_id",
+            "tenant_id",
+            "host_id",
+            "software_item_id",
+            "plugin_config_id",
+            "mapping_id",
+            "vm_type",
+            "original_cores",
+            "original_memory_mb",
+            "scaled_cores",
+            "scaled_memory_mb",
+            "scale_status",
+            "restore_status",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ] {
+            assert!(
+                cols.contains(&ToString::to_string(expected)),
+                "missing column: {expected}"
+            );
+        }
     }
 
     #[tokio::test]
