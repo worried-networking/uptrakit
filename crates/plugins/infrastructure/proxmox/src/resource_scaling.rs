@@ -18,10 +18,6 @@ use crate::{
 pub(crate) struct ControllerUpdateHookPlugin;
 
 impl ControllerUpdateHookPlugin {
-    #[expect(
-        dead_code,
-        reason = "wired into the plugin descriptor in a future task"
-    )]
     pub(crate) fn create(_config: &CatalogConfig) -> Result<Arc<dyn ControllerUpdateHook>> {
         Ok(Arc::new(Self))
     }

@@ -869,6 +869,14 @@ fn __proxmox_create_controller_update_protection(
     crate::update_protection::ControllerUpdateProtectionPlugin::create(config)
 }
 
+fn __proxmox_create_controller_update_hook(
+    config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
+) -> uptrakit_plugin_infrastructure_core::error::Result<
+    std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::ControllerUpdateHook>,
+> {
+    crate::resource_scaling::ControllerUpdateHookPlugin::create(config)
+}
+
 /// Create the agent-side `InfraBundle` for Proxmox.
 ///
 /// Returns all three narrow trait objects (lifecycle, report, guest_exec) from a
@@ -895,6 +903,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     host_requirements: HostRequirements::CONTROLLER_ONLY,
     roles: [ReleaseFetcher, UpdateExecutor],
     controller_update_protection: __proxmox_create_controller_update_protection,
+    controller_update_hook: __proxmox_create_controller_update_hook,
     infra: {
         create: __proxmox_create_infra,
         host_requirements: uptrakit_plugin_infrastructure_core::HostRequirements::new(
@@ -1260,6 +1269,11 @@ mod tests {
                 .contains(&surfaces::Capability::ContextSelector),
             "must declare ContextSelector capability"
         );
+    }
+
+    #[test]
+    fn descriptor_has_controller_update_hook() {
+        assert!(DESCRIPTOR.roles.controller_update_hook.is_some());
     }
 
     #[test]

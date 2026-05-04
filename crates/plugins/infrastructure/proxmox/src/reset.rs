@@ -52,6 +52,13 @@ pub(crate) fn proxmox_reset_tenant_data<'a>(
             .exec(txn)
             .await?;
 
+        use crate::entity::proxmox_resource_scaling_record;
+
+        proxmox_resource_scaling_record::Entity::delete_many()
+            .filter(proxmox_resource_scaling_record::Column::TenantId.eq(tenant_id))
+            .exec(txn)
+            .await?;
+
         // proxmox_protection_audit: audit table — intentionally never deleted.
         Ok(())
     })
