@@ -1794,3 +1794,41 @@ use uptrakit_plugin_infrastructure_core::testing::{
 Cross-reference: inline module documentation in
 `crates/plugins/infrastructure/core/src/helpers.rs` and `src/testing.rs`.
 [PHS API notes](../api/autodiscovery.md#plugin-driven-discovery-targets).
+
+## Action icons
+
+Plugin authors may declare a `lucide-svelte` icon alongside any `SurfaceActionDescriptor` label.
+Icons render through the shared `SurfaceActionButton` component and adapt to the surface they appear
+in (`'auto'` collapse in action bars; `'icon-only'` default in DataTable row actions).
+
+### Identifier scheme
+
+Icon names are Lucide-canonical kebab-case: `refresh-cw`, `trash-2`, `server-cog`. Wire validation
+enforces the regex `^[a-z][a-z0-9-]*[a-z0-9]$` and a 64-character limit; PascalCase or snake_case
+names are rejected at enrollment time.
+
+### Source
+
+The curated allowlist lives at `frontend/src/lib/icons.ts`. Only names present in that file render
+correctly; any other name logs a `console.error` in the dashboard and falls back to text-only.
+
+### Adding a new icon
+
+Single-PR change to `frontend/src/lib/icons.ts`: import the lucide component and add its kebab-case
+key to the `ICONS` map. No wire-crate release is required — the field is `Option<String>`.
+
+### Authoring example
+
+```rust
+SurfaceActionDescriptor::new("sync-host", "Sync")
+    .with_icon("refresh-cw")
+    .with_permission(Permission::UpdateHosts.to_string())
+```
+
+### Where icons render
+
+- **Action-bar buttons** use `labelDisplay='auto'` (the label collapses to icon-only on narrow
+  containers, ≤ 28em).
+- **DataTable row-action buttons** use `labelDisplay='icon-only'` (default-hide when an icon is
+  set).
+- **Workflow triggers** inherit `labelDisplay` from their parent context (action bar or row action).
