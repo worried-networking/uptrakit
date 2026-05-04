@@ -10,6 +10,7 @@ version.workspace = true
 [features]
 default = []
 migration   = ["dep:sea-orm-migration"]
+db-migrate  = []
 db-sqlite   = ["sea-orm/sqlx-sqlite",   "sea-orm-migration?/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration?/sqlx-postgres"]
 
