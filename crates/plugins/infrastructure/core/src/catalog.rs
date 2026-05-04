@@ -782,6 +782,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         reset_tenant_data: None,
+        db_migrate_tables: None,
     };
 
     static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -820,6 +821,7 @@ mod tests {
         raw_settings_keys: &[],
         migrations: None,
         reset_tenant_data: None,
+        db_migrate_tables: None,
         global_provider_consumers: &[],
     };
 
@@ -859,6 +861,7 @@ mod tests {
         raw_settings_keys: &[],
         migrations: None,
         reset_tenant_data: None,
+        db_migrate_tables: None,
         global_provider_consumers: &[],
     };
 
@@ -899,6 +902,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         reset_tenant_data: None,
+        db_migrate_tables: None,
     };
 
     static TEST_MULTI_PROVIDER_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -940,6 +944,7 @@ mod tests {
         ],
         migrations: None,
         reset_tenant_data: None,
+        db_migrate_tables: None,
     };
 
     /// Empty catalog builds successfully.
