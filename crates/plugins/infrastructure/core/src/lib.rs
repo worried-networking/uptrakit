@@ -12,6 +12,8 @@ pub mod batch_update;
 #[cfg(feature = "catalog")]
 pub mod catalog;
 pub mod command;
+#[cfg(feature = "migrations")]
+pub(crate) mod db_migrate;
 pub mod descriptor;
 pub mod error;
 pub mod form_schema;
