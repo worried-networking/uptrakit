@@ -266,6 +266,104 @@ pub type ResetTenantDataFn = for<'a> fn(
 #[cfg(not(feature = "migrations"))]
 pub type ResetTenantDataFn = fn();
 
+/// Per-table copy/clean/verify operations for the `db-migrate` subcommand.
+///
+/// Constructed via [`PluginTableDescriptor::for_entity`].
+///
+/// Type erasure: the closures monomorphise the generic `copy_one` /
+/// `clean_one` / `verify_one` helpers (in `crate::db_migrate`) per
+/// entity `E`. Each `for_entity::<E>(...)` call produces a descriptor
+/// with the same shape regardless of `E`.
+#[cfg(feature = "migrations")]
+pub struct PluginTableDescriptor {
+    /// Table name as it appears in the database (matches
+    /// `#[sea_orm(table_name = "...")]` on the entity).
+    pub name: &'static str,
+
+    /// Bulk-copy rows from `src` to `dst` for this table. Returns row count.
+    pub copy_batch: for<'a> fn(
+        src: &'a sea_orm::DatabaseConnection,
+        dst: &'a sea_orm::DatabaseConnection,
+        batch_size: u64,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<u64, sea_orm::DbErr>> + Send + 'a>,
+    >,
+
+    /// Delete every row in this table on `dst`.
+    pub clean: for<'a> fn(
+        dst: &'a sea_orm::DatabaseConnection,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), sea_orm::DbErr>> + Send + 'a>,
+    >,
+
+    /// Count rows on both `src` and `dst`. Returns `(src_count, dst_count)`.
+    /// The caller (registry helper) compares the pair and constructs a
+    /// structured `TableMigrateError::Mismatch` with the table name on
+    /// disagreement — the descriptor itself does not carry the table
+    /// name into the closure body.
+    pub verify: for<'a> fn(
+        src: &'a sea_orm::DatabaseConnection,
+        dst: &'a sea_orm::DatabaseConnection,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(u64, u64), sea_orm::DbErr>> + Send + 'a>,
+    >,
+}
+
+#[cfg(feature = "migrations")]
+impl PluginTableDescriptor {
+    /// Build a descriptor for a SeaORM entity.
+    ///
+    /// Bounds match the existing `migrate_table<E>` helper in
+    /// `controller-runtime/db_migrate/tables.rs`.
+    pub fn for_entity<E>(name: &'static str) -> Self
+    where
+        E: sea_orm::EntityTrait + 'static,
+        E::Model: sea_orm::IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
+        E::ActiveModel:
+            sea_orm::ActiveModelTrait<Entity = E> + sea_orm::ActiveModelBehavior + Send + 'static,
+    {
+        Self {
+            name,
+            copy_batch: |src, dst, batch| {
+                Box::pin(crate::db_migrate::copy_one::<E>(src, dst, batch))
+            },
+            clean: |dst| Box::pin(crate::db_migrate::clean_one::<E>(dst)),
+            verify: |src, dst| Box::pin(crate::db_migrate::verify_one::<E>(src, dst)),
+        }
+    }
+}
+
+/// Function returning a plugin's tables in FK-safe order.
+///
+/// Order rule: parent tables (referenced by FKs) must come before child
+/// tables. The registry iterates **forward** for copy and verify, and
+/// **reverse** for clean. Getting the order wrong is silent: copy will
+/// fail with a FK violation, but clean might succeed by accident
+/// depending on FK action.
+///
+/// Example — Proxmox plugin, where `proxmox_protection_audit.mapping_id`
+/// references `proxmox_host_mappings.id`:
+///
+/// ```ignore
+/// fn proxmox_db_migrate_tables() -> Vec<PluginTableDescriptor> {
+///     vec![
+///         PluginTableDescriptor::for_entity::<proxmox_host_mapping::Entity>(
+///             "proxmox_host_mappings",
+///         ),
+///         // ... independents ...
+///         PluginTableDescriptor::for_entity::<proxmox_protection_audit::Entity>(
+///             "proxmox_protection_audit",
+///         ),
+///     ]
+/// }
+/// ```
+#[cfg(feature = "migrations")]
+pub type DbMigrateTablesFn = fn() -> Vec<PluginTableDescriptor>;
+
+/// Placeholder used when `migrations` feature is not active.
+#[cfg(not(feature = "migrations"))]
+pub type DbMigrateTablesFn = fn();
+
 // ── Role slots ──────────────────────────────────────────────────────────────
 
 /// A role creation function paired with its host requirements.
@@ -379,6 +477,12 @@ pub struct PluginDescriptor {
     ///
     /// The actual type is only meaningful when `migrations` feature is active.
     pub reset_tenant_data: Option<ResetTenantDataFn>,
+    /// Plugin-owned tables registered for the `db-migrate` subcommand.
+    /// `None` for plugins with no own tables.
+    ///
+    /// Real type only meaningful under `migrations` feature; outside it,
+    /// `DbMigrateTablesFn` is a `fn()` placeholder.
+    pub db_migrate_tables: Option<DbMigrateTablesFn>,
 }
 
 impl PluginDescriptor {

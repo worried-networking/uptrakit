@@ -101,6 +101,8 @@ pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 
 #[cfg(feature = "catalog")]
 pub use descriptor::ControllerRuntime;
+#[cfg(feature = "migrations")]
+pub use descriptor::PluginTableDescriptor;
 pub use descriptor::{
     ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
     CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
@@ -111,7 +113,7 @@ pub use descriptor::{
     SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
     SurfaceWorkflowStep, TypeSettingsOps,
 };
-pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
+pub use descriptor::{DbMigrateTablesFn, InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
 };
