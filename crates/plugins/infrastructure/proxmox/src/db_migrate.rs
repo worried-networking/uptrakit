@@ -4,8 +4,8 @@
 //! FK in the codebase today is
 //! `proxmox_protection_audit.mapping_id → proxmox_host_mappings.id`
 //! (`SetNull`); `host_mapping` therefore precedes `protection_audit`.
-//! The other three Proxmox tables FK only into core tables, so their
-//! relative position within this list does not matter for FK safety.
+//! `proxmox_resource_scaling_records.mapping_id` stores a mapping UUID
+//! but has no enforced FK constraint, so its position is flexible.
 
 #[cfg(feature = "migrations")]
 pub(crate) fn proxmox_db_migrate_tables()
@@ -15,6 +15,7 @@ pub(crate) fn proxmox_db_migrate_tables()
     use crate::entity::{
         proxmox_backup_target_cache, proxmox_host_mapping, proxmox_protection_audit,
         proxmox_protection_default, proxmox_protection_item_override,
+        proxmox_resource_scaling_record,
     };
 
     vec![
@@ -30,6 +31,9 @@ pub(crate) fn proxmox_db_migrate_tables()
         ),
         PluginTableDescriptor::for_entity::<proxmox_protection_audit::Entity>(
             "proxmox_protection_audit",
+        ),
+        PluginTableDescriptor::for_entity::<proxmox_resource_scaling_record::Entity>(
+            "proxmox_resource_scaling_records",
         ),
     ]
 }

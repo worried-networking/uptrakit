@@ -301,8 +301,8 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
         }
 
         // Load host mapping by mapping_id (stable key)
+        use crate::entity::proxmox_host_mapping;
         use sea_orm::EntityTrait;
-        use uptrakit_shared_db::entity::proxmox_host_mapping;
 
         let mapping_row = proxmox_host_mapping::Entity::find_by_id(record.mapping_id)
             .one(db)
@@ -504,9 +504,9 @@ mod tests {
         plugin_config_id: Uuid,
         vmid: i32,
         vm_type: &str,
-    ) -> uptrakit_shared_db::entity::proxmox_host_mapping::Model {
+    ) -> crate::entity::proxmox_host_mapping::Model {
         let now = OffsetDateTime::now_utc();
-        uptrakit_shared_db::entity::proxmox_host_mapping::Model {
+        crate::entity::proxmox_host_mapping::Model {
             id: Uuid::now_v7(),
             tenant_id,
             plugin_config_id,
@@ -619,7 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn pre_update_hook_no_op_when_no_host_mapping() {
-        use uptrakit_shared_db::entity::proxmox_host_mapping;
+        use crate::entity::proxmox_host_mapping;
 
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
