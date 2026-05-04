@@ -60,6 +60,7 @@ macro_rules! declare_plugin {
             } )?
             $(, migrations: $migrations_fn:expr )?
             $(, reset_tenant_data: $reset_fn:expr )?
+            $(, db_migrate_tables: $db_migrate_fn:expr )?
             $(,)?
         }
     ) => {
@@ -275,6 +276,7 @@ macro_rules! declare_plugin {
             ),
             migrations: $crate::__option_expr!( $( $migrations_fn )? ),
             reset_tenant_data: $crate::__option_expr!( $( $reset_fn )? ),
+            db_migrate_tables: $crate::__option_expr!( $( $db_migrate_fn )? ),
         };
     };
 }
