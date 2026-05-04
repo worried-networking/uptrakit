@@ -1314,6 +1314,117 @@ enum ProxmoxResourceScalingRecords {
     UpdatedAt,
 }
 
+// ── Scaling tables DeriveIden enums ────────────────────────────────────────
+
+#[derive(DeriveIden)]
+enum ProxmoxScalingDefaults {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum ProxmoxScalingItemOverrides {
+    Table,
+}
+
+// ── Migration A: create proxmox_scaling_defaults ────────────────────────────
+
+pub struct CreateProxmoxScalingDefaults;
+
+impl MigrationName for CreateProxmoxScalingDefaults {
+    fn name(&self) -> &str {
+        "m20260504_000001_proxmox_scaling_defaults"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxScalingDefaults {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE TABLE proxmox_scaling_defaults (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    plugin_config_id TEXT NOT NULL,
+                    scaling_mode VARCHAR(16) NOT NULL DEFAULT 'none',
+                    absolute_cores INTEGER
+                        CHECK (absolute_cores IS NULL OR absolute_cores >= 1),
+                    absolute_memory_mb INTEGER
+                        CHECK (absolute_memory_mb IS NULL OR absolute_memory_mb >= 1),
+                    delta_cores INTEGER
+                        CHECK (delta_cores IS NULL OR delta_cores >= 1),
+                    delta_memory_mb INTEGER
+                        CHECK (delta_memory_mb IS NULL OR delta_memory_mb >= 1),
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL,
+                    UNIQUE (tenant_id, plugin_config_id)
+                )",
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxScalingDefaults::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+// ── Migration B: create proxmox_scaling_item_overrides ──────────────────────
+
+pub struct CreateProxmoxScalingItemOverrides;
+
+impl MigrationName for CreateProxmoxScalingItemOverrides {
+    fn name(&self) -> &str {
+        "m20260504_000002_proxmox_scaling_item_overrides"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxScalingItemOverrides {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE TABLE proxmox_scaling_item_overrides (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    software_item_id TEXT NOT NULL,
+                    plugin_config_id TEXT NOT NULL,
+                    scaling_mode VARCHAR(16) NOT NULL DEFAULT 'none',
+                    absolute_cores INTEGER
+                        CHECK (absolute_cores IS NULL OR absolute_cores >= 1),
+                    absolute_memory_mb INTEGER
+                        CHECK (absolute_memory_mb IS NULL OR absolute_memory_mb >= 1),
+                    delta_cores INTEGER
+                        CHECK (delta_cores IS NULL OR delta_cores >= 1),
+                    delta_memory_mb INTEGER
+                        CHECK (delta_memory_mb IS NULL OR delta_memory_mb >= 1),
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL,
+                    UNIQUE (software_item_id, plugin_config_id)
+                )",
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxScalingItemOverrides::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 // ── Migration: create proxmox_resource_scaling_records ─────────────────────
 
 pub struct CreateProxmoxResourceScalingRecord;
@@ -1447,6 +1558,8 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(ProxmoxHmVmidUniquePerConfig),
         Box::new(AddProxmoxResourceScalingPolicyColumns),
         Box::new(CreateProxmoxResourceScalingRecord),
+        Box::new(CreateProxmoxScalingDefaults),
+        Box::new(CreateProxmoxScalingItemOverrides),
     ]
 }
 
@@ -1543,6 +1656,86 @@ mod tests {
             "scale_status",
             "restore_status",
             "error_message",
+            "created_at",
+            "updated_at",
+        ] {
+            assert!(
+                cols.contains(&ToString::to_string(expected)),
+                "missing column: {expected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_new_a_creates_proxmox_scaling_defaults_table() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+
+        let cols = column_names(&db, "proxmox_scaling_defaults").await;
+        for expected in &[
+            "id",
+            "tenant_id",
+            "plugin_config_id",
+            "scaling_mode",
+            "absolute_cores",
+            "absolute_memory_mb",
+            "delta_cores",
+            "delta_memory_mb",
+            "created_at",
+            "updated_at",
+        ] {
+            assert!(
+                cols.contains(&ToString::to_string(expected)),
+                "missing column: {expected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_new_a_check_constraint_rejects_zero_absolute_cores() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+
+        let tid = "00000000-0000-0000-0000-000000000001";
+        let cid = "00000000-0000-0000-0000-000000000002";
+        let id = "00000000-0000-0000-0000-000000000003";
+        let result = db
+            .execute_unprepared(&format!(
+                "INSERT INTO proxmox_scaling_defaults \
+                 (id, tenant_id, plugin_config_id, scaling_mode, absolute_cores, created_at, updated_at) \
+                 VALUES ('{id}', '{tid}', '{cid}', 'absolute', 0, '2026-01-01', '2026-01-01')"
+            ))
+            .await;
+        assert!(
+            result.is_err(),
+            "CHECK constraint should reject absolute_cores = 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_new_b_creates_proxmox_scaling_item_overrides_table() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        CreateProxmoxScalingItemOverrides
+            .up(&manager)
+            .await
+            .unwrap();
+
+        let cols = column_names(&db, "proxmox_scaling_item_overrides").await;
+        for expected in &[
+            "id",
+            "tenant_id",
+            "software_item_id",
+            "plugin_config_id",
+            "scaling_mode",
+            "absolute_cores",
+            "absolute_memory_mb",
+            "delta_cores",
+            "delta_memory_mb",
             "created_at",
             "updated_at",
         ] {
