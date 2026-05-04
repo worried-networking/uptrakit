@@ -66,5 +66,5 @@ pub(crate) fn proxmox_reset_tenant_data<'a>(
 
 /// No-op stub used when `migrations` feature is inactive.
 #[cfg(not(feature = "migrations"))]
-#[allow(dead_code)]
+#[expect(dead_code, reason = "only the migrations-feature variant is called")]
 pub(crate) fn proxmox_reset_tenant_data() {}

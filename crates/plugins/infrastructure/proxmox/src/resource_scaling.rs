@@ -15,14 +15,9 @@ use crate::{
     protection_store::{DbProxmoxProtectionStore, ProxmoxProtectionStore as _},
 };
 
-// The struct and create fn are referenced via a function pointer stored in a static
-// (DESCRIPTOR.controller_update_hook). Rustc's dead-code lint does not trace function
-// pointer usage through statics, so suppress it explicitly.
-#[allow(dead_code)]
 pub(crate) struct ControllerUpdateHookPlugin;
 
 impl ControllerUpdateHookPlugin {
-    #[allow(dead_code)]
     pub(crate) fn create(_config: &CatalogConfig) -> Result<Arc<dyn ControllerUpdateHook>> {
         Ok(Arc::new(Self))
     }
@@ -221,14 +216,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             return;
         }
 
-        // Stream status line
+        // Stream status line; send failure means the receiver is gone — ignore.
         if let Some(tx) = &ctx.output_tx {
-            let _ = tx.send(
+            drop(tx.send(
                 format!(
                     "Scaling VM resources to {target_cores} cores / {target_memory_mb} MB\u{2026}\n"
                 )
                 .into_bytes(),
-            );
+            ));
         }
 
         // Apply the resource change
@@ -256,12 +251,12 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     );
                 }
                 if let Some(tx) = &ctx.output_tx {
-                    let _ = tx.send(
+                    drop(tx.send(
                         format!(
                             "VM resources scaled to {target_cores} cores / {target_memory_mb} MB.\n"
                         )
                         .into_bytes(),
-                    );
+                    ));
                 }
             }
             Err(e) => {
@@ -402,11 +397,53 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     );
                 }
 
-                // Notification: send_transactional_email requires a specific `to` address but
-                // the plugin layer has no direct access to a tenant admin email without a
-                // separate DB lookup. The structured tracing::warn above is the operator
-                // notification mechanism. The restore_status = "restore_failed" DB record
-                // is the persistent audit signal for dashboards / alerting pipelines.
+                // Best-effort email notification: look up any tenant user to get an email
+                // address. If lookup fails or no user exists, silently skip.
+                {
+                    use sea_orm::{ColumnTrait, QueryFilter};
+                    use uptrakit_shared_db::entity::{user, user_role};
+
+                    let maybe_user_id = user_role::Entity::find()
+                        .filter(user_role::Column::TenantId.eq(record.tenant_id))
+                        .one(ctx.tenant_db.db())
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|ur| ur.user_id);
+
+                    if let Some(user_id) = maybe_user_id {
+                        let maybe_email = user::Entity::find_by_id(user_id)
+                            .one(ctx.tenant_db.db())
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|u| u.email);
+
+                        if let Some(email) = maybe_email {
+                            let subject = "Proxmox resource restore failed";
+                            let body = format!(
+                                "A Proxmox VM resource restore failed for update {update_history_id}.\n\
+                                 VM is still running at scaled resources ({scaled_cores} cores / \
+                                 {scaled_memory_mb} MB).\n\
+                                 Error: {err}",
+                                update_history_id = ctx.update_history_id,
+                                scaled_cores = record.scaled_cores,
+                                scaled_memory_mb = record.scaled_memory_mb,
+                            );
+                            drop(
+                                ctx.notification_ops
+                                    .send_transactional_email(
+                                        &ctx.tenant_db,
+                                        email.expose_email(),
+                                        subject,
+                                        &body,
+                                        &body,
+                                    )
+                                    .await,
+                            );
+                        }
+                    }
+                }
 
                 Err(rootcause::report!(
                     uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
@@ -422,6 +459,145 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 mod tests {
     use super::*;
 
+    use sea_orm::{DbBackend, MockDatabase, MockExecResult};
+    use time::OffsetDateTime;
+    use uptrakit_plugin_infrastructure_core::{
+        NotificationTransport, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
+        plugin_ops::NotificationOps,
+    };
+    use uptrakit_shared_types::PluginTypeId;
+    use uuid::Uuid;
+
+    // ── Test stubs ────────────────────────────────────────────────────────────
+
+    struct TestHookController {
+        tenant_db: uptrakit_tenant_db::TenantDb,
+    }
+
+    impl UpdateHookController for TestHookController {
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            &self.tenant_db
+        }
+    }
+
+    struct NoOpNotificationOps;
+
+    #[async_trait::async_trait]
+    impl NotificationOps for NoOpNotificationOps {
+        fn transport(
+            &self,
+            _id: &PluginTypeId,
+        ) -> Option<std::sync::Arc<dyn NotificationTransport>> {
+            None
+        }
+
+        fn notification_supported_types(&self) -> Vec<PluginTypeId> {
+            vec![]
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    fn mock_host_mapping(
+        tenant_id: Uuid,
+        host_id: Uuid,
+        plugin_config_id: Uuid,
+        vmid: i32,
+        vm_type: &str,
+    ) -> uptrakit_shared_db::entity::proxmox_host_mapping::Model {
+        let now = OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::proxmox_host_mapping::Model {
+            id: Uuid::now_v7(),
+            tenant_id,
+            plugin_config_id,
+            host_id: Some(host_id),
+            proxmox_node: "pve1".to_string(),
+            proxmox_vmid: vmid,
+            proxmox_type: vm_type.to_string(),
+            proxmox_name: None,
+            proxmox_status: "running".to_string(),
+            hostname: None,
+            ip_addresses: None,
+            machine_id: None,
+            match_method: None,
+            discovered_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn mock_protection_default_with_scaling(
+        tenant_id: Uuid,
+        plugin_config_id: Uuid,
+    ) -> crate::entity::proxmox_protection_default::Model {
+        let now = OffsetDateTime::now_utc();
+        crate::entity::proxmox_protection_default::Model {
+            tenant_id,
+            plugin_config_id,
+            mode: "do_nothing".to_string(),
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+            update_cores: Some(8),
+            update_memory_mb: Some(4096),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn mock_plugin_config(
+        tenant_id: Uuid,
+        plugin_config_id: Uuid,
+        api_url: &str,
+    ) -> uptrakit_shared_db::entity::plugin_config::Model {
+        let now = OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::plugin_config::Model {
+            id: plugin_config_id,
+            tenant_id,
+            name: "test".to_string(),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            config: serde_json::json!({
+                "api_url": api_url,
+                "api_token": "root@pam!tok=secret",
+                "verify_tls": false
+            }),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        }
+    }
+
+    fn mock_scaling_record(
+        update_history_id: Uuid,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+        mapping_id: Uuid,
+    ) -> crate::entity::proxmox_resource_scaling_record::Model {
+        let now = OffsetDateTime::now_utc();
+        crate::entity::proxmox_resource_scaling_record::Model {
+            update_history_id,
+            tenant_id,
+            host_id,
+            software_item_id,
+            plugin_config_id,
+            mapping_id,
+            vm_type: "qemu".to_string(),
+            original_cores: 4,
+            original_memory_mb: 4096,
+            scaled_cores: 8,
+            scaled_memory_mb: 8192,
+            scale_status: "scaled".to_string(),
+            restore_status: "pending".to_string(),
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
     #[test]
     fn controller_update_hook_plugin_implements_plugin_meta() {
         let plugin = ControllerUpdateHookPlugin;
@@ -431,7 +607,6 @@ mod tests {
     #[tokio::test]
     async fn finalize_returns_ok_when_no_record_in_db() {
         use crate::entity::proxmox_resource_scaling_record;
-        use sea_orm::{DbBackend, MockDatabase};
 
         let db = MockDatabase::new(DbBackend::Sqlite)
             .append_query_results([Vec::<proxmox_resource_scaling_record::Model>::new()])
@@ -440,5 +615,223 @@ mod tests {
         let result = crate::policy_store::load_scaling_record(&db, uuid::Uuid::now_v7()).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn pre_update_hook_no_op_when_no_host_mapping() {
+        use uptrakit_shared_db::entity::proxmox_host_mapping;
+
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([Vec::<proxmox_host_mapping::Model>::new()])
+            .into_connection();
+
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+        let controller = TestHookController { tenant_db };
+        let ctx = UpdateHookPreContext::new(
+            &controller,
+            tenant_id,
+            host_id,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        );
+
+        ControllerUpdateHookPlugin
+            .prepare_pre_update_hook(&ctx)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn pre_update_hook_no_op_when_no_scaling_configured() {
+        use crate::entity::{proxmox_protection_default, proxmox_protection_item_override};
+
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([vec![mock_host_mapping(
+                tenant_id,
+                host_id,
+                plugin_config_id,
+                100,
+                "qemu",
+            )]])
+            // load_item_override → None
+            .append_query_results([Vec::<proxmox_protection_item_override::Model>::new()])
+            // load_global_default → Some, but both scaling fields are None
+            .append_query_results([vec![proxmox_protection_default::Model {
+                tenant_id,
+                plugin_config_id,
+                mode: "do_nothing".to_string(),
+                backup_target_key: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: None,
+                update_cores: None,
+                update_memory_mb: None,
+                created_at: now,
+                updated_at: now,
+            }]])
+            .into_connection();
+
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+        let controller = TestHookController { tenant_db };
+        let ctx = UpdateHookPreContext::new(
+            &controller,
+            tenant_id,
+            host_id,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        );
+
+        ControllerUpdateHookPlugin
+            .prepare_pre_update_hook(&ctx)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn pre_update_hook_skips_scaling_when_qemu_hotplug_absent() {
+        use crate::entity::proxmox_protection_item_override;
+        use httpmock::prelude::*;
+
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+
+        let server = MockServer::start();
+        // GET config: cores and memory present, but no hotplug field
+        let get_config_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api2/json/nodes/pve1/qemu/100/config");
+            then.status(200)
+                .json_body(serde_json::json!({"data": {"cores": 4, "memory": 4096}}));
+        });
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([vec![mock_host_mapping(
+                tenant_id,
+                host_id,
+                plugin_config_id,
+                100,
+                "qemu",
+            )]])
+            .append_query_results([Vec::<proxmox_protection_item_override::Model>::new()])
+            .append_query_results([vec![mock_protection_default_with_scaling(
+                tenant_id,
+                plugin_config_id,
+            )]])
+            .append_query_results([vec![mock_plugin_config(
+                tenant_id,
+                plugin_config_id,
+                &server.base_url(),
+            )]])
+            .into_connection();
+
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+        let controller = TestHookController { tenant_db };
+        let ctx = UpdateHookPreContext::new(
+            &controller,
+            tenant_id,
+            host_id,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        );
+
+        ControllerUpdateHookPlugin
+            .prepare_pre_update_hook(&ctx)
+            .await;
+
+        // GET was called once (no hotplug → no PUT should have been sent)
+        get_config_mock.assert_calls(1);
+    }
+
+    #[tokio::test]
+    async fn finalize_restores_resources_after_successful_scale() {
+        use httpmock::prelude::*;
+
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let mapping_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+
+        let server = MockServer::start();
+        // PUT to restore original resources
+        let put_config_mock = server.mock(|when, then| {
+            when.method(PUT)
+                .path("/api2/json/nodes/pve1/qemu/100/config");
+            then.status(200)
+                .json_body(serde_json::json!({"data": null}));
+        });
+
+        let scaled_model = mock_scaling_record(
+            update_history_id,
+            tenant_id,
+            host_id,
+            software_item_id,
+            plugin_config_id,
+            mapping_id,
+        );
+        // "restored" record returned after upsert UPDATE
+        let mut restored_model = scaled_model.clone();
+        restored_model.restore_status = "restored".to_string();
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            // load_scaling_record → Some(scaled record)
+            .append_query_results([vec![scaled_model.clone()]])
+            // find_by_id(mapping_id) for host mapping
+            .append_query_results([vec![mock_host_mapping(
+                tenant_id,
+                host_id,
+                plugin_config_id,
+                100,
+                "qemu",
+            )]])
+            // load_plugin_config_payload
+            .append_query_results([vec![mock_plugin_config(
+                tenant_id,
+                plugin_config_id,
+                &server.base_url(),
+            )]])
+            // upsert_scaling_record UPDATE: find_by_id → Some(scaled)
+            .append_query_results([vec![scaled_model]])
+            // SELECT after UPDATE → restored model
+            .append_query_results([vec![restored_model]])
+            // UPDATE exec
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let tenant_db_for_controller = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+        let controller = TestHookController {
+            tenant_db: tenant_db_for_controller,
+        };
+        // A separate empty DB for the post-context tenant_db (email path, not exercised here)
+        let email_db = MockDatabase::new(DbBackend::Sqlite).into_connection();
+        let post_tenant_db = uptrakit_tenant_db::TenantDb::new(email_db, tenant_id);
+
+        let notification_ops = NoOpNotificationOps;
+        let ctx = UpdateHookPostContext::new(
+            &controller,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+            uptrakit_shared_types::UpdateStatus::Completed,
+            &notification_ops,
+            post_tenant_db,
+        );
+
+        let result = ControllerUpdateHookPlugin
+            .finalize_post_update_hook(&ctx)
+            .await;
+        assert!(result.is_ok(), "restore should succeed: {result:?}");
+        put_config_mock.assert_calls(1);
     }
 }

@@ -471,7 +471,10 @@ pub struct UpdateHookPostContext<'a> {
 
 #[cfg(feature = "plugin-ops")]
 impl<'a> UpdateHookPostContext<'a> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "spec-defined context type; all fields are distinct semantic roles"
+    )]
     pub fn new(
         controller: &'a dyn UpdateHookController,
         tenant_id: Uuid,
