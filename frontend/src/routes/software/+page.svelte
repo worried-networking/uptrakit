@@ -1031,7 +1031,7 @@
 					data-ui="software-route-groups"
 				>
 					<header
-						class="flex flex-col gap-3 border-b border-[var(--border-subtle)] card-padding md:flex-row md:items-center md:justify-between"
+						class="flex flex-col gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] card-padding md:flex-row md:items-center md:justify-between"
 					>
 						<div class="flex flex-wrap items-center gap-3">
 							{#if canManage}
