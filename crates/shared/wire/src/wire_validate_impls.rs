@@ -550,6 +550,13 @@ fn validate_surface_interaction(
         )?;
     }
 
+    if let Some(icon) = &interaction.icon {
+        surfaces::validate_icon_name(icon).map_err(|err| WireValidationError {
+            field: "surfaces[].interactions[].icon",
+            message: err.to_string(),
+        })?;
+    }
+
     Ok(())
 }
 
@@ -731,13 +738,10 @@ impl WireValidate for surfaces::SurfaceRegistration {
                 "surfaces[].descriptor.required_permission",
             )?;
             if let Some(nav_icon) = &surface.descriptor.nav_icon {
-                if nav_icon.is_empty() {
-                    return Err(WireValidationError {
-                        field: "surfaces[].descriptor.nav_icon",
-                        message: "must not be empty".to_string(),
-                    });
-                }
-                check_string_len(nav_icon, MAX_NAV_ICON_LEN, "surfaces[].descriptor.nav_icon")?;
+                surfaces::validate_icon_name(nav_icon).map_err(|err| WireValidationError {
+                    field: "surfaces[].descriptor.nav_icon",
+                    message: err.to_string(),
+                })?;
             }
             check_vec_len(
                 &surface.interactions,
@@ -1897,7 +1901,54 @@ mod tests {
     #[test]
     fn surface_registration_accepts_valid_nav_icon() {
         let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.nav_icon = Some("package".to_string());
+        assert!(payload.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn surface_registration_rejects_pascal_case_nav_icon() {
+        let mut payload = test_surface_registration();
         payload.surfaces[0].descriptor.nav_icon = Some("Package".to_string());
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].descriptor.nav_icon");
+    }
+
+    #[test]
+    fn surface_registration_rejects_empty_interaction_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].icon = Some(String::new());
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].icon");
+    }
+
+    #[test]
+    fn surface_registration_rejects_oversized_interaction_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].icon = Some("a".repeat(65));
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].icon");
+    }
+
+    #[test]
+    fn surface_registration_rejects_pascal_case_interaction_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].icon = Some("Trash2".to_string());
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].icon");
+    }
+
+    #[test]
+    fn surface_registration_rejects_underscore_interaction_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].icon = Some("trash_2".to_string());
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].icon");
+    }
+
+    #[test]
+    fn surface_registration_accepts_valid_interaction_icon() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].icon = Some("trash-2".to_string());
         assert!(payload.wire_validate().is_ok());
     }
 
