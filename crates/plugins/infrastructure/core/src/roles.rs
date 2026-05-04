@@ -783,6 +783,10 @@ mod controller_boundary_tests {
     fn update_hook_controller_trait_is_object_safe() {
         struct TestHookCtrl;
         impl UpdateHookController for TestHookCtrl {
+            #[expect(
+                clippy::unimplemented,
+                reason = "stub method body never executes; test only checks trait-object coercion"
+            )]
             fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
                 unimplemented!()
             }
