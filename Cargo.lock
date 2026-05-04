@@ -7661,6 +7661,7 @@ dependencies = [
  "uptrakit-plugin-releases-forgejo",
  "uptrakit-plugin-releases-github",
  "uptrakit-plugin-releases-gitlab",
+ "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uuid",

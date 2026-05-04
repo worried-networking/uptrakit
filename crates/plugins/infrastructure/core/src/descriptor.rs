@@ -266,6 +266,33 @@ pub type ResetTenantDataFn = for<'a> fn(
 #[cfg(not(feature = "migrations"))]
 pub type ResetTenantDataFn = fn();
 
+/// Erased fn-pointer type for `copy_batch` field on [`PluginTableDescriptor`].
+#[cfg(feature = "migrations")]
+pub type CopyBatchFn = for<'a> fn(
+    src: &'a sea_orm::DatabaseConnection,
+    dst: &'a sea_orm::DatabaseConnection,
+    batch_size: u64,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<u64, sea_orm::DbErr>> + Send + 'a>,
+>;
+
+/// Erased fn-pointer type for `clean` field on [`PluginTableDescriptor`].
+#[cfg(feature = "migrations")]
+pub type CleanFn = for<'a> fn(
+    dst: &'a sea_orm::DatabaseConnection,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), sea_orm::DbErr>> + Send + 'a>,
+>;
+
+/// Erased fn-pointer type for `verify` field on [`PluginTableDescriptor`].
+#[cfg(feature = "migrations")]
+pub type VerifyFn = for<'a> fn(
+    src: &'a sea_orm::DatabaseConnection,
+    dst: &'a sea_orm::DatabaseConnection,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(u64, u64), sea_orm::DbErr>> + Send + 'a>,
+>;
+
 /// Per-table copy/clean/verify operations for the `db-migrate` subcommand.
 ///
 /// Constructed via [`PluginTableDescriptor::for_entity`].
@@ -281,32 +308,17 @@ pub struct PluginTableDescriptor {
     pub name: &'static str,
 
     /// Bulk-copy rows from `src` to `dst` for this table. Returns row count.
-    pub copy_batch: for<'a> fn(
-        src: &'a sea_orm::DatabaseConnection,
-        dst: &'a sea_orm::DatabaseConnection,
-        batch_size: u64,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<u64, sea_orm::DbErr>> + Send + 'a>,
-    >,
+    pub copy_batch: CopyBatchFn,
 
     /// Delete every row in this table on `dst`.
-    pub clean: for<'a> fn(
-        dst: &'a sea_orm::DatabaseConnection,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), sea_orm::DbErr>> + Send + 'a>,
-    >,
+    pub clean: CleanFn,
 
     /// Count rows on both `src` and `dst`. Returns `(src_count, dst_count)`.
     /// The caller (registry helper) compares the pair and constructs a
     /// structured `TableMigrateError::Mismatch` with the table name on
     /// disagreement — the descriptor itself does not carry the table
     /// name into the closure body.
-    pub verify: for<'a> fn(
-        src: &'a sea_orm::DatabaseConnection,
-        dst: &'a sea_orm::DatabaseConnection,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(u64, u64), sea_orm::DbErr>> + Send + 'a>,
-    >,
+    pub verify: VerifyFn,
 }
 
 #[cfg(feature = "migrations")]
