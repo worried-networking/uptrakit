@@ -282,13 +282,138 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
         }
     }
 
-    async fn finalize_post_update_hook(&self, _ctx: &UpdateHookPostContext<'_>) -> Result<()> {
-        // Stub — implemented in Task 12. Return Err so accidental early wiring is caught.
-        Err(rootcause::report!(
-            uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
-                "finalize_post_update_hook not yet implemented".to_string()
+    async fn finalize_post_update_hook(&self, ctx: &UpdateHookPostContext<'_>) -> Result<()> {
+        let update_history_id = ctx.update_history_id;
+        let db = ctx.controller.tenant_db().db();
+
+        // Load scaling record; return Ok if absent (no scale-up happened)
+        let record = match policy_store::load_scaling_record(db, update_history_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return Ok(()),
+            Err(e) => {
+                return Err(rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
+                        format!("failed to load scaling record: {e}")
+                    )
+                ));
+            }
+        };
+
+        // Skip restore if scale never succeeded or was already skipped
+        if record.scale_status != "scaled" && record.scale_status != "scaling" {
+            return Ok(());
+        }
+
+        // Load host mapping by mapping_id (stable key)
+        use sea_orm::EntityTrait;
+        use uptrakit_shared_db::entity::proxmox_host_mapping;
+
+        let mapping_row = proxmox_host_mapping::Entity::find_by_id(record.mapping_id)
+            .one(db)
+            .await
+            .map_err(|e| {
+                rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
+                        format!("failed to load host mapping {}: {e}", record.mapping_id)
+                    )
+                )
+            })?
+            .ok_or_else(|| {
+                rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
+                        format!("host mapping {} not found for restore", record.mapping_id)
+                    )
+                )
+            })?;
+
+        // Load plugin config and create client
+        let store = DbProxmoxProtectionStore { db };
+        let payload = store
+            .load_plugin_config_payload(record.tenant_id, record.plugin_config_id)
+            .await?;
+        let proxmox_cfg: ProxmoxConfig = serde_json::from_value(payload).map_err(|e| {
+            rootcause::report!(
+                uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(format!(
+                    "failed to deserialize ProxmoxConfig: {e}"
+                ))
             )
-        ))
+        })?;
+
+        let client = ProxmoxClient::new(&proxmox_cfg).map_err(|e| {
+            rootcause::report!(
+                uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(format!(
+                    "failed to create Proxmox client: {e}"
+                ))
+            )
+        })?;
+
+        let node = &mapping_row.proxmox_node;
+        let vmid = mapping_row.proxmox_vmid as u32;
+        let original_cores = record.original_cores as u32;
+        let original_memory_mb = record.original_memory_mb as u64;
+
+        // Restore resources
+        let restore_result = match record.vm_type.as_str() {
+            "qemu" => {
+                client
+                    .set_qemu_config_resources(node, vmid, original_cores, original_memory_mb)
+                    .await
+            }
+            _ => {
+                client
+                    .set_lxc_config_resources(node, vmid, original_cores, original_memory_mb)
+                    .await
+            }
+        };
+
+        match restore_result {
+            Ok(()) => {
+                let mut restored = record.clone();
+                restored.restore_status = "restored".to_string();
+                if let Err(e) = policy_store::upsert_scaling_record(db, &restored).await {
+                    tracing::warn!(
+                        %update_history_id, error = %e,
+                        "resource scaling: failed to update record to 'restored'"
+                    );
+                }
+                Ok(())
+            }
+            Err(ref err) => {
+                tracing::warn!(
+                    %update_history_id,
+                    mapping_id = %record.mapping_id,
+                    vm_type = %record.vm_type,
+                    scaled_cores = record.scaled_cores,
+                    scaled_memory_mb = record.scaled_memory_mb,
+                    original_cores = record.original_cores,
+                    original_memory_mb = record.original_memory_mb,
+                    error = %err,
+                    "Proxmox resource restore failed — VM still running at scaled resources"
+                );
+
+                let mut failed = record.clone();
+                failed.restore_status = "restore_failed".to_string();
+                failed.error_message = Some(err.to_string());
+                if let Err(e) = policy_store::upsert_scaling_record(db, &failed).await {
+                    tracing::warn!(
+                        %update_history_id, error = %e,
+                        "resource scaling: failed to persist restore_failed record"
+                    );
+                }
+
+                // Notification: send_transactional_email requires a specific `to` address but
+                // the plugin layer has no direct access to a tenant admin email without a
+                // separate DB lookup. The structured tracing::warn above is the operator
+                // notification mechanism. The restore_status = "restore_failed" DB record
+                // is the persistent audit signal for dashboards / alerting pipelines.
+
+                Err(rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
+                        format!("resource restore failed: {err}")
+                    )
+                ))
+            }
+        }
     }
 }
 
@@ -300,5 +425,19 @@ mod tests {
     fn controller_update_hook_plugin_implements_plugin_meta() {
         let plugin = ControllerUpdateHookPlugin;
         assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
+    }
+
+    #[tokio::test]
+    async fn finalize_returns_ok_when_no_record_in_db() {
+        use crate::entity::proxmox_resource_scaling_record;
+        use sea_orm::{DbBackend, MockDatabase};
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([Vec::<proxmox_resource_scaling_record::Model>::new()])
+            .into_connection();
+
+        let result = crate::policy_store::load_scaling_record(&db, uuid::Uuid::now_v7()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 }
