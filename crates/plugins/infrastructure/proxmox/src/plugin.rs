@@ -1294,6 +1294,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "plugin-ops")]
     fn descriptor_has_controller_update_hook() {
         assert!(DESCRIPTOR.roles.controller_update_hook.is_some());
     }
