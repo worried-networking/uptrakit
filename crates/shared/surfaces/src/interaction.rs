@@ -61,6 +61,8 @@ pub struct InteractionDescriptor {
     pub workflow_steps: Vec<WorkflowStepDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form_ui: Option<FormUiDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +84,7 @@ pub enum ConfirmationSeverity {
     Danger,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum InteractionValidationError {
     #[error(
@@ -104,6 +107,11 @@ pub enum InteractionValidationError {
     BlankWorkflowStepLabel {
         interaction_id: InteractionId,
         step_id: String,
+    },
+    #[error("interaction `{interaction_id}` has invalid icon: {reason}")]
+    IconInvalid {
+        interaction_id: InteractionId,
+        reason: crate::IconNameError,
     },
 }
 
@@ -177,6 +185,99 @@ impl InteractionDescriptor {
             }
         }
 
+        if let Some(icon) = &self.icon {
+            crate::validate_icon_name(icon).map_err(|reason| {
+                InteractionValidationError::IconInvalid {
+                    interaction_id: self.interaction_id.clone(),
+                    reason,
+                }
+            })?;
+        }
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_for_provider_accepts_kebab_icon() {
+        let descriptor = InteractionDescriptor {
+            interaction_id: InteractionId::new("act").unwrap(),
+            kind: InteractionKind::MutationAction,
+            label: "Action".to_string(),
+            required_permission: None,
+            input_schema: None,
+            result_schema: None,
+            sensitive_fields: vec![],
+            timeout_seconds: None,
+            confirmation: None,
+            transport: InteractionTransport::ControllerLocal,
+            workflow_steps: vec![],
+            form_ui: None,
+            icon: Some("trash-2".to_string()),
+        };
+        descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap();
+    }
+
+    #[test]
+    fn validate_for_provider_rejects_pascal_icon() {
+        let mut descriptor = InteractionDescriptor {
+            interaction_id: InteractionId::new("act").unwrap(),
+            kind: InteractionKind::MutationAction,
+            label: "Action".to_string(),
+            required_permission: None,
+            input_schema: None,
+            result_schema: None,
+            sensitive_fields: vec![],
+            timeout_seconds: None,
+            confirmation: None,
+            transport: InteractionTransport::ControllerLocal,
+            workflow_steps: vec![],
+            form_ui: None,
+            icon: Some("Trash2".to_string()),
+        };
+        let err = descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            InteractionValidationError::IconInvalid { .. }
+        ));
+
+        descriptor.icon = Some(String::new());
+        let err = descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            InteractionValidationError::IconInvalid { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_for_provider_accepts_missing_icon() {
+        let descriptor = InteractionDescriptor {
+            interaction_id: InteractionId::new("act").unwrap(),
+            kind: InteractionKind::MutationAction,
+            label: "Action".to_string(),
+            required_permission: None,
+            input_schema: None,
+            result_schema: None,
+            sensitive_fields: vec![],
+            timeout_seconds: None,
+            confirmation: None,
+            transport: InteractionTransport::ControllerLocal,
+            workflow_steps: vec![],
+            form_ui: None,
+            icon: None,
+        };
+        descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap();
     }
 }

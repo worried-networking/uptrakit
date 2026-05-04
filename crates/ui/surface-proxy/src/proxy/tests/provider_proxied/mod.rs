@@ -61,6 +61,7 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
                 transport: surfaces::InteractionTransport::ProviderProxied,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             }],
             data_sources: vec![],
         }],

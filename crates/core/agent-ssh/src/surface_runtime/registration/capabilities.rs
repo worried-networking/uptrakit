@@ -155,6 +155,7 @@ mod tests {
             transport,
             workflow_steps: vec![],
             form_ui: None,
+            icon: None,
         }
     }
 

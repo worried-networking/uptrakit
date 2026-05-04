@@ -997,6 +997,7 @@ mod tests {
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: vec![],
                     form_ui: None,
+                    icon: None,
                 }],
                 data_sources: vec![],
             }],

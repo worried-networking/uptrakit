@@ -65,6 +65,7 @@ fn plugin_registration_for_shared_surface(provider_id: &str) -> surfaces::Surfac
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             }],
             data_sources: vec![],
         }],

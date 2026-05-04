@@ -392,6 +392,7 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             .expect("literal interaction id is valid"),
                     ),
                 }),
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("get-current-tag")
@@ -407,6 +408,7 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
         ],
         data_sources: vec![],

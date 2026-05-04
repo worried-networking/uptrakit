@@ -63,6 +63,7 @@ fn proxmox_hosts_registration(provider_id: &str) -> surfaces::SurfaceRegistratio
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             }],
             data_sources: vec![],
         }],

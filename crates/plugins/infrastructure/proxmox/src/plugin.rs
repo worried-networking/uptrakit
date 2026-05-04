@@ -237,6 +237,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("discover").expect("literal"),
@@ -251,6 +252,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("test-connection").expect("literal"),
@@ -265,6 +267,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("approve-match").expect("literal"),
@@ -279,6 +282,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("match").expect("literal"),
@@ -329,6 +333,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                     ],
                     pre_load_interaction_id: None,
                 }),
+                icon: None,
             },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("unmatch").expect("literal"),
@@ -349,6 +354,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
+                icon: None,
             },
         ],
         data_sources: vec![surfaces::DataSourceDescriptor {
@@ -413,6 +419,7 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
             transport: surfaces::InteractionTransport::ControllerLocal,
             workflow_steps: vec![],
             form_ui: None,
+            icon: None,
         }],
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
@@ -484,7 +491,8 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-            },
+                        icon: None,
+},
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("load-backup-target-options")
                     .expect("literal interaction id is valid"),
@@ -499,7 +507,8 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-            },
+                        icon: None,
+},
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("save-global-defaults")
                     .expect("literal interaction id is valid"),
@@ -629,7 +638,8 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     ),
                 }),
-            },
+                        icon: None,
+},
         ],
         data_sources: vec![],
     }
@@ -690,7 +700,8 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-            },
+                        icon: None,
+},
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("load-backup-target-options")
                     .expect("literal interaction id is valid"),
@@ -705,7 +716,8 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-            },
+                        icon: None,
+},
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("save-item-overrides")
                     .expect("literal interaction id is valid"),
@@ -844,7 +856,8 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             .expect("literal interaction id is valid"),
                     ),
                 }),
-            },
+                        icon: None,
+},
         ],
         data_sources: vec![],
     }
