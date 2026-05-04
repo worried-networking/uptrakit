@@ -27,6 +27,13 @@ use std::pin::Pin;
     feature = "embedded-ssh-agent",
     feature = "embedded-mqtt"
 ))]
+use std::time::Duration;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 use uptrakit_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
@@ -99,6 +106,7 @@ impl BuiltinServiceHost {
         + 'static,
         state: &Arc<uptrakit_web_api::AppState>,
         bg: &mut BackgroundTasks,
+        service_task_timeout: Option<Duration>,
     ) -> rootcause::Result<crate::embedded::AddResult> {
         self.embedded
             .add(
@@ -112,6 +120,7 @@ impl BuiltinServiceHost {
                 run_fn,
                 state,
                 bg,
+                service_task_timeout,
             )
             .await
     }

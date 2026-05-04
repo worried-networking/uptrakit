@@ -242,6 +242,7 @@ pub(crate) async fn register_scheduler(
             },
             app_state,
             bg,
+            None,
         )
         .await?;
 
@@ -287,6 +288,7 @@ pub(crate) async fn register_agent(
             },
             app_state,
             bg,
+            None,
         )
         .await?;
 
@@ -338,6 +340,7 @@ pub(crate) async fn register_agent_ssh(
             },
             app_state,
             bg,
+            None,
         )
         .await?;
 
@@ -385,6 +388,7 @@ pub(crate) async fn register_mqtt(
             },
             app_state,
             bg,
+            Some(crate::durations::EMBEDDED_MQTT_SHUTDOWN_TIMEOUT),
         )
         .await?;
 

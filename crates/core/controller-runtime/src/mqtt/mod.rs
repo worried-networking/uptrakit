@@ -52,42 +52,61 @@ pub(crate) async fn run_embedded_mqtt(
 
     tracing::info!("embedded MQTT started");
 
-    loop {
-        tokio::select! {
+    // Two-phase select loop: poll_event() and cheap arms in the first select;
+    // handle_event() in a second select so drain/abort can interrupt even when
+    // handle_event() is blocking inside publish_retained() during a reconnect storm.
+    'outer: loop {
+        let event = tokio::select! {
             biased;
 
             () = tokens.drain.cancelled() => {
                 tracing::info!("embedded MQTT: draining");
-                break;
+                break 'outer;
             }
 
             () = tokens.abort.cancelled() => {
                 tracing::info!("embedded MQTT: aborting");
-                break;
+                break 'outer;
             }
 
             () = yield_change.notified() => {
                 runtime
                     .handle_yield_change(transport.is_yielded(), &mut transport)
                     .await;
+                continue 'outer;
             }
 
-            event = runtime.poll_event() => {
-                if let Some(outcome) = runtime.handle_event(event, &mut transport).await {
-                    tracing::warn!(?outcome, "embedded MQTT: runtime requested loop exit");
-                    break;
-                }
-            }
+            event = runtime.poll_event() => event,
 
             msg = transport.transport_recv() => {
                 let Some(msg) = msg else {
                     tracing::info!("embedded MQTT: transport closed");
-                    break;
+                    break 'outer;
                 };
-
-                if let Some(outcome) = handle_controller_message(&mut runtime, msg, &mut transport).await {
+                if let Some(outcome) =
+                    handle_controller_message(&mut runtime, msg, &mut transport).await
+                {
                     tracing::warn!(?outcome, "embedded MQTT: controller handling requested loop exit");
-                    break;
+                    break 'outer;
+                }
+                continue 'outer;
+            }
+        };
+
+        tokio::select! {
+            biased;
+            () = tokens.drain.cancelled() => {
+                tracing::info!("embedded MQTT: draining (interrupted handle_event)");
+                break 'outer;
+            }
+            () = tokens.abort.cancelled() => {
+                tracing::info!("embedded MQTT: aborting (interrupted handle_event)");
+                break 'outer;
+            }
+            outcome = runtime.handle_event(event, &mut transport) => {
+                if let Some(outcome) = outcome {
+                    tracing::warn!(?outcome, "embedded MQTT: runtime requested loop exit");
+                    break 'outer;
                 }
             }
         }
