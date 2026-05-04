@@ -61,6 +61,20 @@ impl BackgroundTasks {
             .push((name, handle, durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT));
     }
 
+    /// Register a task with a custom shutdown timeout.
+    ///
+    /// Use this for tasks that need more time to shut down cleanly than the global
+    /// [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] allows (e.g. MQTT which runs
+    /// `OPERATION_TIMEOUT + SHUTDOWN_TIMEOUT` per client).
+    pub(crate) fn track_with_timeout(
+        &mut self,
+        name: &'static str,
+        handle: JoinHandle<()>,
+        timeout: Duration,
+    ) {
+        self.cancellable.push((name, handle, timeout));
+    }
+
     /// Register a task to be aborted on shutdown.
     pub(crate) fn track_abort(&mut self, name: &'static str, handle: JoinHandle<()>) {
         self.abortable.push((name, handle));

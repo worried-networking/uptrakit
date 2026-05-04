@@ -139,6 +139,7 @@ impl EmbeddedServiceHost {
         + 'static,
         state: &Arc<uptrakit_web_api::AppState>,
         bg: &mut BackgroundTasks,
+        service_task_timeout: Option<std::time::Duration>,
     ) -> rootcause::Result<AddResult> {
         // 1. Auto-provision.
         let hostname = hostname::get()
@@ -202,7 +203,11 @@ impl EmbeddedServiceHost {
         //   ctrl_rx is given to the EmbeddedTransport
         let (service_tx, service_rx) =
             tokio::sync::mpsc::channel::<uptrakit_wire::ServiceMessage>(32);
-        let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::channel::<uptrakit_wire::ControllerMessage>(32);
+        // 256 rather than 32: with Fix 4b the transport_recv arm is not serviced
+        // during handle_event() execution (up to 5s). A larger buffer prevents
+        // backpressure from the controller side during MQTT reconnect republish storms.
+        let (ctrl_tx, ctrl_rx) =
+            tokio::sync::mpsc::channel::<uptrakit_wire::ControllerMessage>(256);
 
         let yielded = Arc::new(AtomicBool::new(false));
         let yielding_service_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
@@ -238,7 +243,10 @@ impl EmbeddedServiceHost {
         };
         let service_handle = tokio::spawn(run_fn(transport, tokens));
         bg.mark_embedded(service_id, drain_token);
-        bg.track(label, service_handle);
+        match service_task_timeout {
+            Some(t) => bg.track_with_timeout(label, service_handle, t),
+            None => bg.track(label, service_handle),
+        }
 
         let runtime_state_handle = tokio::spawn(run_yield_state_sync(
             state.db().clone(),

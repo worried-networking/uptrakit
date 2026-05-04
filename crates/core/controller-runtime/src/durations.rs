@@ -31,3 +31,10 @@ pub(crate) const RESTART_NOTIFICATION_SCATTER: Duration = Duration::from_secs(5)
 
 /// Polling interval when waiting for connected services to drain during shutdown (250 ms).
 pub(crate) const SERVICE_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Shutdown timeout for the Embedded MQTT task.
+///
+/// Each MQTT client may take up to `OPERATION_TIMEOUT (5s) + SHUTDOWN_TIMEOUT (5s) = 10s`
+/// to disconnect cleanly. Clients shut down in parallel via `FuturesUnordered`,
+/// so N clients ≈ 10s worst-case regardless of count. 5s of safety margin added.
+pub(crate) const EMBEDDED_MQTT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);

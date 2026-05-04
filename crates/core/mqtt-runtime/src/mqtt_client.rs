@@ -5,6 +5,7 @@ use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, Packet, QoS, Transport};
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uptrakit_service_sdk::Backoff;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -99,20 +100,24 @@ impl MqttHandle {
     /// The EventLoop drains requests and the main task can safely await here
     /// because the two tasks are independent.
     ///
-    /// If the broker is unreachable and the EventLoop is in reconnect backoff,
-    /// this will block until the backoff expires and the channel has space.
-    /// `publish_or_abort!` at every call site ensures the current batch is
-    /// abandoned on error so the main event loop is not blocked indefinitely.
+    /// Returns [`MqttError::PublishTimeout`] if the channel does not accept the
+    /// request within [`PUBLISH_TIMEOUT`]. This prevents the MQTT select loop
+    /// from freezing indefinitely during reconnect backoff storms; `publish_or_abort!`
+    /// at every call site aborts the batch on the first error so recovery can
+    /// proceed on the next `Reconnected` event.
     pub(crate) async fn publish_retained(
         &self,
         topic: &str,
         payload: impl Into<Vec<u8>>,
     ) -> Result<()> {
         let payload = payload.into();
-        self.client
-            .publish(topic, QoS::AtLeastOnce, true, payload)
-            .await
-            .context_to::<MqttError>()
+        timeout(
+            PUBLISH_TIMEOUT,
+            self.client.publish(topic, QoS::AtLeastOnce, true, payload),
+        )
+        .await
+        .map_err(|_elapsed| rootcause::report!(MqttError::PublishTimeout))?
+        .context_to::<MqttError>()
     }
 
     /// Subscribe to a topic with QoS `AtLeastOnce`.
@@ -171,9 +176,20 @@ enum ShutdownOutcome {
 
 /// Timeout for the shutdown sequence: publish retained `offline` + disconnect.
 ///
-/// Only used by [`MqttHandle::shutdown`].  Normal publish/subscribe operations
+/// Only used by [`MqttHandle::shutdown`]. Normal publish/subscribe operations
 /// use non-blocking `try_*` calls and never wait.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum time to wait for the rumqttc request channel to accept a publish.
+///
+/// The 128-capacity flume channel to the rumqttc event loop fills when the
+/// event loop is sleeping in reconnect backoff (2s–60s). At 5s this timeout
+/// reliably triggers before the next backoff cycle completes while being far
+/// above any expected scheduling latency under normal load.
+///
+/// Does not affect [`MqttHandle::shutdown`], which sends `offline` directly
+/// via `self.client.publish()` wrapped in its own `OPERATION_TIMEOUT`.
+const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors returned by [`start`].
 #[derive(Debug, Error)]
@@ -181,6 +197,13 @@ pub(crate) enum MqttError {
     /// Wraps [`rumqttc::ClientError`].
     #[error("MQTT client error: {0}")]
     Client(#[from] rumqttc::ClientError),
+    /// The rumqttc request channel was full for longer than [`PUBLISH_TIMEOUT`].
+    ///
+    /// This happens when the event loop is in reconnect backoff and not draining
+    /// the channel. `publish_or_abort!` uses this to abort the current batch so
+    /// the MQTT select loop does not stay frozen during reconnect storms.
+    #[error("MQTT publish timed out: broker unreachable or request channel full")]
+    PublishTimeout,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<MqttError>>;

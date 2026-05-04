@@ -2239,23 +2239,33 @@ async fn run_embedded_message_handler_inner(
         report_tracker: ReportTracker::new(),
     };
 
-    loop {
+    'msg_loop: loop {
         let msg = tokio::select! {
             biased;
-            () = cancel.cancelled() => break,
+            () = cancel.cancelled() => break 'msg_loop,
             msg = service_rx.recv() => match msg {
                 Some(m) => m,
-                None => break,
+                None => break 'msg_loop,
             },
         };
 
-        let response = processor.dispatch(msg, None).await;
+        // dispatch and reply-send are wrapped in separate cancellable selects so
+        // that drain/abort can interrupt even when a SeaORM query or a channel
+        // send is in progress. Dropping dispatch mid-flight cancels any in-flight
+        // DB query; the connection is returned to the pool and the transaction
+        // rolled back. cleanup_embedded_service_session handles workload release.
+        let response = tokio::select! {
+            biased;
+            () = cancel.cancelled() => break 'msg_loop,
+            r = processor.dispatch(msg, None) => r,
+        };
 
         for reply in response.replies {
-            state
-                .service_connections
-                .send(&session.service_id, reply)
-                .await;
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => break 'msg_loop,
+                _ = state.service_connections.send(&session.service_id, reply) => {}
+            }
         }
 
         match response.action {
@@ -2266,7 +2276,7 @@ async fn run_embedded_message_handler_inner(
                     app_name = session.app_name,
                     "embedded message handler stopping (processor requested break)"
                 );
-                break;
+                break 'msg_loop;
             }
         }
     }
