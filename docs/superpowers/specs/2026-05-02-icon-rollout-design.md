@@ -1,5 +1,10 @@
 # Icon Rollout — Design
 
+> **Update (2026-05-04):** the kebab-case identifier scheme described in
+> `docs/superpowers/specs/2026-05-04-surfaces-button-icons-and-label-display-design.md` supersedes
+> the PascalCase keys recorded below. Icons now live in a unified `frontend/src/lib/icons.ts`
+> registry; `nav-icons.ts` is removed.
+
 ## Goal
 
 Extend lucide-svelte icon usage across the Dashboard beyond the single `Copy`
