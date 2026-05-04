@@ -15,13 +15,21 @@ use crate::descriptor::{
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
-    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps,
-    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    ControllerUpdateHookOps, ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps,
+    PluginMetadataOps, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 use crate::roles::{
     ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
     SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
+
+// ── ControllerUpdateHookValue type ─────────────────────────────────────────
+
+#[cfg(feature = "plugin-ops")]
+type ControllerUpdateHookValue = Option<Arc<dyn crate::roles::ControllerUpdateHook>>;
+
+#[cfg(not(feature = "plugin-ops"))]
+type ControllerUpdateHookValue = ();
 
 /// Errors during catalog construction.
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +67,7 @@ pub struct PluginCatalog {
     transports: BTreeMap<&'static str, Arc<dyn NotificationTransport>>,
     lifecycle_plugins: Vec<Arc<dyn SoftwareItemLifecycle>>,
     controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    controller_update_hook: ControllerUpdateHookValue,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
 }
 
@@ -75,6 +84,12 @@ impl PluginCatalog {
         let mut transports = BTreeMap::new();
         let mut lifecycle_plugins = Vec::new();
         let mut controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>> = None;
+        #[cfg(feature = "plugin-ops")]
+        let mut controller_update_hook: Option<
+            Arc<dyn crate::roles::ControllerUpdateHook>,
+        > = None;
+        #[cfg(not(feature = "plugin-ops"))]
+        let controller_update_hook = ();
         let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
         let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
@@ -163,6 +178,23 @@ impl PluginCatalog {
                 controller_update_protection = Some(plugin);
             }
 
+            // ── Singleton: controller update hook ──
+            #[cfg(feature = "plugin-ops")]
+            if let Some(create) = desc.roles.controller_update_hook {
+                if controller_update_hook.is_some() {
+                    return Err(rootcause::report!(PluginError::UnsupportedOperation(
+                        format!("duplicate controller update hook: {}", desc.type_id)
+                    )));
+                }
+                let plugin = create(config).map_err(|e| {
+                    rootcause::report!(PluginError::UnsupportedOperation(format!(
+                        "failed to create controller update hook '{}': {e}",
+                        desc.type_id
+                    )))
+                })?;
+                controller_update_hook = Some(plugin);
+            }
+
             // ── Uniqueness + overlap: surface action prefixes ──
             if let Some(ext) = desc.surface_actions {
                 for prefix in ext.owned_surface_ids() {
@@ -197,6 +229,7 @@ impl PluginCatalog {
             transports,
             lifecycle_plugins,
             controller_update_protection,
+            controller_update_hook,
             surface_action_routes,
         })
     }
@@ -371,6 +404,18 @@ impl ControllerUpdateProtectionOps for PluginCatalog {
         self.controller_update_protection.clone()
     }
 }
+
+#[cfg(feature = "plugin-ops")]
+impl ControllerUpdateHookOps for PluginCatalog {
+    fn controller_update_hook(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::roles::ControllerUpdateHook>> {
+        self.controller_update_hook.clone()
+    }
+}
+
+#[cfg(not(feature = "plugin-ops"))]
+impl ControllerUpdateHookOps for PluginCatalog {}
 
 // ── Transactional email helpers (plugin-ops feature only) ──────────────────
 
@@ -725,6 +770,7 @@ mod tests {
             notification_transport: None,
             software_item_lifecycle: None,
             controller_update_protection: None,
+            controller_update_hook: None,
             infra: None,
         },
         surface_actions: None,
@@ -762,6 +808,8 @@ mod tests {
             notification_transport: None,
             software_item_lifecycle: Some(create_recording_lifecycle),
             controller_update_protection: None,
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook: None,
             infra: None,
         },
         surface_actions: None,
@@ -799,6 +847,8 @@ mod tests {
             notification_transport: None,
             software_item_lifecycle: None,
             controller_update_protection: Some(create_controller_update_protection_a),
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook: None,
             infra: None,
         },
         surface_actions: None,
@@ -836,6 +886,8 @@ mod tests {
             notification_transport: None,
             software_item_lifecycle: None,
             controller_update_protection: Some(create_controller_update_protection_b),
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook: None,
             infra: None,
         },
         surface_actions: None,
@@ -873,6 +925,7 @@ mod tests {
             notification_transport: None,
             software_item_lifecycle: None,
             controller_update_protection: None,
+            controller_update_hook: None,
             infra: None,
         },
         surface_actions: None,

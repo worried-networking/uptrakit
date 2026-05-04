@@ -218,6 +218,15 @@ pub type CreateEnhancementFn =
 pub type CreateControllerProtectionFn =
     fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::ControllerUpdateProtection>>;
 
+/// Creation for a controller update hook plugin (singleton).
+#[cfg(feature = "plugin-ops")]
+pub type CreateControllerUpdateHookFn =
+    fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::ControllerUpdateHook>>;
+
+/// Placeholder when `plugin-ops` is not enabled.
+#[cfg(not(feature = "plugin-ops"))]
+pub type CreateControllerUpdateHookFn = fn(&CatalogConfig) -> crate::error::Result<()>;
+
 /// Async surface action handler.
 pub type SurfaceActionHandler = for<'a> fn(
     &'a SurfaceActionContext<'a>,
@@ -320,6 +329,10 @@ pub struct RoleCreators {
     pub software_item_lifecycle: Option<CreateEnhancementFn>,
     // Singleton controller-side update protection (catalog config → Arc, created once at startup)
     pub controller_update_protection: Option<CreateControllerProtectionFn>,
+    // Singleton controller-side update hook (catalog config → Arc, created once at startup).
+    // Always present (not cfg-gated) so that `declare_plugin!` macro expansions
+    // in consuming crates always see the field, regardless of feature flags.
+    pub controller_update_hook: Option<CreateControllerUpdateHookFn>,
     // Singleton infra (catalog config → InfraBundle, created once per agent).
     // Always present (not cfg-gated) so that `declare_plugin!` macro expansions
     // in consuming crates always see the field, regardless of feature flags.

@@ -355,6 +355,19 @@ pub trait ControllerUpdateProtectionOps: Send + Sync + 'static {
     ) -> Option<std::sync::Arc<dyn ControllerUpdateProtection>>;
 }
 
+// ── Trait 8: ControllerUpdateHookOps ────────────────────────────────────────
+
+/// Controller-side singleton update hook accessor.
+pub trait ControllerUpdateHookOps: Send + Sync + 'static {
+    /// The registered controller update hook plugin (if configured).
+    #[cfg(feature = "plugin-ops")]
+    fn controller_update_hook(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::roles::ControllerUpdateHook>> {
+        None
+    }
+}
+
 // ── Convenience alias: PluginOps ────────────────────────────────────────────
 
 /// Combined trait for callers that need the full catalog surface.
@@ -370,6 +383,7 @@ pub trait PluginOps:
     + NotificationOps
     + SoftwareItemLifecycleOps
     + ControllerUpdateProtectionOps
+    + ControllerUpdateHookOps
 {
 }
 
@@ -382,5 +396,21 @@ impl<T> PluginOps for T where
         + NotificationOps
         + SoftwareItemLifecycleOps
         + ControllerUpdateProtectionOps
+        + ControllerUpdateHookOps
 {
+}
+
+#[cfg(test)]
+mod update_hook_ops_tests {
+    use super::*;
+
+    struct TestOps;
+    impl ControllerUpdateHookOps for TestOps {}
+
+    #[test]
+    #[cfg(feature = "plugin-ops")]
+    fn default_impl_returns_none() {
+        let ops = TestOps;
+        assert!(ops.controller_update_hook().is_none());
+    }
 }
