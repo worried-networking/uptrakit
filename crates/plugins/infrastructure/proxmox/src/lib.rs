@@ -30,6 +30,7 @@ pub mod policy_store;
 pub(crate) mod protection_store;
 pub mod pve_setup;
 pub(crate) mod reset;
+pub(crate) mod resource_scaling;
 pub mod surfaces;
 pub mod update_protection;
 
