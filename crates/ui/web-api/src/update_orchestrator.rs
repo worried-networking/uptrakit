@@ -8,6 +8,8 @@ use uptrakit_shared_types::OutputStreamType;
 use uuid::Uuid;
 
 use crate::AppState;
+#[cfg(feature = "plugin-ops")]
+use crate::queries::update_dispatch::prepare_pre_update_hook;
 use crate::queries::update_dispatch::{
     DispatchUpdateParams, PreUpdateProtectionOutcome, dispatch_update_to_agent,
     fail_before_agent_dispatch, insert_protection_output_line, prepare_pre_update_protection,
@@ -111,6 +113,10 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
     // 8. Run pre-update protection.
     let protection = state.controller_update_protection();
     let db = state.db().clone();
+    // Clone the sender so the hook step (9a) can also stream output after
+    // protection completes (UnboundedSender is cheaply cloneable).
+    #[cfg(feature = "plugin-ops")]
+    let hook_tx = tx.clone();
     let outcome = match prepare_pre_update_protection(
         &db,
         protection,
@@ -167,6 +173,18 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
                 .await;
         }
         PreUpdateProtectionOutcome::Proceed => {
+            // 9a. Run pre-update hook (resource scaling) — fires after protection
+            //     succeeds and before the agent receives the dispatch message.
+            #[cfg(feature = "plugin-ops")]
+            prepare_pre_update_hook(
+                &db,
+                state.controller_update_hook(),
+                &work.target,
+                update_history_id,
+                Some(hook_tx),
+            )
+            .await;
+
             // 10. Dispatch to agent.
             let notifier = &state.notification.notification_service;
             let dispatch_result = dispatch_update_to_agent(

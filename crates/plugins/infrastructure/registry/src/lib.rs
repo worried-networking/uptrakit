@@ -33,8 +33,9 @@ pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{
-    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    ControllerUpdateHookOps, ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps,
+    PluginMetadataOps, PluginOps, PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps,
+    SoftwareItemLifecycleOps,
 };
 
 // Re-export update-hook types (require plugin-ops feature)

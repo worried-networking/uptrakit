@@ -352,11 +352,12 @@ mod tests {
     use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_registry::{
         CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
-        ControllerProtectionDecision, ControllerUpdateProtection, ControllerUpdateProtectionOps,
-        NotificationOps, NotificationTransport, PluginConfigOps, PluginMetadataOps, PluginOps,
-        PluginResult, PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome,
-        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, build_catalog,
+        ControllerProtectionDecision, ControllerUpdateHookOps, ControllerUpdateProtection,
+        ControllerUpdateProtectionOps, NotificationOps, NotificationTransport, PluginConfigOps,
+        PluginMetadataOps, PluginOps, PluginResult, PluginSurfaceActionOps, PluginSurfaceOps,
+        PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+        SoftwareItemLifecycleContext, SoftwareItemLifecycleOps, SoftwareItemPatch,
+        SurfaceActionContext, build_catalog,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
@@ -468,6 +469,8 @@ mod tests {
             Some(self.protection.clone())
         }
     }
+
+    impl ControllerUpdateHookOps for ProtectionOverridePluginOps {}
 
     async fn build_test_state_with_protection(
         db: sea_orm::DatabaseConnection,

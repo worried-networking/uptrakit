@@ -21,6 +21,7 @@ db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
 reset-data = []
+plugin-ops = ["uptrakit-web-api-queries/plugin-ops", "uptrakit-plugin-infrastructure-registry/plugin-ops"]
 
 [dependencies]
 async-stream = { workspace = true }

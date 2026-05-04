@@ -2224,11 +2224,12 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_registry::{
         CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
-        ControllerProtectionDecision, ControllerUpdateProtection, ControllerUpdateProtectionOps,
-        NotificationOps, NotificationTransport, PluginConfigOps, PluginMetadataOps, PluginOps,
-        PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome, SoftwareItemCreatedEvent,
-        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, SurfaceActionContext, SurfaceActionError, build_catalog,
+        ControllerProtectionDecision, ControllerUpdateHookOps, ControllerUpdateProtection,
+        ControllerUpdateProtectionOps, NotificationOps, NotificationTransport, PluginConfigOps,
+        PluginMetadataOps, PluginOps, PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome,
+        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, SurfaceActionError,
+        build_catalog,
     };
     use uptrakit_shared_db::entity::{
         audit_log, host_software_item, host_software_item_plugin, software_item, update_history,
@@ -2337,6 +2338,8 @@ mod tests {
             Some(self.protection.clone())
         }
     }
+
+    impl ControllerUpdateHookOps for ProtectionOverridePluginOps {}
 
     async fn build_test_state_without_real_protection(
         db: DatabaseConnection,
