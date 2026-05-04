@@ -40,5 +40,8 @@ pub(crate) fn proxmox_db_migrate_tables()
 
 /// No-op stub used when `migrations` feature is inactive.
 #[cfg(not(feature = "migrations"))]
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "stub compiled only when `migrations` feature is off"
+)]
 pub(crate) fn proxmox_db_migrate_tables() {}
