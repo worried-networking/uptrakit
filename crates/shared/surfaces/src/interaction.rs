@@ -130,6 +130,12 @@ impl InteractionDescriptor {
     /// Returns
     /// [`InteractionValidationError::ConfirmableActionMissingConfirmation`]
     /// when a confirmable interaction omits confirmation metadata.
+    /// Returns [`InteractionValidationError::BlankLabel`] when `label` is
+    /// empty or whitespace-only.
+    /// Returns [`InteractionValidationError::BlankWorkflowStepLabel`] when
+    /// any workflow step has an empty or whitespace-only label.
+    /// Returns [`InteractionValidationError::IconInvalid`] when `icon` is
+    /// `Some` but fails kebab-case validation.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,
