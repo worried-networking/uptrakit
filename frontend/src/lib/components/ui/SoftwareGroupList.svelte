@@ -150,7 +150,7 @@
 	});
 
 	function zebraClass(idx: number): string {
-		return idx % 2 === 0 ? 'bg-[var(--bg-raised)]' : '';
+		return idx % 2 === 1 ? 'bg-[var(--bg-raised)]' : '';
 	}
 </script>
 
