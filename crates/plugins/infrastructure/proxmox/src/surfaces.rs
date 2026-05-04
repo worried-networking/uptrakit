@@ -29,6 +29,10 @@ use crate::policy_store::{
     list_cached_backup_targets, load_global_default, load_item_override, upsert_global_default,
     upsert_item_override,
 };
+use crate::scaling_store::{
+    ScalingMode, ScalingPolicy, delete_scaling_item_override, load_scaling_global_default,
+    load_scaling_item_override, upsert_scaling_global_default, upsert_scaling_item_override,
+};
 
 // ── Request types (moved from plugin-infrastructure-core) ────────────────────
 
@@ -97,8 +101,35 @@ pub(crate) struct ProxmoxItemOverrideSaveRequest {
     pub backup_timeout_seconds: Option<i64>,
 }
 
-const SURFACE_SETTINGS_UPDATE_PROTECTION: &str = "proxmox.settings.update-protection";
-const SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION: &str = "proxmox.software-item.update-protection";
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProxmoxScalingGlobalDefaultsSaveRequest {
+    pub plugin_config_id: uuid::Uuid,
+    pub scaling_mode: String,
+    pub absolute_cores: Option<i32>,
+    pub absolute_memory_mb: Option<i32>,
+    pub delta_cores: Option<i32>,
+    pub delta_memory_mb: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProxmoxScalingItemOverridesSaveRequest {
+    pub software_item_id: uuid::Uuid,
+    pub plugin_config_id: uuid::Uuid,
+    /// "inherit" | "none" | "absolute" | "delta"
+    pub scaling_mode: String,
+    pub absolute_cores: Option<i32>,
+    pub absolute_memory_mb: Option<i32>,
+    pub delta_cores: Option<i32>,
+    pub delta_memory_mb: Option<i32>,
+}
+
+const SURFACE_SETTINGS_UPDATE_HOOKS: &str = "proxmox.settings.update-hooks";
+const SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS: &str = "proxmox.software-item.update-hooks";
+
+const ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS: &str = "preload-scaling-global-defaults";
+const ACTION_SAVE_SCALING_GLOBAL_DEFAULTS: &str = "save-scaling-global-defaults";
+const ACTION_PRELOAD_SCALING_ITEM_OVERRIDES: &str = "preload-scaling-item-overrides";
+const ACTION_SAVE_SCALING_ITEM_OVERRIDES: &str = "save-scaling-item-overrides";
 
 const ACTION_PRELOAD_GLOBAL_DEFAULTS: &str = "preload-global-defaults";
 const ACTION_SAVE_GLOBAL_DEFAULTS: &str = "save-global-defaults";
@@ -121,6 +152,10 @@ enum ControllerSurfaceAction {
     PreloadItemOverrides,
     SaveItemOverrides,
     LoadBackupTargetOptions,
+    PreloadScalingGlobalDefaults,
+    SaveScalingGlobalDefaults,
+    PreloadScalingItemOverrides,
+    SaveScalingItemOverrides,
 }
 
 fn resolve_controller_surface_action(
@@ -136,21 +171,33 @@ fn resolve_controller_surface_action(
         ("proxmox.hosts", "unmatch") => Some(ControllerSurfaceAction::UnmatchHost),
         ("proxmox.hosts", "list-all-unmatched") => Some(ControllerSurfaceAction::ListAllUnmatched),
         ("proxmox.host-info", "get-info") => Some(ControllerSurfaceAction::GetHostInfo),
-        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_PRELOAD_GLOBAL_DEFAULTS) => {
+        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_PRELOAD_GLOBAL_DEFAULTS) => {
             Some(ControllerSurfaceAction::PreloadGlobalDefaults)
         }
-        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_SAVE_GLOBAL_DEFAULTS) => {
+        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_SAVE_GLOBAL_DEFAULTS) => {
             Some(ControllerSurfaceAction::SaveGlobalDefaults)
         }
-        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS)
-        | (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => {
+        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_LOAD_BACKUP_TARGET_OPTIONS)
+        | (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => {
             Some(ControllerSurfaceAction::LoadBackupTargetOptions)
         }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_PRELOAD_ITEM_OVERRIDES) => {
+        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_PRELOAD_ITEM_OVERRIDES) => {
             Some(ControllerSurfaceAction::PreloadItemOverrides)
         }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_SAVE_ITEM_OVERRIDES) => {
+        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_SAVE_ITEM_OVERRIDES) => {
             Some(ControllerSurfaceAction::SaveItemOverrides)
+        }
+        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS) => {
+            Some(ControllerSurfaceAction::PreloadScalingGlobalDefaults)
+        }
+        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_SAVE_SCALING_GLOBAL_DEFAULTS) => {
+            Some(ControllerSurfaceAction::SaveScalingGlobalDefaults)
+        }
+        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_PRELOAD_SCALING_ITEM_OVERRIDES) => {
+            Some(ControllerSurfaceAction::PreloadScalingItemOverrides)
+        }
+        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_SAVE_SCALING_ITEM_OVERRIDES) => {
+            Some(ControllerSurfaceAction::SaveScalingItemOverrides)
         }
         _ => None,
     }
@@ -175,6 +222,10 @@ pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
         preload_item_overrides_action(),
         save_item_overrides_action(),
         load_backup_target_options_action(),
+        preload_scaling_global_defaults_action(),
+        save_scaling_global_defaults_action(),
+        preload_scaling_item_overrides_action(),
+        save_scaling_item_overrides_action(),
     ]
 }
 
@@ -323,6 +374,38 @@ fn load_backup_target_options_action() -> SurfaceActionDescriptor {
     .with_permission(Permission::ViewSoftware)
 }
 
+fn preload_scaling_global_defaults_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(
+        ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS,
+        "Preload Scaling Global Defaults",
+    )
+    .with_permission(Permission::ManageGlobalSettings)
+}
+
+fn save_scaling_global_defaults_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(
+        ACTION_SAVE_SCALING_GLOBAL_DEFAULTS,
+        "Save Scaling Global Defaults",
+    )
+    .with_permission(Permission::ManageGlobalSettings)
+}
+
+fn preload_scaling_item_overrides_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(
+        ACTION_PRELOAD_SCALING_ITEM_OVERRIDES,
+        "Preload Per-item Scaling Overrides",
+    )
+    .with_permission(Permission::ViewSoftware)
+}
+
+fn save_scaling_item_overrides_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(
+        ACTION_SAVE_SCALING_ITEM_OVERRIDES,
+        "Save Per-item Scaling Overrides",
+    )
+    .with_permission(Permission::UpdateSoftware)
+}
+
 /// Handle a surface action for the Proxmox plugin.
 ///
 /// Dispatches based on `(surface_id, action_id)` to the appropriate handler.
@@ -463,6 +546,38 @@ async fn execute_controller_surface_action_typed(
             .await
             .map_err(map_controller_action_error)
         }
+        ControllerSurfaceAction::PreloadScalingGlobalDefaults => {
+            handle_preload_scaling_global_defaults(
+                db,
+                tenant_id,
+                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
+            )
+            .await
+            .map_err(map_controller_action_error)
+        }
+        ControllerSurfaceAction::SaveScalingGlobalDefaults => handle_save_scaling_global_defaults(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxScalingGlobalDefaultsSaveRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::PreloadScalingItemOverrides => {
+            handle_preload_scaling_item_overrides(
+                db,
+                tenant_id,
+                parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
+            )
+            .await
+            .map_err(map_controller_action_error)
+        }
+        ControllerSurfaceAction::SaveScalingItemOverrides => handle_save_scaling_item_overrides(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
     }
 }
 
@@ -1346,6 +1461,268 @@ async fn handle_load_backup_target_options(
     }))
 }
 
+fn parse_scaling_mode_global(value: &str) -> std::result::Result<ScalingMode, String> {
+    let trimmed = value.trim();
+    match trimmed {
+        "none" => Ok(ScalingMode::None),
+        "absolute" => Ok(ScalingMode::Absolute),
+        "delta" => Ok(ScalingMode::Delta),
+        _ => Err(format!(
+            "invalid scaling_mode '{trimmed}'; expected none, absolute, or delta"
+        )),
+    }
+}
+
+fn parse_scaling_mode_item(value: &str) -> std::result::Result<Option<ScalingMode>, String> {
+    match value.trim() {
+        "inherit" => Ok(None),
+        "none" => Ok(Some(ScalingMode::None)),
+        "absolute" => Ok(Some(ScalingMode::Absolute)),
+        "delta" => Ok(Some(ScalingMode::Delta)),
+        other => Err(format!(
+            "invalid scaling_mode '{other}'; expected inherit, none, absolute, or delta"
+        )),
+    }
+}
+
+fn validate_scaling_dimensions(
+    mode: ScalingMode,
+    absolute_cores: Option<i32>,
+    absolute_memory_mb: Option<i32>,
+    delta_cores: Option<i32>,
+    delta_memory_mb: Option<i32>,
+) -> std::result::Result<ScalingPolicy, String> {
+    match mode {
+        ScalingMode::None => Ok(ScalingPolicy::none()),
+        ScalingMode::Absolute => {
+            if delta_cores.is_some() || delta_memory_mb.is_some() {
+                return Err(
+                    "cross-mode fields rejected: delta_cores/delta_memory_mb must be null \
+                     when scaling_mode = absolute"
+                        .to_string(),
+                );
+            }
+            for (val, name) in [
+                (absolute_cores, "absolute_cores"),
+                (absolute_memory_mb, "absolute_memory_mb"),
+            ] {
+                if val.is_some_and(|v| v < 1) {
+                    return Err(format!("{name} must be >= 1"));
+                }
+            }
+            if absolute_cores.is_none() && absolute_memory_mb.is_none() {
+                return Err(
+                    "at least one dimension (absolute_cores or absolute_memory_mb) \
+                     must be set when scaling_mode = absolute"
+                        .to_string(),
+                );
+            }
+            Ok(ScalingPolicy {
+                mode,
+                absolute_cores,
+                absolute_memory_mb,
+                delta_cores: None,
+                delta_memory_mb: None,
+            })
+        }
+        ScalingMode::Delta => {
+            if absolute_cores.is_some() || absolute_memory_mb.is_some() {
+                return Err(
+                    "cross-mode fields rejected: absolute_cores/absolute_memory_mb must be null \
+                     when scaling_mode = delta"
+                        .to_string(),
+                );
+            }
+            for (val, name) in [
+                (delta_cores, "delta_cores"),
+                (delta_memory_mb, "delta_memory_mb"),
+            ] {
+                if val.is_some_and(|v| v < 1) {
+                    return Err(format!("{name} must be >= 1"));
+                }
+            }
+            if delta_cores.is_none() && delta_memory_mb.is_none() {
+                return Err("at least one dimension (delta_cores or delta_memory_mb) \
+                     must be set when scaling_mode = delta"
+                    .to_string());
+            }
+            Ok(ScalingPolicy {
+                mode,
+                absolute_cores: None,
+                absolute_memory_mb: None,
+                delta_cores,
+                delta_memory_mb,
+            })
+        }
+    }
+}
+
+async fn handle_preload_scaling_global_defaults(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    request: ProxmoxScopeSelectionRequest,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "scaling global defaults preload")?;
+    let configs = resolve_scope_plugin_configs(db, tenant_id, &request).await?;
+
+    let Some(selected_config) = configs.first() else {
+        return Ok(json!({
+            "plugin_config_id": "",
+            "scaling_mode": "none",
+            "absolute_cores": serde_json::Value::Null,
+            "absolute_memory_mb": serde_json::Value::Null,
+            "delta_cores": serde_json::Value::Null,
+            "delta_memory_mb": serde_json::Value::Null,
+        }));
+    };
+
+    let policy = load_scaling_global_default(db, tenant_id, selected_config.id)
+        .await
+        .map_err(|e| format!("failed to load scaling global defaults: {e}"))?;
+
+    Ok(json!({
+        "plugin_config_id": selected_config.id.to_string(),
+        "scaling_mode": policy.mode.as_str(),
+        "absolute_cores": policy.absolute_cores,
+        "absolute_memory_mb": policy.absolute_memory_mb,
+        "delta_cores": policy.delta_cores,
+        "delta_memory_mb": policy.delta_memory_mb,
+    }))
+}
+
+async fn handle_save_scaling_global_defaults(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    request: ProxmoxScalingGlobalDefaultsSaveRequest,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "scaling global defaults save")?;
+    let plugin_config_id = request.plugin_config_id;
+
+    let mode = parse_scaling_mode_global(&request.scaling_mode)?;
+    let policy = validate_scaling_dimensions(
+        mode,
+        request.absolute_cores,
+        request.absolute_memory_mb,
+        request.delta_cores,
+        request.delta_memory_mb,
+    )?;
+
+    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+
+    upsert_scaling_global_default(db, tenant_id, plugin_config_id, &policy)
+        .await
+        .map_err(|e| format!("failed to save scaling global defaults: {e}"))?;
+
+    Ok(json!({ "success": true, "plugin_config_id": plugin_config_id.to_string() }))
+}
+
+async fn handle_preload_scaling_item_overrides(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    request: ProxmoxItemOverridePreloadRequest,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "scaling item overrides preload")?;
+    let software_item_id = request.software_item_id;
+    let configs = resolve_scope_plugin_configs(
+        db,
+        tenant_id,
+        &ProxmoxScopeSelectionRequest {
+            plugin_config_id: request.plugin_config_id,
+            software_item_id: Some(software_item_id),
+        },
+    )
+    .await?;
+
+    let Some(selected_config) = configs.first() else {
+        return Ok(json!({
+            "software_item_id": software_item_id.to_string(),
+            "plugin_config_id": "",
+            "scaling_mode": "inherit",
+            "absolute_cores": serde_json::Value::Null,
+            "absolute_memory_mb": serde_json::Value::Null,
+            "delta_cores": serde_json::Value::Null,
+            "delta_memory_mb": serde_json::Value::Null,
+        }));
+    };
+
+    let item_override = load_scaling_item_override(db, software_item_id, selected_config.id)
+        .await
+        .map_err(|e| format!("failed to load scaling item override: {e}"))?;
+
+    let (scaling_mode_str, abs_c, abs_m, del_c, del_m) = match item_override {
+        None => ("inherit".to_string(), None, None, None, None),
+        Some(p) => (
+            p.mode.as_str().to_string(),
+            p.absolute_cores,
+            p.absolute_memory_mb,
+            p.delta_cores,
+            p.delta_memory_mb,
+        ),
+    };
+
+    Ok(json!({
+        "software_item_id": software_item_id.to_string(),
+        "plugin_config_id": selected_config.id.to_string(),
+        "scaling_mode": scaling_mode_str,
+        "absolute_cores": abs_c,
+        "absolute_memory_mb": abs_m,
+        "delta_cores": del_c,
+        "delta_memory_mb": del_m,
+    }))
+}
+
+async fn handle_save_scaling_item_overrides(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    request: ProxmoxScalingItemOverridesSaveRequest,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "scaling item overrides save")?;
+    let software_item_id = request.software_item_id;
+    let plugin_config_id = request.plugin_config_id;
+
+    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_plugin_config_assigned_to_software_item(
+        db,
+        tenant_id,
+        software_item_id,
+        plugin_config_id,
+    )
+    .await?;
+
+    let mode_opt = parse_scaling_mode_item(&request.scaling_mode)?;
+
+    let Some(mode) = mode_opt else {
+        delete_scaling_item_override(db, software_item_id, plugin_config_id)
+            .await
+            .map_err(|e| format!("failed to clear scaling item override: {e}"))?;
+        return Ok(json!({
+            "success": true,
+            "cleared": true,
+            "software_item_id": software_item_id.to_string(),
+            "plugin_config_id": plugin_config_id.to_string(),
+        }));
+    };
+
+    let policy = validate_scaling_dimensions(
+        mode,
+        request.absolute_cores,
+        request.absolute_memory_mb,
+        request.delta_cores,
+        request.delta_memory_mb,
+    )?;
+
+    upsert_scaling_item_override(db, tenant_id, software_item_id, plugin_config_id, &policy)
+        .await
+        .map_err(|e| format!("failed to save scaling item override: {e}"))?;
+
+    Ok(json!({
+        "success": true,
+        "cleared": false,
+        "software_item_id": software_item_id.to_string(),
+        "plugin_config_id": plugin_config_id.to_string(),
+    }))
+}
+
 async fn ensure_proxmox_plugin_config_exists(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -1645,9 +2022,39 @@ mod tests {
     use time::OffsetDateTime;
 
     #[test]
+    fn surface_actions_include_scaling_actions_with_correct_permissions() {
+        let actions = surface_actions();
+        // Now 17: 13 original + 4 scaling
+        assert_eq!(actions.len(), 17);
+        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
+        assert!(ids.contains(&ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS));
+        assert!(ids.contains(&ACTION_SAVE_SCALING_GLOBAL_DEFAULTS));
+        assert!(ids.contains(&ACTION_PRELOAD_SCALING_ITEM_OVERRIDES));
+        assert!(ids.contains(&ACTION_SAVE_SCALING_ITEM_OVERRIDES));
+
+        let save_global_scaling = actions
+            .iter()
+            .find(|a| a.action_id == ACTION_SAVE_SCALING_GLOBAL_DEFAULTS)
+            .expect("save-scaling-global-defaults must be exported");
+        assert_eq!(
+            save_global_scaling.permission,
+            Permission::ManageGlobalSettings.as_str()
+        );
+
+        let save_item_scaling = actions
+            .iter()
+            .find(|a| a.action_id == ACTION_SAVE_SCALING_ITEM_OVERRIDES)
+            .expect("save-scaling-item-overrides must be exported");
+        assert_eq!(
+            save_item_scaling.permission,
+            Permission::UpdateSoftware.as_str()
+        );
+    }
+
+    #[test]
     fn surface_actions_include_host_and_policy_actions_with_permissions() {
         let actions = surface_actions();
-        assert_eq!(actions.len(), 13);
+        assert_eq!(actions.len(), 17);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));
         assert!(ids.contains(&"match"));
