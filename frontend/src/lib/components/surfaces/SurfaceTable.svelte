@@ -257,8 +257,8 @@
 					</td>
 				{/each}
 				{#if hasRowActions}
-					<td class="table-cell-pad">
-						<div class="flex flex-wrap gap-2">
+					<td class="table-cell-pad whitespace-nowrap">
+						<div class="@container/buttons flex flex-nowrap items-center gap-1">
 							{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
 								{#if isRowActionVisible(rowAction, rowRecord)}
 									<SurfaceInteractionButton
@@ -270,6 +270,7 @@
 										baseParams={rowParams(rowRecord)}
 										rowSeed={rowRecord}
 										size="sm"
+										labelDisplay={interaction.icon ? 'icon-only' : 'always'}
 										oncomplete={async () => {
 											await loadPage(currentPage);
 										}}
@@ -309,23 +310,26 @@
 			emptyDescription={dataSource?.empty_state?.description}
 		>
 			{#snippet rowActions(row)}
-				{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
-					{#if isRowActionVisible(rowAction, row)}
-						<SurfaceInteractionButton
-							{surfaceId}
-							{interaction}
-							{interactions}
-							{targetProviderId}
-							{encryptionContext}
-							baseParams={rowParams(row)}
-							rowSeed={row}
-							size="sm"
-							oncomplete={async () => {
-								await loadPage(currentPage);
-							}}
-						/>
-					{/if}
-				{/each}
+				<div class="@container/buttons flex flex-nowrap items-center gap-1">
+					{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
+						{#if isRowActionVisible(rowAction, row)}
+							<SurfaceInteractionButton
+								{surfaceId}
+								{interaction}
+								{interactions}
+								{targetProviderId}
+								{encryptionContext}
+								baseParams={rowParams(row)}
+								rowSeed={row}
+								size="sm"
+								labelDisplay={interaction.icon ? 'icon-only' : 'always'}
+								oncomplete={async () => {
+									await loadPage(currentPage);
+								}}
+							/>
+						{/if}
+					{/each}
+				</div>
 			{/snippet}
 			{#snippet footer()}
 				{#if showInlineFooter}
