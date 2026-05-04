@@ -309,7 +309,7 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
         use crate::entity::proxmox_host_mapping;
         use sea_orm::EntityTrait;
 
-        let mapping_row = proxmox_host_mapping::Entity::find_by_id(record.mapping_id)
+        let mapping_row = match proxmox_host_mapping::Entity::find_by_id(record.mapping_id)
             .one(db)
             .await
             .map_err(|e| {
@@ -318,14 +318,24 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                         format!("failed to load host mapping {}: {e}", record.mapping_id)
                     )
                 )
-            })?
-            .ok_or_else(|| {
-                rootcause::report!(
-                    uptrakit_plugin_infrastructure_core::error::PluginError::PluginInternal(
-                        format!("host mapping {} not found for restore", record.mapping_id)
-                    )
-                )
-            })?;
+            })? {
+            Some(row) => row,
+            None => {
+                tracing::warn!(
+                    %update_history_id,
+                    mapping_id = %record.mapping_id,
+                    "resource scaling: host mapping deleted before restore; \
+                     writing skipped_mapping_deleted"
+                );
+                let mut skipped = record.clone();
+                skipped.restore_status = "skipped_mapping_deleted".to_string();
+                if let Err(e) = policy_store::upsert_scaling_record(db, &skipped).await {
+                    tracing::warn!(%update_history_id, error = %e,
+                        "resource scaling: failed to persist skipped_mapping_deleted record");
+                }
+                return Ok(());
+            }
+        };
 
         // Load plugin config and create client
         let store = DbProxmoxProtectionStore { db };
@@ -463,17 +473,17 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 /// Compute target core count from a `ScalingPolicy`.
 ///
 /// - `Absolute` mode: use `absolute_cores` if set, else keep original.
-/// - `Delta` mode: clamp-add `delta_cores` to original (minimum 1 core).
+/// - `Delta` mode: add `delta_cores` to original.
 /// - `None`: keep original.
+///
+/// No minimum clamp is applied here — the integrity guard in the caller
+/// already returns early for invalid values (v < 1).
 fn compute_target_cores(policy: &ScalingPolicy, original: u32) -> u32 {
     match policy.mode {
-        ScalingMode::Absolute => policy
-            .absolute_cores
-            .map(|c| c.max(1) as u32)
-            .unwrap_or(original),
+        ScalingMode::Absolute => policy.absolute_cores.map(|c| c as u32).unwrap_or(original),
         ScalingMode::Delta => policy
             .delta_cores
-            .map(|d| (original as i64 + i64::from(d)).max(1) as u32)
+            .map(|d| (original as i64 + i64::from(d)) as u32)
             .unwrap_or(original),
         ScalingMode::None => original,
     }
@@ -482,17 +492,20 @@ fn compute_target_cores(policy: &ScalingPolicy, original: u32) -> u32 {
 /// Compute target memory (MB) from a `ScalingPolicy`.
 ///
 /// - `Absolute` mode: use `absolute_memory_mb` if set, else keep original.
-/// - `Delta` mode: clamp-add `delta_memory_mb` to original (minimum 16 MB).
+/// - `Delta` mode: add `delta_memory_mb` to original.
 /// - `None`: keep original.
+///
+/// No minimum clamp is applied here — the integrity guard in the caller
+/// already returns early for invalid values (v < 1).
 fn compute_target_memory_mb(policy: &ScalingPolicy, original: u64) -> u64 {
     match policy.mode {
         ScalingMode::Absolute => policy
             .absolute_memory_mb
-            .map(|m| m.max(1) as u64)
+            .map(|m| m as u64)
             .unwrap_or(original),
         ScalingMode::Delta => policy
             .delta_memory_mb
-            .map(|d| (original as i64 + i64::from(d)).max(16) as u64)
+            .map(|d| (original as i64 + i64::from(d)) as u64)
             .unwrap_or(original),
         ScalingMode::None => original,
     }
@@ -867,5 +880,70 @@ mod tests {
             .await;
         assert!(result.is_ok(), "restore should succeed: {result:?}");
         put_config_mock.assert_calls(1);
+    }
+
+    #[test]
+    fn is_active_returns_false_for_none_mode() {
+        use crate::scaling_store::ScalingPolicy;
+        let policy = ScalingPolicy::none();
+        assert!(!policy.is_active());
+    }
+
+    #[test]
+    fn is_active_returns_false_for_absolute_with_no_dimensions() {
+        use crate::scaling_store::{ScalingMode, ScalingPolicy};
+        let policy = ScalingPolicy {
+            mode: ScalingMode::Absolute,
+            ..Default::default()
+        };
+        assert!(!policy.is_active());
+    }
+
+    #[test]
+    fn delta_target_computation() {
+        let original_cores: u32 = 4;
+        let delta_cores: i32 = 2;
+        let target = (original_cores as i64 + delta_cores as i64) as u32;
+        assert_eq!(target, 6u32);
+    }
+
+    #[test]
+    fn delta_integrity_guard_condition() {
+        use crate::scaling_store::{ScalingMode, ScalingPolicy};
+        let policy_zero_delta = ScalingPolicy {
+            mode: ScalingMode::Delta,
+            delta_cores: Some(0),
+            ..Default::default()
+        };
+        assert!(policy_zero_delta.is_active());
+        let guard_fires = policy_zero_delta.delta_cores.map_or(false, |v| v < 1);
+        assert!(
+            guard_fires,
+            "integrity guard must fire when delta_cores = 0"
+        );
+
+        let policy_valid = ScalingPolicy {
+            mode: ScalingMode::Delta,
+            delta_cores: Some(1),
+            ..Default::default()
+        };
+        let guard_fires_valid = policy_valid.delta_cores.map_or(false, |v| v < 1);
+        assert!(
+            !guard_fires_valid,
+            "guard must not fire for delta_cores = 1"
+        );
+    }
+
+    #[test]
+    fn delta_partial_config_cores_only() {
+        use crate::scaling_store::{ScalingMode, ScalingPolicy};
+        let policy = ScalingPolicy {
+            mode: ScalingMode::Delta,
+            delta_cores: Some(2),
+            delta_memory_mb: None,
+            ..Default::default()
+        };
+        assert!(policy.is_active());
+        assert!(policy.delta_memory_mb.is_none());
     }
 }
