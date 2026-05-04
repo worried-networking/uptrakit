@@ -173,6 +173,7 @@ pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30)
+            .with_icon("trash-2")
             .batch(),
         sync_host_action(),
         bootstrap_action(),
@@ -624,7 +625,7 @@ fn build_interactions(
             transport: InteractionTransport::ProviderProxied,
             workflow_steps,
             form_ui,
-            icon: None,
+            icon: action.icon.clone(),
         });
     }
     interactions
@@ -866,6 +867,7 @@ fn sync_host_action() -> SurfaceActionDescriptor {
         .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
+        .with_icon("refresh-cw")
         .batch()
 }
 
@@ -947,6 +949,7 @@ fn bootstrap_action() -> SurfaceActionDescriptor {
         .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
+        .with_icon("server-cog")
 }
 
 // ── Surface runtime context ──────────────────────────────────────────
@@ -2956,6 +2959,48 @@ mod tests {
         assert_eq!(details["selected_guest_count"], json!(2));
         assert_eq!(details["succeeded"], json!(1));
         assert_eq!(details["failed"], json!(1));
+    }
+
+    #[test]
+    fn ssh_host_actions_carry_their_icons() {
+        let actions = build_actions();
+        let by_id: std::collections::HashMap<&str, &SurfaceActionDescriptor> =
+            actions.iter().map(|a| (a.action_id.as_str(), a)).collect();
+
+        assert_eq!(by_id["bootstrap"].icon.as_deref(), Some("server-cog"));
+        assert_eq!(by_id["sync-host"].icon.as_deref(), Some("refresh-cw"));
+        assert_eq!(by_id["remove-host"].icon.as_deref(), Some("trash-2"));
+    }
+
+    #[test]
+    fn surface_action_icon_is_forwarded_to_interaction_descriptor() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|s| s.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
+            .expect("ssh hosts surface present");
+
+        let bootstrap = surface
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "bootstrap")
+            .expect("bootstrap interaction present");
+        assert_eq!(bootstrap.icon.as_deref(), Some("server-cog"));
+
+        let sync = surface
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "sync-host")
+            .expect("sync-host interaction present");
+        assert_eq!(sync.icon.as_deref(), Some("refresh-cw"));
+
+        let remove = surface
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "remove-host")
+            .expect("remove-host interaction present");
+        assert_eq!(remove.icon.as_deref(), Some("trash-2"));
     }
 
     #[tokio::test]
