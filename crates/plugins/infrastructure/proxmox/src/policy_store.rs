@@ -55,6 +55,8 @@ pub struct ProtectionPolicy {
     pub backup_target_key: Option<String>,
     pub snapshot_timeout_seconds: Option<i64>,
     pub backup_timeout_seconds: Option<i64>,
+    pub update_cores: Option<i32>,
+    pub update_memory_mb: Option<i32>,
 }
 
 impl ProtectionPolicy {
@@ -64,6 +66,8 @@ impl ProtectionPolicy {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
+            update_cores: None,
+            update_memory_mb: None,
         }
     }
 }
@@ -132,11 +136,21 @@ pub fn resolve_effective_policy(
         .and_then(|p| p.backup_timeout_seconds)
         .or_else(|| global_ref.and_then(|p| p.backup_timeout_seconds));
 
+    let update_cores = item_ref
+        .and_then(|p| p.update_cores)
+        .or_else(|| global_ref.and_then(|p| p.update_cores));
+
+    let update_memory_mb = item_ref
+        .and_then(|p| p.update_memory_mb)
+        .or_else(|| global_ref.and_then(|p| p.update_memory_mb));
+
     ProtectionPolicy {
         mode,
         backup_target_key,
         snapshot_timeout_seconds,
         backup_timeout_seconds,
+        update_cores,
+        update_memory_mb,
     }
 }
 
@@ -162,6 +176,8 @@ pub async fn load_global_default(
         backup_target_key: model.backup_target_key,
         snapshot_timeout_seconds: model.snapshot_timeout_seconds,
         backup_timeout_seconds: model.backup_timeout_seconds,
+        update_cores: model.update_cores,
+        update_memory_mb: model.update_memory_mb,
     }))
 }
 
@@ -190,6 +206,8 @@ pub async fn upsert_global_default(
         active.backup_target_key = Set(policy.backup_target_key.clone());
         active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
         active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
+        active.update_cores = Set(policy.update_cores);
+        active.update_memory_mb = Set(policy.update_memory_mb);
         active.updated_at = Set(now);
         active.update(db).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -204,8 +222,8 @@ pub async fn upsert_global_default(
             backup_target_key: Set(policy.backup_target_key.clone()),
             snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
             backup_timeout_seconds: Set(policy.backup_timeout_seconds),
-            update_cores: Set(None),
-            update_memory_mb: Set(None),
+            update_cores: Set(policy.update_cores),
+            update_memory_mb: Set(policy.update_memory_mb),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -241,6 +259,8 @@ pub async fn load_item_override(
         backup_target_key: model.backup_target_key,
         snapshot_timeout_seconds: model.snapshot_timeout_seconds,
         backup_timeout_seconds: model.backup_timeout_seconds,
+        update_cores: model.update_cores,
+        update_memory_mb: model.update_memory_mb,
     }))
 }
 
@@ -269,6 +289,8 @@ pub async fn upsert_item_override(
         active.backup_target_key = Set(policy.backup_target_key.clone());
         active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
         active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
+        active.update_cores = Set(policy.update_cores);
+        active.update_memory_mb = Set(policy.update_memory_mb);
         active.updated_at = Set(now);
         active.update(db).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -283,8 +305,8 @@ pub async fn upsert_item_override(
             backup_target_key: Set(policy.backup_target_key.clone()),
             snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
             backup_timeout_seconds: Set(policy.backup_timeout_seconds),
-            update_cores: Set(None),
-            update_memory_mb: Set(None),
+            update_cores: Set(policy.update_cores),
+            update_memory_mb: Set(policy.update_memory_mb),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -598,12 +620,16 @@ mod tests {
             backup_target_key: Some("k1".to_string()),
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
+            update_cores: None,
+            update_memory_mb: None,
         };
         let global = ProtectionPolicy {
             mode: ProtectionMode::Snapshot,
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
+            update_cores: None,
+            update_memory_mb: None,
         };
 
         let effective = resolve_effective_policy(Some(item.clone()), Some(global));
@@ -624,12 +650,16 @@ mod tests {
             backup_target_key: None,
             snapshot_timeout_seconds: None,
             backup_timeout_seconds: None,
+            update_cores: None,
+            update_memory_mb: None,
         };
         let global = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some("pbs-home:pbs".to_string()),
             snapshot_timeout_seconds: Some(180),
             backup_timeout_seconds: Some(1200),
+            update_cores: None,
+            update_memory_mb: None,
         };
 
         let effective = resolve_effective_policy(Some(item), Some(global));
@@ -645,17 +675,65 @@ mod tests {
             backup_target_key: Some("pbs-home:pbs".to_string()),
             snapshot_timeout_seconds: Some(90),
             backup_timeout_seconds: Some(1500),
+            update_cores: None,
+            update_memory_mb: None,
         };
         let global = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some("pbs-home:pbs".to_string()),
             snapshot_timeout_seconds: Some(180),
             backup_timeout_seconds: Some(1200),
+            update_cores: None,
+            update_memory_mb: None,
         };
 
         let effective = resolve_effective_policy(Some(item), Some(global));
         assert_eq!(effective.snapshot_timeout_seconds, Some(90));
         assert_eq!(effective.backup_timeout_seconds, Some(1500));
+    }
+
+    #[test]
+    fn protection_policy_carries_scaling_fields() {
+        let p = ProtectionPolicy {
+            mode: ProtectionMode::DoNothing,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+            update_cores: Some(4),
+            update_memory_mb: Some(8192),
+        };
+        assert_eq!(p.update_cores, Some(4));
+        assert_eq!(p.update_memory_mb, Some(8192));
+    }
+
+    #[test]
+    fn do_nothing_policy_has_no_scaling() {
+        let p = ProtectionPolicy::do_nothing();
+        assert!(p.update_cores.is_none());
+        assert!(p.update_memory_mb.is_none());
+    }
+
+    #[test]
+    fn resolve_effective_policy_cascades_scaling_fields() {
+        let item = ProtectionPolicy {
+            mode: ProtectionMode::Snapshot,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+            update_cores: Some(8),
+            update_memory_mb: None,
+        };
+        let global = ProtectionPolicy {
+            mode: ProtectionMode::DoNothing,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+            update_cores: Some(4),
+            update_memory_mb: Some(4096),
+        };
+        let effective = resolve_effective_policy(Some(item), Some(global));
+        assert_eq!(effective.update_cores, Some(8));
+        assert_eq!(effective.update_memory_mb, Some(4096));
     }
 
     #[tokio::test]

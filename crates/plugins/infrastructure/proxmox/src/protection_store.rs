@@ -54,6 +54,8 @@ pub(crate) struct ProxmoxProtectionPolicyRecord {
     pub backup_target_key: Option<String>,
     pub snapshot_timeout_seconds: Option<i64>,
     pub backup_timeout_seconds: Option<i64>,
+    pub update_cores: Option<i32>,
+    pub update_memory_mb: Option<i32>,
 }
 
 /// Typed persisted audit row used by Proxmox protection reconciliation.
@@ -245,6 +247,16 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
                     .and_then(|row| row.backup_timeout_seconds)
             });
 
+        let update_cores = item_override
+            .as_ref()
+            .and_then(|row| row.update_cores)
+            .or_else(|| global_default.as_ref().and_then(|row| row.update_cores));
+
+        let update_memory_mb = item_override
+            .as_ref()
+            .and_then(|row| row.update_memory_mb)
+            .or_else(|| global_default.as_ref().and_then(|row| row.update_memory_mb));
+
         Ok(ProxmoxProtectionPolicyRecord {
             mode: item_mode
                 .or(global_mode)
@@ -259,6 +271,8 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
                 }),
             snapshot_timeout_seconds,
             backup_timeout_seconds,
+            update_cores,
+            update_memory_mb,
         })
     }
 

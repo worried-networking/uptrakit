@@ -1134,6 +1134,8 @@ async fn handle_save_global_defaults(
             backup_target_key,
             snapshot_timeout_seconds: snapshot_timeout,
             backup_timeout_seconds: backup_timeout,
+            update_cores: None,
+            update_memory_mb: None,
         },
     )
     .await
@@ -1265,6 +1267,8 @@ async fn handle_save_item_overrides(
             backup_target_key,
             snapshot_timeout_seconds: snapshot_timeout,
             backup_timeout_seconds: backup_timeout,
+            update_cores: None,
+            update_memory_mb: None,
         },
     )
     .await
