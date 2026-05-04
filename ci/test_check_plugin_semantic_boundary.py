@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 import unittest
 
 
 ROOT = Path(__file__).resolve().parent
 HELPER = ROOT / "check_plugin_semantic_boundary.py"
-SHELL_HELPER = ROOT / "check_plugin_semantic_boundary.sh"
 FIXTURES = ROOT / "testdata" / "plugin_semantic_boundary"
 
 
@@ -37,55 +33,6 @@ def run_checker(
         capture_output=True,
         text=True,
     )
-
-
-def run_shell_checker(
-    fixture_name: str,
-    *,
-    report_all: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    fixture_root = FIXTURES / fixture_name
-    with tempfile.TemporaryDirectory() as tmpdir:
-        temp_root = Path(tmpdir) / "repo"
-        shutil.copytree(fixture_root, temp_root)
-        temp_ci_dir = temp_root / "ci"
-        temp_ci_dir.mkdir(exist_ok=True)
-        temp_shell_helper = temp_ci_dir / "check_plugin_semantic_boundary.sh"
-        shutil.copy2(SHELL_HELPER, temp_shell_helper)
-        temp_shell_helper.chmod(0o755)
-
-        env = os.environ.copy()
-        if report_all:
-            env["UPTRAKIT_SEMANTIC_BOUNDARY_REPORT_ALL"] = "1"
-
-        return subprocess.run(
-            ["bash", str(temp_shell_helper)],
-            cwd=temp_root,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-
-
-def parse_shell_findings(output: str) -> list[tuple[str, str, int]]:
-    findings: list[tuple[str, str, int]] = []
-    current_label: str | None = None
-
-    for raw_line in output.splitlines():
-        line = raw_line.rstrip()
-        if line.startswith("semantic-boundary violation: "):
-            current_label = line.removeprefix("semantic-boundary violation: ")
-            continue
-        if not line:
-            current_label = None
-            continue
-        if current_label is None or not line.startswith("./"):
-            continue
-
-        path, line_no, _excerpt = line[2:].split(":", 2)
-        findings.append((current_label, f"crates/{path}", int(line_no)))
-
-    return findings
 
 
 def index_python_rule_ids_by_location(
@@ -609,70 +556,6 @@ class PluginSemanticBoundaryTests(unittest.TestCase):
                     "hardcoded-plugin-type-literal",
                     rule_ids_by_location[location],
                     msg=output,
-                )
-
-    def test_shell_report_all_mode_collects_without_changing_default_fail_fast(self) -> None:
-        default_result = run_shell_checker("fail/shell_legacy_parity")
-        default_output = default_result.stdout + default_result.stderr
-        self.assertNotEqual(default_result.returncode, 0, msg=default_output)
-        self.assertIn("dashboard-icons bespoke surface", default_output, msg=default_output)
-        self.assertNotIn(
-            "PluginTypeId semantic helper definitions",
-            default_output,
-            msg=default_output,
-        )
-
-        report_all_result = run_shell_checker("fail/shell_legacy_parity", report_all=True)
-        report_all_output = report_all_result.stdout + report_all_result.stderr
-        self.assertNotEqual(report_all_result.returncode, 0, msg=report_all_output)
-        self.assertIn("dashboard-icons bespoke surface", report_all_output, msg=report_all_output)
-        self.assertIn(
-            "PluginTypeId semantic helper callsites/uses",
-            report_all_output,
-            msg=report_all_output,
-        )
-        self.assertIn(
-            "PluginTypeId semantic helper definitions",
-            report_all_output,
-            msg=report_all_output,
-        )
-        self.assertIn("identity-specific helpers", report_all_output, msg=report_all_output)
-        self.assertIn(
-            "plugin_ids token references in non-plugin production code",
-            report_all_output,
-            msg=report_all_output,
-        )
-        self.assertIn("let _instance_display = id.display_name();", report_all_output, msg=report_all_output)
-
-    def test_python_checker_maps_every_shell_report_all_finding_to_expected_rule_id(self) -> None:
-        shell_result = run_shell_checker("fail/shell_legacy_parity", report_all=True)
-        shell_output = shell_result.stdout + shell_result.stderr
-        self.assertNotEqual(shell_result.returncode, 0, msg=shell_output)
-        shell_findings = parse_shell_findings(shell_output)
-        self.assertGreaterEqual(len(shell_findings), 6, msg=shell_output)
-
-        python_result = run_checker("fail/shell_legacy_parity", output_format="json")
-        python_output = python_result.stdout + python_result.stderr
-        self.assertNotEqual(python_result.returncode, 0, msg=python_output)
-        payload = json.loads(python_result.stdout)
-        python_rule_ids_by_location = index_python_rule_ids_by_location(payload["findings"])
-        expected_rule_by_shell_label = {
-            "dashboard-icons bespoke surface": "legacy-dashboard-bespoke-surface",
-            "PluginTypeId semantic helper callsites/uses": "forbidden-plugin-helper",
-            "PluginTypeId semantic helper definitions": "forbidden-plugin-helper",
-            "identity-specific helpers": "forbidden-plugin-helper",
-            "plugin_ids token references in non-plugin production code": "plugin-ids-reference",
-        }
-
-        for label, path, line in shell_findings:
-            with self.subTest(label=label, path=path, line=line):
-                location = (path, line)
-                self.assertIn(location, python_rule_ids_by_location, msg=python_output)
-                self.assertIn(label, expected_rule_by_shell_label, msg=shell_output)
-                self.assertIn(
-                    expected_rule_by_shell_label[label],
-                    python_rule_ids_by_location[location],
-                    msg=python_output,
                 )
 
     def test_rust_raw_payload_literals_are_detected_without_external_context(self) -> None:
