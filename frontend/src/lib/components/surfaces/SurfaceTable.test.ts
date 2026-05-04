@@ -658,6 +658,154 @@ describe('SurfaceTable', () => {
 		});
 	});
 
+	it('entity-link path: row-action wrapper uses flex flex-nowrap @container/buttons', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name', cell_type: { kind: 'entity_link', entity_type: 'host' } }],
+			row_actions: [{ interaction_id: 'delete' }]
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'row-1', name: { entity_id: 'h-1', label: 'Alpha', found: true } }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'delete',
+				kind: 'mutation_action',
+				label: 'Delete',
+				icon: 'trash-2',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'test.surface',
+			node,
+			dataSource,
+			interactions
+		});
+
+		expect(screen.getByText('Alpha')).toBeInTheDocument();
+		const wrapper = container.querySelector('div.flex.flex-nowrap.\\@container\\/buttons');
+		expect(wrapper).toBeInTheDocument();
+	});
+
+	it('entity-link path: icon-only labelDisplay hides label in sr-only when icon present', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name', cell_type: { kind: 'entity_link', entity_type: 'host' } }],
+			row_actions: [{ interaction_id: 'delete' }]
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'row-1', name: { entity_id: 'h-1', label: 'Alpha', found: true } }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'delete',
+				kind: 'mutation_action',
+				label: 'Delete',
+				icon: 'trash-2',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'test.surface',
+			node,
+			dataSource,
+			interactions
+		});
+
+		expect(screen.getByText('Alpha')).toBeInTheDocument();
+		const srOnly = container.querySelector('span.sr-only');
+		expect(srOnly).toBeInTheDocument();
+		expect(srOnly?.textContent).toBe('Delete');
+	});
+
+	it('entity-link path: label is visible (no sr-only) when interaction has no icon', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name', cell_type: { kind: 'entity_link', entity_type: 'host' } }],
+			row_actions: [{ interaction_id: 'act' }]
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'row-1', name: { entity_id: 'h-1', label: 'Alpha', found: true } }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'act',
+				kind: 'mutation_action',
+				label: 'Do It',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'test.surface',
+			node,
+			dataSource,
+			interactions
+		});
+
+		expect(screen.getByText('Alpha')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Do It' })).toBeInTheDocument();
+		expect(container.querySelector('span.sr-only')).not.toBeInTheDocument();
+	});
+
+	it('rowActions snippet path: row-action wrapper uses flex flex-nowrap @container/buttons', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: [{ interaction_id: 'delete' }]
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'row-1', name: 'Alpha' }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'delete',
+				kind: 'mutation_action',
+				label: 'Delete',
+				icon: 'trash-2',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'test.surface',
+			node,
+			dataSource,
+			interactions
+		});
+
+		expect(screen.getByText('Alpha')).toBeInTheDocument();
+		const wrapper = container.querySelector('div.flex.flex-nowrap.\\@container\\/buttons');
+		expect(wrapper).toBeInTheDocument();
+	});
+
 	it('keeps the footer visible for provider-query pagination when the current page has no rows', async () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
