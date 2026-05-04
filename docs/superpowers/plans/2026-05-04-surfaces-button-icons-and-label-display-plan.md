@@ -496,25 +496,69 @@ In `validate_for_provider` (line 125 area), add — just before `Ok(())` at the 
         Ok(())
 ```
 
-Update any existing struct-literal constructions of `InteractionDescriptor` inside this same file's
-tests so they include `icon: None` (search the file for `InteractionDescriptor {` and add the
-field).
+- [ ] **Step 4: Cascade `icon: None,` across every workspace struct literal**
 
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `cargo test -p uptrakit-surfaces interaction::` Expected: PASS — all interaction tests
-including the three new ones.
-
-- [ ] **Step 5: Quality gates for the surfaces crate**
-
-Run:
-`cargo fmt -p uptrakit-surfaces && cargo clippy -p uptrakit-surfaces --all-targets --all-features -- -D warnings`
-Expected: empty output.
-
-- [ ] **Step 6: Commit**
+`InteractionDescriptor` is `#[non_exhaustive]` so external crates can't use struct literals at all,
+but internal workspace crates do — and adding the new public `icon` field breaks every existing
+literal until each one sets it. There are roughly 74 sites across 17 files. Discover them:
 
 ```bash
-git add crates/shared/surfaces/src/interaction.rs
+grep -rn 'InteractionDescriptor\s*{' --include='*.rs' crates/ \
+    | grep -v ':[[:space:]]*//' \
+    | grep -v '/.worktrees/'
+```
+
+Walk every hit and add `icon: None,` next to the existing terminal field. Touched files include
+(non-exhaustive — confirm via the grep above):
+
+- `crates/plugins/notifications/{email,telegram,webhook}/src/plugin.rs`
+- `crates/plugins/infrastructure/proxmox/src/plugin.rs` (all surfaces, not only `proxmox_hosts_surface`;
+  Task 5 will replace these `None`s with real icons for the five Proxmox VE Hosts interactions)
+- `crates/plugins/releases/docker/src/plugin.rs`
+- `crates/core/mqtt-runtime/src/surface_runtime.rs`
+- `crates/core/agent-ssh/src/surface_runtime.rs` (the conversion site at line 614 — Task 4 will then
+  replace `None` with `action.icon.clone()`)
+- `crates/core/agent-ssh/src/surface_runtime/registration/*.rs`
+- `crates/ui/surface-proxy/src/registry.rs`
+- `crates/ui/surface-proxy/src/proxy/tests/**/*.rs`
+- `crates/ui/cli/{tests/command_execution.rs,src/commands/surfaces.rs}`
+- `crates/ui/web-api/src/routes/{surfaces.rs,service_ws/handler/mod.rs}`
+- `crates/shared/wire/src/wire_validate_impls.rs` (test fixtures inside the existing test module)
+
+This step is mechanical but mandatory: skipping any literal leaves the workspace red. Use sed if you
+prefer, but verify each site visually — some are inside macro invocations or test helpers that may
+need slightly different formatting.
+
+- [ ] **Step 5: Run the surfaces-crate tests to verify they pass**
+
+Run: `cargo test -p uptrakit-surfaces interaction::`
+Expected: PASS — all interaction tests including the three new ones.
+
+- [ ] **Step 6: Run the workspace-wide check before committing**
+
+Run: `cargo check --all-features`
+Expected: compile success across the entire workspace. If any literal was missed, fix it now —
+do not commit a red workspace.
+
+- [ ] **Step 7: Quality gates for touched crates**
+
+Run:
+
+```bash
+cargo fmt --all
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Expected: empty output. (Workspace-wide because the cascade touched many crates.)
+
+- [ ] **Step 8: Commit**
+
+Stage everything the cascade touched plus the surfaces-crate change. The commit must include every
+struct-literal site that gained `icon: None,` so the workspace stays compilable at every commit.
+
+```bash
+git add -u crates/
+git status   # sanity check — every modified .rs in the listed crates should be staged
 git commit -m "feat(surfaces): add icon field to InteractionDescriptor and validate it"
 ```
 
@@ -794,7 +838,7 @@ Append to the test module at the bottom of `crates/plugins/infrastructure/proxmo
 ```rust
 #[test]
 fn proxmox_hosts_surface_interactions_carry_icons() {
-    let registrations = surfaces();
+    let registrations = proxmox_surface_registrations();
     let proxmox = registrations
         .first()
         .expect("plugin returns at least one registration");
@@ -819,9 +863,9 @@ fn proxmox_hosts_surface_interactions_carry_icons() {
 }
 ```
 
-(If `surfaces` is the function name returning the `Vec<SurfaceRegistration>`, use that. Adjust to
-whatever the file's existing helper exposes — the test module conventions in the file will indicate
-the name.)
+(`proxmox_surface_registrations()` is the existing helper at `crates/plugins/infrastructure/proxmox/src/plugin.rs:96` returning
+`Vec<surfaces::SurfaceRegistration>`. The existing test `proxmox_hosts_surface_has_full_table_layout`
+in the same file calls it; mirror that pattern.)
 
 - [ ] **Step 2: Run the test to verify failure**
 
@@ -968,6 +1012,13 @@ git commit -m "feat(plugin-proxmox): assign boxes icon to bootstrap-proxmox-gues
 
 - `forbid Result<T, String> except user-facing validation` — wire `WireValidationError` is the
   existing typed error; we map into it.
+
+**Backward-compat note:** This task tightens `nav_icon` validation from "non-empty + length" to the
+strict kebab-case regex. In-tree producers do not call `SurfaceDescriptor::nav_icon(...)` today (per
+the spec's grep), but external Services / out-of-tree Plugins enrolled against an upgraded
+controller will fail re-enrollment if they send PascalCase values. This is intentional — the spec
+calls it out under Risks ("Kebab-case migration of `nav_icon`") — but the implementer should expect
+to coordinate the controller upgrade with any deployed services that emit a `nav_icon`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1294,12 +1345,13 @@ git commit -m "feat(frontend): add unified kebab-case icon registry with logged 
 
 ---
 
-## Task 9: Migrate `registry.svelte.ts` to `resolveIcon`, then delete `nav-icons.ts`
+## Task 9: Migrate `registry.svelte.ts` and `+layout.svelte` to `resolveIcon`, then delete `nav-icons.ts`
 
 **Files:**
 
 - Modify: `frontend/src/lib/surfaces/registry.svelte.ts:55`
 - Modify: `frontend/src/lib/surfaces/registry.test.ts` (update PascalCase fixtures)
+- Modify: `frontend/src/routes/+layout.svelte:47,280` (also imports `resolveNavIcon`).
 - Delete: `frontend/src/lib/nav-icons.ts`
 - Delete: `frontend/src/lib/nav-icons.test.ts`
 
@@ -1327,48 +1379,66 @@ Run: `cd frontend && npx vitest run src/lib/surfaces/registry.test.ts` Expected:
 
 - [ ] **Step 3: Update `registry.svelte.ts`**
 
-Edit `frontend/src/lib/surfaces/registry.svelte.ts:55`:
+Edit `frontend/src/lib/surfaces/registry.svelte.ts:55`. `resolveSurfacePageNavItems` keeps its
+current contract (returns `icon: string`); component-resolution lives downstream in `+layout.svelte`.
+The change here is just the lowercase fallback:
 
 ```ts
 icon: surface.nav_icon ?? "box";
 ```
 
-(Just the lowercase `'box'`. The frontend already passes the string downstream to a resolver —
-confirm whether `resolveIcon` is needed at this line or whether the consumer site does the resolve.
-If `resolveSurfacePageNavItems` returns a string `icon` for downstream
-`resolveNavIcon`/`resolveIcon` calls, the change is purely the literal. If a consumer of the
-returned shape calls `resolveNavIcon`, switch that call to `resolveIcon` from `$lib/icons`. Inspect
-the consumers via grep before committing.)
+- [ ] **Step 4: Update `+layout.svelte` to use `resolveIcon`**
 
-Run `grep -rn "resolveNavIcon\|nav-icons" frontend/src` to find any remaining references and switch
-them to the new module:
+`+layout.svelte` is the only live consumer of `resolveNavIcon`. Edit
+`frontend/src/routes/+layout.svelte:47` — replace the import:
 
-```ts
-import { resolveIcon } from "$lib/icons";
-// resolveNavIcon(name) → resolveIcon(name).component
+```svelte
+import { resolveIcon } from '$lib/icons';
 ```
 
-- [ ] **Step 4: Delete the old files**
+Edit `frontend/src/routes/+layout.svelte:280` — pick the component out of `resolveIcon`'s
+`{ component, ok }` return shape:
+
+```svelte
+icon: resolveIcon(item.icon).component
+```
+
+Run `grep -rn "resolveNavIcon\|nav-icons" frontend/src` and confirm no remaining references outside
+this plan / spec docs.
+
+- [ ] **Step 5: Delete the old files**
 
 ```bash
 git rm frontend/src/lib/nav-icons.ts frontend/src/lib/nav-icons.test.ts
 ```
 
-- [ ] **Step 5: Run the test suite**
+- [ ] **Step 6: Run the test suite**
 
 Run: `cd frontend && npm run check && npx vitest run` Expected: PASS — all tests green;
 `npm run check` reports no missing module.
 
-- [ ] **Step 6: Format and lint**
+- [ ] **Step 7: Format and lint**
 
 Run:
-`cd frontend && npx prettier --write src/lib/surfaces/registry.svelte.ts src/lib/surfaces/registry.test.ts && npm run lint`
-Expected: clean.
-
-- [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/src/lib/surfaces/registry.svelte.ts frontend/src/lib/surfaces/registry.test.ts frontend/src/lib/nav-icons.ts frontend/src/lib/nav-icons.test.ts
+cd frontend
+npx prettier --write src/lib/surfaces/registry.svelte.ts \
+                     src/lib/surfaces/registry.test.ts \
+                     src/routes/+layout.svelte
+npm run lint
+```
+
+Expected: clean.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add frontend/src/lib/surfaces/registry.svelte.ts \
+        frontend/src/lib/surfaces/registry.test.ts \
+        frontend/src/routes/+layout.svelte \
+        frontend/src/lib/nav-icons.ts \
+        frontend/src/lib/nav-icons.test.ts
 git commit -m "refactor(frontend): retire nav-icons.ts; use unified kebab-case icon registry"
 ```
 
@@ -1467,7 +1537,7 @@ git commit -m "feat(frontend): add LabelDisplay type for surface buttons"
 Create `frontend/src/lib/components/surfaces/SurfaceActionButton.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import SurfaceActionButton from "./SurfaceActionButton.svelte";
 
@@ -1498,7 +1568,7 @@ describe("SurfaceActionButton", () => {
     expect(srOnly?.textContent).toBe("Sync");
     const tooltipWrap = container.querySelector('span[title="Sync"]');
     expect(tooltipWrap).not.toBeNull();
-    expect(tooltipWrap?.classList.contains("contents")).toBe(true);
+    expect(tooltipWrap?.classList.contains("inline-flex")).toBe(true);
     const button = container.querySelector("button");
     expect(button?.getAttribute("aria-label")).toBe("Sync");
   });
@@ -1582,7 +1652,7 @@ describe("SurfaceActionButton", () => {
 });
 ```
 
-(Add `import { vi } from 'vitest';` if the file does not already import `vi`.)
+(`vi` is included in the import at the top of Step 1 — used by the resolver-failure test case below.)
 
 - [ ] **Step 2: Run the tests to verify failure**
 
@@ -1655,7 +1725,7 @@ Create `frontend/src/lib/components/surfaces/SurfaceActionButton.svelte`:
 		{#if effectiveDisplay === 'always'}
 			{label}
 		{:else if effectiveDisplay === 'auto'}
-			<span class="button-label-auto">{label}</span>
+			<span class="button-label-auto @max-[28em]/buttons:sr-only">{label}</span>
 		{:else}
 			<span class="sr-only">{label}</span>
 		{/if}
@@ -1663,13 +1733,20 @@ Create `frontend/src/lib/components/surfaces/SurfaceActionButton.svelte`:
 {/snippet}
 
 {#if showTooltipWrap}
-	<span title={label} class="contents">
+	<span title={label} class="inline-flex">
 		{@render body()}
 	</span>
 {:else}
 	{@render body()}
 {/if}
 ```
+
+Note on the wrapper class: `class="inline-flex"` matches the layout the existing context-gated
+wrapper produces at `SurfaceInteractionButton.svelte:102` (a plain inline `<span>` whose intrinsic
+size is the child Button's). `display: contents` is intentionally avoided — its interaction with
+the native `title` attribute is browser-inconsistent (Safari has reported regressions in this area),
+and the proven pattern in the existing code is the inline span. Verify in the dev preview at Task 18
+that the tooltip appears on hover for all three label-display states.
 
 - [ ] **Step 4: Run the tests**
 
@@ -2322,54 +2399,50 @@ git commit -m "feat(frontend): SurfaceTable row actions go single-line and icon-
 
 **Files:**
 
-- Inspect: build output (no source change required if Tailwind v4 already covers `@container/...`
-  and `@max-[Xem]/...:sr-only`)
+- Inspect: build output (verification only — both classes are already applied in Task 12 / 15 / 16).
 
 - [ ] **Step 1: Build the frontend**
 
-Run: `cd frontend && npm run build` Expected: build succeeds.
+Run: `cd frontend && npm run build`
+Expected: build succeeds.
 
 - [ ] **Step 2: Confirm the generated CSS contains the container-query rule**
 
 Run:
-`grep -r "container-name: buttons" frontend/.svelte-kit/output/ frontend/build/ 2>/dev/null | head -3`
-Expected: the search returns at least one hit (Tailwind generated
-`container-type: inline-size; container-name: buttons` from `@container/buttons`).
-
-Run:
-`grep -r "@container buttons (max-width: 28em)" frontend/.svelte-kit/output/ frontend/build/ 2>/dev/null | head -3`
-Expected: at least one hit (generated from `@max-[28em]/buttons:sr-only`).
-
-- [ ] **Step 3: If neither hit appears, the Tailwind v4 syntax used in components is wrong**
-
-Inspect the produced CSS for any `@container` rule. Compare with the spec § 5 contract. The
-component classes that should produce the rules are:
-
-- `@container/buttons` on the wrapper element (in `SurfaceActionBar`, `SurfaceTable`,
-  `SurfaceWorkflow`).
-- `@max-[28em]/buttons:sr-only` on the `<span class="button-label-auto">` (this class lives in
-  `SurfaceActionButton`).
-
-To make the `'auto'` mode actually collapse the label, the `<span class="button-label-auto">` in
-`SurfaceActionButton.svelte` must additionally carry the variant utility. Update Step 3 of Task 12's
-component to:
-
-```svelte
-{:else if effectiveDisplay === 'auto'}
-	<span class="button-label-auto @max-[28em]/buttons:sr-only">{label}</span>
-```
-
-(Re-run the affected tests; the visible label remains because jsdom does not evaluate container
-queries — assertions on `.button-label-auto` class presence still hold.)
-
-- [ ] **Step 4: If Step 3 was needed, commit the fix**
 
 ```bash
-git add frontend/src/lib/components/surfaces/SurfaceActionButton.svelte
-git commit -m "fix(frontend): apply @max-[28em]/buttons:sr-only to auto label span"
+grep -r "container-name: buttons" frontend/.svelte-kit/output/ frontend/build/ 2>/dev/null | head -3
 ```
 
-(If no fix was needed, no commit.)
+Expected: at least one hit (Tailwind generated `container-type: inline-size; container-name: buttons`
+from `@container/buttons`).
+
+Run:
+
+```bash
+grep -r "@container buttons" frontend/.svelte-kit/output/ frontend/build/ 2>/dev/null | head -3
+```
+
+Expected: at least one hit, including a rule whose body sets `position: absolute; ...` (the
+generated `sr-only` block from `@max-[28em]/buttons:sr-only`).
+
+- [ ] **Step 3: If either grep returns nothing, stop and diagnose**
+
+The Tailwind utility classes are applied in `SurfaceActionButton.svelte` (`@max-[28em]/buttons:sr-only`),
+`SurfaceActionBar.svelte` (`@container/buttons`), and `SurfaceTable.svelte` (`@container/buttons` in
+both row-action branches). If the generated CSS does not contain the expected rules, the most likely
+causes are:
+
+1. The Tailwind config's `content` glob does not include `src/lib/components/surfaces/`. Inspect
+   `frontend/tailwind.config.*` (or the `@tailwindcss/vite` setup in `vite.config.ts`).
+2. The class name was typed differently in source (e.g. `@container/Buttons` capitalized).
+3. The tailwind v4 version installed is < 4.0.0-alpha.20 (container queries shipped in alpha-20).
+   Check `frontend/package.json` and `package-lock.json`.
+
+Resolve the cause before continuing — Task 17 is a hard gate: Tasks 18+ depend on the visual
+collapse working.
+
+This task makes no commits when the gate passes.
 
 ---
 
