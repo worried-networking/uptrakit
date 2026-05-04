@@ -49,6 +49,26 @@ pub struct PveQemuConfig {
     /// VM name.
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub cores: Option<u32>,
+    #[serde(default)]
+    pub memory: Option<u64>,
+    /// Comma-separated hotplug device list (e.g. `"disk,network,usb,memory,cpu"`).
+    /// Absent means hotplug is disabled.
+    #[serde(default)]
+    pub hotplug: Option<String>,
+}
+
+impl PveQemuConfig {
+    pub fn supports_live_resource_scaling(&self) -> bool {
+        match &self.hotplug {
+            None => false,
+            Some(h) => {
+                h.split(',').map(str::trim).any(|f| f == "cpu")
+                    && h.split(',').map(str::trim).any(|f| f == "memory")
+            }
+        }
+    }
 }
 
 /// LXC container configuration from `GET /nodes/{node}/lxc/{vmid}/config`.
@@ -57,6 +77,10 @@ pub struct PveLxcConfig {
     /// Container hostname.
     #[serde(default)]
     pub hostname: Option<String>,
+    #[serde(default)]
+    pub cores: Option<u32>,
+    #[serde(default)]
+    pub memory: Option<u64>,
 }
 
 /// A single network interface from the QEMU guest agent.
@@ -211,5 +235,55 @@ mod tests {
         assert_eq!(resp.data[0].n, 0);
         assert_eq!(resp.data[0].t, "INFO: starting");
         assert_eq!(resp.data[1].n, 1);
+    }
+
+    #[test]
+    fn qemu_config_no_hotplug_returns_false() {
+        let cfg = PveQemuConfig {
+            name: None,
+            cores: Some(2),
+            memory: Some(2048),
+            hotplug: None,
+        };
+        assert!(!cfg.supports_live_resource_scaling());
+    }
+
+    #[test]
+    fn qemu_config_partial_hotplug_returns_false() {
+        let cfg = PveQemuConfig {
+            name: None,
+            cores: Some(2),
+            memory: Some(2048),
+            hotplug: Some("disk,network".to_string()),
+        };
+        assert!(!cfg.supports_live_resource_scaling());
+    }
+
+    #[test]
+    fn qemu_config_full_hotplug_returns_true() {
+        let cfg = PveQemuConfig {
+            name: None,
+            cores: Some(2),
+            memory: Some(2048),
+            hotplug: Some("disk,network,usb,memory,cpu".to_string()),
+        };
+        assert!(cfg.supports_live_resource_scaling());
+    }
+
+    #[test]
+    fn qemu_config_deserialization_includes_cores_memory_hotplug() {
+        let json = r#"{"data":{"name":"vm1","cores":4,"memory":8192,"hotplug":"disk,network,usb,memory,cpu"}}"#;
+        let resp: PveResponse<PveQemuConfig> = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(resp.data.cores, Some(4));
+        assert_eq!(resp.data.memory, Some(8192));
+        assert!(resp.data.supports_live_resource_scaling());
+    }
+
+    #[test]
+    fn lxc_config_deserialization_includes_cores_memory() {
+        let json = r#"{"data":{"hostname":"ct1","cores":2,"memory":1024}}"#;
+        let resp: PveResponse<PveLxcConfig> = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(resp.data.cores, Some(2));
+        assert_eq!(resp.data.memory, Some(1024));
     }
 }
