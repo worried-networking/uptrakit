@@ -893,6 +893,19 @@ Tests live at the bottom of the file containing the code under test (using `#[cf
 The `#[cfg(test)] use super::*;` pattern gives test blocks access to private helpers in the
 same module.
 
+### Plugin entity file naming
+
+Plugin-owned SeaORM entity files in `crates/plugins/<family>/<name>/src/entity/`
+must use a stem that does not collide with any core entity file in
+`crates/shared/db/src/entity/`. Convention: prefix with the plugin
+family or name (e.g. `proxmox_host_mappings.rs`, `docker_image.rs`).
+The boundary checker (`ci/check_plugin_semantic_boundary.py` rule
+`RULE_PLUGIN_ENTITY_IN_SHARED_DB`) auto-discovers plugin entity stems
+and fires when shared-db hosts a file or re-export with the same stem.
+A collision is interpreted as the plugin entity being mistakenly hosted
+in shared-db; the resolution is to rename the plugin entity, not to
+weaken the rule.
+
 ## Adding a New Plugin
 
 Checklist for adding a new first-party plugin:
