@@ -172,6 +172,43 @@ impl ProxmoxClient {
         Ok(wrapper.data)
     }
 
+    /// Perform a PUT form request to the Proxmox API.
+    ///
+    /// Proxmox returns either `{"data":null}` or a UPID string for async tasks
+    /// depending on version and VM state; we discard the body and treat HTTP 2xx as success.
+    async fn put_form(&self, path: &str, params: &[(String, String)]) -> Result<()> {
+        let url = format!("{}/api2/json{path}", self.base_url);
+
+        let encoded = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(params.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .finish();
+
+        let response = self
+            .client
+            .put(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(encoded)
+            .send()
+            .await
+            .map_err(|e| {
+                report!(ProxmoxError::Request(format!(
+                    "HTTP PUT request to {path} failed: {e}"
+                )))
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            bail!(ProxmoxError::ApiError {
+                status,
+                message: body
+            });
+        }
+
+        Ok(())
+    }
+
     /// Build a stable backup target key.
     ///
     /// Shared storages omit the node so they deduplicate to a single entry
@@ -609,6 +646,68 @@ impl ProxmoxClient {
             );
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    /// Apply CPU and memory limits to a running QEMU VM.
+    ///
+    /// Calls `PUT /api2/json/nodes/{node}/qemu/{vmid}/config` with `cores` and
+    /// `memory` fields. Proxmox applies both atomically when hotplug is enabled.
+    pub async fn set_qemu_config_resources(
+        &self,
+        node: &str,
+        vmid: u32,
+        cores: u32,
+        memory_mb: u64,
+    ) -> Result<()> {
+        let path = format!("/nodes/{node}/qemu/{vmid}/config");
+        self.put_form(
+            &path,
+            &[
+                ("cores".to_string(), cores.to_string()),
+                ("memory".to_string(), memory_mb.to_string()),
+            ],
+        )
+        .await
+    }
+
+    /// Apply CPU and memory limits to a running LXC container.
+    ///
+    /// Calls `PUT /api2/json/nodes/{node}/lxc/{vmid}/config`.
+    pub async fn set_lxc_config_resources(
+        &self,
+        node: &str,
+        vmid: u32,
+        cores: u32,
+        memory_mb: u64,
+    ) -> Result<()> {
+        let path = format!("/nodes/{node}/lxc/{vmid}/config");
+        self.put_form(
+            &path,
+            &[
+                ("cores".to_string(), cores.to_string()),
+                ("memory".to_string(), memory_mb.to_string()),
+            ],
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+mod resource_scaling_method_tests {
+    use super::*;
+
+    #[test]
+    fn client_has_set_qemu_config_resources_method() {
+        // Verify the method exists by directly calling the method pointer
+        let method = ProxmoxClient::set_qemu_config_resources;
+        let _ = method;
+    }
+
+    #[test]
+    fn client_has_set_lxc_config_resources_method() {
+        // Verify the method exists by directly calling the method pointer
+        let method = ProxmoxClient::set_lxc_config_resources;
+        let _ = method;
     }
 }
 
