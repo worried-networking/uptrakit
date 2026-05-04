@@ -42,6 +42,17 @@ checker, shell + bash for hooks. SQLite (in-memory) for integration tests.
   Commits). `<type>` is one of
   `feat|fix|refactor|test|docs|chore|build|ci|perf|style`.
 - Frequent commits — one logical change per commit. Each task ends with a commit.
+- **Atomic-phase rule clarification.** Phase B and Phase C each land as
+  a single **pushed** commit. Local staging, `git stash`, and squashed
+  WIP commits during investigation are fine — the invariant is that no
+  intermediate state ever reaches the remote. If mid-Phase-B you
+  discover a Phase A primitive is incomplete, do **not** split Phase B;
+  stash, fix Phase A as a new commit, then resume Phase B.
+- **Per-task rollback rule.** If a quality gate fails inside a task,
+  fix the cause in place. If the root cause is in a prior already-
+  committed task, revert that commit (or land a follow-up fix) and
+  redo. Never paper over with `#[allow(...)]` unless the lint is a
+  documented false positive.
 
 ---
 
@@ -186,30 +197,41 @@ git commit -m "feat(shared-db): add TableMigrateError enum under db-migrate feat
 - [ ] **Step 1: Read the current Cargo.toml**
 
 Run: `cat crates/plugins/infrastructure/core/Cargo.toml`
-Locate the existing `[features]` block, especially the `migrations` feature, and the optional `uptrakit-shared-db` dep entry.
+Locate the existing `[features]` block, especially the `migrations`
+feature. Note: `uptrakit-shared-db = { workspace = true, optional = true }`
+is already declared. Currently `dep:uptrakit-shared-db` is activated only
+by the `catalog` feature, **not** by `migrations`. Wave A needs both
+the dep activation AND the `db-migrate` feature activation under
+`migrations`.
 
 - [ ] **Step 2: Extend the `migrations` feature**
 
-Edit `crates/plugins/infrastructure/core/Cargo.toml`. Add
-`"uptrakit-shared-db/db-migrate"` to the `migrations` feature activation list.
-Keep all existing activations.
-
-Example shape (adapt to actual current entries):
+Edit `crates/plugins/infrastructure/core/Cargo.toml`. The current
+`migrations` feature reads roughly:
 
 ```toml
-[features]
+migrations = ["dep:sea-orm", "dep:sea-orm-migration"]
+```
+
+Replace with:
+
+```toml
 migrations = [
-    "sea-orm",
+    "dep:sea-orm",
+    "dep:sea-orm-migration",
     "dep:uptrakit-shared-db",
     "uptrakit-shared-db/db-migrate",
-    "dep:uptrakit-tenant-db",
 ]
 ```
 
-If `dep:uptrakit-shared-db` is already present (the existing definition), keep
-it. If only `"uptrakit-shared-db"` is listed, replace with
-`"dep:uptrakit-shared-db"` to be explicit; this is the correct 2024-edition
-shape.
+Keep all other activations the existing `migrations` feature has — the
+example above is not exhaustive; verify against the actual file.
+
+`dep:uptrakit-shared-db` is required because `migrations` needs the
+optional dep itself activated (the `catalog` feature already activates
+it for a different purpose; both features must independently activate
+the dep). `uptrakit-shared-db/db-migrate` then activates the new
+`db-migrate` feature on the dep so `TableMigrateError` resolves.
 
 - [ ] **Step 3: Verify compilation**
 
@@ -298,10 +320,14 @@ pub(crate) async fn clean_one<E: EntityTrait>(
     E::delete_many().exec(dst).await.map(|_| ())
 }
 
-pub(crate) async fn verify_one<E: EntityTrait>(
+pub(crate) async fn verify_one<E>(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
-) -> Result<(u64, u64), DbErr> {
+) -> Result<(u64, u64), DbErr>
+where
+    E: EntityTrait + 'static,
+    E::Model: Send + Sync + 'static,
+{
     let src_count = E::find().count(src).await?;
     let dst_count = E::find().count(dst).await?;
     Ok((src_count, dst_count))
@@ -752,15 +778,32 @@ cargo test --all-features
 
 Expected: every command exits 0. No new test failures introduced.
 
+If clippy fires `dead_code` warnings on the new public items
+(`PluginTableDescriptor`, `for_entity`, `copy_plugin_tables`,
+`clean_plugin_tables`, `verify_plugin_tables`) because no caller exists
+yet, **do not** add `#[allow(dead_code)]` — those callers arrive in
+Phase B. Confirm the warnings are actually present (`cargo clippy
+--all-targets --all-features 2>&1 | grep -i dead_code`); if any fire,
+land Phase B immediately to silence them. The window between A8 and
+B's commit should be short.
+
 - [ ] **Step 2: Verify doc comments render**
 
-Run: `cargo doc --no-deps -p uptrakit-plugin-infrastructure-core -p uptrakit-shared-db -p uptrakit-plugin-infrastructure-registry`
+Run:
+
+```bash
+cargo doc --no-deps -p uptrakit-plugin-infrastructure-core \
+                    -p uptrakit-shared-db \
+                    -p uptrakit-plugin-infrastructure-registry
+```
+
 Expected: no warnings about broken doc links or invalid doc syntax.
 
 - [ ] **Step 3: Confirm no plugin populates the new field yet**
 
 Run: `git grep -n "db_migrate_tables:" crates/plugins/`
-Expected: zero hits in plugin source files (only in `core/src/descriptor.rs` and `core/src/macros.rs`).
+Expected: zero hits in plugin source files (only in
+`core/src/descriptor.rs` and `core/src/macros.rs`).
 
 ---
 
@@ -881,15 +924,44 @@ pub mod proxmox_host_mapping;
 
 Keep alphabetical or grouping order consistent with the existing entries.
 
-- [ ] **Step 4: Verify the new file compiles in isolation**
+- [ ] **Step 4: Verify SeaORM accepts cross-crate `belongs_to` paths**
 
-Run: `cargo check -p uptrakit-plugin-infrastructure-proxmox`
-Expected: may produce duplicate-symbol errors against `shared-db`'s copy. That
-is fine — Task B2 deletes the shared-db copy. If it compiles, even better.
+The four already-moved Proxmox entities (`proxmox_protection_audit`,
+`proxmox_protection_default`, `proxmox_protection_item_override`,
+`proxmox_backup_target_cache`) all have `pub enum Relation {}` with no
+relations, so they cannot serve as precedent. The new
+`proxmox_host_mapping` is the first plugin-owned entity with cross-crate
+`belongs_to` relations.
+
+Run: `cargo check -p uptrakit-plugin-infrastructure-proxmox 2>&1 | head -50`
+Expected: compiles, OR fails with a `belongs_to` parser error indicating
+SeaORM does not accept absolute crate-qualified paths.
+
+If the parser rejects absolute paths, fall back to the documented
+SeaORM-style:
+
+```rust
+use uptrakit_shared_db::entity::{tenant, plugin_config, host};
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {
+    #[sea_orm(belongs_to = "tenant::Entity", from = "Column::TenantId", to = "tenant::Column::Id")]
+    Tenant,
+    // ... etc.
+}
+```
+
+— i.e. import the modules at the top, then reference them by short name
+in `belongs_to`. SeaORM resolves the type via Rust's path lookup at the
+expansion site.
+
+Some duplicate-symbol errors against `shared-db`'s copy are expected here
+and resolve in B2. Distinguish them from real `belongs_to` parser errors.
 
 - [ ] **Step 5: Do NOT commit yet**
 
-This task is part of Phase B's atomic commit (final commit at Task B8). All B-tasks build up to one commit.
+This task is part of Phase B's atomic commit (final commit at Task B8).
+All B-tasks build up to one commit.
 
 ### Task B2: Delete `proxmox_host_mapping` from `shared-db`
 
@@ -1237,6 +1309,11 @@ use uptrakit_shared_macros::impl_report_conversion;
 // Folds `TableMigrateError` (returned by both registry and shared-db core
 // helpers) into the existing `DbMigrateError::TableOp` and
 // `DbMigrateError::Mismatch` variants — no new variants needed.
+// `TableMigrateError` is `#[non_exhaustive]` and lives in another crate
+// (`shared-db`), so the closure's match must include a wildcard arm.
+// The wildcard maps unknown variants conservatively to `TableOp` with a
+// `DbErr::Custom` carrying the Debug rendering — guaranteed to fire only
+// when `shared-db` adds a new variant we have not yet handled here.
 impl_report_conversion!(TableMigrateError => DbMigrateError, |e| match e {
     TableMigrateError::Db { table, err } => {
         DbMigrateError::TableOp { table, db_err: err }
@@ -1244,6 +1321,10 @@ impl_report_conversion!(TableMigrateError => DbMigrateError, |e| match e {
     TableMigrateError::Mismatch { table, src, dst } => {
         DbMigrateError::Mismatch { table, src, dst }
     }
+    other => DbMigrateError::TableOp {
+        table: "<unknown>",
+        db_err: sea_orm::DbErr::Custom(format!("{other:?}")),
+    },
 });
 ```
 
@@ -1558,10 +1639,11 @@ def scan_plugin_entity_leaks_in_shared_db(repo_root: Path) -> list[Finding]:
             findings.append(
                 Finding(
                     rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB,
-                    match_kind="file_path",
                     path=rel,
                     line=1,
-                    snippet=f"plugin-owned entity stem `{path.stem}` hosted in shared-db",
+                    match_kind="file_path",
+                    match_value=path.stem,
+                    excerpt=f"plugin-owned entity stem `{path.stem}` hosted in shared-db",
                 )
             )
 
@@ -1580,10 +1662,11 @@ def scan_plugin_entity_leaks_in_shared_db(repo_root: Path) -> list[Finding]:
                     findings.append(
                         Finding(
                             rule_id=RULE_PLUGIN_ENTITY_IN_SHARED_DB,
-                            match_kind="module_token",
                             path=rel,
                             line=line_no,
-                            snippet=line.rstrip(),
+                            match_kind="module_token",
+                            match_value=m.group(1),
+                            excerpt=line.rstrip(),
                         )
                     )
     return findings
@@ -1606,40 +1689,54 @@ Expected: exits 0 (after Phase B, no plugin entity hosted in shared-db; no
 plugin re-export in mod/prelude). If it fails with
 `RULE_PLUGIN_ENTITY_IN_SHARED_DB`, Phase B is incomplete — go back and finish.
 
-- [ ] **Step 7: Test the rule fires on a fixture**
+- [ ] **Step 7: Test the rule fires on a fixture (filename collision)**
 
-Create a temporary fixture file:
+Verify the working tree is clean first to avoid mixing fixture cleanup
+with real edits:
+
+```bash
+git status --porcelain
+```
+
+Expected: empty (or only the staged D1 changes).
+
+Create the fixture, run the checker, then immediately restore:
 
 ```bash
 touch crates/shared/db/src/entity/proxmox_host_mapping.rs
 echo "// fixture" > crates/shared/db/src/entity/proxmox_host_mapping.rs
-```
-
-Run: `python3 ci/check_plugin_semantic_boundary.py`
-Expected: exits non-zero, reports `RULE_PLUGIN_ENTITY_IN_SHARED_DB` with `match_kind="file_path"`.
-
-Clean up:
-
-```bash
+python3 ci/check_plugin_semantic_boundary.py || echo "Checker fired as expected"
 rm crates/shared/db/src/entity/proxmox_host_mapping.rs
+git status --porcelain crates/shared/db/src/entity/proxmox_host_mapping.rs
 ```
+
+Expected: checker exits non-zero, reports
+`RULE_PLUGIN_ENTITY_IN_SHARED_DB` with `match_kind="file_path"`. Final
+`git status --porcelain` line is empty (file fully removed, no stray
+new file in the index).
 
 - [ ] **Step 8: Test the module-token check fires**
 
-Append a fixture line to `prelude.rs`:
+Same discipline. Verify the working tree is clean first:
+
+```bash
+git status --porcelain crates/shared/db/src/entity/prelude.rs
+```
+
+Expected: empty.
+
+Append a fixture line, run the checker, restore via `git checkout`:
 
 ```bash
 echo 'pub use super::proxmox_host_mapping::Foo;' >> crates/shared/db/src/entity/prelude.rs
-```
-
-Run: `python3 ci/check_plugin_semantic_boundary.py`
-Expected: exits non-zero, reports `RULE_PLUGIN_ENTITY_IN_SHARED_DB` with `match_kind="module_token"`.
-
-Clean up:
-
-```bash
+python3 ci/check_plugin_semantic_boundary.py || echo "Checker fired as expected"
 git checkout -- crates/shared/db/src/entity/prelude.rs
+git status --porcelain crates/shared/db/src/entity/prelude.rs
 ```
+
+Expected: checker exits non-zero, reports
+`RULE_PLUGIN_ENTITY_IN_SHARED_DB` with `match_kind="module_token"`.
+Final `git status --porcelain` line is empty.
 
 - [ ] **Step 9: Commit**
 
@@ -1831,7 +1928,32 @@ Python checker step (line 57 of `ci.yml` per spec).
 
 - [ ] **Step 3: Update docs that reference the shell checker**
 
-For each doc match from Step 1, replace the reference with `python3 ci/check_plugin_semantic_boundary.py` or remove the mention if redundant.
+For each doc match from Step 1, replace the reference with
+`python3 ci/check_plugin_semantic_boundary.py` or remove the mention if
+redundant.
+
+- [ ] **Step 3b: Document the plugin-prefix entity naming convention**
+
+Open `docs/development/plugin-guidelines.md`. Find a section about
+plugin entities or DB tables (or add one if absent). Append:
+
+```markdown
+### Plugin entity file naming
+
+Plugin-owned SeaORM entity files in `crates/plugins/<family>/<name>/src/entity/`
+must use a stem that does not collide with any core entity file in
+`crates/shared/db/src/entity/`. Convention: prefix with the plugin
+family or name (e.g. `proxmox_host_mappings.rs`, `docker_image.rs`).
+The boundary checker (`ci/check_plugin_semantic_boundary.py` rule
+`RULE_PLUGIN_ENTITY_IN_SHARED_DB`) auto-discovers plugin entity stems
+and fires when shared-db hosts a file or re-export with the same stem.
+A collision is interpreted as the plugin entity being mistakenly hosted
+in shared-db; the resolution is to rename the plugin entity, not to
+weaken the rule.
+```
+
+If `plugin-guidelines.md` already covers naming, integrate the section
+above into the existing structure rather than duplicating headings.
 
 - [ ] **Step 4: Delete the shell file**
 
@@ -2066,7 +2188,7 @@ pub async fn copy(
     dst: &DatabaseConnection,
     batch_size: u64,
 ) -> Result<u64> {
-    use uptrakit_shared_db_internal_entities as ents;
+    use crate::entity::prelude::*;
 
     let mut total = 0u64;
 
@@ -2089,6 +2211,8 @@ pub async fn copy(
 
 /// Delete every core table on `dst` in reverse FK-safe order.
 pub async fn clean(dst: &DatabaseConnection) -> Result<()> {
+    use crate::entity::prelude::*;
+
     macro_rules! clean {
         ($entity:ty, $name:literal) => {
             clean_table::<$entity>($name, dst).await?;
@@ -2107,6 +2231,8 @@ pub async fn verify(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
 ) -> Result<u64> {
+    use crate::entity::prelude::*;
+
     let mut total = 0u64;
 
     macro_rules! verify {
@@ -2123,14 +2249,8 @@ pub async fn verify(
 ```
 
 The `crate::entity::prelude::*` glob (within `shared-db`) provides every
-entity type alias used by the macros. Add `use crate::entity::prelude::*;`
-near the top of the module.
-
-Note: the placeholder pseudo-import `uptrakit_shared_db_internal_entities`
-shown above is a docstring artefact — the actual code uses
-`crate::entity::prelude::*` since we're already inside `shared-db`.
-Remove the stray `use uptrakit_shared_db_internal_entities as ents;` line;
-replace with `use crate::entity::prelude::*;`.
+entity type alias used by the macros. Each function (`copy`, `clean`,
+`verify`) imports it locally at the top of its body.
 
 - [ ] **Step 6: Verify the module compiles**
 
@@ -2152,7 +2272,12 @@ Wave C is one logical change — final commit at C4.
 
 - [ ] **Step 1: Replace the entire file body**
 
-Open `crates/core/controller-runtime/src/db_migrate/tables.rs` and replace the contents (excluding the `mod tests` block) with:
+Open `crates/core/controller-runtime/src/db_migrate/tables.rs` and
+replace the **entire** contents — including the `mod tests` block —
+with the template below. The template re-emits the
+`migration_coverage_complete` test verbatim from Phase D so the test is
+preserved across the C2 rewrite. Do not try to merge the existing test
+in by hand; the template already contains it.
 
 ```rust
 //! Database data migration — orchestrator over core tables (in
