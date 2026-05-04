@@ -5,6 +5,7 @@ mod interaction;
 mod protocol;
 mod slot;
 mod surface;
+mod validation;
 
 pub use data::*;
 pub use form::*;
@@ -13,3 +14,4 @@ pub use interaction::*;
 pub use protocol::*;
 pub use slot::*;
 pub use surface::*;
+pub use validation::*;
