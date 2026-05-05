@@ -1147,13 +1147,21 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
                             label: "Proxmox Configuration".to_string(),
-                            field_type: "hidden".to_string(),
+                            field_type: "select".to_string(),
                             required: true,
                             placeholder: None,
-                            help_text: None,
+                            help_text: Some(
+                                "Select the Proxmox plugin configuration this override applies to."
+                                    .to_string(),
+                            ),
                             default_value: None,
                             options: vec![],
-                            select_source: None,
+                            select_source: Some(surfaces::FormSelectSource::RestApi {
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                    .to_string(),
+                                value_field: "id".to_string(),
+                                label_field: "name".to_string(),
+                            }),
                             sensitive: false,
                             list: false,
                             visible_when: None,
