@@ -26,11 +26,12 @@ use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 use crate::policy_store::{
     ProtectionMode, ProtectionPolicy, delete_item_override, find_cached_backup_target,
-    list_cached_backup_targets, load_global_default, load_item_override, upsert_global_default,
-    upsert_item_override,
+    find_first_item_override_config, list_cached_backup_targets, load_global_default,
+    load_item_override, upsert_global_default, upsert_item_override,
 };
 use crate::scaling_store::{
-    ScalingMode, ScalingPolicy, delete_scaling_item_override, load_scaling_global_default,
+    ScalingMode, ScalingPolicy, delete_scaling_item_override,
+    find_first_scaling_item_override_config, load_scaling_global_default,
     load_scaling_item_override, upsert_scaling_global_default, upsert_scaling_item_override,
 };
 
@@ -1270,11 +1271,19 @@ async fn handle_preload_item_overrides(
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = require_tenant_id(tenant_id, "item override preload")?;
     let software_item_id = request.software_item_id;
+
+    let effective_config_id = match request.plugin_config_id {
+        Some(id) => Some(id),
+        None => find_first_item_override_config(db, software_item_id)
+            .await
+            .map_err(|e| format!("failed to find saved override config: {e}"))?,
+    };
+
     let configs = resolve_scope_plugin_configs(
         db,
         tenant_id,
         &ProxmoxScopeSelectionRequest {
-            plugin_config_id: request.plugin_config_id,
+            plugin_config_id: effective_config_id,
             software_item_id: Some(software_item_id),
         },
     )
@@ -1618,11 +1627,19 @@ async fn handle_preload_scaling_item_overrides(
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = require_tenant_id(tenant_id, "scaling item overrides preload")?;
     let software_item_id = request.software_item_id;
+
+    let effective_config_id = match request.plugin_config_id {
+        Some(id) => Some(id),
+        None => find_first_scaling_item_override_config(db, tenant_id, software_item_id)
+            .await
+            .map_err(|e| format!("failed to find saved scaling override config: {e}"))?,
+    };
+
     let configs = resolve_scope_plugin_configs(
         db,
         tenant_id,
         &ProxmoxScopeSelectionRequest {
-            plugin_config_id: request.plugin_config_id,
+            plugin_config_id: effective_config_id,
             software_item_id: Some(software_item_id),
         },
     )

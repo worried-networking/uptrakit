@@ -243,6 +243,25 @@ pub async fn load_item_override(
     }))
 }
 
+/// Returns the `plugin_config_id` of the most recently updated protection override for
+/// the given software item, or `None` if no override exists.
+pub async fn find_first_item_override_config(
+    db: &DatabaseConnection,
+    software_item_id: Uuid,
+) -> Result<Option<Uuid>> {
+    let row = ProxmoxProtectionItemOverride::find()
+        .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
+        .order_by_desc(proxmox_protection_item_override::Column::UpdatedAt)
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to find protection item override config: {e}"
+            )))
+        })?;
+    Ok(row.map(|m| m.plugin_config_id))
+}
+
 /// Upsert per-item override policy for one `(software_item_id, plugin_config_id)` pair.
 pub async fn upsert_item_override(
     db: &DatabaseConnection,
