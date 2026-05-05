@@ -106,7 +106,8 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
         proxmox_host_info_surface(),
         proxmox_settings_update_protection_surface(),
         proxmox_settings_resource_scaling_surface(),
-        proxmox_software_item_update_hooks_surface(),
+        proxmox_software_item_update_protection_surface(),
+        proxmox_software_item_resource_scaling_surface(),
     ];
     vec![surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -848,7 +849,7 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
     }
 }
 
-fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
+fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurface {
     let callout = "Per-item override values are stored in Proxmox policy tables. \
         Backup target options come from sync cache and stay empty until discover/sync populates them."
         .to_string();
@@ -859,7 +860,7 @@ fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
                 surfaces::SurfaceId::new("proxmox.software-item.update-hooks")
                     .expect("literal surface id is valid"),
             )
-            .label("Proxmox Update Hooks")
+            .label("Update Protection")
             .priority(520)
             .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
             .scope(surfaces::Scope::Global)
@@ -874,6 +875,7 @@ fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::MutationAction,
                 surfaces::Capability::UniversalTargeting,
             ]))
+            .tab_group("proxmox.software-item", "Proxmox Update Hooks")
             .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
@@ -881,25 +883,9 @@ fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
                     },
-                    surfaces::SurfaceNode::Section {
-                        title: Some("Update Protection".to_string()),
-                        children: vec![
-                            surfaces::SurfaceNode::Form {
-                                interaction_id: surfaces::InteractionId::new("save-item-overrides")
-                                    .expect("literal interaction id is valid"),
-                            },
-                        ],
-                    },
-                    surfaces::SurfaceNode::Section {
-                        title: Some("Resource Scaling".to_string()),
-                        children: vec![
-                            surfaces::SurfaceNode::Form {
-                                interaction_id: surfaces::InteractionId::new(
-                                    "save-scaling-item-overrides",
-                                )
-                                .expect("literal interaction id is valid"),
-                            },
-                        ],
+                    surfaces::SurfaceNode::Form {
+                        interaction_id: surfaces::InteractionId::new("save-item-overrides")
+                            .expect("literal interaction id is valid"),
                     },
                 ],
             })
@@ -1075,8 +1061,44 @@ fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     ),
                 }),
-                        icon: None,
-},
+                icon: None,
+            },
+        ],
+        data_sources: vec![],
+    }
+}
+
+fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurface {
+    surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.software-item.resource-scaling")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Resource Scaling")
+            .priority(521)
+            .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::ViewSoftware.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::FormNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::UniversalTargeting,
+            ]))
+            .tab_group("proxmox.software-item", "Proxmox Update Hooks")
+            .root_node(surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![surfaces::SurfaceNode::Form {
+                    interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
+                        .expect("literal interaction id is valid"),
+                }],
+            })
+            .build(),
+        interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("preload-scaling-item-overrides")
                     .expect("literal interaction id is valid"),
@@ -1232,9 +1254,7 @@ fn proxmox_software_item_update_hooks_surface() -> surfaces::RegisteredSurface {
                             field_type: "number".to_string(),
                             required: false,
                             placeholder: Some("1024".to_string()),
-                            help_text: Some(
-                                "MB to add to current RAM during update.".to_string(),
-                            ),
+                            help_text: Some("MB to add to current RAM during update.".to_string()),
                             default_value: None,
                             options: vec![],
                             select_source: None,

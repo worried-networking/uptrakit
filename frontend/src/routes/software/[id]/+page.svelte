@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -189,10 +189,29 @@
 		software_item_id: id
 	}));
 
+	type SoftwareItemTabGroup = { id: string; label: string; surfaces: SurfaceResponse[] };
+	const softwareItemTabGroups = $derived.by<SoftwareItemTabGroup[]>(() => {
+		const groups = new SvelteMap<string, SoftwareItemTabGroup>();
+		for (const surface of softwareItemTabSurfaces) {
+			const key = surface.tab_group ?? surface.surface_id;
+			const existing = groups.get(key);
+			if (existing) {
+				existing.surfaces.push(surface);
+			} else {
+				groups.set(key, {
+					id: key,
+					label: surface.tab_group_label ?? surface.label,
+					surfaces: [surface]
+				});
+			}
+		}
+		return [...groups.values()];
+	});
+
 	const tabItems = $derived.by<TabStripItem[]>(() => {
 		const items: TabStripItem[] = [{ id: 'overview', label: 'Overview' }];
-		for (const surface of softwareItemTabSurfaces) {
-			items.push({ id: surface.surface_id, label: surface.label });
+		for (const group of softwareItemTabGroups) {
+			items.push({ id: group.id, label: group.label });
 		}
 		return items;
 	});
@@ -298,14 +317,19 @@
 	// Validate activeTab — must be declared before URL-sync $effect
 	$effect(() => {
 		const surfaceRegistryLoaded = getSurfaceRegistryLoaded();
-		const isSurfaceAccessible = softwareItemTabSurfaces.some((s) => s.surface_id === activeTab);
-		const isPending = isSurfaceTabPending({
-			activeTab,
-			slotSurfaces: softwareItemTabSurfaces,
-			readBySurface: softwareItemTabReads,
-			isReadRequested: getSurfaceReadRequested(activeTab),
-			isReadLoading: getSurfaceReadLoading(activeTab)
-		});
+		const activeGroup = softwareItemTabGroups.find((g) => g.id === activeTab);
+		const isSurfaceAccessible = activeGroup !== undefined;
+		const isPending = activeGroup
+			? activeGroup.surfaces.some((surface) =>
+					isSurfaceTabPending({
+						activeTab: surface.surface_id,
+						slotSurfaces: [surface],
+						readBySurface: softwareItemTabReads,
+						isReadRequested: getSurfaceReadRequested(surface.surface_id),
+						isReadLoading: getSurfaceReadLoading(surface.surface_id)
+					})
+				)
+			: false;
 		if (!surfaceRegistryLoaded && activeTab !== 'overview') return;
 		if (activeTab !== 'overview' && !isSurfaceAccessible && !isPending) {
 			activeTab = 'overview';
@@ -1046,16 +1070,31 @@
 					</DataTable>
 				</SectionCard>
 			{:else}
-				{#each softwareItemTabSurfaces as surface (surface.surface_id)}
-					{#if activeTab === surface.surface_id}
-						<SectionCard title={surface.label}>
-							<SurfaceReadPanel
-								{surface}
-								read={softwareItemTabReads[surface.surface_id]}
-								baseParams={softwareItemTabBaseParams}
-								reloadToken={softwareItemTabsReloadToken}
-							/>
-						</SectionCard>
+				{#each softwareItemTabGroups as group (group.id)}
+					{#if activeTab === group.id}
+						{#if group.surfaces.length === 1}
+							<SectionCard>
+								<SurfaceReadPanel
+									surface={group.surfaces[0]}
+									read={softwareItemTabReads[group.surfaces[0].surface_id]}
+									baseParams={softwareItemTabBaseParams}
+									reloadToken={softwareItemTabsReloadToken}
+								/>
+							</SectionCard>
+						{:else}
+							<div class="space-y-4">
+								{#each group.surfaces as surface (surface.surface_id)}
+									<SectionCard title={surface.label}>
+										<SurfaceReadPanel
+											{surface}
+											read={softwareItemTabReads[surface.surface_id]}
+											baseParams={softwareItemTabBaseParams}
+											reloadToken={softwareItemTabsReloadToken}
+										/>
+									</SectionCard>
+								{/each}
+							</div>
+						{/if}
 					{/if}
 				{/each}
 			{/if}
