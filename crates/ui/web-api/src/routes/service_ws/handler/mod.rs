@@ -2317,7 +2317,9 @@ async fn cleanup_embedded_service_session(
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
-        if let Some(tid) = tenant_id {
+        if let Some(tid) = tenant_id
+            && !state.shutdown_token.is_cancelled()
+        {
             state
                 .notification
                 .event_broadcaster
@@ -2639,7 +2641,9 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
-        if let Some(tenant_id) = service_tenant_id {
+        if let Some(tenant_id) = service_tenant_id
+            && !state.shutdown_token.is_cancelled()
+        {
             state
                 .notification
                 .event_broadcaster
@@ -2738,7 +2742,9 @@ async fn finalize_authenticated_session(state: &Arc<AppState>, session: Authenti
                     .surface_proxy_deps
                     .proxy
                     .fail_in_flight_for_provider(&provider_id);
-                if let Some(tenant_id) = service_tenant_id {
+                if let Some(tenant_id) = service_tenant_id
+                    && !state.shutdown_token.is_cancelled()
+                {
                     state
                         .notification
                         .event_broadcaster

@@ -116,6 +116,18 @@ impl BackgroundTasks {
             }
         }
 
+        // Cancel the shared token before scattering ServerRestarting so that:
+        // - SSE streams close before services begin disconnecting (no stale events)
+        // - cleanup_authenticated_session sees is_cancelled()=true and skips SurfacesChanged
+        // Background tasks (MQTT, NATS, scheduler) wind down in parallel; they do not
+        // participate in the WS-based service drain.
+        tracing::debug!(
+            cancellable = self.cancellable.len(),
+            abortable = self.abortable.len(),
+            "cancelling background tasks"
+        );
+        self.shutdown_token.cancel();
+
         // 2. Scatter restart notifications, then wait for services to disconnect.
         //    `broadcast_server_restarting_scattered` returns immediately after
         //    scheduling the per-service delayed sends; the actual sends happen
@@ -145,21 +157,13 @@ impl BackgroundTasks {
             tracing::info!("no services connected, skipping service drain");
         }
 
-        // 3. Cancel all token-based tasks
-        tracing::debug!(
-            cancellable = self.cancellable.len(),
-            abortable = self.abortable.len(),
-            "cancelling background tasks"
-        );
-        self.shutdown_token.cancel();
-
-        // 4. Abort tasks that don't use CancellationToken
+        // 3. Abort tasks that don't use CancellationToken
         for (name, handle) in self.abortable {
             tracing::debug!("aborting {name}");
             handle.abort();
         }
 
-        // 5. Wait for token-based tasks to complete
+        // 4. Wait for token-based tasks to complete
         tracing::debug!("waiting for background tasks to complete");
         for (name, handle, task_timeout) in self.cancellable {
             tracing::trace!(
