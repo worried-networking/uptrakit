@@ -278,3 +278,161 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
         serde_json::json!("infrastructure_proxmox")
     );
 }
+
+#[tokio::test]
+async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update_audit_row() {
+    ensure_master_key();
+    let db = setup_proxmox_db().await;
+    let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_update_protection_registration(
+            "plugin.infrastructure_proxmox",
+            "proxmox.settings.update-hooks",
+            "save-scaling-global-defaults",
+        ))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "plugin_config_id".to_string(),
+        serde_json::json!(plugin_config_id.to_string()),
+    );
+    params.insert("scaling_mode".to_string(), serde_json::json!("none"));
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.settings.update-hooks".to_string(),
+                interaction_id: "save-scaling-global-defaults".to_string(),
+                idempotency_key: "idem-proxmox-save-scaling-global-success".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("save-scaling-global-defaults must succeed");
+
+    assert!(response.success);
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
+    )
+    .await;
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.actor_id, Some(user_id()));
+    assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["mutation_source"],
+        serde_json::json!("surface_proxy.proxmox_resource_scaling.save_scaling_global_defaults")
+    );
+    assert_eq!(
+        details["plugin_type"],
+        serde_json::json!("infrastructure_proxmox")
+    );
+}
+
+#[tokio::test]
+async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_audit_row() {
+    ensure_master_key();
+    let db = setup_proxmox_db().await;
+    let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+    let software_item_id = Uuid::now_v7();
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(proxmox_update_protection_registration(
+            "plugin.infrastructure_proxmox",
+            "proxmox.software-item.update-hooks",
+            "save-scaling-item-overrides",
+        ))
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "plugin_config_id".to_string(),
+        serde_json::json!(plugin_config_id.to_string()),
+    );
+    params.insert(
+        "software_item_id".to_string(),
+        serde_json::json!(software_item_id.to_string()),
+    );
+    params.insert("scaling_mode".to_string(), serde_json::json!("inherit"));
+
+    // Invoke — may succeed or fail; audit must be emitted either way.
+    let _ = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "proxmox.software-item.update-hooks".to_string(),
+                interaction_id: "save-scaling-item-overrides".to_string(),
+                idempotency_key: "idem-proxmox-save-scaling-item-audit".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await;
+
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+    )
+    .await;
+    assert_eq!(row.actor_id, Some(user_id()));
+    assert_eq!(row.target_type.as_deref(), Some("software_item"));
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["mutation_source"],
+        serde_json::json!("surface_proxy.proxmox_resource_scaling.save_scaling_item_overrides")
+    );
+    assert_eq!(
+        details["plugin_type"],
+        serde_json::json!("infrastructure_proxmox")
+    );
+}

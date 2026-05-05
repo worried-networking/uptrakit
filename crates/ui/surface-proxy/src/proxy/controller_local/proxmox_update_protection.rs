@@ -5,9 +5,15 @@ use super::SurfaceProxyError;
 const PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX: &str = "infrastructure_proxmox";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "all variants represent save mutations; shared prefix is load-bearing for readability"
+)]
 pub(crate) enum ProxmoxUpdateProtectionAction {
     SaveGlobalDefaults,
     SaveItemOverrides,
+    SaveScalingGlobalDefaults,
+    SaveScalingItemOverrides,
 }
 
 pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
@@ -21,6 +27,12 @@ pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
         ("proxmox.software-item.update-hooks", "save-item-overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveItemOverrides)
         }
+        ("proxmox.settings.update-hooks", "save-scaling-global-defaults") => {
+            Some(ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults)
+        }
+        ("proxmox.software-item.update-hooks", "save-scaling-item-overrides") => {
+            Some(ProxmoxUpdateProtectionAction::SaveScalingItemOverrides)
+        }
         _ => None,
     }
 }
@@ -29,10 +41,12 @@ fn proxmox_update_protection_action_type(
     action: ProxmoxUpdateProtectionAction,
 ) -> uptrakit_audit_log::RegisteredAuditAction {
     match action {
-        ProxmoxUpdateProtectionAction::SaveGlobalDefaults => {
+        ProxmoxUpdateProtectionAction::SaveGlobalDefaults
+        | ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults => {
             uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE
         }
-        ProxmoxUpdateProtectionAction::SaveItemOverrides => {
+        ProxmoxUpdateProtectionAction::SaveItemOverrides
+        | ProxmoxUpdateProtectionAction::SaveScalingItemOverrides => {
             uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE
         }
     }
@@ -47,6 +61,12 @@ fn proxmox_update_protection_mutation_source(
         }
         ProxmoxUpdateProtectionAction::SaveItemOverrides => {
             "surface_proxy.proxmox_update_protection.save_item_overrides"
+        }
+        ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults => {
+            "surface_proxy.proxmox_resource_scaling.save_scaling_global_defaults"
+        }
+        ProxmoxUpdateProtectionAction::SaveScalingItemOverrides => {
+            "surface_proxy.proxmox_resource_scaling.save_scaling_item_overrides"
         }
     }
 }
@@ -170,6 +190,56 @@ pub(crate) fn emit_proxmox_update_protection_audit_event(
                     .or_else(|| requested_plugin_config_id.clone()),
             ),
             (ProxmoxUpdateProtectionAction::SaveItemOverrides, Err(error)) => {
+                let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
+                (
+                    outcome,
+                    Some(reason_code),
+                    Some("software_item".to_string()),
+                    requested_software_item_id.clone(),
+                    requested_plugin_config_id.clone(),
+                )
+            }
+            (ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults, Ok(response)) => (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                Some("plugin_config".to_string()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or_else(|| requested_plugin_config_id.clone()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or_else(|| requested_plugin_config_id.clone()),
+            ),
+            (ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults, Err(error)) => {
+                let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
+                (
+                    outcome,
+                    Some(reason_code),
+                    Some("plugin_config".to_string()),
+                    requested_plugin_config_id.clone(),
+                    requested_plugin_config_id.clone(),
+                )
+            }
+            (ProxmoxUpdateProtectionAction::SaveScalingItemOverrides, Ok(response)) => (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                Some("software_item".to_string()),
+                response
+                    .get("software_item_id")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or_else(|| requested_software_item_id.clone()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or_else(|| requested_plugin_config_id.clone()),
+            ),
+            (ProxmoxUpdateProtectionAction::SaveScalingItemOverrides, Err(error)) => {
                 let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
                 (
                     outcome,

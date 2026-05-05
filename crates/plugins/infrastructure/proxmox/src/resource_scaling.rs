@@ -191,6 +191,28 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             }
         };
 
+        // Defense-in-depth: policy dimensions are validated (≥ 1) at save time,
+        // but guard against corrupt DB state here before calling the Proxmox API.
+        let has_invalid_dimension = match scaling_policy.mode {
+            ScalingMode::Absolute => {
+                scaling_policy.absolute_cores.is_some_and(|v| v < 1)
+                    || scaling_policy.absolute_memory_mb.is_some_and(|v| v < 1)
+            }
+            ScalingMode::Delta => {
+                scaling_policy.delta_cores.is_some_and(|v| v < 1)
+                    || scaling_policy.delta_memory_mb.is_some_and(|v| v < 1)
+            }
+            ScalingMode::None => false,
+        };
+        if has_invalid_dimension {
+            tracing::error!(
+                %update_history_id,
+                "resource scaling: policy dimension < 1 reached the hook (corrupt DB?) \
+                 — aborting scale-up"
+            );
+            return;
+        }
+
         // Compute target values from ScalingPolicy (v2)
         let target_cores = compute_target_cores(&scaling_policy, original_cores_u32);
         let target_memory_mb = compute_target_memory_mb(&scaling_policy, original_memory_u64);
@@ -206,8 +228,8 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             vm_type: mapping.proxmox_type.clone(),
             original_cores: original_cores_u32 as i32,
             original_memory_mb: original_memory_u64 as i64,
-            scaled_cores: target_cores as i32,
-            scaled_memory_mb: target_memory_mb as i64,
+            scaled_cores: i32::try_from(target_cores).unwrap_or(i32::MAX),
+            scaled_memory_mb: i64::try_from(target_memory_mb).unwrap_or(i64::MAX),
             scale_status: "scaling".to_string(),
             restore_status: "pending".to_string(),
             error_message: None,
@@ -590,7 +612,7 @@ mod tests {
             id: Uuid::now_v7(),
             tenant_id,
             plugin_config_id,
-            scaling_mode: "absolute".to_string(),
+            scaling_mode: crate::scaling_mode::ScalingMode::Absolute,
             absolute_cores: Some(8),
             absolute_memory_mb: Some(4096),
             delta_cores: None,

@@ -592,7 +592,7 @@ pub struct ScalingRecord {
     pub scale_status: String,
     pub restore_status: String,
     pub error_message: Option<String>,
-    pub scaling_mode_used: crate::scaling_store::ScalingMode,
+    pub(crate) scaling_mode_used: crate::scaling_store::ScalingMode,
 }
 
 /// Load a scaling record by `update_history_id`.
