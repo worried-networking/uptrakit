@@ -124,7 +124,9 @@ pub(crate) struct ProxmoxScalingItemOverridesSaveRequest {
 }
 
 const SURFACE_SETTINGS_UPDATE_HOOKS: &str = "proxmox.settings.update-hooks";
+const SURFACE_SETTINGS_RESOURCE_SCALING: &str = "proxmox.settings.resource-scaling";
 const SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS: &str = "proxmox.software-item.update-hooks";
+const SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING: &str = "proxmox.software-item.resource-scaling";
 
 const ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS: &str = "preload-scaling-global-defaults";
 const ACTION_SAVE_SCALING_GLOBAL_DEFAULTS: &str = "save-scaling-global-defaults";
@@ -187,16 +189,16 @@ fn resolve_controller_surface_action(
         (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_SAVE_ITEM_OVERRIDES) => {
             Some(ControllerSurfaceAction::SaveItemOverrides)
         }
-        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS) => {
+        (SURFACE_SETTINGS_RESOURCE_SCALING, ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS) => {
             Some(ControllerSurfaceAction::PreloadScalingGlobalDefaults)
         }
-        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_SAVE_SCALING_GLOBAL_DEFAULTS) => {
+        (SURFACE_SETTINGS_RESOURCE_SCALING, ACTION_SAVE_SCALING_GLOBAL_DEFAULTS) => {
             Some(ControllerSurfaceAction::SaveScalingGlobalDefaults)
         }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_PRELOAD_SCALING_ITEM_OVERRIDES) => {
+        (SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING, ACTION_PRELOAD_SCALING_ITEM_OVERRIDES) => {
             Some(ControllerSurfaceAction::PreloadScalingItemOverrides)
         }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_SAVE_SCALING_ITEM_OVERRIDES) => {
+        (SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING, ACTION_SAVE_SCALING_ITEM_OVERRIDES) => {
             Some(ControllerSurfaceAction::SaveScalingItemOverrides)
         }
         _ => None,
