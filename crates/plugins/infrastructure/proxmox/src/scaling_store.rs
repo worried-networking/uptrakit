@@ -38,7 +38,7 @@ impl ScalingPolicy {
     }
 
     #[cfg_attr(
-        not(feature = "plugin-ops"),
+        all(not(feature = "plugin-ops"), not(test)),
         expect(
             dead_code,
             reason = "called only from plugin-ops-gated resource_scaling"

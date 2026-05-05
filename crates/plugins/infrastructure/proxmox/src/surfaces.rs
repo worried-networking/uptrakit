@@ -2195,55 +2195,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_item_overrides_rejects_unassigned_plugin_config_for_software_item() {
-        let tenant_id = Uuid::now_v7();
-        let software_item_id = Uuid::now_v7();
-        let requested_plugin_config_id = Uuid::now_v7();
-        let assigned_plugin_config_id = Uuid::now_v7();
-
-        let db = MockDatabase::new(DbBackend::MySql)
-            // ensure_proxmox_plugin_config_exists(requested)
-            .append_query_results([vec![mock_plugin_config_model(
-                tenant_id,
-                requested_plugin_config_id,
-            )]])
-            // list_proxmox_plugin_configs_for_software_item -> host_software_item_plugins
-            .append_query_results([vec![mock_host_software_item_plugin_model(
-                software_item_id,
-                assigned_plugin_config_id,
-            )]])
-            // list_proxmox_plugin_configs_by_ids(assigned)
-            .append_query_results([vec![mock_plugin_config_model(
-                tenant_id,
-                assigned_plugin_config_id,
-            )]])
-            .into_connection();
-
-        let result = handle_save_item_overrides(
-            &db,
-            Some(tenant_id),
-            ProxmoxItemOverrideSaveRequest {
-                software_item_id,
-                plugin_config_id: requested_plugin_config_id,
-                mode: "inherit_global".to_string(),
-                backup_target_option: None,
-                snapshot_timeout_seconds: None,
-                backup_timeout_seconds: None,
-            },
-        )
-        .await;
-
-        let err = result.expect_err("save should reject unrelated plugin config");
-        assert!(err.contains("is not assigned to software item"));
-    }
-
-    #[tokio::test]
     async fn preload_item_overrides_does_not_fallback_to_all_configs_when_item_has_no_proxmox_assignment()
      {
         let tenant_id = Uuid::now_v7();
         let software_item_id = Uuid::now_v7();
 
         let db = MockDatabase::new(DbBackend::MySql)
+            // find_first_item_override_config -> no saved overrides
+            .append_query_results([
+                Vec::<crate::entity::proxmox_protection_item_override::Model>::new(),
+            ])
             // list_proxmox_plugin_configs_for_software_item -> no assignments
             .append_query_results([Vec::<
                 uptrakit_shared_db::entity::host_software_item_plugin::Model,

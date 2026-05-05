@@ -13,6 +13,7 @@ mod notifications;
 mod proxmox;
 
 mod docker;
+#[cfg(any(feature = "notifications-email", feature = "notifications-telegram"))]
 mod notification_settings;
 mod proxmox_update_protection;
 
