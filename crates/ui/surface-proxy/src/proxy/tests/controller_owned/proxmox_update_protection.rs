@@ -133,7 +133,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
-            "proxmox.settings.update-protection",
+            "proxmox.settings.update-hooks",
             "save-global-defaults",
         ))
         .expect("plugin registration should succeed");
@@ -157,7 +157,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
             &registry,
             SurfaceInvokeRequest {
                 tenant_id: tenant_id(),
-                surface_id: "proxmox.settings.update-protection".to_string(),
+                surface_id: "proxmox.settings.update-hooks".to_string(),
                 interaction_id: "save-global-defaults".to_string(),
                 idempotency_key: "idem-proxmox-save-global-defaults-success".to_string(),
                 target_provider_id: None,
@@ -217,7 +217,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
-            "proxmox.software-item.update-protection",
+            "proxmox.software-item.update-hooks",
             "save-item-overrides",
         ))
         .expect("plugin registration should succeed");
@@ -246,7 +246,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
             &registry,
             SurfaceInvokeRequest {
                 tenant_id: tenant_id(),
-                surface_id: "proxmox.software-item.update-protection".to_string(),
+                surface_id: "proxmox.software-item.update-hooks".to_string(),
                 interaction_id: "save-item-overrides".to_string(),
                 idempotency_key: "idem-proxmox-save-item-overrides-audit".to_string(),
                 target_provider_id: None,
