@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.1...uptrakit-service-sdk-v0.0.2) - 2026-05-05
+
+### Added
+
+- *(wire)* validate icon names via shared kebab-case validator
+- *(surfaces)* add icon field to InteractionDescriptor and validate it
+- *(surfaces)* add optional nav_icon field to SurfaceDescriptor with wire validation
+- *(wire)* add resumable to UpdateResultPayload, not_ready to VersionCheckResult
+- *(task-18)* wire UptrakitSelfUpdatePlugin into controller-standalone registry
+- *(types)* add UpdateStatus::AwaitingRestart variant
+- *(permissions)* add AccessMcp variant and DB migration
+- *(permissions)* wire-safe Other(String) catch-all for unknown variants
+- *(surfaces)* add tab_group concept; split Proxmox update-hooks into two surfaces
+- *(surfaces)* add validate_icon_name and IconNameError
+
+### Fixed
+
+- *(clippy)* remediate new lint violations (panic, silent-failure, unsafe)
+- *(wire)* use MAX_ICON_NAME_LEN constant in oversized icon test cases
+- add #[non_exhaustive] to interaction enums; add @container/buttons to workflow trigger
+
+### Other
+
+- *(verify)* post-implementation polish from /verify pass
+- *(wire)* add not_ready round-trip test for VersionCheckResult
+- *(surfaces)* complete `# Errors` section on validate_for_provider
+- *(surfaces)* derive Copy on FrameworkGenerationRange, remove redundant clone
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-service-sdk-v0.0.1) - 2026-04-27
 
 ### Added

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.1...uptrakit-mqtt-v0.0.2) - 2026-05-05
+
+### Added
+
+- *(surfaces)* add icon field to InteractionDescriptor and validate it
+
+### Fixed
+
+- *(clippy)* remediate new lint violations (panic, silent-failure, unsafe)
+- *(release-plz)* pin explicit versions, drop workspace.package.version, silence debug logs
+- *(mqtt)* clear stale collision state on disconnect to fix post-hibernation reconnect storm
+- *(controller)* fix embedded service shutdown deadlocks and MQTT reconnect freeze
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-mqtt-v0.0.1) - 2026-04-27
 
 ### Added
