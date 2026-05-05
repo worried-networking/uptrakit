@@ -1581,6 +1581,7 @@ response. Do not use `count.unwrap_or(0)` as a silent default.
 
 ### SQLite transactions that read before writing must use `BEGIN IMMEDIATE`
 
+<!-- prettier-ignore -->
 **Background — SQLITE_BUSY_SNAPSHOT:** SQLite WAL mode allows one writer and many concurrent
 readers. When a `BEGIN DEFERRED` transaction reads a row, it establishes a snapshot at the WAL
 position at that moment. If a separate connection commits a write before the first transaction
@@ -1625,6 +1626,27 @@ hint, so it is safe to pass unconditionally regardless of which backend is activ
 **Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do
 not need `BEGIN IMMEDIATE`; `busy_timeout` handles the ordinary writer-writer lock contention
 for those.
+
+### Per-item policy override pattern
+
+Use the **three-state override** model for per-item policy configuration:
+
+- **Inherit** — no override row exists; effective policy comes from global defaults.
+- **Disable** — override row with the "none"/"disabled" mode; item opts out regardless of global.
+- **Configure** — override row with a real mode + field values; item has an explicit policy.
+
+Row-level inheritance is signalled by the absence of a row, not by null field values.
+
+Within a configured override row, a null dimension value inherits the global default for that
+dimension (per-field cascade). For example: an item override with `scaling_mode = delta`,
+`delta_cores = 2`, and `delta_memory_mb = NULL` will use the global default's `delta_memory_mb`
+at runtime. The UI should communicate this by labeling null/empty fields "inherit from global".
+
+When implementing surfaces for three-state policies: use a 4-value `scaling_mode` selector
+(`inherit` / `none` / mode-specific values) so `FormVisibleWhen`'s single-field condition can
+gate dimension fields without compound logic. Cross-mode field inheritance is forbidden: if the
+effective mode is `delta`, only `delta_*` dimensions cascade from global; `absolute_*` dimensions
+are cleared even if the global has them set.
 
 ## Exhaustive Enum Dispatch
 
