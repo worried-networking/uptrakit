@@ -33,6 +33,7 @@ uptrakit-controller-runtime = { workspace = true, features = [
   "reset-data",
   "dashboard-icons",
   "mcp",
+  "plugin-ops",
 ] }
 
 [lints]

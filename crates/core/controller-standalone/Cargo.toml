@@ -33,6 +33,7 @@ uptrakit-controller-runtime = { workspace = true, features = [
   "embedded-agent",
   "embedded-ssh-agent",
   "mcp",
+  "plugin-ops",
 ] }
 
 [lints]

@@ -101,6 +101,7 @@ pub async fn detect_pve_cluster_nodes(executor: &dyn RemoteExecutor) -> Vec<Stri
 /// 2. The user holds an audit role on `/` — either [`UPTRAKIT_AUDIT_ROLE`]
 ///    (current) or the legacy `PVEAuditor` (pre-existing installs).
 /// 3. The user holds [`UPTRAKIT_PROTECTION_ROLE`] on `/vms`.
+/// 4. The user holds [`UPTRAKIT_SCALING_ROLE`] on `/vms`.
 ///
 /// Returns `Ok(())` when all checks pass.  Returns an error listing which
 /// checks failed; the caller should call [`ensure_pve_privileges`] to fix
@@ -180,6 +181,16 @@ pub async fn verify_pve_privileges(
         path == "/storage" && ugid == user_realm && roleid == UPTRAKIT_PROTECTION_ROLE
     });
 
+    let has_scaling_vms = acls.iter().any(|acl| {
+        let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+        let roleid = acl
+            .get("roleid")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        path == "/vms" && ugid == user_realm && roleid == UPTRAKIT_SCALING_ROLE
+    });
+
     let mut missing = Vec::new();
     if !has_audit {
         missing.push(format!("{UPTRAKIT_AUDIT_ROLE} on /"));
@@ -189,6 +200,9 @@ pub async fn verify_pve_privileges(
     }
     if !has_protection_storage {
         missing.push(format!("{UPTRAKIT_PROTECTION_ROLE} on /storage"));
+    }
+    if !has_scaling_vms {
+        missing.push(format!("{UPTRAKIT_SCALING_ROLE} on /vms"));
     }
 
     if !missing.is_empty() {
@@ -263,8 +277,23 @@ pub const UPTRAKIT_AUDIT_ROLE: &str = "UptrakitAudit";
 /// `403 Forbidden (Datastore.AllocateSpace)` when targeting PBS datastores.
 pub const UPTRAKIT_PROTECTION_ROLE: &str = "UptrakitProtection";
 
+/// Custom PVE role for resource-scaling operations.
+///
+/// Privileges:
+/// - `VM.Audit` — read current VM/CT config (cores, memory) before scaling.
+///   Also required on `/vms` directly because a more-specific ACL on `/vms`
+///   (e.g. [`UPTRAKIT_PROTECTION_ROLE`]) shadows the `VM.Audit` granted by
+///   [`UPTRAKIT_AUDIT_ROLE`] on `/`.
+/// - `VM.Config.CPU` — live-update vCPU count
+/// - `VM.Config.Memory` — live-update memory allocation
+///
+/// Granted on `/vms` alongside [`UPTRAKIT_PROTECTION_ROLE`]; Proxmox unions
+/// the privilege sets of multiple roles assigned to the same path.
+pub const UPTRAKIT_SCALING_ROLE: &str = "UptrakitScaling";
+
 const PVE_AUDIT_PRIVS: &str = "Sys.Audit VM.Audit VM.GuestAgent.Audit VM.GuestAgent.FileRead";
 const PVE_PROTECTION_PRIVS: &str = "VM.Snapshot VM.Backup Datastore.AllocateSpace";
+const PVE_SCALING_PRIVS: &str = "VM.Audit VM.Config.CPU VM.Config.Memory";
 
 /// Build the PVE user@realm string for a given tenant ID.
 ///
@@ -338,6 +367,7 @@ async fn ensure_pve_roles(executor: &dyn RemoteExecutor) -> Result<()> {
     for (role, privs) in [
         (UPTRAKIT_AUDIT_ROLE, PVE_AUDIT_PRIVS),
         (UPTRAKIT_PROTECTION_ROLE, PVE_PROTECTION_PRIVS),
+        (UPTRAKIT_SCALING_ROLE, PVE_SCALING_PRIVS),
     ] {
         // `pveum role add` exits non-zero if the role already exists; ignore
         // that error then unconditionally apply `modify` to keep privs in sync.
@@ -367,6 +397,7 @@ async fn ensure_pve_roles(executor: &dyn RemoteExecutor) -> Result<()> {
 /// - [`UPTRAKIT_AUDIT_ROLE`] on `/`
 /// - [`UPTRAKIT_PROTECTION_ROLE`] on `/vms` (VM.Snapshot, VM.Backup)
 /// - [`UPTRAKIT_PROTECTION_ROLE`] on `/storage` (Datastore.AllocateSpace for PBS/dir targets)
+/// - [`UPTRAKIT_SCALING_ROLE`] on `/vms` (VM.Audit, VM.Config.CPU, VM.Config.Memory)
 ///
 /// `pveum acl modify` is idempotent — calling it when the ACL already exists
 /// is a no-op. Safe to call on every sync.
@@ -375,6 +406,7 @@ async fn ensure_pve_acls(executor: &dyn RemoteExecutor, user_realm: &str) -> Res
         ("/", UPTRAKIT_AUDIT_ROLE),
         ("/vms", UPTRAKIT_PROTECTION_ROLE),
         ("/storage", UPTRAKIT_PROTECTION_ROLE),
+        ("/vms", UPTRAKIT_SCALING_ROLE),
     ];
     for (path, role) in pairs {
         let cmd = format!("pveum acl modify '{path}' --users '{user_realm}' --roles '{role}'");
@@ -623,20 +655,38 @@ mod tests {
         })
     }
 
-    #[test]
-    fn verify_pve_acl_parsing_new_roles() {
-        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
-        let json = format!(
+    fn has_scaling_vms_acl(acls: &[serde_json::Value], user_realm: &str) -> bool {
+        acls.iter().any(|acl| {
+            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+            let roleid = acl
+                .get("roleid")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            path == "/vms" && ugid == user_realm && roleid == UPTRAKIT_SCALING_ROLE
+        })
+    }
+
+    fn full_acl_json(user_realm: &str) -> String {
+        format!(
             r#"[
                 {{"path":"/","roleid":"{UPTRAKIT_AUDIT_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
                 {{"path":"/vms","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
-                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
+                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/vms","roleid":"{UPTRAKIT_SCALING_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
             ]"#
-        );
-        let acls: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
+        )
+    }
+
+    #[test]
+    fn verify_pve_acl_parsing_new_roles() {
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let acls: Vec<serde_json::Value> =
+            serde_json::from_str(&full_acl_json(user_realm)).expect("valid JSON");
         assert!(has_audit_acl(&acls, user_realm));
         assert!(has_protection_vms_acl(&acls, user_realm));
         assert!(has_protection_storage_acl(&acls, user_realm));
+        assert!(has_scaling_vms_acl(&acls, user_realm));
     }
 
     #[test]
@@ -647,13 +697,15 @@ mod tests {
             r#"[
                 {{"path":"/","roleid":"PVEAuditor","type":"user","ugid":"{user_realm}","propagate":true}},
                 {{"path":"/vms","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
-                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
+                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/vms","roleid":"{UPTRAKIT_SCALING_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
             ]"#
         );
         let acls: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
         assert!(has_audit_acl(&acls, user_realm));
         assert!(has_protection_vms_acl(&acls, user_realm));
         assert!(has_protection_storage_acl(&acls, user_realm));
+        assert!(has_scaling_vms_acl(&acls, user_realm));
     }
 
     #[test]
@@ -668,6 +720,7 @@ mod tests {
         assert!(has_audit_acl(&acls, user_realm));
         assert!(!has_protection_vms_acl(&acls, user_realm));
         assert!(!has_protection_storage_acl(&acls, user_realm));
+        assert!(!has_scaling_vms_acl(&acls, user_realm));
     }
 
     #[test]
@@ -680,6 +733,7 @@ mod tests {
         assert!(!has_audit_acl(&acls, user_realm));
         assert!(!has_protection_vms_acl(&acls, user_realm));
         assert!(!has_protection_storage_acl(&acls, user_realm));
+        assert!(!has_scaling_vms_acl(&acls, user_realm));
     }
 
     #[test]
