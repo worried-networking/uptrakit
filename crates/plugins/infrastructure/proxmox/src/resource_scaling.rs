@@ -117,79 +117,84 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
         let node = &mapping.proxmox_node;
         let vmid = mapping.proxmox_vmid as u32;
 
-        // Read current config, check hotplug (QEMU only), extract original values
-        let (original_cores_u32, original_memory_u64) = match mapping.proxmox_type.as_str() {
-            "qemu" => {
-                let config = match client.get_qemu_config(node, vmid).await {
-                    Ok(c) => c,
-                    Err(e) => {
+        // Read current config, check hotplug (QEMU only), extract original values.
+        // original_cores_opt: None = LXC container with no CPU limit set (valid).
+        let (original_cores_opt, original_memory_u64): (Option<u32>, u64) =
+            match mapping.proxmox_type.as_str() {
+                "qemu" => {
+                    let config = match client.get_qemu_config(node, vmid).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(
+                                %update_history_id, node, vmid, error = %e,
+                                "resource scaling: failed to read QEMU config"
+                            );
+                            return;
+                        }
+                    };
+                    if !config.supports_live_resource_scaling() {
                         tracing::warn!(
-                            %update_history_id, node, vmid, error = %e,
-                            "resource scaling: failed to read QEMU config"
+                            %update_history_id, node, vmid,
+                            "QEMU VM does not support hotplug — skipping resource scaling"
                         );
                         return;
                     }
-                };
-                if !config.supports_live_resource_scaling() {
+                    match (config.cores, config.memory) {
+                        (Some(c), Some(m)) => (Some(c), m),
+                        _ => {
+                            tracing::warn!(
+                                %update_history_id, node, vmid,
+                                "resource scaling: QEMU config missing cores or memory field"
+                            );
+                            return;
+                        }
+                    }
+                }
+                "lxc" => {
+                    let lxc_memory_scaling = match scaling_policy.mode {
+                        ScalingMode::Absolute => scaling_policy.absolute_memory_mb.is_some(),
+                        ScalingMode::Delta => scaling_policy.delta_memory_mb.is_some(),
+                        ScalingMode::None => false,
+                    };
+                    if lxc_memory_scaling {
+                        tracing::warn!(
+                            %update_history_id, node, vmid,
+                            "resource scaling: LXC memory scaling may only take effect on next \
+                             container restart — kernel cgroup live memory resize is not guaranteed"
+                        );
+                    }
+                    let config = match client.get_lxc_config(node, vmid).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(
+                                %update_history_id, node, vmid, error = %e,
+                                "resource scaling: failed to read LXC config"
+                            );
+                            return;
+                        }
+                    };
+                    // cores may be None (container has no CPU limit) — that is valid.
+                    // Only abort if memory is absent (always required).
+                    let memory = match config.memory {
+                        Some(m) => m,
+                        None => {
+                            tracing::warn!(
+                                %update_history_id, node, vmid,
+                                "resource scaling: LXC config missing memory field"
+                            );
+                            return;
+                        }
+                    };
+                    (config.cores, memory)
+                }
+                other => {
                     tracing::warn!(
-                        %update_history_id, node, vmid,
-                        "QEMU VM does not support hotplug — skipping resource scaling"
+                        %update_history_id, vm_type = other,
+                        "resource scaling: unrecognized vm_type — skipping"
                     );
                     return;
                 }
-                match (config.cores, config.memory) {
-                    (Some(c), Some(m)) => (c, m),
-                    _ => {
-                        tracing::warn!(
-                            %update_history_id, node, vmid,
-                            "resource scaling: QEMU config missing cores or memory field"
-                        );
-                        return;
-                    }
-                }
-            }
-            "lxc" => {
-                let lxc_memory_scaling = match scaling_policy.mode {
-                    ScalingMode::Absolute => scaling_policy.absolute_memory_mb.is_some(),
-                    ScalingMode::Delta => scaling_policy.delta_memory_mb.is_some(),
-                    ScalingMode::None => false,
-                };
-                if lxc_memory_scaling {
-                    tracing::warn!(
-                        %update_history_id, node, vmid,
-                        "resource scaling: LXC memory scaling may only take effect on next \
-                         container restart — kernel cgroup live memory resize is not guaranteed"
-                    );
-                }
-                let config = match client.get_lxc_config(node, vmid).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!(
-                            %update_history_id, node, vmid, error = %e,
-                            "resource scaling: failed to read LXC config"
-                        );
-                        return;
-                    }
-                };
-                match (config.cores, config.memory) {
-                    (Some(c), Some(m)) => (c, m),
-                    _ => {
-                        tracing::warn!(
-                            %update_history_id, node, vmid,
-                            "resource scaling: LXC config missing cores or memory field"
-                        );
-                        return;
-                    }
-                }
-            }
-            other => {
-                tracing::warn!(
-                    %update_history_id, vm_type = other,
-                    "resource scaling: unrecognized vm_type — skipping"
-                );
-                return;
-            }
-        };
+            };
 
         // Defense-in-depth: policy dimensions are validated (≥ 1) at save time,
         // but guard against corrupt DB state here before calling the Proxmox API.
@@ -213,9 +218,15 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             return;
         }
 
-        // Compute target values from ScalingPolicy (v2)
-        let target_cores = compute_target_cores(&scaling_policy, original_cores_u32);
+        // Compute target values from ScalingPolicy (v2).
+        // target_cores: None = no cores adjustment (policy skips CPU, or LXC had no limit).
+        let target_cores: Option<u32> =
+            compute_target_cores(&scaling_policy, original_cores_opt, update_history_id);
         let target_memory_mb = compute_target_memory_mb(&scaling_policy, original_memory_u64);
+
+        // -1 sentinel: LXC container that had no cores limit (original_cores_opt was None).
+        let original_cores_stored = original_cores_opt.map(|c| c as i32).unwrap_or(-1);
+        let scaled_cores_stored = target_cores.map(|c| c as i32).unwrap_or(-1);
 
         // Persist record with scale_status = "scaling" BEFORE API call (crash-safe)
         let scaling_record = ScalingRecord {
@@ -226,9 +237,9 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
             plugin_config_id: mapping.plugin_config_id,
             mapping_id: mapping.id,
             vm_type: mapping.proxmox_type.clone(),
-            original_cores: original_cores_u32 as i32,
+            original_cores: original_cores_stored,
             original_memory_mb: original_memory_u64 as i64,
-            scaled_cores: i32::try_from(target_cores).unwrap_or(i32::MAX),
+            scaled_cores: scaled_cores_stored,
             scaled_memory_mb: i64::try_from(target_memory_mb).unwrap_or(i64::MAX),
             scale_status: "scaling".to_string(),
             restore_status: "pending".to_string(),
@@ -245,9 +256,12 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 
         // Stream status line; send failure means the receiver is gone — ignore.
         if let Some(tx) = &ctx.output_tx {
+            let cores_display = target_cores
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unlimited".to_string());
             drop(tx.send(
                 format!(
-                    "Scaling VM resources to {target_cores} cores / {target_memory_mb} MB\u{2026}\n"
+                    "Scaling VM resources to {cores_display} cores / {target_memory_mb} MB\u{2026}\n"
                 )
                 .into_bytes(),
             ));
@@ -257,7 +271,12 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
         let scale_result = match mapping.proxmox_type.as_str() {
             "qemu" => {
                 client
-                    .set_qemu_config_resources(node, vmid, target_cores, target_memory_mb)
+                    .set_qemu_config_resources(
+                        node,
+                        vmid,
+                        target_cores.unwrap_or(original_cores_opt.unwrap_or(0)),
+                        target_memory_mb,
+                    )
                     .await
             }
             _ => {
@@ -278,9 +297,12 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     );
                 }
                 if let Some(tx) = &ctx.output_tx {
+                    let cores_display = target_cores
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "unlimited".to_string());
                     drop(tx.send(
                         format!(
-                            "VM resources scaled to {target_cores} cores / {target_memory_mb} MB.\n"
+                            "VM resources scaled to {cores_display} cores / {target_memory_mb} MB.\n"
                         )
                         .into_bytes(),
                     ));
@@ -382,19 +404,29 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 
         let node = &mapping_row.proxmox_node;
         let vmid = mapping_row.proxmox_vmid as u32;
-        let original_cores = record.original_cores as u32;
         let original_memory_mb = record.original_memory_mb as u64;
+        // -1 sentinel: LXC had no cores limit → restore by omitting cores from the PUT.
+        let lxc_restore_cores: Option<u32> = if record.original_cores == -1 {
+            None
+        } else {
+            Some(record.original_cores as u32)
+        };
 
         // Restore resources
         let restore_result = match record.vm_type.as_str() {
             "qemu" => {
                 client
-                    .set_qemu_config_resources(node, vmid, original_cores, original_memory_mb)
+                    .set_qemu_config_resources(
+                        node,
+                        vmid,
+                        record.original_cores as u32,
+                        original_memory_mb,
+                    )
                     .await
             }
             _ => {
                 client
-                    .set_lxc_config_resources(node, vmid, original_cores, original_memory_mb)
+                    .set_lxc_config_resources(node, vmid, lxc_restore_cores, original_memory_mb)
                     .await
             }
         };
@@ -494,19 +526,32 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 
 /// Compute target core count from a `ScalingPolicy`.
 ///
-/// - `Absolute` mode: use `absolute_cores` if set, else keep original.
-/// - `Delta` mode: add `delta_cores` to original.
-/// - `None`: keep original.
+/// `original = None` means the LXC container has no cores limit set.
+/// Returns `None` to signal "don't touch cores in the API call" when:
+/// - the policy does not request CPU scaling, OR
+/// - `delta_cores` is set but there is no baseline (original is None).
 ///
 /// No minimum clamp is applied here — the integrity guard in the caller
 /// already returns early for invalid values (v < 1).
-fn compute_target_cores(policy: &ScalingPolicy, original: u32) -> u32 {
+fn compute_target_cores(
+    policy: &ScalingPolicy,
+    original: Option<u32>,
+    update_history_id: uuid::Uuid,
+) -> Option<u32> {
     match policy.mode {
-        ScalingMode::Absolute => policy.absolute_cores.map(|c| c as u32).unwrap_or(original),
-        ScalingMode::Delta => policy
-            .delta_cores
-            .map(|d| (original as i64 + i64::from(d)) as u32)
-            .unwrap_or(original),
+        ScalingMode::Absolute => policy.absolute_cores.map(|c| c as u32).or(original),
+        ScalingMode::Delta => match (policy.delta_cores, original) {
+            (Some(d), Some(c)) => Some((c as i64 + i64::from(d)) as u32),
+            (Some(_), None) => {
+                tracing::warn!(
+                    %update_history_id,
+                    "resource scaling: delta_cores set but LXC container has no cores limit \
+                     — skipping CPU scaling dimension"
+                );
+                None
+            }
+            (None, orig) => orig,
+        },
         ScalingMode::None => original,
     }
 }
@@ -670,6 +715,28 @@ mod tests {
             restore_status: "pending".to_string(),
             error_message: None,
             scaling_mode_used: "absolute".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn mock_scaling_item_override_delta_memory(
+        tenant_id: Uuid,
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+        delta_memory_mb: i32,
+    ) -> crate::entity::proxmox_scaling_item_override::Model {
+        let now = OffsetDateTime::now_utc();
+        crate::entity::proxmox_scaling_item_override::Model {
+            id: Uuid::now_v7(),
+            tenant_id,
+            software_item_id,
+            plugin_config_id,
+            scaling_mode: crate::scaling_mode::ScalingMode::Delta,
+            absolute_cores: None,
+            absolute_memory_mb: None,
+            delta_cores: None,
+            delta_memory_mb: Some(delta_memory_mb),
             created_at: now,
             updated_at: now,
         }
@@ -967,5 +1034,112 @@ mod tests {
         };
         assert!(policy.is_active());
         assert!(policy.delta_memory_mb.is_none());
+    }
+
+    /// LXC container with no CPU limit (cores absent from API response):
+    /// memory-only delta policy must succeed and PUT must omit `cores`.
+    #[tokio::test]
+    async fn pre_update_hook_scales_memory_when_lxc_has_no_cores_limit() {
+        use crate::entity::{proxmox_resource_scaling_record, proxmox_scaling_default};
+        use httpmock::prelude::*;
+
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+
+        let server = MockServer::start();
+        // GET LXC config — no cores field (unlimited CPU)
+        let get_config_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api2/json/nodes/pve1/lxc/110/config");
+            then.status(200)
+                .json_body(serde_json::json!({"data": {"memory": 512}}));
+        });
+        // PUT must be called (memory scaled); body correctness verified by unit logic
+        let put_config_mock = server.mock(|when, then| {
+            when.method(PUT)
+                .path("/api2/json/nodes/pve1/lxc/110/config");
+            then.status(200)
+                .json_body(serde_json::json!({"data": null}));
+        });
+
+        let mapping_id = Uuid::now_v7();
+        let mut mapping = mock_host_mapping(tenant_id, host_id, plugin_config_id, 110, "lxc");
+        mapping.id = mapping_id;
+
+        // Scaling record that will be returned after INSERT (for the subsequent UPDATE)
+        let now = time::OffsetDateTime::now_utc();
+        let scaling_record_row = proxmox_resource_scaling_record::Model {
+            update_history_id,
+            tenant_id,
+            host_id,
+            software_item_id,
+            plugin_config_id,
+            mapping_id,
+            vm_type: "lxc".to_string(),
+            original_cores: -1,
+            original_memory_mb: 512,
+            scaled_cores: -1,
+            scaled_memory_mb: 2560,
+            scale_status: "scaling".to_string(),
+            restore_status: "pending".to_string(),
+            error_message: None,
+            scaling_mode_used: "delta".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            // load_host_mapping
+            .append_query_results([vec![mapping]])
+            // load_scaling_item_override → delta_memory_mb=2048
+            .append_query_results([vec![mock_scaling_item_override_delta_memory(
+                tenant_id,
+                software_item_id,
+                plugin_config_id,
+                2048,
+            )]])
+            // load_scaling_global_default → empty (item override takes precedence)
+            .append_query_results([Vec::<proxmox_scaling_default::Model>::new()])
+            // load_plugin_config_payload
+            .append_query_results([vec![mock_plugin_config(
+                tenant_id,
+                plugin_config_id,
+                &server.base_url(),
+            )]])
+            // upsert_scaling_record (INSERT path): find_by_id → None
+            .append_query_results([Vec::<proxmox_resource_scaling_record::Model>::new()])
+            // INSERT exec
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // upsert_scaling_record UPDATE (after scale success): find_by_id → existing row
+            .append_query_results([vec![scaling_record_row]])
+            // UPDATE exec
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+        let controller = TestHookController { tenant_db };
+        let ctx = UpdateHookPreContext::new(
+            &controller,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+        );
+
+        ControllerUpdateHookPlugin
+            .prepare_pre_update_hook(&ctx)
+            .await;
+
+        get_config_mock.assert_calls(1);
+        put_config_mock.assert_calls(1);
     }
 }
