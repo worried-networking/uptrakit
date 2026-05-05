@@ -148,6 +148,8 @@ export interface SurfaceDescriptor {
 	root_node: SurfaceNode;
 	context_selector?: SurfaceContextSelector;
 	nav_icon?: string;
+	tab_group?: string;
+	tab_group_label?: string;
 }
 
 export type DataSourceKind =
