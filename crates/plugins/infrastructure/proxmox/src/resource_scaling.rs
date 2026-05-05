@@ -916,7 +916,7 @@ mod tests {
             ..Default::default()
         };
         assert!(policy_zero_delta.is_active());
-        let guard_fires = policy_zero_delta.delta_cores.map_or(false, |v| v < 1);
+        let guard_fires = policy_zero_delta.delta_cores.is_some_and(|v| v < 1);
         assert!(
             guard_fires,
             "integrity guard must fire when delta_cores = 0"
@@ -927,7 +927,7 @@ mod tests {
             delta_cores: Some(1),
             ..Default::default()
         };
-        let guard_fires_valid = policy_valid.delta_cores.map_or(false, |v| v < 1);
+        let guard_fires_valid = policy_valid.delta_cores.is_some_and(|v| v < 1);
         assert!(
             !guard_fires_valid,
             "guard must not fire for delta_cores = 1"

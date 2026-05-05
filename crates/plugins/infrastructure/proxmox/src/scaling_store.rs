@@ -66,7 +66,13 @@ impl ScalingPolicy {
         }
     }
 
-    /// True when the policy will result in at least one dimension being scaled.
+    #[cfg_attr(
+        not(feature = "plugin-ops"),
+        expect(
+            dead_code,
+            reason = "called only from plugin-ops-gated resource_scaling"
+        )
+    )]
     pub(crate) fn is_active(&self) -> bool {
         match self.mode {
             ScalingMode::None => false,
@@ -402,7 +408,7 @@ mod tests {
     #[test]
     fn scaling_mode_unknown_string_returns_err() {
         let result = "invalid".parse::<ScalingMode>();
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
@@ -450,7 +456,6 @@ mod tests {
             absolute_memory_mb: Some(8192),
             delta_cores: Some(2),
             delta_memory_mb: None,
-            ..Default::default()
         };
 
         // Replicate the cascade logic from resolve_effective_scaling_policy.

@@ -15,10 +15,10 @@ pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
     interaction_id: &str,
 ) -> Option<ProxmoxUpdateProtectionAction> {
     match (surface_id, interaction_id) {
-        ("proxmox.settings.update-protection", "save-global-defaults") => {
+        ("proxmox.settings.update-hooks", "save-global-defaults") => {
             Some(ProxmoxUpdateProtectionAction::SaveGlobalDefaults)
         }
-        ("proxmox.software-item.update-protection", "save-item-overrides") => {
+        ("proxmox.software-item.update-hooks", "save-item-overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveItemOverrides)
         }
         _ => None,
