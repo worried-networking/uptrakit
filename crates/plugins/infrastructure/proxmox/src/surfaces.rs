@@ -1331,13 +1331,6 @@ async fn handle_save_item_overrides(
     let mode_raw = normalize_required_mode(request.mode.as_str())?;
 
     ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
-    ensure_plugin_config_assigned_to_software_item(
-        db,
-        tenant_id,
-        software_item_id,
-        plugin_config_id,
-    )
-    .await?;
 
     if mode_raw == "inherit_global" {
         delete_item_override(db, software_item_id, plugin_config_id)
@@ -1684,13 +1677,6 @@ async fn handle_save_scaling_item_overrides(
     let plugin_config_id = request.plugin_config_id;
 
     ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
-    ensure_plugin_config_assigned_to_software_item(
-        db,
-        tenant_id,
-        software_item_id,
-        plugin_config_id,
-    )
-    .await?;
 
     let mode_opt = parse_scaling_mode_item(&request.scaling_mode)?;
 
@@ -1745,23 +1731,6 @@ async fn ensure_proxmox_plugin_config_exists(
     if config.is_none() {
         return Err(format!(
             "Proxmox plugin configuration '{plugin_config_id}' was not found in tenant scope"
-        ));
-    }
-    Ok(())
-}
-
-async fn ensure_plugin_config_assigned_to_software_item(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    software_item_id: Uuid,
-    plugin_config_id: Uuid,
-) -> std::result::Result<(), String> {
-    let scoped =
-        list_proxmox_plugin_configs_for_software_item(db, tenant_id, software_item_id).await?;
-    let assigned = scoped.iter().any(|config| config.id == plugin_config_id);
-    if !assigned {
-        return Err(format!(
-            "Proxmox plugin configuration '{plugin_config_id}' is not assigned to software item '{software_item_id}'"
         ));
     }
     Ok(())
