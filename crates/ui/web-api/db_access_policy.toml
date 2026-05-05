@@ -238,6 +238,7 @@ handle_discovery_results = "no-db"
 handle_report_plugin_config = "no-db"
 enrich_discovered_items = "ignore"
 emit_service_certificate_renew_non_success_audit_event = "ignore"
+trigger_host_progression_after_awaiting_restart = "ignore"
 
 [routes."service_ws/handler/mod.rs"]
 send_ws_with_timeout = "ignore"

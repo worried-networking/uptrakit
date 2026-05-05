@@ -715,11 +715,29 @@ def main() -> None:
     policy = tomllib.loads(POLICY_PATH.read_text())
     routes_policy: dict[str, dict[str, str]] = policy.get("routes", {})
 
+    routes_dir_abs = ROUTES_DIR.resolve()
+
+    if len(sys.argv) > 1:
+        rs_files: list[pathlib.Path] = []
+        for arg in sys.argv[1:]:
+            p = pathlib.Path(arg).resolve()
+            try:
+                p.relative_to(routes_dir_abs)
+            except ValueError:
+                print(
+                    f"WARNING: skipping {arg} — not under {ROUTES_DIR}",
+                    file=sys.stderr,
+                )
+                continue
+            rs_files.append(p)
+    else:
+        rs_files = sorted(ROUTES_DIR.rglob("*.rs"))
+
     exit_code = 0
     all_errors: list[str] = []
 
-    for rs_file in sorted(ROUTES_DIR.rglob("*.rs")):
-        rel = str(rs_file.relative_to(ROUTES_DIR))
+    for rs_file in rs_files:
+        rel = str(rs_file.resolve().relative_to(routes_dir_abs))
         handlers, source_function_names = extract_handlers(rs_file)
         file_policy = routes_policy.get(rel, {})
 
