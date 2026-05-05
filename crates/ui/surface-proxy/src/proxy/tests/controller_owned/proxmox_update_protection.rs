@@ -295,7 +295,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
-            "proxmox.settings.update-hooks",
+            "proxmox.settings.resource-scaling",
             "save-scaling-global-defaults",
         ))
         .expect("plugin registration should succeed");
@@ -319,7 +319,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
             &registry,
             SurfaceInvokeRequest {
                 tenant_id: tenant_id(),
-                surface_id: "proxmox.settings.update-hooks".to_string(),
+                surface_id: "proxmox.settings.resource-scaling".to_string(),
                 interaction_id: "save-scaling-global-defaults".to_string(),
                 idempotency_key: "idem-proxmox-save-scaling-global-success".to_string(),
                 target_provider_id: None,
@@ -375,7 +375,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
-            "proxmox.software-item.update-hooks",
+            "proxmox.software-item.resource-scaling",
             "save-scaling-item-overrides",
         ))
         .expect("plugin registration should succeed");
@@ -404,7 +404,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
             &registry,
             SurfaceInvokeRequest {
                 tenant_id: tenant_id(),
-                surface_id: "proxmox.software-item.update-hooks".to_string(),
+                surface_id: "proxmox.software-item.resource-scaling".to_string(),
                 interaction_id: "save-scaling-item-overrides".to_string(),
                 idempotency_key: "idem-proxmox-save-scaling-item-audit".to_string(),
                 target_provider_id: None,

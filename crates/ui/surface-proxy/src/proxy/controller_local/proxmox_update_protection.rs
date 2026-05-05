@@ -27,10 +27,10 @@ pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
         ("proxmox.software-item.update-hooks", "save-item-overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveItemOverrides)
         }
-        ("proxmox.settings.update-hooks", "save-scaling-global-defaults") => {
+        ("proxmox.settings.resource-scaling", "save-scaling-global-defaults") => {
             Some(ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults)
         }
-        ("proxmox.software-item.update-hooks", "save-scaling-item-overrides") => {
+        ("proxmox.software-item.resource-scaling", "save-scaling-item-overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveScalingItemOverrides)
         }
         _ => None,
