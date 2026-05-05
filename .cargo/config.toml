@@ -1,6 +1,14 @@
 [alias]
 xtask = "run --package xtask --"
 
+# Fake registry: satisfies cargo's publish-target validation for
+# `publish = ["uptrakit-private"]` in [workspace.package]. Without this,
+# `cargo package --workspace` fails to resolve the registry source id.
+# We never actually publish here; the sparse+crates.io URL means any
+# accidental `cargo publish` attempt would still require a valid token.
+[registries.uptrakit-private]
+index = "sparse+https://index.crates.io/"
+
 # Build speed optimizations for development.
 # These settings do not affect release builds or CI unless explicitly opted in.
 
