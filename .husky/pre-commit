@@ -22,6 +22,7 @@ RUST_FILES=()
 MARKDOWN_FILES=()
 FRONTEND_ESLINT_FILES=()
 FRONTEND_PRETTIER_FILES=()
+ROUTES_RS_FILES=()
 
 for path in "${STAGED_PATHS[@]}"; do
   case "$path" in
@@ -37,6 +38,7 @@ for path in "${STAGED_PATHS[@]}"; do
       FRONTEND_PRETTIER_FILES+=("${path#frontend/}")
       ;;
   esac
+  [[ "$path" =~ ^crates/ui/web-api/src/routes/.*\.rs$ ]] && ROUTES_RS_FILES+=("$path")
 done
 
 require_worktree_paths() {
@@ -70,6 +72,14 @@ require_rust_edition_2024() {
     die "Rust edition for $path is not 2024. Mixed-edition workspaces require revisiting this hook."
   done
 }
+
+if (( ${#ROUTES_RS_FILES[@]} > 0 )); then
+  command -v python3 >/dev/null 2>&1 || die 'python3 is required for staged routes/ Rust files.'
+  require_worktree_paths 'routes Rust' "${ROUTES_RS_FILES[@]}"
+  echo '[pre-commit] Verifying DB access policy for staged routes/ files...'
+  # Full stale-entry validation runs in CI; this check only covers staged files.
+  python3 ci/verify_db_access_policy.py "${ROUTES_RS_FILES[@]}"
+fi
 
 if (( ${#RUST_FILES[@]} > 0 )); then
   command -v rustfmt >/dev/null 2>&1 || die 'rustfmt is required for staged Rust files. Install it with: rustup component add rustfmt'

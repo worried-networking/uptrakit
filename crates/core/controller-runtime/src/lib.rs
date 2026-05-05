@@ -182,13 +182,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
-    #[cfg_attr(
-        not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
-        expect(
-            unused_variables,
-            reason = "only read inside the embedded-scheduler and embedded-agent feature blocks below"
-        )
-    )]
     let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
     // Phase 3: Database
@@ -845,17 +838,6 @@ async fn spawn_background_tasks(
     ca_tx: tokio::sync::watch::Sender<pki::CaSnapshot>,
     initial_ca_version: i64,
     controller_id: uuid::Uuid,
-    #[cfg_attr(
-        not(any(
-            feature = "embedded-scheduler",
-            feature = "embedded-agent",
-            feature = "embedded-mqtt"
-        )),
-        expect(
-            unused_variables,
-            reason = "only read inside embedded-scheduler/embedded-agent/embedded-mqtt feature blocks"
-        )
-    )]
     controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
@@ -985,7 +967,8 @@ async fn spawn_background_tasks(
         }
     }
 
-    // Suppress unused-variable warnings when embedded features are disabled.
+    // Suppress unused-variable warnings in feature combinations where the
+    // embedded service blocks above do not consume these values.
     let _ = controller_id;
     let _ = controller_installation_id;
     let _ = &state_dir;

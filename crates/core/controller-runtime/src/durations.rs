@@ -37,4 +37,5 @@ pub(crate) const SERVICE_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(2
 /// Each MQTT client may take up to `OPERATION_TIMEOUT (5s) + SHUTDOWN_TIMEOUT (5s) = 10s`
 /// to disconnect cleanly. Clients shut down in parallel via `FuturesUnordered`,
 /// so N clients ≈ 10s worst-case regardless of count. 5s of safety margin added.
+#[cfg(feature = "embedded-mqtt")]
 pub(crate) const EMBEDDED_MQTT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
