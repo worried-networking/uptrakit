@@ -2,7 +2,7 @@
 name = "uptrakit-integration-tests"
 description = "Uptrakit end-to-end integration tests (Docker-driven)"
 edition.workspace = true
-version.workspace = true
+version = "0.0.1"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
