@@ -4,7 +4,7 @@ use crate::entity::{proxmox_scaling_default, proxmox_scaling_item_override};
 use proxmox_scaling_default::Entity as ProxmoxScalingDefault;
 use proxmox_scaling_item_override::Entity as ProxmoxScalingItemOverride;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
     SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
@@ -116,6 +116,27 @@ pub(crate) async fn load_scaling_item_override(
             )))
         })?;
     Ok(row.as_ref().map(item_model_to_policy))
+}
+
+/// Returns the `plugin_config_id` of the most recently updated scaling override for
+/// the given software item, or `None` if no override exists.
+pub(crate) async fn find_first_scaling_item_override_config(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    software_item_id: Uuid,
+) -> Result<Option<Uuid>> {
+    let row = ProxmoxScalingItemOverride::find()
+        .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))
+        .filter(proxmox_scaling_item_override::Column::SoftwareItemId.eq(software_item_id))
+        .order_by_desc(proxmox_scaling_item_override::Column::UpdatedAt)
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to find scaling item override config: {e}"
+            )))
+        })?;
+    Ok(row.map(|m| m.plugin_config_id))
 }
 
 /// Resolve effective scaling policy. Item override wins over global default.
