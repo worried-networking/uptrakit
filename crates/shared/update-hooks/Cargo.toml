@@ -2,7 +2,7 @@
 name = "uptrakit-config-merge"
 description = "Uptrakit shared update-hooks: lifecycle hook trait and dispatch"
 edition.workspace = true
-version.workspace = true
+version = "0.0.1"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
