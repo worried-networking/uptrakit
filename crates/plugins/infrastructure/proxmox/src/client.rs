@@ -672,23 +672,23 @@ impl ProxmoxClient {
 
     /// Apply CPU and memory limits to a running LXC container.
     ///
+    /// `cores = None` leaves the existing cores limit unchanged (used when the
+    /// container had no limit set and the policy does not require CPU scaling).
+    ///
     /// Calls `PUT /api2/json/nodes/{node}/lxc/{vmid}/config`.
     pub async fn set_lxc_config_resources(
         &self,
         node: &str,
         vmid: u32,
-        cores: u32,
+        cores: Option<u32>,
         memory_mb: u64,
     ) -> Result<()> {
         let path = format!("/nodes/{node}/lxc/{vmid}/config");
-        self.put_form(
-            &path,
-            &[
-                ("cores".to_string(), cores.to_string()),
-                ("memory".to_string(), memory_mb.to_string()),
-            ],
-        )
-        .await
+        let mut params = vec![("memory".to_string(), memory_mb.to_string())];
+        if let Some(c) = cores {
+            params.push(("cores".to_string(), c.to_string()));
+        }
+        self.put_form(&path, &params).await
     }
 }
 
