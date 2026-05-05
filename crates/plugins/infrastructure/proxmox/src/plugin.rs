@@ -104,7 +104,8 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_surface(),
         proxmox_host_info_surface(),
-        proxmox_settings_update_hooks_surface(),
+        proxmox_settings_update_protection_surface(),
+        proxmox_settings_resource_scaling_surface(),
         proxmox_software_item_update_hooks_surface(),
     ];
     vec![surfaces::SurfaceRegistration {
@@ -436,7 +437,7 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
     }
 }
 
-fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
+fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
     let callout = "Backup targets in this form come from Proxmox discovery cache. \
         If the dropdown is empty, run Discover on the Proxmox VE Hosts page first."
         .to_string();
@@ -447,7 +448,7 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                 surfaces::SurfaceId::new("proxmox.settings.update-hooks")
                     .expect("literal surface id is valid"),
             )
-            .label("Proxmox Update Hooks")
+            .label("Update Protection")
             .priority(720)
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(surfaces::Scope::Global)
@@ -462,6 +463,7 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::MutationAction,
                 surfaces::Capability::UniversalTargeting,
             ]))
+            .tab_group("proxmox.settings", "Proxmox Update Hooks")
             .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
@@ -469,25 +471,9 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
                     },
-                    surfaces::SurfaceNode::Section {
-                        title: Some("Update Protection".to_string()),
-                        children: vec![
-                            surfaces::SurfaceNode::Form {
-                                interaction_id: surfaces::InteractionId::new("save-global-defaults")
-                                    .expect("literal interaction id is valid"),
-                            },
-                        ],
-                    },
-                    surfaces::SurfaceNode::Section {
-                        title: Some("Resource Scaling".to_string()),
-                        children: vec![
-                            surfaces::SurfaceNode::Form {
-                                interaction_id: surfaces::InteractionId::new(
-                                    "save-scaling-global-defaults",
-                                )
-                                .expect("literal interaction id is valid"),
-                            },
-                        ],
+                    surfaces::SurfaceNode::Form {
+                        interaction_id: surfaces::InteractionId::new("save-global-defaults")
+                            .expect("literal interaction id is valid"),
                     },
                 ],
             })
@@ -507,8 +493,8 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                        icon: None,
-},
+                icon: None,
+            },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("load-backup-target-options")
                     .expect("literal interaction id is valid"),
@@ -523,8 +509,8 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                 transport: surfaces::InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
                 form_ui: None,
-                        icon: None,
-},
+                icon: None,
+            },
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("save-global-defaults")
                     .expect("literal interaction id is valid"),
@@ -553,7 +539,8 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox".to_string(),
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                    .to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
                             }),
@@ -654,8 +641,44 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     ),
                 }),
-                        icon: None,
-},
+                icon: None,
+            },
+        ],
+        data_sources: vec![],
+    }
+}
+
+fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
+    surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.settings.resource-scaling")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Resource Scaling")
+            .priority(721)
+            .slot(surfaces::SLOT_SETTINGS_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::ManageGlobalSettings.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::FormNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::UniversalTargeting,
+            ]))
+            .tab_group("proxmox.settings", "Proxmox Update Hooks")
+            .root_node(surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![surfaces::SurfaceNode::Form {
+                    interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
+                        .expect("literal interaction id is valid"),
+                }],
+            })
+            .build(),
+        interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("preload-scaling-global-defaults")
                     .expect("literal interaction id is valid"),
@@ -801,9 +824,7 @@ fn proxmox_settings_update_hooks_surface() -> surfaces::RegisteredSurface {
                             field_type: "number".to_string(),
                             required: false,
                             placeholder: Some("1024".to_string()),
-                            help_text: Some(
-                                "MB to add to current RAM during update.".to_string(),
-                            ),
+                            help_text: Some("MB to add to current RAM during update.".to_string()),
                             default_value: None,
                             options: vec![],
                             select_source: None,

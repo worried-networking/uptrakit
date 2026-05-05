@@ -22,6 +22,8 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
+	import type { SurfaceResponse } from '$lib/surfaces/contract';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 
@@ -36,6 +38,17 @@
 	import NotificationRulesSettings from './NotificationRulesSettings.svelte';
 	import NotificationLogView from './NotificationLogView.svelte';
 	import DangerZone from './DangerZone.svelte';
+
+	// Maintenance: keep in sync with the {#if activeTab === '...'} chain below.
+	// Surfaces with a matching tab_group append to these existing tabs instead of creating new ones.
+	const BUILTIN_TAB_IDS = new Set([
+		'general',
+		'plugin-configs',
+		'scheduler',
+		'global-settings',
+		'notification-rules',
+		'notification-log'
+	]);
 
 	// ── Permissions ─────────────────────────────────────────────────────
 	const canManageSettings = $derived(
@@ -88,7 +101,26 @@
 		}
 		return result;
 	});
-	const showSurfaceSettingsTabs = $derived(slotTabSurfaces.length > 0);
+	type TabGroup = { id: string; label: string; surfaces: SurfaceResponse[] };
+	const slotTabGroups = $derived.by<TabGroup[]>(() => {
+		const groups = new SvelteMap<string, TabGroup>();
+		for (const surface of slotTabSurfaces) {
+			const key = surface.tab_group ?? surface.surface_id;
+			const existing = groups.get(key);
+			if (existing) {
+				existing.surfaces.push(surface);
+			} else {
+				groups.set(key, {
+					id: key,
+					label: surface.tab_group_label ?? surface.label,
+					surfaces: [surface]
+				});
+			}
+		}
+		return [...groups.values()];
+	});
+	const slotTabGroupsByTabId = $derived(new SvelteMap(slotTabGroups.map((g) => [g.id, g])));
+	const showSurfaceSettingsTabs = $derived(slotTabGroups.some((g) => !BUILTIN_TAB_IDS.has(g.id)));
 	const tabItems = $derived.by<TabStripItem[]>(() => {
 		const items: TabStripItem[] = [];
 		if (canManageSettings) {
@@ -108,14 +140,17 @@
 			items.push({ id: 'notification-log', label: 'Notification Log' });
 		}
 		if (showSurfaceSettingsTabs) {
-			for (const surface of slotTabSurfaces) {
-				items.push({ id: surface.surface_id, label: surface.label });
+			for (const group of slotTabGroups) {
+				if (!BUILTIN_TAB_IDS.has(group.id)) {
+					items.push({ id: group.id, label: group.label });
+				}
 			}
 		}
 		return items;
 	});
 
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
+	const builtinAppendGroup = $derived(BUILTIN_TAB_IDS.has(activeTab) ? slotTabGroupsByTabId.get(activeTab) : undefined);
 
 	// Redirect if no permissions at all
 	$effect(() => {
@@ -137,14 +172,19 @@
 			(activeTab === 'notification-rules' && canViewNotifications) ||
 			(activeTab === 'notification-log' && canViewNotifications);
 		const isSurfaceAccessible =
-			showSurfaceSettingsTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
-		const isPendingSurfaceTab = isSurfaceTabPending({
-			activeTab,
-			slotSurfaces: slotTabSurfaces,
-			readBySurface: slotTabReads,
-			isReadRequested: getSurfaceReadRequested(activeTab),
-			isReadLoading: getSurfaceReadLoading(activeTab)
-		});
+			showSurfaceSettingsTabs && slotTabGroups.some((g) => g.id === activeTab && !BUILTIN_TAB_IDS.has(g.id));
+		const activeGroup = !BUILTIN_TAB_IDS.has(activeTab) ? slotTabGroupsByTabId.get(activeTab) : undefined;
+		const isPendingSurfaceTab = activeGroup
+			? activeGroup.surfaces.some((surface) =>
+					isSurfaceTabPending({
+						activeTab: surface.surface_id,
+						slotSurfaces: [surface],
+						readBySurface: slotTabReads,
+						isReadRequested: getSurfaceReadRequested(surface.surface_id),
+						isReadLoading: getSurfaceReadLoading(surface.surface_id)
+					})
+				)
+			: false;
 		if (!surfaceRegistryLoaded && !isBuiltinAccessible) {
 			return;
 		}
@@ -154,7 +194,10 @@
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
-			else if (showSurfaceSettingsTabs && slotTabSurfaces.length > 0) activeTab = slotTabSurfaces[0].surface_id;
+			else if (showSurfaceSettingsTabs) {
+				const firstNewGroup = slotTabGroups.find((g) => !BUILTIN_TAB_IDS.has(g.id));
+				if (firstNewGroup) activeTab = firstNewGroup.id;
+			}
 		}
 	});
 
@@ -323,13 +366,32 @@
 		{:else if activeTab === 'notification-log'}
 			<NotificationLogView />
 		{:else if showSurfaceSettingsTabs}
-			{#each slotTabSurfaces as surface (surface.surface_id)}
-				{#if activeTab === surface.surface_id}
+			{#each slotTabGroups as group (group.id)}
+				{#if activeTab === group.id && !BUILTIN_TAB_IDS.has(group.id)}
+					{#if group.surfaces.length === 1}
+						<SectionCard>
+							<SurfaceReadPanel surface={group.surfaces[0]} read={slotTabReads[group.surfaces[0].surface_id]} />
+						</SectionCard>
+					{:else}
+						<div class="space-y-4">
+							{#each group.surfaces as surface (surface.surface_id)}
+								<SectionCard title={surface.label}>
+									<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
+								</SectionCard>
+							{/each}
+						</div>
+					{/if}
+				{/if}
+			{/each}
+		{/if}
+		{#if builtinAppendGroup}
+			<div class="space-y-4">
+				{#each builtinAppendGroup.surfaces as surface (surface.surface_id)}
 					<SectionCard title={surface.label}>
 						<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
 					</SectionCard>
-				{/if}
-			{/each}
+				{/each}
+			</div>
 		{/if}
 	</PageShell>
 {/if}

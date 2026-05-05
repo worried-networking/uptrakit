@@ -256,6 +256,10 @@ pub struct SurfaceDescriptor {
     pub context_selector: Option<SurfaceContextSelectorDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nav_icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_group_label: Option<String>,
 }
 
 impl SurfaceDescriptor {
@@ -307,6 +311,8 @@ pub struct SurfaceDescriptorBuilder {
     root_node: Option<SurfaceNode>,
     context_selector: Option<SurfaceContextSelectorDescriptor>,
     nav_icon: Option<String>,
+    tab_group: Option<String>,
+    tab_group_label: Option<String>,
 }
 
 impl SurfaceDescriptorBuilder {
@@ -394,6 +400,17 @@ impl SurfaceDescriptorBuilder {
         self
     }
 
+    /// Groups this surface with others sharing `id` under one settings tab.
+    ///
+    /// If `id` matches an existing built-in tab (e.g. `"general"`), content is appended
+    /// to that tab and `label` is ignored. Otherwise a new tab labelled `label` is created.
+    #[must_use]
+    pub fn tab_group(mut self, id: impl Into<String>, label: impl Into<String>) -> Self {
+        self.tab_group = Some(id.into());
+        self.tab_group_label = Some(label.into());
+        self
+    }
+
     /// Consumes the builder and returns the [`SurfaceDescriptor`].
     ///
     /// # Panics
@@ -431,6 +448,8 @@ impl SurfaceDescriptorBuilder {
                 .expect("SurfaceDescriptorBuilder: root_node not set"),
             context_selector: self.context_selector,
             nav_icon: self.nav_icon,
+            tab_group: self.tab_group,
+            tab_group_label: self.tab_group_label,
         }
     }
 }
@@ -602,6 +621,8 @@ mod tests {
                 required_for_interactions: vec![crate::InteractionId::new("discover").unwrap()],
             }),
             nav_icon: None,
+            tab_group: None,
+            tab_group_label: None,
         };
 
         let json = serde_json::to_string(&descriptor).expect("serialize");
@@ -634,6 +655,8 @@ mod tests {
             },
             context_selector: None,
             nav_icon: None,
+            tab_group: None,
+            tab_group_label: None,
         };
 
         let json = serde_json::to_string(&descriptor).expect("serialize");
