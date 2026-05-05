@@ -12,38 +12,9 @@ use uuid::Uuid;
 
 use crate::error::{ProxmoxError, Result};
 
-/// Scaling mode discriminant. Internal-only; not sent over any network
-/// boundary. Not `#[non_exhaustive]` — must be exhaustively matched everywhere.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScalingMode {
-    #[default]
-    None,
-    Absolute,
-    Delta,
-}
-
-impl ScalingMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Absolute => "absolute",
-            Self::Delta => "delta",
-        }
-    }
-}
-
-impl std::str::FromStr for ScalingMode {
-    type Err = ();
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "none" => Ok(Self::None),
-            "absolute" => Ok(Self::Absolute),
-            "delta" => Ok(Self::Delta),
-            _ => Err(()),
-        }
-    }
-}
+// Re-export so existing callers (`policy_store`, `surfaces`, `resource_scaling`)
+// can continue to import ScalingMode from `scaling_store`.
+pub(crate) use crate::scaling_mode::ScalingMode;
 
 /// Effective scaling policy resolved for a software item update.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -85,18 +56,8 @@ impl ScalingPolicy {
 }
 
 fn model_to_policy(model: &proxmox_scaling_default::Model) -> ScalingPolicy {
-    let mode = model
-        .scaling_mode
-        .parse::<ScalingMode>()
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                value = %model.scaling_mode,
-                "unrecognised scaling_mode in proxmox_scaling_defaults; treating as None"
-            );
-            ScalingMode::None
-        });
     ScalingPolicy {
-        mode,
+        mode: model.scaling_mode,
         absolute_cores: model.absolute_cores,
         absolute_memory_mb: model.absolute_memory_mb,
         delta_cores: model.delta_cores,
@@ -105,18 +66,8 @@ fn model_to_policy(model: &proxmox_scaling_default::Model) -> ScalingPolicy {
 }
 
 fn item_model_to_policy(model: &proxmox_scaling_item_override::Model) -> ScalingPolicy {
-    let mode = model
-        .scaling_mode
-        .parse::<ScalingMode>()
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                value = %model.scaling_mode,
-                "unrecognised scaling_mode in proxmox_scaling_item_overrides; treating as None"
-            );
-            ScalingMode::None
-        });
     ScalingPolicy {
-        mode,
+        mode: model.scaling_mode,
         absolute_cores: model.absolute_cores,
         absolute_memory_mb: model.absolute_memory_mb,
         delta_cores: model.delta_cores,
@@ -149,10 +100,12 @@ pub(crate) async fn load_scaling_global_default(
 /// Load per-item scaling override. Returns `None` if no row (inherit global).
 pub(crate) async fn load_scaling_item_override(
     db: &DatabaseConnection,
+    tenant_id: Uuid,
     software_item_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<Option<ScalingPolicy>> {
     let row = ProxmoxScalingItemOverride::find()
+        .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))
         .filter(proxmox_scaling_item_override::Column::SoftwareItemId.eq(software_item_id))
         .filter(proxmox_scaling_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
@@ -181,7 +134,8 @@ pub(crate) async fn resolve_effective_scaling_policy(
     software_item_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<ScalingPolicy> {
-    let item = load_scaling_item_override(db, software_item_id, plugin_config_id).await?;
+    let item =
+        load_scaling_item_override(db, tenant_id, software_item_id, plugin_config_id).await?;
     let global = load_scaling_global_default(db, tenant_id, plugin_config_id).await?;
 
     let Some(item_policy) = item else {
@@ -248,7 +202,7 @@ pub(crate) async fn upsert_scaling_global_default(
 
     if let Some(existing) = existing {
         let mut active: proxmox_scaling_default::ActiveModel = existing.into();
-        active.scaling_mode = Set(policy.mode.as_str().to_string());
+        active.scaling_mode = Set(policy.mode);
         active.absolute_cores = Set(policy.absolute_cores);
         active.absolute_memory_mb = Set(policy.absolute_memory_mb);
         active.delta_cores = Set(policy.delta_cores);
@@ -264,7 +218,7 @@ pub(crate) async fn upsert_scaling_global_default(
             id: Set(Uuid::now_v7()),
             tenant_id: Set(tenant_id),
             plugin_config_id: Set(plugin_config_id),
-            scaling_mode: Set(policy.mode.as_str().to_string()),
+            scaling_mode: Set(policy.mode),
             absolute_cores: Set(policy.absolute_cores),
             absolute_memory_mb: Set(policy.absolute_memory_mb),
             delta_cores: Set(policy.delta_cores),
@@ -309,6 +263,7 @@ pub(crate) async fn upsert_scaling_item_override(
         })?;
 
     let existing = ProxmoxScalingItemOverride::find()
+        .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))
         .filter(proxmox_scaling_item_override::Column::SoftwareItemId.eq(software_item_id))
         .filter(proxmox_scaling_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(&txn)
@@ -321,7 +276,7 @@ pub(crate) async fn upsert_scaling_item_override(
 
     if let Some(existing) = existing {
         let mut active: proxmox_scaling_item_override::ActiveModel = existing.into();
-        active.scaling_mode = Set(policy.mode.as_str().to_string());
+        active.scaling_mode = Set(policy.mode);
         active.absolute_cores = Set(policy.absolute_cores);
         active.absolute_memory_mb = Set(policy.absolute_memory_mb);
         active.delta_cores = Set(policy.delta_cores);
@@ -338,7 +293,7 @@ pub(crate) async fn upsert_scaling_item_override(
             tenant_id: Set(tenant_id),
             software_item_id: Set(software_item_id),
             plugin_config_id: Set(plugin_config_id),
-            scaling_mode: Set(policy.mode.as_str().to_string()),
+            scaling_mode: Set(policy.mode),
             absolute_cores: Set(policy.absolute_cores),
             absolute_memory_mb: Set(policy.absolute_memory_mb),
             delta_cores: Set(policy.delta_cores),
@@ -364,10 +319,12 @@ pub(crate) async fn upsert_scaling_item_override(
 /// Delete per-item scaling override (revert item to global inheritance).
 pub(crate) async fn delete_scaling_item_override(
     db: &DatabaseConnection,
+    tenant_id: Uuid,
     software_item_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<()> {
     if let Some(existing) = ProxmoxScalingItemOverride::find()
+        .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))
         .filter(proxmox_scaling_item_override::Column::SoftwareItemId.eq(software_item_id))
         .filter(proxmox_scaling_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)

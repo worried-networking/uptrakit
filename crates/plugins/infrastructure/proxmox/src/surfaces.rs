@@ -1645,9 +1645,10 @@ async fn handle_preload_scaling_item_overrides(
         }));
     };
 
-    let item_override = load_scaling_item_override(db, software_item_id, selected_config.id)
-        .await
-        .map_err(|e| format!("failed to load scaling item override: {e}"))?;
+    let item_override =
+        load_scaling_item_override(db, tenant_id, software_item_id, selected_config.id)
+            .await
+            .map_err(|e| format!("failed to load scaling item override: {e}"))?;
 
     let (scaling_mode_str, abs_c, abs_m, del_c, del_m) = match item_override {
         None => ("inherit".to_string(), None, None, None, None),
@@ -1692,7 +1693,7 @@ async fn handle_save_scaling_item_overrides(
     let mode_opt = parse_scaling_mode_item(&request.scaling_mode)?;
 
     let Some(mode) = mode_opt else {
-        delete_scaling_item_override(db, software_item_id, plugin_config_id)
+        delete_scaling_item_override(db, tenant_id, software_item_id, plugin_config_id)
             .await
             .map_err(|e| format!("failed to clear scaling item override: {e}"))?;
         return Ok(json!({

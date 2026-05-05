@@ -6,6 +6,8 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
+use crate::scaling_mode::ScalingMode;
+
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "proxmox_scaling_item_overrides")]
 pub struct Model {
@@ -14,7 +16,7 @@ pub struct Model {
     pub tenant_id: Uuid,
     pub software_item_id: Uuid,
     pub plugin_config_id: Uuid,
-    pub scaling_mode: String,
+    pub(crate) scaling_mode: ScalingMode,
     pub absolute_cores: Option<i32>,
     pub absolute_memory_mb: Option<i32>,
     pub delta_cores: Option<i32>,
