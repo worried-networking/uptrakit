@@ -19,6 +19,11 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
