@@ -93,7 +93,15 @@ pub(crate) struct MqttHandle {
 }
 
 impl MqttHandle {
-    /// Publish a retained message.
+    /// Publish a retained message at QoS 0 (at-most-once).
+    ///
+    /// QoS 0 is intentional: all retained state topics are fully republished
+    /// on every `Reconnected` event, so at-most-once delivery is correct.
+    /// Using QoS 1 would track packet IDs in `MqttState::outgoing_pub`; a
+    /// stale collision carried over from a previous session (possible when
+    /// `state.clean()` runs on disconnect) would permanently disable the
+    /// `next_request` flow-control gate, blocking the channel for 60 s per
+    /// reconnect cycle.
     ///
     /// Awaits on the bounded flume channel so that the EventLoop (running in
     /// its own Tokio task) can drain the channel without creating a deadlock.
@@ -113,7 +121,7 @@ impl MqttHandle {
         let payload = payload.into();
         timeout(
             PUBLISH_TIMEOUT,
-            self.client.publish(topic, QoS::AtLeastOnce, true, payload),
+            self.client.publish(topic, QoS::AtMostOnce, true, payload),
         )
         .await
         .map_err(|_elapsed| rootcause::report!(MqttError::PublishTimeout))?
@@ -183,9 +191,10 @@ const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum time to wait for the rumqttc request channel to accept a publish.
 ///
 /// The 128-capacity flume channel to the rumqttc event loop fills when the
-/// event loop is sleeping in reconnect backoff (2s–60s). At 5s this timeout
-/// reliably triggers before the next backoff cycle completes while being far
-/// above any expected scheduling latency under normal load.
+/// event loop is sleeping in reconnect backoff (2s–60s) and cannot drain
+/// requests.  At 5s this timeout reliably triggers before the next backoff
+/// cycle completes while being far above any expected scheduling latency
+/// under normal load.
 ///
 /// Does not affect [`MqttHandle::shutdown`], which sends `offline` directly
 /// via `self.client.publish()` wrapped in its own `OPERATION_TIMEOUT`.
@@ -404,7 +413,7 @@ async fn run_event_loop(
         // and never block, so spinning here costs nothing.
         if pending_online
             && client
-                .try_publish(&topic, QoS::AtLeastOnce, true, "online")
+                .try_publish(&topic, QoS::AtMostOnce, true, "online")
                 .is_ok()
         {
             pending_online = false;
@@ -458,6 +467,14 @@ async fn run_event_loop(
                         // there is nothing to retry until the next ConnAck.
                         pending_online = false;
                         pending_ha_subscribe = false;
+                        // state.clean() (called inside poll() on error) clears outgoing_pub
+                        // and inflight but intentionally does not clear collision.  With
+                        // clean_session=true the broker has no session state after reconnect,
+                        // so the PUBACK that would resolve the collision never arrives.
+                        // The stale collision permanently disables the next_request flow-control
+                        // gate, blocking all channel reads until CollisionTimeout fires 60 s
+                        // later.  Clear it here so the next session starts clean.
+                        event_loop.state.collision = None;
                         let delay = reconnect_backoff.next_delay();
                         tracing::warn!("MQTT error: {e}; retrying in {delay:?}");
                         if let Some(ref r) = reporter {
