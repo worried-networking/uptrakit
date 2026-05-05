@@ -263,8 +263,10 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         if let Some(tid_uuid) = token_owned_by_tenant {
             match pve_setup::ensure_pve_privileges(executor, &tid_uuid).await {
                 Ok(()) => lines.push(format!(
-                    "privileges: OK ({} on /, {} on /vms and /storage)",
+                    "privileges: OK ({} on /, {} and {} on /vms, {} on /storage)",
                     pve_setup::UPTRAKIT_AUDIT_ROLE,
+                    pve_setup::UPTRAKIT_PROTECTION_ROLE,
+                    pve_setup::UPTRAKIT_SCALING_ROLE,
                     pve_setup::UPTRAKIT_PROTECTION_ROLE,
                 )),
                 Err(e) => {

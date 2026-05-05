@@ -23,7 +23,7 @@ agent-infra = [
     "uptrakit-plugin-infrastructure-proxmox/agent-infra",
 ]
 dashboard-icons = ["dep:uptrakit-plugin-enhancement-dashboard-icons", "dep:tokio-util", "dep:reqwest"]
-plugin-ops = ["uptrakit-plugin-infrastructure-core/plugin-ops"]
+plugin-ops = ["uptrakit-plugin-infrastructure-core/plugin-ops", "uptrakit-plugin-infrastructure-proxmox/plugin-ops"]
 notifications = []
 notifications-webhook = ["notifications", "dep:uptrakit-notification-plugin-webhook"]
 notifications-telegram = ["notifications", "dep:uptrakit-notification-plugin-telegram"]
