@@ -205,19 +205,38 @@ publish = false
 [[package]]
 name = "uptrakit-agent-runtime"
 git_only = true
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-agent-runtime-v{{ version }}"
+publish = false
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
 git_only = true
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-agent-ssh-runtime-v{{ version }}"
+publish = false
 
 [[package]]
 name = "uptrakit-mqtt-runtime"
 git_only = true
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-mqtt-runtime-v{{ version }}"
+publish = false
 
 [[package]]
 name = "uptrakit-scheduler-runtime"
 git_only = true
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-scheduler-runtime-v{{ version }}"
+publish = false
 
+# controller-runtime is a library (lib backing both controller and
+# controller-standalone). Its commits flow into both binaries' changelogs
+# via changelog_include, so it does not write its own.
 [[package]]
 name = "uptrakit-controller-runtime"
 git_only = true
