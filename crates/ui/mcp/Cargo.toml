@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version = "0.0.1"
-publish.workspace = true
+publish = false
 
 [dependencies]
 uptrakit-web-api       = { workspace = true }
