@@ -174,7 +174,7 @@ fn spawn_child_with_pty(
     unsafe {
         cmd.pre_exec(move || {
             libc::setsid();
-            libc::ioctl(slave_raw, libc::TIOCSCTTY as libc::c_ulong, 0);
+            libc::ioctl(slave_raw, libc::TIOCSCTTY as _, 0); // Ioctl is c_int on musl, c_ulong on glibc/macOS
             libc::dup2(slave_raw, 0);
             libc::dup2(slave_raw, 1);
             libc::dup2(slave_raw, 2);
