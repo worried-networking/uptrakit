@@ -40,12 +40,6 @@ pub struct SurfaceProviderInfo {
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
 }
 
-/// Controller-owned rollout signal for the shared surface runtime.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SurfaceRuntimeStatusResponse {
-    pub active: bool,
-}
-
 /// Surface read payload used by frontend route rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SurfaceReadResponse {

@@ -67,10 +67,8 @@ Controller admission rejects incompatible registrations. Main gates:
 - allowlist failures (`controller_query`, SSE topic, direct built-in operation IDs)
 - payload and depth limits
 
-Activation is controller-owned. The shared Surfaces runtime becomes active only when the
-controller's required-provider rollout gate is satisfied by real provider-reported
-generation/capability data. The built-in UI and surface-backed UI must stay visually aligned; the
-runtime is a parity path, not a separate design system.
+The built-in UI and surface-backed UI must stay visually aligned; the runtime is a parity path,
+not a separate design system.
 
 ## Canonical Runtime States
 
@@ -84,15 +82,9 @@ conditions:
 - `hydration_action_failure`
 - `no_surface_content`
 
-These are render states, not a statement about rollout status. The runtime may surface different
-states depending on loading, authorization, provider compatibility, contract validation, action
-hydration, or empty-content conditions.
-
-When rollout is inactive, the surface API is fail-closed:
-
-- `GET /api/v1/surfaces` returns an empty list
-- reads and invokes fail closed without exposing provider metadata
-- provider-listing behaves as absence rather than exposing inactive-provider metadata
+These are render states, not error codes. The runtime surfaces different states depending on
+loading, authorization, provider compatibility, contract validation, action hydration, or
+empty-content conditions.
 
 Do not rely on graceful fallback for incompatible contracts. Fix the provider contract until
 admission succeeds.
@@ -125,7 +117,7 @@ bootstraps these registrations into `SurfaceRegistry`.
 
 The frontend loads and renders surfaces through shared runtime modules:
 
-- `loadSurfaceRegistry()` fetches rollout status and surface list (`/api/v1/surfaces/*`)
+- `loadSurfaceRegistry()` fetches surface list (`/api/v1/surfaces/*`)
 - `getSurfacesBySlot(slot)` drives slot rendering and sidebar integration
 - `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
 
@@ -140,7 +132,6 @@ and it must use the same visual primitives and token adapter as the built-in UI.
 REST endpoints:
 
 - `GET /api/v1/surfaces`
-- `GET /api/v1/surfaces/runtime-status`
 - `GET /api/v1/surfaces/{surface_id}/providers`
 - `GET /api/v1/surfaces/{surface_id}/read`
 - `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`

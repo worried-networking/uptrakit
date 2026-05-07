@@ -82,8 +82,8 @@ Invocation path is mediated by `SurfaceProxy`:
 ## Capability gating
 
 UI/surface runtime participation is gated on protocol capability negotiation.
-Provider reports are also used by rollout guard logic so incompatible required providers prevent
-activation of shared-surface runtime.
+Incompatible providers are excluded from the active surface catalog; their registrations are
+rejected at admission time rather than silently degrading runtime behavior.
 
 ## Trust boundaries
 

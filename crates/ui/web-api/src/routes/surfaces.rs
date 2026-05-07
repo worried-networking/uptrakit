@@ -18,7 +18,7 @@ use serde_json::Value;
 use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
-    SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse, SurfaceRuntimeStatusResponse,
+    SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
@@ -62,15 +62,6 @@ fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceRespons
         entry.provider_count += 1;
     }
     grouped.into_values().collect()
-}
-
-#[tracing::instrument(skip_all)]
-pub async fn get_surface_runtime_status(_state: State<Arc<AppState>>) -> Response {
-    (
-        StatusCode::OK,
-        Json(SurfaceRuntimeStatusResponse { active: true }),
-    )
-        .into_response()
 }
 
 #[tracing::instrument(skip_all)]

@@ -267,10 +267,6 @@ export interface SurfaceProviderInfo {
 	encryption_metadata?: ProviderEncryptionMetadata;
 }
 
-export interface SurfaceRuntimeStatusResponse {
-	active: boolean;
-}
-
 export interface SurfaceReadResponse {
 	descriptor: SurfaceDescriptor;
 	interactions: InteractionDescriptor[];
