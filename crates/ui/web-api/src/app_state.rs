@@ -367,6 +367,9 @@ pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, A
 
 /// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
 /// and token denylist.
+///
+/// `#[non_exhaustive]`: OAuth 2.1 will add fields (e.g. OIDC provider registry).
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct AuthState {
     /// JWT signing/validation manager for access tokens.
