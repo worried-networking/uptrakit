@@ -129,7 +129,7 @@ pub(super) async fn handle_service_trigger_update(
     {
         Ok(result) => {
             if let Some(work) = result.pending_protection_work {
-                crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), *work);
+                state.update_dispatcher.spawn_pending_protection(*work);
             }
             let dispatch_status = trigger_update_dispatch_status_label(result.initial_status);
             emit_software_update_audit(

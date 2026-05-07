@@ -1,7 +1,7 @@
 //! Production implementation of [`UpdateDispatcher`] that runs pre-update
 //! protection, then dispatches to the agent.
 //!
-//! Logic is ported from `crates/ui/web-api/src/update_orchestrator.rs` and
+//! Logic is ported from the now-deleted `update_orchestrator.rs` and
 //! `crates/ui/web-api/src/routes/software_items/mod.rs` with AppState
 //! references replaced by explicit dependency parameters.
 
@@ -198,6 +198,10 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
             outcome,
         })
     }
+
+    fn spawn_pending_protection(&self, work: PendingProtectionWork) {
+        self.spawn_protection_and_dispatch(work);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +227,7 @@ impl ControllerUpdateDispatcher {
 }
 
 // ---------------------------------------------------------------------------
-// Core orchestration (mirrors update_orchestrator.rs)
+// Core orchestration
 // ---------------------------------------------------------------------------
 
 #[tracing::instrument(skip_all, fields(update_id = %work.update_history_id))]

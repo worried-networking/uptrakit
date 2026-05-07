@@ -50,7 +50,6 @@ pub use mcp_compat::{
     validate_api_token_for_mcp,
 };
 pub mod tenant_db;
-pub(crate) mod update_orchestrator;
 pub mod update_output_broadcaster;
 pub mod workload_claims;
 
@@ -281,6 +280,9 @@ mod tests {
             reject_dangerous_commands: false,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+            update_dispatcher: std::sync::Arc::new(
+                uptrakit_controller_core::update::NoopUpdateDispatcher,
+            ),
         })
     }
 

@@ -23,7 +23,6 @@ use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::plugin_type_settings as pts_queries;
 use crate::queries::software_items as item_queries;
-use crate::queries::update_triggers::TriggerUpdateParams;
 use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -114,31 +113,6 @@ fn emit_software_item_mutation_audit(
     }
 }
 
-pub(crate) fn emit_software_update_audit(
-    state: &AppState,
-    tenant_id: Uuid,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    item_id: Uuid,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-    let entry = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
-    )
-    .tenant_scope(tenant_id)
-    .actor(actor_type, actor_id)
-    .target("software_item", item_id.to_string(), None)
-    .outcome(outcome)
-    .details(details)
-    .build();
-
-    if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
-    }
-}
-
 fn emit_software_version_check_audit(
     ctx: &AuditContext<'_>,
     item_id: Uuid,
@@ -186,43 +160,6 @@ fn classify_version_check_context_load_failure(
             uptrakit_audit_log::AuditOutcome::Failed,
             "version_check.internal_error",
         ),
-    }
-}
-
-fn classify_trigger_update_dispatch_audit_outcome(
-    status: uptrakit_shared_db::entity::update_history::UpdateStatus,
-) -> uptrakit_audit_log::AuditOutcome {
-    match status {
-        uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => {
-            uptrakit_audit_log::AuditOutcome::Failed
-        }
-        _ => uptrakit_audit_log::AuditOutcome::Success,
-    }
-}
-
-#[cfg(test)]
-mod trigger_update_audit_outcome_tests {
-    use super::classify_trigger_update_dispatch_audit_outcome;
-    use uptrakit_shared_db::entity::update_history;
-
-    #[test]
-    fn failed_dispatch_status_maps_to_failed_audit_outcome() {
-        assert_eq!(
-            classify_trigger_update_dispatch_audit_outcome(update_history::UpdateStatus::Failed),
-            uptrakit_audit_log::AuditOutcome::Failed
-        );
-    }
-
-    #[test]
-    fn non_failed_dispatch_status_maps_to_success_audit_outcome() {
-        assert_eq!(
-            classify_trigger_update_dispatch_audit_outcome(update_history::UpdateStatus::Pending),
-            uptrakit_audit_log::AuditOutcome::Success
-        );
-        assert_eq!(
-            classify_trigger_update_dispatch_audit_outcome(update_history::UpdateStatus::Queued),
-            uptrakit_audit_log::AuditOutcome::Success
-        );
     }
 }
 
@@ -1208,98 +1145,106 @@ pub async fn trigger_update(
     };
     let to_version = req.to_version.clone();
     let interactive = req.interactive;
-    // Convert the API release_info type to the wire type before delegating.
-    let release_info = req.release_info.map(|ri| uptrakit_wire::ReleaseInfo {
-        tag: ri.tag,
-        release_url: ri.release_url,
-        assets: ri
-            .assets
-            .into_iter()
-            .map(|a| uptrakit_wire::ReleaseAsset {
-                name: a.name,
-                download_url: a.download_url,
-                size: a.size,
-                content_type: None,
-                sha256_digest: None,
-            })
-            .collect(),
-        // Attestation fields are enriched server-side at dispatch time from
-        // latest_release_metadata and the fetch_releases plugin config.
-        attestation_status: None,
-        require_attestation: false,
+    // Convert the API release_info type to the wire type then serialise for
+    // UpdateDispatchParams, which carries an opaque JSON value.
+    let release_info = req.release_info.map(|ri| {
+        let wire = uptrakit_wire::ReleaseInfo {
+            tag: ri.tag,
+            release_url: ri.release_url,
+            assets: ri
+                .assets
+                .into_iter()
+                .map(|a| uptrakit_wire::ReleaseAsset {
+                    name: a.name,
+                    download_url: a.download_url,
+                    size: a.size,
+                    content_type: None,
+                    sha256_digest: None,
+                })
+                .collect(),
+            // Attestation fields are enriched server-side at dispatch time from
+            // latest_release_metadata and the fetch_releases plugin config.
+            attestation_status: None,
+            require_attestation: false,
+        };
+        serde_json::to_value(wire).unwrap_or(serde_json::Value::Null)
     });
 
-    let ctx = state.mutation_context();
-    let result = match item_actions::trigger_update(
-        &tenant_db,
-        &ctx,
-        TriggerUpdateParams {
-            tenant_id: tenant_db.tenant_id(),
-            item_id,
+    let result = state
+        .update_dispatcher
+        .dispatch(uptrakit_controller_core::update::UpdateDispatchParams::new(
+            tenant_db.tenant_id(),
             host_id,
-            to_version: to_version.clone(),
-            actor_type: update_actor_type.as_str(),
-            actor_id: &update_actor_id,
+            item_id,
+            to_version.clone(),
+            uptrakit_controller_core::update::ActorInfo::new(update_actor_type, update_actor_id),
             release_info,
             interactive,
-        },
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().trigger_audit_classification();
-            emit_software_update_audit(
-                &state,
-                tenant_db.tenant_id(),
-                &user,
-                api_token_id,
-                item_id,
-                outcome,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "to_version": to_version,
-                    "interactive": interactive,
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
-        }
-    };
-    if let Some(work) = result.pending_protection_work {
-        crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(&state), *work);
-    }
+        ))
+        .await
+        .map_err(|err| {
+            use uptrakit_controller_core::update::UpdateDispatchError;
+            match err.current_context() {
+                UpdateDispatchError::HostNotFound => ApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "Host not found.",
+                    "trigger_update.host_not_found",
+                    None,
+                ),
+                UpdateDispatchError::SoftwareItemNotFound => ApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "Software item not found.",
+                    "trigger_update.software_item_not_found",
+                    None,
+                ),
+                UpdateDispatchError::UpdateAlreadyActive => ApiError::new(
+                    StatusCode::CONFLICT,
+                    "An update is already active for this host.",
+                    "trigger_update.update_already_active",
+                    None,
+                ),
+                UpdateDispatchError::NotConfigured => ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "Host is not configured for updates.",
+                    "trigger_update.not_configured",
+                    None,
+                ),
+                UpdateDispatchError::AgentUnavailable => ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "No approved agent is linked to this host.",
+                    "trigger_update.agent_unavailable",
+                    None,
+                ),
+                UpdateDispatchError::Internal | _ => {
+                    tracing::warn!(
+                        host_id = %host_id,
+                        item_id = %item_id,
+                        "unhandled UpdateDispatchError in HTTP trigger_update"
+                    );
+                    ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "An internal error occurred.",
+                        "trigger_update.internal_error",
+                        Some(format!("{err}")),
+                    )
+                }
+            }
+        })?;
 
-    let status = match result.initial_status {
-        uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
-            TriggerUpdateStatus::Pending
-        }
-        uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => {
+    let status = match result.outcome {
+        uptrakit_controller_core::update::DispatchOutcome::Sent => TriggerUpdateStatus::Pending,
+        uptrakit_controller_core::update::DispatchOutcome::Queued => TriggerUpdateStatus::Queued,
+        uptrakit_controller_core::update::DispatchOutcome::Failed => TriggerUpdateStatus::Failed,
+        _ => {
+            tracing::warn!("unhandled DispatchOutcome in HTTP trigger_update response mapping");
             TriggerUpdateStatus::Failed
         }
-        _ => TriggerUpdateStatus::Queued,
     };
+
     let resp = TriggerUpdateResponse {
         update_history_id: result.update_history_id,
         status,
     };
-
-    emit_software_update_audit(
-        &state,
-        tenant_db.tenant_id(),
-        &user,
-        api_token_id,
-        item_id,
-        classify_trigger_update_dispatch_audit_outcome(result.initial_status),
-        serde_json::json!({
-            "host_id": host_id,
-            "to_version": to_version,
-            "interactive": interactive,
-            "update_history_id": result.update_history_id,
-            "dispatch_status": resp.status.to_string(),
-        }),
-    );
-
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 

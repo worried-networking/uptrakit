@@ -983,6 +983,7 @@ mod tests {
             reject_dangerous_commands: false,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+            update_dispatcher: Arc::new(uptrakit_controller_core::update::NoopUpdateDispatcher),
         })
     }
 
