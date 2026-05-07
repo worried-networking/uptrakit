@@ -151,6 +151,7 @@ uptrakit-plugin-package-manager-pacman = { path = "crates/plugins/package-manage
 uptrakit-plugin-package-manager-apk = { path = "crates/plugins/package-managers/apk", version = "0.0.1" }
 uptrakit-plugin-package-manager-snap = { path = "crates/plugins/package-managers/snap", version = "0.0.1" }
 uptrakit-plugin-package-manager-cargo = { path = "crates/plugins/package-managers/cargo", version = "0.0.1" }
+uptrakit-package-manager-routeros = { path = "crates/plugins/package-managers/routeros", version = "0.0.1" }
 uptrakit-plugin-infrastructure-proxmox = { path = "crates/plugins/infrastructure/proxmox", version = "0.0.1" }
 uptrakit-plugin-hook-systemd = { path = "crates/plugins/hooks/systemd", version = "0.0.1" }
 uptrakit-plugin-hook-shell = { path = "crates/plugins/hooks/shell", version = "0.0.1" }
