@@ -36,6 +36,10 @@ tracing      = { workspace = true }
 [features]
 axum-integration = ["dep:axum"]
 nats = []
+plugin-ops = [
+    "uptrakit-web-api-queries/plugin-ops",
+    "uptrakit-plugin-infrastructure-registry/plugin-ops",
+]
 # Expose test-only helpers (e.g. `NotificationDispatcher::test_channel`) to
 # dependent crates' test targets without requiring #[cfg(test)].
 testing = []
