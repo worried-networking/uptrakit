@@ -79,12 +79,17 @@ system_service.not_approved
 system_service.not_found
 system_service.not_pending
 trigger_update.agent_not_approved
+trigger_update.agent_unavailable
 trigger_update.database_error
 trigger_update.host_not_assigned
 trigger_update.host_not_found
+trigger_update.internal_error
 trigger_update.no_agent
 trigger_update.no_execute_update_plugin
+trigger_update.not_configured
 trigger_update.plugin_config_not_found
+trigger_update.post_update_finalization_failed
+trigger_update.pre_update_protection_failed
 trigger_update.software_item_not_found
 trigger_update.unknown_plugin_type
 trigger_update.update_already_active

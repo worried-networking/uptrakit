@@ -8,7 +8,7 @@ mod version_check_dispatch;
 
 use crate::AppState;
 use crate::actions::software_items as item_actions;
-use crate::api_error::ApiError;
+use crate::api_error::{ApiError, format_report_summary};
 use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -1167,7 +1167,10 @@ pub async fn trigger_update(
             attestation_status: None,
             require_attestation: false,
         };
-        serde_json::to_value(wire).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(wire).unwrap_or_else(|e| {
+            tracing::warn!("failed to serialize release info: {e}");
+            serde_json::Value::Null
+        })
     });
 
     let result = state
@@ -1225,7 +1228,7 @@ pub async fn trigger_update(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "An internal error occurred.",
                         "trigger_update.internal_error",
-                        Some(format!("{err}")),
+                        Some(format_report_summary(&err)),
                     )
                 }
             }
