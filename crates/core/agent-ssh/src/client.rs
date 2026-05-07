@@ -16,6 +16,9 @@ use tokio::task::JoinSet;
 use uptrakit_agent_core::ConnectionContext;
 use uptrakit_agent_ssh_runtime::SshInFlightUpdate;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
+use uptrakit_plugin_infrastructure_registry::{
+    HostCapabilities, HostRuntime, construct_host_runtime,
+};
 
 use uptrakit_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, Capability, CheckVersionsPayload,
@@ -496,8 +499,11 @@ pub async fn handle_execute_update_ssh(
     let host_machine_id = payload.host_machine_id.clone();
     let update_history_id = payload.update_history_id;
 
+    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+
     #[allow(unused_mut)]
-    let mut in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
+    let mut in_flight = uptrakit_agent_core::start_update(payload, runtime, conn, &ctx).await;
 
     // Extract interactive channels before moving InFlightUpdate into the forwarder.
     #[cfg(feature = "interactive")]
@@ -663,7 +669,9 @@ async fn run_check_versions_ssh(
         hostname = %host.hostname,
         "running version check on SSH host"
     );
-    uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
+    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    uptrakit_agent_core::run_check_versions(payload, runtime, &ctx).await
 }
 
 /// Spawn a `DiscoverSoftware` operation as a background task.
@@ -759,7 +767,9 @@ async fn run_discover_software_ssh(
         hostname = %host.hostname,
         "running discovery on SSH host"
     );
-    uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
+    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    uptrakit_agent_core::run_discover_software(payload, runtime, &ctx).await
 }
 
 /// Spawn an `ExecuteBatchUpdate` operation as a background task.
@@ -889,7 +899,9 @@ async fn run_execute_batch_update_ssh(
         batch_id = %payload.batch_id,
         "running batch update on SSH host"
     );
-    uptrakit_agent_core::run_execute_batch_update(payload, executor, &ctx).await
+    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    uptrakit_agent_core::run_execute_batch_update(payload, runtime, &ctx).await
 }
 
 // ── Shared re-exports ─────────────────────────────────────────────────────────

@@ -8,10 +8,9 @@
 
 use std::sync::Arc;
 
-use uptrakit_command::CommandExecutor;
 use uptrakit_plugin_infrastructure_registry::{
-    BatchUpdateItem, HostCapabilities, HostCompatibility, MetadataAwareHostRuntime,
-    PluginCapability, UpdateLifecycleContext, construct_host_runtime, get_descriptor,
+    BatchUpdateItem, HostCompatibility, HostRuntime, MetadataAwareHostRuntime, PluginCapability,
+    UpdateLifecycleContext, get_descriptor,
 };
 use uptrakit_service_sdk::LoopOutcome;
 use uptrakit_wire::{
@@ -69,21 +68,17 @@ struct SpawnedUpdate {
 /// Otherwise, falls back to the standard non-interactive path.
 async fn spawn_update_task(
     payload: uptrakit_wire::ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     output_tx: tokio::sync::mpsc::Sender<crate::update::UpdateOutputMessage>,
     early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
     _update_history_id: uuid::Uuid,
 ) -> SpawnedUpdate {
     // Try interactive execution when the feature is enabled and requested.
     #[cfg(feature = "interactive")]
-    if payload.interactive && executor.supports_interactive() {
-        let result = crate::update::execute_update_interactive(
-            payload,
-            executor,
-            output_tx,
-            early_result_tx,
-        )
-        .await;
+    if payload.interactive && runtime.executor().supports_interactive() {
+        let result =
+            crate::update::execute_update_interactive(payload, runtime, output_tx, early_result_tx)
+                .await;
         return SpawnedUpdate {
             handle: result.handle,
             stdin_tx: result.stdin_tx,
@@ -94,7 +89,7 @@ async fn spawn_update_task(
 
     // Non-interactive fallback (always compiled, always reachable without the feature).
     let handle = tokio::spawn(async move {
-        crate::update::execute_update(payload, executor, output_tx, early_result_tx).await
+        crate::update::execute_update(payload, runtime, output_tx, early_result_tx).await
     });
     SpawnedUpdate {
         handle,
@@ -309,7 +304,7 @@ pub async fn send_background_result(
 #[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
 pub async fn run_check_versions(
     payload: uptrakit_wire::CheckVersionsPayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> ServiceMessage {
     tracing::info!(
@@ -319,8 +314,7 @@ pub async fn run_check_versions(
     );
 
     let results: Vec<VersionCheckResult> =
-        crate::version_check::batch_check_versions(payload.assignments, Arc::clone(&executor), ctx)
-            .await;
+        crate::version_check::batch_check_versions(payload.assignments, runtime, ctx).await;
 
     tracing::debug!("version check complete");
     ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results })
@@ -339,7 +333,7 @@ pub async fn run_check_versions(
 #[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn start_update(
     payload: uptrakit_wire::ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     conn: &mut dyn ServiceTransport,
     ctx: &ConnectionContext,
 ) -> InFlightUpdate {
@@ -366,7 +360,7 @@ pub async fn start_update(
 
     let spawned = spawn_update_task(
         effective_payload,
-        executor,
+        runtime,
         output_tx,
         early_result_tx,
         update_history_id,
@@ -426,7 +420,7 @@ pub async fn start_update(
 #[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn handle_execute_update(
     payload: uptrakit_wire::ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     in_flight_update: &mut Option<InFlightUpdate>,
     conn: &mut dyn ServiceTransport,
     ctx: &ConnectionContext,
@@ -458,7 +452,7 @@ pub async fn handle_execute_update(
         return;
     }
 
-    *in_flight_update = Some(start_update(payload, executor, conn, ctx).await);
+    *in_flight_update = Some(start_update(payload, runtime, conn, ctx).await);
 }
 
 /// Run a batch update and return the result as a [`ServiceMessage`].
@@ -469,7 +463,7 @@ pub async fn handle_execute_update(
 #[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
 pub async fn run_execute_batch_update(
     payload: ExecuteBatchUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> ServiceMessage {
     tracing::info!(
@@ -480,7 +474,7 @@ pub async fn run_execute_batch_update(
         "received batch update request"
     );
 
-    let results = batch_update_inner(&payload, executor, ctx).await;
+    let results = batch_update_inner(&payload, runtime, ctx).await;
 
     ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
         batch_id: payload.batch_id,
@@ -491,7 +485,7 @@ pub async fn run_execute_batch_update(
 /// Inner batch-update logic for [`run_execute_batch_update`].
 async fn batch_update_inner(
     payload: &ExecuteBatchUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> Vec<BatchUpdateItemResult> {
     // Build a correlation map: package_identifier → (host_software_item_id, update_history_id)
@@ -530,9 +524,7 @@ async fn batch_update_inner(
     // Execute with timeout
     let timeout_duration = payload.timeout;
     let batch_results = tokio::time::timeout(timeout_duration, async {
-        // Create plugin via descriptor
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-
+        // Apply connection context to the plugin config before creating plugin
         let desc = get_descriptor(payload.plugin_type.as_str()).ok_or_else(|| {
             let msg = format!(
                 "Failed to create plugin: unknown plugin type '{}'",
@@ -551,7 +543,7 @@ async fn batch_update_inner(
             msg
         })?;
 
-        let updater = (slot.create)(&effective_config, runtime).map_err(|e| {
+        let updater = (slot.create)(&effective_config, Arc::clone(&runtime)).map_err(|e| {
             let msg = format!("Failed to create plugin: {e}");
             tracing::error!(error = %e, "failed to create plugin for batch update");
             msg
@@ -566,7 +558,7 @@ async fn batch_update_inner(
         crate::update::run_batch_pre_hook_plugins(
             &payload.pre_update_hook_plugins,
             &pre_ctx,
-            Arc::clone(&executor),
+            Arc::clone(&runtime),
         )
         .await
         .map_err(|e| format!("Pre-update hook failed: {e}"))?;
@@ -585,7 +577,7 @@ async fn batch_update_inner(
         crate::update::run_batch_post_hook_plugins(
             &payload.post_update_hook_plugins,
             &post_ctx,
-            Arc::clone(&executor),
+            Arc::clone(&runtime),
         )
         .await;
 
@@ -673,7 +665,7 @@ async fn batch_update_inner(
 #[tracing::instrument(skip_all, fields(plugin_count = payload.plugins.len()))]
 pub async fn run_discover_software(
     payload: DiscoverSoftwarePayload,
-    executor: Arc<dyn CommandExecutor>,
+    base_runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> ServiceMessage {
     tracing::info!(
@@ -682,7 +674,7 @@ pub async fn run_discover_software(
         "received DiscoverSoftware request"
     );
 
-    let results = discover_software_inner(&payload, executor, ctx).await;
+    let results = discover_software_inner(&payload, base_runtime, ctx).await;
 
     ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
         host_machine_id: payload.host_machine_id,
@@ -693,7 +685,7 @@ pub async fn run_discover_software(
 /// Inner discovery logic for [`run_discover_software`].
 async fn discover_software_inner(
     payload: &DiscoverSoftwarePayload,
-    executor: Arc<dyn CommandExecutor>,
+    base_runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> Vec<DiscoveryPluginResult> {
     let mut results = Vec::with_capacity(payload.plugins.len());
@@ -708,14 +700,11 @@ async fn discover_software_inner(
         let mut effective_config = assignment.config.clone();
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
-        let base_runtime =
-            construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-        let runtime: Arc<dyn uptrakit_plugin_infrastructure_registry::HostRuntime> =
-            if let Some(ref provider) = ctx.metadata_provider {
-                MetadataAwareHostRuntime::new(base_runtime, Arc::clone(provider))
-            } else {
-                base_runtime
-            };
+        let runtime: Arc<dyn HostRuntime> = if let Some(ref provider) = ctx.metadata_provider {
+            MetadataAwareHostRuntime::new(Arc::clone(&base_runtime), Arc::clone(provider))
+        } else {
+            Arc::clone(&base_runtime)
+        };
 
         let result = match get_descriptor(assignment.plugin_type.as_str()) {
             None => {
@@ -849,7 +838,6 @@ async fn discover_software_inner(
 mod tests {
     use std::sync::Arc;
 
-    use uptrakit_command::NoopCommandExecutor;
     use uptrakit_plugin_infrastructure_registry::PluginTypeId;
     use uptrakit_wire::{
         BatchUpdateItem, CheckVersionsPayload, ExecuteBatchUpdatePayload, ServiceMessage,
@@ -868,8 +856,13 @@ mod tests {
         }
     }
 
-    fn noop_executor() -> Arc<dyn uptrakit_command::CommandExecutor> {
-        Arc::new(NoopCommandExecutor)
+    fn noop_runtime() -> Arc<dyn super::HostRuntime> {
+        use uptrakit_command::NoopCommandExecutor;
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, StandardHostRuntime};
+        Arc::new(StandardHostRuntime::new(
+            Arc::new(NoopCommandExecutor),
+            HostCapabilities::default(),
+        ))
     }
 
     fn ctx() -> ConnectionContext {
@@ -907,7 +900,7 @@ mod tests {
             PluginTypeId::new("unknown-plugin-xyz"),
             std::time::Duration::from_secs(30),
         );
-        let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;
+        let results = super::batch_update_inner(&payload, noop_runtime(), &ctx()).await;
 
         assert_eq!(results.len(), 1, "must return one result per package");
         assert_eq!(
@@ -942,7 +935,7 @@ mod tests {
             PluginTypeId::new("unknown-plugin-xyz"),
             std::time::Duration::ZERO,
         );
-        let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;
+        let results = super::batch_update_inner(&payload, noop_runtime(), &ctx()).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, UpdateFinalStatus::Failed);
@@ -961,7 +954,7 @@ mod tests {
             assignments: vec![],
         };
 
-        let response = super::run_check_versions(payload, noop_executor(), &ctx()).await;
+        let response = super::run_check_versions(payload, noop_runtime(), &ctx()).await;
 
         match response {
             ServiceMessage::VersionCheckResults(results) => {
