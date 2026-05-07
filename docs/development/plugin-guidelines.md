@@ -30,13 +30,13 @@ can continue to validate configs and mask secrets correctly.
 
 The `PluginFamily` enum classifies plugins into functional groups:
 
-| Family | Description |
-| :--- | :--- |
-| `Software` | Plugins that detect, fetch, and update software packages. |
-| `Hook` | Plugins that run pre/post-update lifecycle hooks. |
-| `Notification` | Plugins that deliver alerts via external channels (webhook, email, Telegram). |
-| `Infrastructure` | Plugins that manage infrastructure resources (Proxmox VE). |
-| `Enhancement` | Plugins that enrich software items with supplemental data (dashboard icons). |
+| Family           | Description                                                                   |
+| :--------------- | :---------------------------------------------------------------------------- |
+| `Software`       | Plugins that detect, fetch, and update software packages.                     |
+| `Hook`           | Plugins that run pre/post-update lifecycle hooks.                             |
+| `Notification`   | Plugins that deliver alerts via external channels (webhook, email, Telegram). |
+| `Infrastructure` | Plugins that manage infrastructure resources (Proxmox VE).                    |
+| `Enhancement`    | Plugins that enrich software items with supplemental data (dashboard icons).  |
 
 The family is declared in `declare_plugin!` and determines which role traits are expected.
 
@@ -46,24 +46,24 @@ The `PluginCapability` enum defines optional features a plugin may support. Capa
 from the roles declared in `declare_plugin!`. Plugins do not manually list capabilities -- the macro infers
 them from implemented role traits.
 
-| Capability | Source | Description |
-| :--- | :--- | :--- |
-| `DiscoverLocalSoftware` | `DiscoveryPlugin` role | Enumerate software the plugin can manage on the local system. |
-| `RefreshPackageIndex` | `PackageIndexPlugin` role | Refresh local package index (for example, `apt update`). |
-| `DetectHostCompatibility` | `HostCompatibilityPlugin` role | Determine whether this plugin is applicable to the current host environment. |
-| `UpdateLifecycle` | `UpdateLifecyclePlugin` role | Plugin implements pre/post-update hooks. See [Update Lifecycle Plugins](update-hooks.md). |
-| `ControllerSideFetchReleases` | `HostRequirements::CONTROLLER_ONLY` | `fetch_releases()` runs on the controller without local system state. |
-| `ConfigTest` | `config_test: [...]` in `declare_plugin!` | Plugin supports configuration testing. See [Config Test Capability](#config-test-capability). |
+| Capability                    | Source                                    | Description                                                                                   |
+| :---------------------------- | :---------------------------------------- | :-------------------------------------------------------------------------------------------- |
+| `DiscoverLocalSoftware`       | `DiscoveryPlugin` role                    | Enumerate software the plugin can manage on the local system.                                 |
+| `RefreshPackageIndex`         | `PackageIndexPlugin` role                 | Refresh local package index (for example, `apt update`).                                      |
+| `DetectHostCompatibility`     | `HostCompatibilityPlugin` role            | Determine whether this plugin is applicable to the current host environment.                  |
+| `UpdateLifecycle`             | `UpdateLifecyclePlugin` role              | Plugin implements pre/post-update hooks. See [Update Lifecycle Plugins](update-hooks.md).     |
+| `ControllerSideFetchReleases` | `HostRequirements::CONTROLLER_ONLY`       | `fetch_releases()` runs on the controller without local system state.                         |
+| `ConfigTest`                  | `config_test: [...]` in `declare_plugin!` | Plugin supports configuration testing. See [Config Test Capability](#config-test-capability). |
 
 ## Host Requirements
 
 Each plugin role declares its host requirements via the `HostRequirements` enum:
 
-| Variant | Meaning | Example |
-| :--- | :--- | :--- |
-| `POSIX` | Requires a POSIX command executor (default). | APT version detection, Homebrew discovery. |
+| Variant            | Meaning                                         | Example                                         |
+| :----------------- | :---------------------------------------------- | :---------------------------------------------- |
+| `POSIX`            | Requires a POSIX command executor (default).    | APT version detection, Homebrew discovery.      |
 | `POSIX_PRIVILEGED` | Requires POSIX with elevated privileges (sudo). | APT package installation, systemctl operations. |
-| `CONTROLLER_ONLY` | Runs on the controller; no agent needed. | GitHub Releases fetch, Docker registry queries. |
+| `CONTROLLER_ONLY`  | Runs on the controller; no agent needed.        | GitHub Releases fetch, Docker registry queries. |
 
 A single plugin can have different requirements per role. For example, APT uses `POSIX` for detection
 and `POSIX_PRIVILEGED` for updates.
@@ -201,13 +201,13 @@ All built-in plugins declare this capability.
 The test executes without creating any database records or triggering real updates. The kind of test
 performed depends on the plugin type and its capabilities:
 
-| `ConfigTestKind` | Description | When used |
-| :--- | :--- | :--- |
-| `VersionDetection` | Runs `detect_installed_version()` against the host and returns the detected version. | Agent-side plugins that support version detection (Shell, APT, Homebrew, etc.). |
-| `UpdateCommandValidation` | Validates the update command syntax (e.g. `sh -n` check) without executing it. | Agent-side plugins with an update command (Shell). |
-| `PreUpdateHook` | Executes the pre-update hook with a mock `UpdateLifecycleContext`. | Hook plugins (hook\_systemd, hook\_shell) assigned to `pre_update_hook`. |
-| `PostUpdateHook` | Executes the post-update hook with a mock `UpdateLifecycleContext`. | Hook plugins (hook\_systemd, hook\_shell) assigned to `post_update_hook`. |
-| `Connectivity` | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. | Controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm, Cargo). |
+| `ConfigTestKind`          | Description                                                                          | When used                                                                       |
+| :------------------------ | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| `VersionDetection`        | Runs `detect_installed_version()` against the host and returns the detected version. | Agent-side plugins that support version detection (Shell, APT, Homebrew, etc.). |
+| `UpdateCommandValidation` | Validates the update command syntax (e.g. `sh -n` check) without executing it.       | Agent-side plugins with an update command (Shell).                              |
+| `PreUpdateHook`           | Executes the pre-update hook with a mock `UpdateLifecycleContext`.                   | Hook plugins (hook_systemd, hook_shell) assigned to `pre_update_hook`.          |
+| `PostUpdateHook`          | Executes the post-update hook with a mock `UpdateLifecycleContext`.                  | Hook plugins (hook_systemd, hook_shell) assigned to `post_update_hook`.         |
+| `Connectivity`            | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. | Controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm, Cargo).          |
 
 ### Two execution paths
 
@@ -251,16 +251,16 @@ declare_plugin! {
 }
 ```
 
-| Field | Required | Description |
-| :--- | :--- | :--- |
-| `id` | Yes | `PluginTypeId` identifying this plugin. |
-| `name` | Yes | Human-readable display name. |
-| `family` | Yes | `PluginFamily` variant. |
-| `config_model` | Yes | `ConfigModel::PluginConfig` or `ConfigModel::NotificationChannel`. |
-| `config` | Yes | Config struct type (must implement `PluginConfig`). |
-| `plugin` | Yes | Plugin struct type (must implement `PluginMeta` + role traits). |
-| `host_requirements` | Yes | Default `HostRequirements` for the plugin. |
-| `config_test` | No | List of `ConfigTestKind` variants (first is default). |
+| Field               | Required | Description                                                        |
+| :------------------ | :------- | :----------------------------------------------------------------- |
+| `id`                | Yes      | `PluginTypeId` identifying this plugin.                            |
+| `name`              | Yes      | Human-readable display name.                                       |
+| `family`            | Yes      | `PluginFamily` variant.                                            |
+| `config_model`      | Yes      | `ConfigModel::PluginConfig` or `ConfigModel::NotificationChannel`. |
+| `config`            | Yes      | Config struct type (must implement `PluginConfig`).                |
+| `plugin`            | Yes      | Plugin struct type (must implement `PluginMeta` + role traits).    |
+| `host_requirements` | Yes      | Default `HostRequirements` for the plugin.                         |
+| `config_test`       | No       | List of `ConfigTestKind` variants (first is default).              |
 
 ## The `PluginConfig` Trait
 
@@ -378,11 +378,11 @@ Plugin configuration uses a **two-tier model**:
 
 **When to use which:**
 
-| Use type settings for | Use plugin configs for |
-| --- | --- |
-| Discovery preferences (`discovery_filter`) | Authentication credentials (`auth_token`) |
-| Behavioral defaults (`package_type`) | API endpoints (`api_base_url`) |
-| Settings shared across all configs of a type | Settings that differ between profiles |
+| Use type settings for                        | Use plugin configs for                    |
+| -------------------------------------------- | ----------------------------------------- |
+| Discovery preferences (`discovery_filter`)   | Authentication credentials (`auth_token`) |
+| Behavioral defaults (`package_type`)         | API endpoints (`api_base_url`)            |
+| Settings shared across all configs of a type | Settings that differ between profiles     |
 
 **Implementing type settings:**
 
@@ -467,6 +467,31 @@ impl GitHubPlugin {
     }
 }
 ```
+
+### RouterOS plugins
+
+RouterOS plugins receive a `RouterOsHostRuntime` and must downcast to access the
+`RouterOsExecutor`:
+
+```rust
+impl RouterOsPlugin {
+    pub fn new(config: RouterOsConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let ros = runtime
+            .as_any()
+            .downcast_ref::<RouterOsHostRuntime>()
+            .ok_or_else(|| report!(PluginError::Configuration(
+                "RouterOS plugin requires RouterOsHostRuntime".to_string()
+            )))?;
+        let exec = ros.routeros_executor();
+        let allow_reboot = ros.allow_reboot();
+        Ok(Self { config, exec, allow_reboot })
+    }
+}
+```
+
+`RouterOsHostRuntime` is defined in `uptrakit_plugin_infrastructure_core::host_runtime`.
+Set `host_requirements: HostRequirements::ROUTER_OS` in `declare_plugin!` to ensure
+the plugin is only assigned to RouterOS hosts.
 
 All plugin `new()` constructors must return `Result<Self, Report<PluginError>>` so the registry can
 handle instantiation failures uniformly. The constructor should validate its configuration before
@@ -839,11 +864,11 @@ operator guidance.
 Each software item on a host is managed through **role-based plugin assignments**. There are three
 plugin roles, and each `(host, software_item)` pair can have up to one plugin assignment per role:
 
-| Role | Default execution site | Responsibility |
-| :--- | :--- | :--- |
-| `detect_version` | Agent | Detect the currently installed version on the host. |
-| `fetch_releases` | Agent or Controller (depends on `execution_site` and plugin capabilities) | Fetch latest version metadata from an upstream source. |
-| `execute_update` | Agent | Run the update (via sudo-allowlisted commands or custom script). |
+| Role             | Default execution site                                                    | Responsibility                                                   |
+| :--------------- | :------------------------------------------------------------------------ | :--------------------------------------------------------------- |
+| `detect_version` | Agent                                                                     | Detect the currently installed version on the host.              |
+| `fetch_releases` | Agent or Controller (depends on `execution_site` and plugin capabilities) | Fetch latest version metadata from an upstream source.           |
+| `execute_update` | Agent                                                                     | Run the update (via sudo-allowlisted commands or custom script). |
 
 Different plugins can be assigned to different roles for the same software item on the same host.
 For example, a PHS-discovered container might use APT for `detect_version` and `execute_update`
@@ -854,23 +879,23 @@ for the full data model and execution site decision logic.
 
 Plugin crates:
 
-| Crate | Path | Purpose |
-| :--- | :--- | :--- |
-| `uptrakit-shared-types` | `crates/shared/types/` | Canonical home for `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
-| `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. |
-| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; `PluginConfig` trait; re-exports shared types and executor types. |
-| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginTypeId`. |
-| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `HostCompatibilityPlugin`. |
-| `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: controller-side fetch; agent-side install. |
-| `uptrakit-plugin-releases-gitlab` | `crates/plugins/releases/gitlab/` | GitLab Releases: controller-side fetch; supports nested namespaces; PRIVATE-TOKEN auth. |
-| `uptrakit-plugin-releases-forgejo` | `crates/plugins/releases/forgejo/` | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`. |
-| `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `HostCompatibilityPlugin`. |
-| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `HostCompatibilityPlugin`. |
-| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `HostCompatibilityPlugin`. |
-| `uptrakit-plugin-package-manager-npm` | `crates/plugins/package-managers/npm/` | npm: global-package tracking via `registry.npmjs.org`. Implements `HostCompatibilityPlugin`. |
-| `uptrakit-plugin-generic-shell` | `crates/plugins/generic/shell/` | Generic shell plugin: custom `version_command` and `update_command`; agent-side only. |
-| `uptrakit-plugin-hook-systemd` | `crates/plugins/hooks/systemd/` | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecyclePlugin`. |
-| `uptrakit-plugin-hook-shell` | `crates/plugins/hooks/shell/` | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecyclePlugin`. |
+| Crate                                              | Path                                               | Purpose                                                                                                  |
+| :------------------------------------------------- | :------------------------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `uptrakit-shared-types`                            | `crates/shared/types/`                             | Canonical home for `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
+| `uptrakit-command`                                 | `crates/shared/command/`                           | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`.                         |
+| `uptrakit-plugin-infrastructure-core`              | `crates/plugins/infrastructure/core/`              | Plugin trait/abstractions; `PluginConfig` trait; re-exports shared types and executor types.             |
+| `uptrakit-plugin-infrastructure-registry`          | `crates/plugins/infrastructure/registry/`          | Centralized plugin dispatch and validation; re-exports `PluginTypeId`.                                   |
+| `uptrakit-plugin-releases-docker`                  | `crates/plugins/releases/docker/`                  | Docker/OCI image tracking and container discovery. Implements `HostCompatibilityPlugin`.                 |
+| `uptrakit-plugin-releases-github`                  | `crates/plugins/releases/github/`                  | GitHub Releases: controller-side fetch; agent-side install.                                              |
+| `uptrakit-plugin-releases-gitlab`                  | `crates/plugins/releases/gitlab/`                  | GitLab Releases: controller-side fetch; supports nested namespaces; PRIVATE-TOKEN auth.                  |
+| `uptrakit-plugin-releases-forgejo`                 | `crates/plugins/releases/forgejo/`                 | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`.                             |
+| `uptrakit-plugin-package-manager-homebrew`         | `crates/plugins/package-managers/homebrew/`        | Homebrew: agent-side version tracking and updates. Implements `HostCompatibilityPlugin`.                 |
+| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `HostCompatibilityPlugin`.             |
+| `uptrakit-plugin-package-manager-apt`              | `crates/plugins/package-managers/apt/`             | APT: Debian/Ubuntu package management. Implements `HostCompatibilityPlugin`.                             |
+| `uptrakit-plugin-package-manager-npm`              | `crates/plugins/package-managers/npm/`             | npm: global-package tracking via `registry.npmjs.org`. Implements `HostCompatibilityPlugin`.             |
+| `uptrakit-plugin-generic-shell`                    | `crates/plugins/generic/shell/`                    | Generic shell plugin: custom `version_command` and `update_command`; agent-side only.                    |
+| `uptrakit-plugin-hook-systemd`                     | `crates/plugins/hooks/systemd/`                    | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecyclePlugin`.         |
+| `uptrakit-plugin-hook-shell`                       | `crates/plugins/hooks/shell/`                      | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecyclePlugin`.      |
 
 ## Plugin Source Layout
 
@@ -1072,10 +1097,10 @@ validate_version(to_version)
 
 **Per-plugin validation rules:**
 
-| Plugin | Allowed characters | Additional rejections |
-| :--- | :--- | :--- |
-| npm | `[a-zA-Z0-9._+-]` | Protocol prefixes: `file:`, `git+`, `http:`, `https:` |
-| apt | `[a-zA-Z0-9.+~:-]` | Leading `-` (would be interpreted as a flag) |
+| Plugin | Allowed characters | Additional rejections                                 |
+| :----- | :----------------- | :---------------------------------------------------- |
+| npm    | `[a-zA-Z0-9._+-]`  | Protocol prefixes: `file:`, `git+`, `http:`, `https:` |
+| apt    | `[a-zA-Z0-9.+~:-]` | Leading `-` (would be interpreted as a flag)          |
 
 **Testing:** Add unit tests covering valid versions, boundary cases (empty, max length), and
 injection attempts (protocol prefixes for npm, flag injection for apt).
@@ -1120,14 +1145,14 @@ The `DiscoveryPlugin` role trait includes a `discover_software()` method that al
 software they can manage on the local system. The method returns a `Vec<DiscoveredSoftware>`, where each
 entry contains:
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `package_identifier` | `String` | Plugin-specific identifier (maps to `host_software_items.package_identifier`). |
-| `name` | `String` | Human-readable display name. |
-| `installed_version` | `String` | Currently installed version (required; plugins omit items with unknown versions). |
-| `featured` | `bool` | Controls visibility: `true` = individual entry in Software list, `false` = aggregated per-host summary. |
-| `targets` | `Vec<DiscoveryTarget>` | Structured targets for plugin config creation. Empty = use discovering plugin's config. |
-| `extra` | `Option<serde_json::Value>` | Informational metadata only (e.g. Docker container names). Not used for config synthesis. |
+| Field                | Type                        | Description                                                                                             |
+| :------------------- | :-------------------------- | :------------------------------------------------------------------------------------------------------ |
+| `package_identifier` | `String`                    | Plugin-specific identifier (maps to `host_software_items.package_identifier`).                          |
+| `name`               | `String`                    | Human-readable display name.                                                                            |
+| `installed_version`  | `String`                    | Currently installed version (required; plugins omit items with unknown versions).                       |
+| `featured`           | `bool`                      | Controls visibility: `true` = individual entry in Software list, `false` = aggregated per-host summary. |
+| `targets`            | `Vec<DiscoveryTarget>`      | Structured targets for plugin config creation. Empty = use discovering plugin's config.                 |
+| `extra`              | `Option<serde_json::Value>` | Informational metadata only (e.g. Docker container names). Not used for config synthesis.               |
 
 The default implementation returns an empty list. Plugins that support discovery (e.g.,
 Proxmox Helper-Scripts) override this method to scan the local system.
@@ -1162,15 +1187,15 @@ DiscoveredSoftware {
 
 **Current plugin featured assignment:**
 
-| Plugin | Mode | Featured |
-| :--- | :--- | :--- |
-| APT | all modes | `false` |
-| Homebrew | all modes | `false` |
-| npm | all modes | `false` |
-| Cargo | all modes | `false` |
-| Snap | all modes | `false` |
-| Docker | all modes | `true` |
-| Proxmox Helper Scripts | all modes | `true` |
+| Plugin                 | Mode      | Featured |
+| :--------------------- | :-------- | :------- |
+| APT                    | all modes | `false`  |
+| Homebrew               | all modes | `false`  |
+| npm                    | all modes | `false`  |
+| Cargo                  | all modes | `false`  |
+| Snap                   | all modes | `false`  |
+| Docker                 | all modes | `true`   |
+| Proxmox Helper Scripts | all modes | `true`   |
 
 The controller's `process_discovery_results()` uses the `featured` flag to determine the
 storage strategy. For non-featured items the controller resolves the plugin config ID:
@@ -1633,17 +1658,17 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 
 **Config fields (`GitHubConfig`):**
 
-| Field | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `owner` | String | Yes | -- | GitHub repository owner. |
-| `repo` | String | Yes | -- | GitHub repository name. |
-| `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
-| `api_base_url` | String | No | `https://api.github.com` | API base URL (for GitHub Enterprise). |
-| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
-| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
-| `asset_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter release assets (empty means all). |
-| `install_command` | `Option<String>` | No | `null` | Custom shell command to execute after downloading the release asset. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders (shell-escaped). |
-| `detect_installed_version_command` | `Option<String>` | No | `null` | Shell command to detect the installed version on the agent host. The first non-empty trimmed line of stdout is used. Supports `{package_identifier}` placeholder (shell-escaped). If absent, `detect_installed_version()` returns `None`. |
+| Field                              | Type             | Required | Default                  | Description                                                                                                                                                                                                                               |
+| :--------------------------------- | :--------------- | :------- | :----------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`                            | String           | Yes      | --                       | GitHub repository owner.                                                                                                                                                                                                                  |
+| `repo`                             | String           | Yes      | --                       | GitHub repository name.                                                                                                                                                                                                                   |
+| `auth_token`                       | String           | No       | `null`                   | Personal access token (private repos or higher rate limits).                                                                                                                                                                              |
+| `api_base_url`                     | String           | No       | `https://api.github.com` | API base URL (for GitHub Enterprise).                                                                                                                                                                                                     |
+| `include_prereleases`              | bool             | No       | `false`                  | Whether to include pre-release versions.                                                                                                                                                                                                  |
+| `tag_strip_prefix`                 | String           | No       | `"v"`                    | Prefix to strip from tag names to extract version strings.                                                                                                                                                                                |
+| `asset_patterns`                   | `Vec<String>`    | No       | `[]`                     | Regex patterns to filter release assets (empty means all).                                                                                                                                                                                |
+| `install_command`                  | `Option<String>` | No       | `null`                   | Custom shell command to execute after downloading the release asset. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders (shell-escaped).                                                                           |
+| `detect_installed_version_command` | `Option<String>` | No       | `null`                   | Shell command to detect the installed version on the agent host. The first non-empty trimmed line of stdout is used. Supports `{package_identifier}` placeholder (shell-escaped). If absent, `detect_installed_version()` returns `None`. |
 
 **Behaviour:**
 

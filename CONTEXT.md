@@ -11,7 +11,9 @@ An isolated account that owns all resources. Single-tenant is the only tested de
 _Avoid_: organization, workspace, account
 
 **Host**:
-A server whose software is managed by uptrakit.
+A server whose software is managed by uptrakit. Supported OS families: Linux,
+macOS, FreeBSD, and RouterOS (MikroTik). Agent-SSH bootstraps RouterOS hosts
+via a non-POSIX SSH path; all other OS families use a standard POSIX SSH path.
 _Avoid_: device (reserved for the OAuth CLI flow), machine, node, server
 
 **Software Item**:
