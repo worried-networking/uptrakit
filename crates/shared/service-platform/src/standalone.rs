@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, cli::CommonServiceArgs,
+    LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
+    cli::CommonServiceArgs,
 };
-use uptrakit_wire::{Capability, ControllerMessage};
+use uptrakit_wire::{Capability, ControllerMessage, ServiceTransport};
 
 use crate::runtime::ServiceRuntime;
 
@@ -66,7 +66,7 @@ where
     // lifecycle callbacks instead of acknowledging the connection as a no-op.
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         let _ = &mut self.runtime;
@@ -78,7 +78,7 @@ where
     async fn on_message(
         &mut self,
         _msg: ControllerMessage,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         let _ = &mut self.runtime;
         Ok(None)
@@ -99,7 +99,7 @@ where
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         match event {}
     }
@@ -108,7 +108,7 @@ where
     // mapping, but runtime drain/abort coordination is deferred to later work.
     async fn on_shutdown(
         &mut self,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         _shutdown_timeout: Duration,
     ) -> LoopOutcome {
