@@ -196,12 +196,12 @@ pub async fn mcp_trigger_update(
     ));
     let mut_ctx = state.mutation_context();
 
-    let audit_user = AuthenticatedUser {
-        user_id: ctx.user_id,
-        auth_method: AuthMethod::ApiToken,
-        permissions: ctx.permissions.clone(),
-        jti: None,
-    };
+    let audit_user = AuthenticatedUser::new(
+        ctx.user_id,
+        AuthMethod::ApiToken,
+        ctx.permissions.clone(),
+        None,
+    );
     let audit_token = AuthenticatedApiTokenId(ctx.token_id);
 
     let trigger_result = crate::actions::software_items::trigger_update(

@@ -353,14 +353,14 @@ mod tests {
                 crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
                 ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             },
-            auth: crate::app_state::AuthState {
-                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+            auth: crate::app_state::AuthState::new(
+                Arc::new(crate::auth::jwt::JwtManager::from_secret(
                     b"test-secret-for-settings-nats-tests",
                 )),
-                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            },
+                crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            ),
             notification: crate::app_state::NotificationState {
                 notification_service,
                 notification_dispatcher,
@@ -479,12 +479,12 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNatsSettingsRequest {
                 url: Some(serde_json::json!("nats://demo:secret@localhost:4222")),
@@ -545,12 +545,12 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNatsSettingsRequest { url: None }),
         )
@@ -596,12 +596,12 @@ mod tests {
 
         let first_response = update_nats_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(request.clone()),
         )
@@ -613,12 +613,12 @@ mod tests {
 
         let second_response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(request),
         )
@@ -662,12 +662,12 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             Some(Extension(AuthenticatedApiTokenId(token_id))),
             Validated(UpdateNatsSettingsRequest {
                 url: Some(serde_json::json!("nats://demo:secret@localhost:4222")),
@@ -723,12 +723,12 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNatsSettingsRequest {
                 url: Some(serde_json::Value::Null),
@@ -785,12 +785,12 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: user.id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user.id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNatsSettingsRequest {
                 url: Some(serde_json::json!("nats://demo:secret@localhost:4222")),

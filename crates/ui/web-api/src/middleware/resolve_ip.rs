@@ -241,14 +241,14 @@ mod tests {
                 crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
                 ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             },
-            auth: crate::app_state::AuthState {
-                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+            auth: crate::app_state::AuthState::new(
+                Arc::new(crate::auth::jwt::JwtManager::from_secret(
                     b"test-secret-resolve-ip",
                 )),
-                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            },
+                crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            ),
             notification: crate::app_state::NotificationState {
                 notification_service,
                 notification_dispatcher,

@@ -300,12 +300,12 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_zeroconf_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user_id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateZeroconfSettingsRequest {
                 enabled: Some(true),

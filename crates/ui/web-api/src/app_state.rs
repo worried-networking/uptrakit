@@ -363,6 +363,8 @@ pub struct CertState {
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
 }
 
+pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser};
+
 /// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
 /// and token denylist.
 #[derive(Clone)]
@@ -375,6 +377,23 @@ pub struct AuthState {
     pub rate_limit_store: RateLimitStore,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
+}
+
+impl AuthState {
+    /// Creates a new [`AuthState`].
+    pub fn new(
+        jwt: Arc<JwtManager>,
+        device_flow_store: DeviceFlowStore,
+        rate_limit_store: RateLimitStore,
+        token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
+    ) -> Self {
+        Self {
+            jwt,
+            device_flow_store,
+            rate_limit_store,
+            token_denylist,
+        }
+    }
 }
 
 /// Real-time broadcast channels for SSE event delivery.

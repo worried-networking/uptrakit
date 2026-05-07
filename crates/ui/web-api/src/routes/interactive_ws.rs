@@ -750,6 +750,16 @@ fn classify_interactive_auth_failure(
                 "jwt_authenticate_failed",
             )),
             AuthFailure::InvalidApiToken => None,
+            _ => {
+                tracing::warn!(
+                    "unknown AuthFailure variant in interactive_ws audit classification; treating as internal error"
+                );
+                Some((
+                    InteractiveAuditActor::anonymous(uptrakit_audit_log::AuditActorType::User),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    "jwt_authenticate_failed",
+                ))
+            }
         }
     }
 }

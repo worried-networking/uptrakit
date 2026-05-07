@@ -206,12 +206,12 @@ mod tests {
     /// Build request `Parts` with an `AuthenticatedUser` pre-inserted.
     fn parts_with_user(permissions: Vec<Permission>) -> axum::http::request::Parts {
         let mut req = Request::new(Body::empty());
-        req.extensions_mut().insert(AuthenticatedUser {
-            user_id: uuid::Uuid::nil(),
-            auth_method: AuthMethod::Password,
+        req.extensions_mut().insert(AuthenticatedUser::new(
+            uuid::Uuid::nil(),
+            AuthMethod::Password,
             permissions,
-            jti: None,
-        });
+            None,
+        ));
         req.into_parts().0
     }
 
@@ -267,12 +267,12 @@ mod tests {
     async fn authenticated_user_is_accessible_in_extractor() {
         let user_id = uuid::Uuid::now_v7();
         let mut parts = Request::new(Body::empty()).into_parts().0;
-        parts.extensions.insert(AuthenticatedUser {
+        parts.extensions.insert(AuthenticatedUser::new(
             user_id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewHosts],
-            jti: None,
-        });
+            AuthMethod::Password,
+            vec![Permission::ViewHosts],
+            None,
+        ));
         let CanViewHosts(extracted_user) = CanViewHosts::from_request_parts(&mut parts, &())
             .await
             .unwrap();
@@ -281,12 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_constructor_bypasses_check() {
-        let user = AuthenticatedUser {
-            user_id: uuid::Uuid::nil(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![], // no permissions
-            jti: None,
-        };
+        let user = AuthenticatedUser::new(uuid::Uuid::nil(), AuthMethod::Password, vec![], None);
         // new() skips the permission check — intended for direct handler tests
         let extractor = CanApproveServices::new(user.clone());
         assert_eq!(extractor.0.user_id, user.user_id);
