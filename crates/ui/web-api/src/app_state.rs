@@ -383,41 +383,9 @@ pub struct CertState {
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
 }
 
-pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser};
-
-/// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
-/// and token denylist.
-///
-/// `#[non_exhaustive]`: OAuth 2.1 will add fields (e.g. OIDC provider registry).
-#[non_exhaustive]
-#[derive(Clone)]
-pub struct AuthState {
-    /// JWT signing/validation manager for access tokens.
-    pub jwt: Arc<JwtManager>,
-    /// Database-backed store for pending device authorization flows.
-    pub device_flow_store: DeviceFlowStore,
-    /// Database-backed rate limiter for public authentication endpoints.
-    pub rate_limit_store: RateLimitStore,
-    /// In-memory denylist for immediate JWT access token revocation.
-    pub token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
-}
-
-impl AuthState {
-    /// Creates a new [`AuthState`].
-    pub fn new(
-        jwt: Arc<JwtManager>,
-        device_flow_store: DeviceFlowStore,
-        rate_limit_store: RateLimitStore,
-        token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
-    ) -> Self {
-        Self {
-            jwt,
-            device_flow_store,
-            rate_limit_store,
-            token_denylist,
-        }
-    }
-}
+pub use uptrakit_controller_core::auth::{
+    AuthFailure, AuthState, AuthenticatedApiTokenId, AuthenticatedUser,
+};
 
 /// Real-time broadcast channels for SSE event delivery.
 #[non_exhaustive]
@@ -969,18 +937,15 @@ impl AppStateBuilder {
                     .ca_rotation_trigger
                     .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
             },
-            auth: AuthState {
-                jwt: self.jwt.ok_or(AppStateBuildError("jwt"))?,
-                device_flow_store: self
-                    .device_flow_store
+            auth: AuthState::new(
+                self.jwt.ok_or(AppStateBuildError("jwt"))?,
+                self.device_flow_store
                     .ok_or(AppStateBuildError("device_flow_store"))?,
-                rate_limit_store: self
-                    .rate_limit_store
+                self.rate_limit_store
                     .ok_or(AppStateBuildError("rate_limit_store"))?,
-                token_denylist: self
-                    .token_denylist
+                self.token_denylist
                     .ok_or(AppStateBuildError("token_denylist"))?,
-            },
+            ),
             notification: NotificationState {
                 notification_service: self
                     .notification_service
@@ -1119,9 +1084,9 @@ impl FromRef<Arc<AppState>> for CertState {
     }
 }
 
-impl FromRef<Arc<AppState>> for AuthState {
-    fn from_ref(state: &Arc<AppState>) -> Self {
-        state.auth.clone()
+impl uptrakit_controller_core::auth::AuthStateSource for AppState {
+    fn auth_state(&self) -> AuthState {
+        self.auth.clone()
     }
 }
 
