@@ -9,10 +9,15 @@ version = "0.0.1"
 publish.workspace = true
 
 [dependencies]
-uptrakit-web-api       = { workspace = true }
-uptrakit-web-api-types = { workspace = true }
-uptrakit-shared-db     = { workspace = true }
-rmcp                   = { workspace = true }
+uptrakit-web-api          = { workspace = true }
+uptrakit-web-api-types    = { workspace = true }
+uptrakit-shared-db        = { workspace = true }
+uptrakit-controller-core  = { workspace = true }
+uptrakit-web-api-queries  = { workspace = true }
+uptrakit-audit-log        = { workspace = true }
+tokio-util                = { workspace = true }
+tracing                   = { workspace = true }
+rmcp                      = { workspace = true }
 vt100                  = { workspace = true }
 schemars               = { workspace = true }
 sea-orm                = { workspace = true }
