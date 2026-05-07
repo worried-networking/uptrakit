@@ -660,7 +660,7 @@ pub(super) async fn prepare_pending_replay_messages(
                 };
                 // Safe to spawn multiple times: set_inprogress_for_orchestrator CAS ensures
                 // only one task transitions the record; subsequent tasks exit with rows==0.
-                crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), work);
+                state.update_dispatcher.spawn_pending_protection(work);
                 continue;
             }
 
@@ -2108,7 +2108,7 @@ async fn dispatch_next_queued_update_with_notifier(
             release_info: None,
             interactive: next.interactive,
         };
-        crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), work);
+        state.update_dispatcher.spawn_pending_protection(work);
         return;
     }
 }

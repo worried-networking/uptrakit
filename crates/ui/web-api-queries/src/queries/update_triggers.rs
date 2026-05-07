@@ -49,8 +49,8 @@ pub struct TriggerUpdateResult {
     pub update_history_id: Uuid,
     /// The initial status of the record.
     pub initial_status: update_history::UpdateStatus,
-    /// Present when `initial_status == Pending`. The caller must spawn
-    /// `update_orchestrator::spawn_protection_and_dispatch` with this bundle.
+    /// Present when `initial_status == Pending`. The caller must pass this
+    /// bundle to `UpdateDispatcher::spawn_pending_protection`.
     /// `None` when `initial_status == Queued`.
     pub pending_protection_work: Option<Box<PendingProtectionWork>>,
 }

@@ -205,6 +205,31 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         "https://localhost".to_string(),
     );
 
+    let notification = crate::app_state::NotificationState::new(
+        notification_service,
+        notification_dispatcher,
+        crate::event_broadcaster::EventBroadcaster::new(),
+    );
+
+    let audit_emitter =
+        uptrakit_audit_log::AuditEmitter::new(uptrakit_audit_log::AuditLogDispatcher::new(
+            Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone())),
+        ));
+
+    let update_output_broadcaster =
+        crate::update_output_broadcaster::UpdateOutputBroadcaster::new();
+
+    let update_dispatcher_for_test: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher> =
+        Arc::new(
+            uptrakit_controller_core::update::controller::ControllerUpdateDispatcher::new(
+                db.clone(),
+                notification.clone(),
+                Arc::new(update_output_broadcaster.clone()),
+                Arc::clone(&plugin_ops),
+                audit_emitter.clone(),
+            ),
+        );
+
     let state = Arc::new(AppState {
         db: crate::app_state::DbState::new(db.clone()),
         cert: crate::app_state::CertState {
@@ -220,15 +245,10 @@ pub(crate) async fn build_test_state_with_plugin_ops(
             crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
         ),
-        notification: crate::app_state::NotificationState::new(
-            notification_service,
-            notification_dispatcher,
-            crate::event_broadcaster::EventBroadcaster::new(),
-        ),
+        notification,
         broadcast: crate::app_state::BroadcastState {
             device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
-            update_output_broadcaster:
-                crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+            update_output_broadcaster,
             batch_progress_broadcaster:
                 crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
         },
@@ -257,11 +277,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
             uptrakit_audit_log::DatabaseBackend::new(db.clone()),
         )),
-        audit_emitter: uptrakit_audit_log::AuditEmitter::new(
-            uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                uptrakit_audit_log::DatabaseBackend::new(db.clone()),
-            )),
-        ),
+        audit_emitter,
         surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
             Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
@@ -275,6 +291,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         reject_dangerous_commands: false,
         #[cfg(feature = "interactive")]
         interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+        update_dispatcher: update_dispatcher_for_test,
     });
 
     (state, jwt)

@@ -518,6 +518,11 @@ pub struct AppState {
     /// Registry of active interactive update sessions (single-writer enforcement).
     #[cfg(feature = "interactive")]
     pub interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry,
+    /// Update dispatcher: runs pre-update protection then dispatches to the agent.
+    ///
+    /// Defaults to [`ControllerUpdateDispatcher`] wired from the state's own fields.
+    /// Override via [`AppStateBuilder::update_dispatcher`] to inject a test double.
+    pub update_dispatcher: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -581,6 +586,7 @@ pub struct AppStateBuilder {
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
+    update_dispatcher: Option<Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>>,
 }
 
 impl AppStateBuilder {
@@ -630,6 +636,7 @@ impl AppStateBuilder {
             config_test_proxy: None,
             workload_claim_registry: None,
             reject_dangerous_commands: false,
+            update_dispatcher: None,
         }
     }
 
@@ -893,6 +900,20 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the update dispatcher.
+    ///
+    /// Optional — defaults to [`uptrakit_controller_core::update::controller::ControllerUpdateDispatcher`]
+    /// wired from the builder's own fields (db, notification, output broadcaster, plugin ops,
+    /// audit emitter). Override in tests to inject a [`uptrakit_controller_core::update::NoopUpdateDispatcher`]
+    /// or a mock.
+    pub fn update_dispatcher(
+        mut self,
+        v: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>,
+    ) -> Self {
+        self.update_dispatcher = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -913,6 +934,37 @@ impl AppStateBuilder {
         let audit_emitter = self
             .audit_emitter
             .unwrap_or_else(|| uptrakit_audit_log::AuditEmitter::new(audit_log_dispatcher.clone()));
+        let notification = NotificationState::new(
+            self.notification_service
+                .ok_or(AppStateBuildError("notification_service"))?,
+            self.notification_dispatcher
+                .ok_or(AppStateBuildError("notification_dispatcher"))?,
+            self.event_broadcaster.unwrap_or_default(),
+        );
+        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+            self.plugin_ops.unwrap_or_else(|| {
+                let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
+                    global_provider_lookup: Some(global_providers.clone()),
+                    ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
+                };
+                Arc::new(
+                    uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+                        .expect("default catalog should build"),
+                )
+            });
+        let update_output_broadcaster = self.update_output_broadcaster.unwrap_or_default();
+        let update_dispatcher: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher> =
+            self.update_dispatcher.unwrap_or_else(|| {
+                Arc::new(
+                    uptrakit_controller_core::update::controller::ControllerUpdateDispatcher::new(
+                        db.clone(),
+                        notification.clone(),
+                        Arc::new(update_output_broadcaster.clone()),
+                        plugin_ops.clone(),
+                        audit_emitter.clone(),
+                    ),
+                )
+            });
         Ok(AppState {
             db: DbState::new(db),
             cert: CertState {
@@ -939,16 +991,10 @@ impl AppStateBuilder {
                 self.token_denylist
                     .ok_or(AppStateBuildError("token_denylist"))?,
             ),
-            notification: NotificationState::new(
-                self.notification_service
-                    .ok_or(AppStateBuildError("notification_service"))?,
-                self.notification_dispatcher
-                    .ok_or(AppStateBuildError("notification_dispatcher"))?,
-                self.event_broadcaster.unwrap_or_default(),
-            ),
+            notification,
             broadcast: BroadcastState {
                 device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
-                update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
+                update_output_broadcaster,
                 batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
             },
             #[cfg(feature = "oidc")]
@@ -971,16 +1017,7 @@ impl AppStateBuilder {
             service_connections: self
                 .service_connections
                 .ok_or(AppStateBuildError("service_connections"))?,
-            plugin_ops: self.plugin_ops.unwrap_or_else(|| {
-                let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
-                    global_provider_lookup: Some(global_providers.clone()),
-                    ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
-                };
-                Arc::new(
-                    uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                        .expect("default catalog should build"),
-                )
-            }),
+            plugin_ops,
             global_providers,
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
@@ -1016,6 +1053,7 @@ impl AppStateBuilder {
             reject_dangerous_commands: self.reject_dangerous_commands,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+            update_dispatcher,
         })
     }
 }

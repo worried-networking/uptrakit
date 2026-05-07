@@ -4,8 +4,6 @@ use uuid::Uuid;
 
 use crate::actions::MutationContext;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
-use crate::queries::update_dispatch::TriggerUpdateError;
-use crate::queries::update_triggers::{self, TriggerUpdateParams, TriggerUpdateResult};
 use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::software_item;
 use uptrakit_web_api_types::events::AdminEvent;
@@ -27,41 +25,6 @@ pub(crate) async fn update(
         .await;
 
     Ok(resp)
-}
-
-/// Trigger an update for a single host/item pair.
-///
-/// Returns a [`TriggerUpdateResult`]. When `result.pending_protection_work` is
-/// `Some`, the caller must hand it off to the orchestrator via
-/// `update_orchestrator::spawn_protection_and_dispatch`.
-pub(crate) async fn trigger_update(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    params: TriggerUpdateParams<'_>,
-) -> Result<TriggerUpdateResult, rootcause::Report<TriggerUpdateError>> {
-    // Copy fields needed after params is consumed by value.
-    let tenant_id = params.tenant_id;
-    let host_id = params.host_id;
-    let item_id = params.item_id;
-
-    let result = update_triggers::trigger_update_for_host(tenant_db.db(), params).await?;
-
-    ctx.notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_id)
-        .await;
-
-    ctx.event_broadcaster
-        .send(
-            tenant_id,
-            AdminEvent::UpdateTriggered {
-                update_history_id: result.update_history_id,
-                host_id,
-                software_item_id: item_id,
-            },
-        )
-        .await;
-
-    Ok(result)
 }
 
 /// Batch "feature" (approve): sets `featured = true` for matching items.

@@ -5,6 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use uptrakit_shared_types::OutputStreamType;
+use uptrakit_web_api_queries::queries::update_triggers::PendingProtectionWork;
 use uptrakit_web_api_queries::queries::update_types::ActorType;
 
 /// Groups actor identification for a dispatch request.
@@ -155,6 +156,16 @@ pub trait UpdateDispatcher: Send + Sync {
         &self,
         params: UpdateDispatchParams,
     ) -> Result<UpdateDispatchResult, rootcause::Report<UpdateDispatchError>>;
+
+    /// Spawn background protection + agent dispatch for a reconnect-recovery
+    /// record that has already been created in `update_history`.
+    ///
+    /// Called by service-WS reconnect handlers that load `PendingProtectionWork`
+    /// from an existing pending/queued history row rather than creating a new one.
+    /// The concrete CAS inside `run_protection_and_dispatch` (Pending → InProgress)
+    /// ensures only one controller task advances the record even when called
+    /// multiple times.
+    fn spawn_pending_protection(&self, work: PendingProtectionWork);
 }
 
 /// No-op dispatcher for tests that do not exercise update dispatch.
@@ -168,5 +179,9 @@ impl UpdateDispatcher for NoopUpdateDispatcher {
     ) -> Result<UpdateDispatchResult, rootcause::Report<UpdateDispatchError>> {
         use rootcause::report;
         Err(report!(UpdateDispatchError::Internal))
+    }
+
+    fn spawn_pending_protection(&self, _work: PendingProtectionWork) {
+        // No-op: test dispatcher does not run background tasks.
     }
 }
