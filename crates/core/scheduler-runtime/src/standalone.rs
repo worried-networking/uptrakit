@@ -8,12 +8,12 @@ use tokio::sync::mpsc;
 use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
 use uptrakit_scheduler_engine::SchedulerNotifier;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
-    Signal, default_resolve_shutdown,
+    LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause, Signal,
+    default_resolve_shutdown,
 };
 use uptrakit_wire::{
     Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
-    payloads::AuditEventPayload,
+    ServiceTransport, payloads::AuditEventPayload,
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -99,14 +99,14 @@ impl ServiceHandler for StandaloneSchedulerHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         identity: &uptrakit_service_sdk::ServiceIdentityState,
     ) -> LoopResult<()> {
-        conn.send(ServiceMessage::Register(RegisterPayload::new(
+        conn.transport_send(ServiceMessage::Register(RegisterPayload::new(
             standalone_scheduler_capabilities(),
         )))
         .await
-        .context_to::<LoopError>()?;
+        .map_err(|e| report!(LoopError::Other(format!("failed to send Register: {e}"))))?;
 
         self.service_id = identity.service_id();
         tracing::info!("connected to controller, waiting for ServiceCredentials");
@@ -116,7 +116,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
             ControllerMessage::ServiceCredentials(creds) => {
@@ -172,11 +172,15 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         match event {
             StandaloneSchedulerServiceEvent::Forward(message) => {
-                conn.send(message).await.context_to::<LoopError>()?;
+                conn.transport_send(message).await.map_err(|e| {
+                    report!(LoopError::Other(format!(
+                        "failed to forward audit event: {e}"
+                    )))
+                })?;
                 Ok(None)
             }
         }
@@ -188,14 +192,16 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     )]
     async fn on_shutdown(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         _shutdown_timeout: Duration,
     ) -> LoopOutcome {
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
         let stop_mode = if matches!(
             cause,
-            ShutdownCause::ServerRestarting | ShutdownCause::Signal(Signal::Hangup)
+            ShutdownCause::ServerRestarting
+                | ShutdownCause::Signal(Signal::Hangup)
+                | ShutdownCause::EmbeddedDrain
         ) {
             SchedulerStopMode::Drain
         } else {
@@ -205,7 +211,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
         self.drain_service_events(conn).await;
 
         let _ = conn
-            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+            .transport_send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
                 disconnect_reason,
             )))
             .await;
@@ -215,12 +221,12 @@ impl ServiceHandler for StandaloneSchedulerHandler {
 }
 
 impl StandaloneSchedulerHandler {
-    async fn drain_service_events(&mut self, conn: &mut ControllerConnection) {
+    async fn drain_service_events(&mut self, conn: &mut dyn ServiceTransport) {
         while let Ok(StandaloneSchedulerServiceEvent::Forward(message)) =
             self.service_event_rx.try_recv()
         {
-            if let Err(error) = conn.send(message).await {
-                tracing::debug!(
+            if let Err(error) = conn.transport_send(message).await {
+                tracing::warn!(
                     error = %error,
                     "failed to drain scheduler audit event during shutdown"
                 );
