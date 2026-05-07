@@ -4,10 +4,9 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use uptrakit_backoff::Backoff;
-use uptrakit_command::CommandExecutor;
 use uptrakit_plugin_infrastructure_registry::{
-    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginCapability, PluginError,
-    PluginResult, ReleaseFetcher, construct_host_runtime, get_descriptor,
+    BatchDetectItem, BatchFetchItem, HostRuntime, PluginCapability, PluginError, PluginResult,
+    ReleaseFetcher, get_descriptor,
 };
 use uptrakit_wire::{
     PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
@@ -49,11 +48,11 @@ pub struct VersionCheckOutcome {
 pub async fn check_version(
     detect: Option<&PluginAssignment>,
     fetch: Option<&PluginAssignment>,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> VersionCheckOutcome {
     let installed_version = if let Some(assignment) = detect {
-        detect_installed(assignment, Arc::clone(&executor), ctx).await
+        detect_installed(assignment, Arc::clone(&runtime), ctx).await
     } else {
         Ok(None)
     };
@@ -64,7 +63,7 @@ pub async fn check_version(
     };
 
     let latest_result = if let Some(assignment) = fetch {
-        fetch_latest(assignment, Arc::clone(&executor), ctx).await
+        fetch_latest(assignment, Arc::clone(&runtime), ctx).await
     } else {
         Ok(None)
     };
@@ -184,15 +183,13 @@ fn error_for_all_fetch_items(
 /// Returns `(assignment_index, (installed_version, error))` for each item.
 async fn run_detect_group(
     group: BatchGroup,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
 ) -> Vec<(usize, DetectItemResult)> {
     let batch_items: Vec<BatchDetectItem> = group
         .items
         .iter()
         .map(|(_, pkg)| BatchDetectItem::new(pkg.clone()))
         .collect();
-
-    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
     let desc = match get_descriptor(group.plugin_type.as_str()) {
         Some(d) => d,
@@ -270,7 +267,7 @@ async fn run_detect_group(
 /// each item.
 async fn run_fetch_group(
     group: BatchGroup,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     fetcher_factory: &FetcherFactory,
 ) -> Vec<(usize, FetchItemResult)> {
     let batch_items: Vec<BatchFetchItem> = group
@@ -278,8 +275,6 @@ async fn run_fetch_group(
         .iter()
         .map(|(_, pkg)| BatchFetchItem::new(pkg.clone()))
         .collect();
-
-    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
     let fetcher = match fetcher_factory(&group.plugin_type, &group.effective_config, runtime) {
         Ok(f) => f,
@@ -359,7 +354,7 @@ fn default_fetcher_factory(
 /// Runs sequentially to avoid concurrent `apt-get update` / `brew update`.
 async fn refresh_package_indexes(
     fetch_groups: &HashMap<GroupKey, BatchGroup>,
-    executor: &Arc<dyn CommandExecutor>,
+    runtime: &Arc<dyn HostRuntime>,
 ) {
     for group in fetch_groups.values() {
         let Some(desc) = get_descriptor(group.plugin_type.as_str()) else {
@@ -377,9 +372,7 @@ async fn refresh_package_indexes(
             continue;
         };
 
-        let runtime = construct_host_runtime(Arc::clone(executor), HostCapabilities::default());
-
-        match (slot.create)(&group.effective_config, runtime) {
+        match (slot.create)(&group.effective_config, Arc::clone(runtime)) {
             Ok(pkg_index) => {
                 tracing::info!(
                     plugin_type = %group.plugin_type,
@@ -428,7 +421,7 @@ fn merge_errors(detect_error: Option<String>, fetch_error: Option<String>) -> Op
 /// for detect-only groups.
 async fn batch_check_versions_inner(
     assignments: Vec<VersionCheckAssignment>,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
     fetcher_factory: &FetcherFactory,
 ) -> Vec<VersionCheckResult> {
@@ -448,7 +441,7 @@ async fn batch_check_versions_inner(
                 item_count = group.items.len(),
                 "queuing detect_installed_version batch group"
             );
-            run_detect_group(group, Arc::clone(&executor))
+            run_detect_group(group, Arc::clone(&runtime))
         })
         .collect();
 
@@ -460,7 +453,7 @@ async fn batch_check_versions_inner(
     }
 
     // ── Step 3: RefreshPackageIndex – at most once per unique fetch group ───
-    refresh_package_indexes(&fetch_groups, &executor).await;
+    refresh_package_indexes(&fetch_groups, &runtime).await;
 
     // ── Step 4: Run fetch groups in parallel ─────────────────────────────────
     let fetch_futs: Vec<_> = fetch_groups
@@ -471,7 +464,7 @@ async fn batch_check_versions_inner(
                 item_count = group.items.len(),
                 "queuing fetch_releases batch group"
             );
-            run_fetch_group(group, Arc::clone(&executor), fetcher_factory)
+            run_fetch_group(group, Arc::clone(&runtime), fetcher_factory)
         })
         .collect();
 
@@ -515,10 +508,10 @@ async fn batch_check_versions_inner(
 #[tracing::instrument(skip_all, fields(assignment_count = assignments.len()))]
 pub async fn batch_check_versions(
     assignments: Vec<VersionCheckAssignment>,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> Vec<VersionCheckResult> {
-    batch_check_versions_inner(assignments, executor, ctx, &default_fetcher_factory).await
+    batch_check_versions_inner(assignments, runtime, ctx, &default_fetcher_factory).await
 }
 
 /// Run `op` with exponential backoff retry on transient plugin errors.
@@ -577,7 +570,7 @@ async fn run_with_retry<'a, T>(
 /// (see [`PluginError::is_retryable`]).
 async fn detect_installed(
     assignment: &PluginAssignment,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> Result<Option<String>, String> {
     tracing::debug!(
@@ -588,9 +581,6 @@ async fn detect_installed(
 
     let mut effective_config = assignment.config.clone();
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
-
-    // Plugin creation is not retried — config/instantiation errors aren't transient.
-    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
     let desc = get_descriptor(assignment.plugin_type.as_str())
         .ok_or_else(|| format!("unknown plugin type: {}", assignment.plugin_type))?;
@@ -629,7 +619,7 @@ async fn detect_installed(
 /// (see [`PluginError::is_retryable`]).
 async fn fetch_latest(
     assignment: &PluginAssignment,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     ctx: &ConnectionContext,
 ) -> Result<Option<(String, UpdateCategory)>, String> {
     tracing::debug!(
@@ -640,9 +630,6 @@ async fn fetch_latest(
 
     let mut effective_config = assignment.config.clone();
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
-
-    // Plugin creation is not retried — config/instantiation errors aren't transient.
-    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
     let desc = get_descriptor(assignment.plugin_type.as_str())
         .ok_or_else(|| format!("unknown plugin type: {}", assignment.plugin_type))?;
@@ -685,13 +672,17 @@ mod tests {
 
     use super::*;
     use async_trait::async_trait;
-    use uptrakit_command::LocalCommandExecutor;
     use uptrakit_plugin_infrastructure_core::UpstreamRelease;
     use uptrakit_plugin_infrastructure_registry::{BatchFetchItem, BatchFetchResult, PluginMeta};
     use uptrakit_wire::plugin_ids;
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        use uptrakit_command::LocalCommandExecutor;
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, StandardHostRuntime};
+        Arc::new(StandardHostRuntime::new(
+            Arc::new(LocalCommandExecutor),
+            HostCapabilities::default(),
+        ))
     }
 
     fn no_ctx() -> ConnectionContext {
@@ -811,7 +802,7 @@ mod tests {
     async fn check_version_github_detect_not_supported() {
         // The GitHub plugin is fetch-only; using it for detect returns an error.
         let assignment = gh_assignment();
-        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         // The GitHub plugin's default detect_installed_version returns an error.
@@ -834,7 +825,7 @@ mod tests {
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
-        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &no_ctx()).await;
         // No fetch assignment → latest_version must always be None.
         assert!(outcome.latest_version.is_none());
         // installed_version and error are mutually exclusive: a successful inspect
@@ -855,7 +846,7 @@ mod tests {
             package_identifier: "booklore".to_string(),
             config: serde_json::json!({}),
         };
-        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         // The trait default returns an error for unsupported operations.
@@ -871,7 +862,7 @@ mod tests {
             package_identifier: "octocat/hello-world".to_string(),
             config: serde_json::json!({"api_base_url": "http://api.github.com"}),
         };
-        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
         assert!(
@@ -888,7 +879,7 @@ mod tests {
             package_identifier: String::new(),
             config: serde_json::json!({}),
         };
-        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
@@ -905,7 +896,7 @@ mod tests {
         // Default context (no keep-alive handles) should not panic during
         // plugin creation. The check itself will fail (no daemon) but that
         // proves the creation path runs without panicking.
-        let outcome = check_version(Some(&assignment), None, test_executor(), &ctx).await;
+        let outcome = check_version(Some(&assignment), None, test_runtime(), &ctx).await;
         let _ = outcome;
     }
 
@@ -925,7 +916,7 @@ mod tests {
     async fn batch_check_versions_fetch_error_sets_error_field() {
         let results = batch_check_versions_inner(
             vec![fetch_assignment("pkg-1", "nginx:latest")],
-            test_executor(),
+            test_runtime(),
             &no_ctx(),
             &failing_fetcher_factory,
         )
@@ -959,7 +950,7 @@ mod tests {
 
         let results = batch_check_versions_inner(
             assignments,
-            test_executor(),
+            test_runtime(),
             &no_ctx(),
             &failing_fetcher_factory,
         )
@@ -984,7 +975,7 @@ mod tests {
         ];
 
         let results =
-            batch_check_versions_inner(assignments, test_executor(), &no_ctx(), &broken_factory)
+            batch_check_versions_inner(assignments, test_runtime(), &no_ctx(), &broken_factory)
                 .await;
 
         assert_eq!(results.len(), 2);
@@ -1015,7 +1006,7 @@ mod tests {
 
         let results = batch_check_versions_inner(
             assignments,
-            test_executor(),
+            test_runtime(),
             &no_ctx(),
             &batch_failing_fetcher_factory,
         )
@@ -1048,7 +1039,7 @@ mod tests {
             plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
         )];
 
-        let results = batch_check_versions(assignments, test_executor(), &no_ctx()).await;
+        let results = batch_check_versions(assignments, test_runtime(), &no_ctx()).await;
 
         assert_eq!(results.len(), 1);
         let result = &results[0];
@@ -1073,7 +1064,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_no_assignments_returns_empty() {
-        let outcome = check_version(None, None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(None, None, test_runtime(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
