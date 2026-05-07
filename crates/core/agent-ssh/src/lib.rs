@@ -22,6 +22,7 @@ pub use uptrakit_service_sdk::ServiceSurfaceProxy;
 pub(crate) mod host_info;
 pub mod operations;
 pub(crate) mod remote_exec;
+pub(crate) mod routeros_executor;
 pub(crate) mod ssh_executor;
 pub mod ssh_key;
 pub(crate) mod ssh_stdio_tunnel;

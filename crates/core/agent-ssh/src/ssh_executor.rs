@@ -43,10 +43,6 @@ impl SshCommandExecutor {
     ///
     /// Returns combined stdout + stderr. The timeout is optional; `None` means
     /// no deadline.
-    #[expect(
-        dead_code,
-        reason = "consumed by RouterOsSshExecutor which is added in a subsequent task"
-    )]
     pub(crate) async fn exec_raw(
         &self,
         cmd: &str,
@@ -58,7 +54,7 @@ impl SshCommandExecutor {
     /// Access the underlying [`SshSession`].
     #[expect(
         dead_code,
-        reason = "consumed by RouterOsSshExecutor which is added in a subsequent task"
+        reason = "reserved for RouterOS bootstrap helpers that need direct session access"
     )]
     pub(crate) fn session(&self) -> &Arc<SshSession> {
         &self.session
