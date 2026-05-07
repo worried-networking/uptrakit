@@ -23,11 +23,13 @@ MARKDOWN_FILES=()
 FRONTEND_ESLINT_FILES=()
 FRONTEND_PRETTIER_FILES=()
 ROUTES_RS_FILES=()
+ACTIONS_FILES=()
 
 for path in "${STAGED_PATHS[@]}"; do
   case "$path" in
     crates/*.rs) RUST_FILES+=("$path") ;;
     *.md) MARKDOWN_FILES+=("$path") ;;
+    .github/workflows/*.yml|.github/workflows/*.yaml) ACTIONS_FILES+=("$path") ;;
   esac
   case "$path" in
     frontend/*.js|frontend/*.cjs|frontend/*.mjs|frontend/*.ts|frontend/*.cts|frontend/*.mts|frontend/*.svelte)
@@ -95,6 +97,17 @@ if (( ${#MARKDOWN_FILES[@]} > 0 )); then
   require_worktree_paths 'Markdown' "${MARKDOWN_FILES[@]}"
   echo '[pre-commit] Running markdownlint on staged Markdown files...'
   markdownlint --config .markdownlint.json -- "${MARKDOWN_FILES[@]}"
+fi
+
+if (( ${#ACTIONS_FILES[@]} > 0 )); then
+  if ! command -v actionlint >/dev/null 2>&1; then
+    printf '[pre-commit] WARNING: actionlint not installed — skipping workflow lint.\n' >&2
+    printf '[pre-commit] Install: https://github.com/rhysd/actionlint/blob/v1.7.12/docs/install.md\n' >&2
+  else
+    require_worktree_paths 'Actions' "${ACTIONS_FILES[@]}"
+    echo '[pre-commit] Running actionlint on staged workflow files...'
+    actionlint "${ACTIONS_FILES[@]}"
+  fi
 fi
 
 if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 || ${#FRONTEND_PRETTIER_FILES[@]} > 0 )); then
