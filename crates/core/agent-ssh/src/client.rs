@@ -16,9 +16,7 @@ use tokio::task::JoinSet;
 use uptrakit_agent_core::ConnectionContext;
 use uptrakit_agent_ssh_runtime::SshInFlightUpdate;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
-use uptrakit_plugin_infrastructure_registry::{
-    HostCapabilities, HostRuntime, construct_host_runtime,
-};
+use uptrakit_plugin_infrastructure_registry::{HostCapabilities, HostRuntime};
 
 use uptrakit_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, Capability, CheckVersionsPayload,
@@ -31,8 +29,10 @@ use uptrakit_wire::{
 use crate::db::entity::ssh_host::Model;
 use crate::host_info::collect_remote_host_info;
 use crate::host_ops::{find_host_by_machine_id, list_hosts, update_host_machine_id};
+use crate::routeros_executor::RouterOsSshExecutor;
 use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_pool::SshConnectionPool;
+use crate::ssh_transport::SshSession;
 
 // Re-export shared update types for use in main.rs.
 pub use uptrakit_agent_core::UpdateEvent;
@@ -43,6 +43,59 @@ async fn recv_attention_opt(rx: &mut Option<tokio::sync::mpsc::Receiver<()>>) ->
         return rx.recv().await;
     }
     std::future::pending().await
+}
+
+// ── Per-host runtime dispatch ────────────────────────────────────────────────
+
+/// Select the appropriate [`HostRuntime`] implementation for the given host.
+///
+/// If the host has a `routeros_host_config` row in the local database, a
+/// [`RouterOsHostRuntime`] is returned, wired to the RouterOS-specific SSH
+/// executor.  Otherwise — or when the DB query fails — falls back to a
+/// POSIX [`HostRuntime`] via [`construct_host_runtime`] with a `"linux"`
+/// capability set.
+async fn build_host_runtime(
+    host_id: uuid::Uuid,
+    session: Arc<SshSession>,
+    executor: Arc<dyn CommandExecutor>,
+    db: &sea_orm::DatabaseConnection,
+) -> Arc<dyn HostRuntime> {
+    use sea_orm::EntityTrait as _;
+    use uptrakit_plugin_infrastructure_registry::{
+        construct_host_runtime, construct_routeros_host_runtime,
+    };
+    use uptrakit_shared_types::host_features;
+
+    use crate::db::entity::routeros_host_config;
+
+    match routeros_host_config::Entity::find_by_id(host_id)
+        .one(db)
+        .await
+    {
+        Ok(Some(ros_config)) => {
+            let ros_exec = Arc::new(RouterOsSshExecutor::new(Arc::clone(&session)));
+            let caps = HostCapabilities::new(
+                Some("routeros"),
+                None,
+                None,
+                &[host_features::ROUTER_OS_CLI.as_str().to_string()],
+            );
+            construct_routeros_host_runtime(ros_exec, caps, ros_config.allow_reboot)
+        }
+        Ok(None) => {
+            let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+            construct_host_runtime(executor, caps)
+        }
+        Err(e) => {
+            tracing::warn!(
+                host_id = %host_id,
+                error = %e,
+                "failed to query routeros_host_config; defaulting to StandardHostRuntime"
+            );
+            let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
+            construct_host_runtime(executor, caps)
+        }
+    }
 }
 
 // ── Connection context ────────────────────────────────────────────────────────
@@ -499,8 +552,8 @@ pub async fn handle_execute_update_ssh(
     let host_machine_id = payload.host_machine_id.clone();
     let update_history_id = payload.update_history_id;
 
-    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
-    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    let runtime =
+        build_host_runtime(host.id, Arc::clone(&session), Arc::clone(&executor), db).await;
 
     #[allow(unused_mut)]
     let mut in_flight = uptrakit_agent_core::start_update(payload, runtime, conn, &ctx).await;
@@ -669,8 +722,8 @@ async fn run_check_versions_ssh(
         hostname = %host.hostname,
         "running version check on SSH host"
     );
-    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
-    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    let runtime =
+        build_host_runtime(host.id, Arc::clone(&session), Arc::clone(&executor), db).await;
     uptrakit_agent_core::run_check_versions(payload, runtime, &ctx).await
 }
 
@@ -767,8 +820,8 @@ async fn run_discover_software_ssh(
         hostname = %host.hostname,
         "running discovery on SSH host"
     );
-    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
-    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    let runtime =
+        build_host_runtime(host.id, Arc::clone(&session), Arc::clone(&executor), db).await;
     uptrakit_agent_core::run_discover_software(payload, runtime, &ctx).await
 }
 
@@ -899,8 +952,8 @@ async fn run_execute_batch_update_ssh(
         batch_id = %payload.batch_id,
         "running batch update on SSH host"
     );
-    let caps = HostCapabilities::new(Some("linux"), None, None, &[]);
-    let runtime: Arc<dyn HostRuntime> = construct_host_runtime(executor, caps);
+    let runtime =
+        build_host_runtime(host.id, Arc::clone(&session), Arc::clone(&executor), db).await;
     uptrakit_agent_core::run_execute_batch_update(payload, runtime, &ctx).await
 }
 
