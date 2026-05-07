@@ -2,9 +2,8 @@
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::let_underscore_must_use,
-    clippy::panic,
     clippy::unused_result_ok,
-    reason = "integration test infrastructure: panics are acceptable in OCSP responder test helper"
+    reason = "integration test infrastructure: expects are acceptable in OCSP responder test helper"
 )]
 
 use std::net::TcpListener;
@@ -101,20 +100,6 @@ impl OcspResponder {
         Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
     }
 
-    /// Start a test OCSP responder on a specific port (plain HTTP).
-    ///
-    /// Panics if the port cannot be bound.
-    pub(crate) async fn start_on_port(
-        port: u16,
-        ca_cert_pem: &str,
-        ca_key_pem: &str,
-        revoked_serials: Vec<String>,
-    ) -> Self {
-        let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
-            .unwrap_or_else(|e| panic!("failed to bind OCSP responder to port {port}: {e}"));
-        Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
-    }
-
     pub(crate) async fn start_http_with_listener(
         listener: TcpListener,
         ca_cert_pem: &str,
@@ -148,30 +133,6 @@ impl OcspResponder {
             state,
             shutdown: shutdown_tx,
         }
-    }
-
-    /// Start a test OCSP responder on a specific port (HTTPS / TLS).
-    ///
-    /// Panics if the port cannot be bound.
-    pub(crate) async fn start_https_on_port(
-        port: u16,
-        ca_cert_pem: &str,
-        ca_key_pem: &str,
-        server_cert_pem: &str,
-        server_key_pem: &str,
-        revoked_serials: Vec<String>,
-    ) -> Self {
-        let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
-            .unwrap_or_else(|e| panic!("failed to bind HTTPS OCSP responder to port {port}: {e}"));
-        Self::start_https_with_listener(
-            listener,
-            ca_cert_pem,
-            ca_key_pem,
-            server_cert_pem,
-            server_key_pem,
-            revoked_serials,
-        )
-        .await
     }
 
     pub(crate) async fn start_https_with_listener(
