@@ -953,6 +953,16 @@ delay is long.
 
 See also: [Service Lifecycle](service-lifecycle.md) for the full reconnect and enrollment flow.
 
+## `ServiceHandler` Transport Contract
+
+`ServiceHandler` implementations must not import or depend on `ControllerConnection`. All
+handler method signatures use `&mut dyn ServiceTransport` (from `uptrakit-wire`). A handler
+impl that compiles against `uptrakit-wire` types only is transport-agnostic by construction
+and can run in both standalone (WebSocket) and embedded (in-process) modes.
+
+`agreed_capabilities` for capability-dependent initialization must be read from the
+`on_settings` parameter, not from a connection method.
+
 ## String-to-Type Conversions
 
 All string-to-type conversions must use the standard `FromStr` trait. Do not add ad-hoc `parse(&str)` methods that serve the same purpose.
