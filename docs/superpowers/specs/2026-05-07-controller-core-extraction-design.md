@@ -169,35 +169,49 @@ pub trait UpdateOutputStream: Send + Sync {
     async fn send_completed(&self, update_id: Uuid, outcome: DispatchOutcome, error: Option<String>);
 }
 
+/// Groups actor identification for a dispatch request.
+///
+/// `#[non_exhaustive]`: future auth methods may add fields (e.g. `scope`).
+/// ActorType stays in uptrakit-web-api-queries; controller-core imports it from there.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct ActorInfo {
+    pub actor_type: ActorType,
+    pub actor_id: String,
+}
+
+impl ActorInfo {
+    pub fn new(actor_type: ActorType, actor_id: impl Into<String>) -> Self {
+        Self { actor_type, actor_id: actor_id.into() }
+    }
+}
+
 #[non_exhaustive]
 pub struct UpdateDispatchParams {
     pub tenant_id: Uuid,
     pub host_id: Uuid,
     pub software_item_id: Uuid,
     pub to_version: String,
-    // ActorType stays in uptrakit-web-api-queries (used as query param there).
-    // controller-core imports it via its uptrakit-web-api-queries dep.
-    pub actor_type: ActorType,
-    pub actor_id: String,
+    // ActorInfo groups actor_type + actor_id. ActorType stays in
+    // uptrakit-web-api-queries — controller-core imports it from there (no cycle).
+    pub actor: ActorInfo,
     pub release_info: Option<serde_json::Value>, // serialised release metadata; avoids pulling in
                                                  // a web-api-specific ReleaseInfo type
     pub interactive: bool,
 }
 
 impl UpdateDispatchParams {
-    #[expect(clippy::too_many_arguments, reason = "constructor for non_exhaustive struct")]
+    // 7 params — within clippy default limit; no suppression needed.
     pub fn new(
         tenant_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
         to_version: String,
-        actor_type: ActorType,
-        actor_id: String,
+        actor: ActorInfo,
         release_info: Option<serde_json::Value>,
         interactive: bool,
     ) -> Self {
-        Self { tenant_id, host_id, software_item_id, to_version, actor_type, actor_id,
-               release_info, interactive }
+        Self { tenant_id, host_id, software_item_id, to_version, actor, release_info, interactive }
     }
 }
 
@@ -427,8 +441,7 @@ pub async fn mcp_trigger_update(
         host_id,
         software_item_id,
         to_version,
-        ActorType::ApiToken,
-        ctx.token_id.to_string(),
+        ActorInfo::new(ActorType::ApiToken, ctx.token_id.to_string()),
         None,
         false,
     );
