@@ -235,9 +235,6 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}) {
 		if (method === 'GET' && path === '/api/v1/system/alerts') {
 			return json({ alerts: systemAlerts });
 		}
-		if (method === 'GET' && path === '/api/v1/surfaces/runtime-status') {
-			return json({ active: true });
-		}
 		if (method === 'GET' && path === '/api/v1/surfaces') {
 			const slot = url.searchParams.get('slot');
 			if (!slot) {

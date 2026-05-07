@@ -30,7 +30,6 @@ const canonicalUiParityReason =
 	'ui parity screenshot baselines are canonicalized on macOS Chromium to avoid cross-OS rasterization drift';
 
 type MockScenario = {
-	runtimeActive?: boolean;
 	surfaces?: SurfaceResponse[];
 	readModels?: Record<string, SurfaceReadResponse>;
 	softwareDetailHostActiveUpdate?: boolean;
@@ -361,7 +360,6 @@ async function mountActionBadgeParityFixture(page: Page) {
 async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<MockParityApiResult> {
 	const surfaces = scenario.surfaces ?? paritySurfaces;
 	const readModels = scenario.readModels ?? buildDefaultReadModels(surfaces);
-	const runtimeActive = scenario.runtimeActive ?? true;
 	const softwareDetailItem = buildSoftwareDetailItem(
 		scenario.softwareDetailHostActiveUpdate ? 'history-live-001' : null
 	);
@@ -393,9 +391,6 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 		}
 		if (method === 'GET' && path === '/api/v1/system/alerts') {
 			return json({ alerts: [] });
-		}
-		if (method === 'GET' && path === '/api/v1/surfaces/runtime-status') {
-			return json({ active: runtimeActive });
 		}
 		if (method === 'GET' && path === '/api/v1/surfaces') {
 			const slot = url.searchParams.get('slot');
@@ -962,32 +957,4 @@ test('shared primitive ui parity: entity link cell rendering states', async ({ p
 	await expect(dataTable.locator('a[href="/hosts/00000000-0000-0000-0000-000000000001"]')).toBeVisible();
 
 	await captureParityScreenshot(page, dataTable, 'ui-parity-entity-link-cells.png');
-});
-
-// SKIPPED: The runtime-active gate was intentionally removed in commit 73343131
-// ("refactor: remove surface rollout gate"). The surface page no longer checks
-// getSurfaceRuntimeStatus() — surfaces are always active. Re-enable this test
-// if a new runtime-status UI wiring spec is implemented.
-test.skip('surface page ui parity: surface.page runtime-state shell', async ({ page }) => {
-	const runtimeReadModels = buildDefaultReadModels(paritySurfaces);
-	expect(runtimeReadModels['surface.one']).toBeDefined();
-
-	const apiRequests = await mockParityApi(page, {
-		runtimeActive: false,
-		readModels: runtimeReadModels
-	});
-
-	await page.goto('/surfaces/surface.one');
-
-	const runtimeStateCard = page.locator('[data-ui="section-card"]').filter({
-		has: page.getByText('Surface contract mismatch detected. Please refresh and try again.', {
-			exact: true
-		})
-	});
-	await expect(runtimeStateCard).toBeVisible();
-	await expect(page.locator('[data-ui="app-shell-nav"]').getByRole('link', { name: 'Surface One' })).toHaveCount(0);
-	await expect(page.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeVisible();
-	await expect(page.getByText('Surface One Loaded Content')).toHaveCount(0);
-	expect(apiRequests.readRequests).not.toContain('surface.one');
-	await captureParityScreenshot(page, runtimeStateCard, 'ui-parity-surface-page-runtime-state-shell.png');
 });

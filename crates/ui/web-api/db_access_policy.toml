@@ -412,7 +412,6 @@ update_zeroconf_settings = "full-state"
 
 [routes."surfaces.rs"]
 list_surfaces = "full-state"
-get_surface_runtime_status = "full-state"
 list_surface_providers = "full-state"
 get_surface_read = "full-state"
 invoke_surface_interaction = "full-state"

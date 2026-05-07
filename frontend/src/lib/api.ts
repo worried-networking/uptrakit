@@ -93,8 +93,7 @@ import type {
 	InvokeSurfaceInteractionRequest,
 	SurfaceProviderInfo,
 	SurfaceReadResponse,
-	SurfaceResponse,
-	SurfaceRuntimeStatusResponse
+	SurfaceResponse
 } from './surfaces/contract';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -1145,10 +1144,6 @@ export async function sealedBoxEncrypt(plaintext: string, recipientPublicKeyBase
 	sealed.set(ciphertextWithTag, 77);
 
 	return bytesToBase64(sealed);
-}
-
-export async function getSurfaceRuntimeStatus(): Promise<SurfaceRuntimeStatusResponse> {
-	return request<SurfaceRuntimeStatusResponse>('/surfaces/runtime-status');
 }
 
 export async function listSurfaces(options?: { slot?: string; page?: string }): Promise<SurfaceResponse[]> {

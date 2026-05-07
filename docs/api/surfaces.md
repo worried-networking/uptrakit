@@ -40,18 +40,6 @@ Response: `SurfaceResponse[]`
 ]
 ```
 
-### `GET /api/v1/surfaces/runtime-status`
-
-Returns controller-owned rollout status for shared surface runtime.
-
-Response:
-
-```json
-{
-  "active": true
-}
-```
-
 ### `GET /api/v1/surfaces/{surface_id}/providers`
 
 Lists providers for targeted surfaces.

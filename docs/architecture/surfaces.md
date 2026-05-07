@@ -110,15 +110,10 @@ codes.
 The frontend path is unified for built-in and provider-backed surfaces:
 
 - `frontend/src/lib/surfaces/registry.svelte.ts` — runtime surface index by slot, provider cache,
-  read-model cache, rollout state
+  read-model cache
 - `frontend/src/lib/components/surfaces/` — shared renderer components
   (`SurfaceReadPanel`, `SurfaceRenderer`, `SurfaceTable`, `SurfaceForm`, `SurfaceWorkflow`, ...)
 - `frontend/src/routes/surfaces/[id]/+page.svelte` — dynamic route keyed by `surface_id`
 
 Because shared-surface navigation uses `/surfaces/{surface_id}`, refreshing keeps users on the
 same surface page.
-
-## Rollout signal
-
-`/api/v1/surfaces/runtime-status` exposes controller-owned rollout state (`active`), letting the
-frontend keep behavior fail-closed during activation windows.

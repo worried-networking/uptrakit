@@ -966,7 +966,6 @@ export type {
 	SurfaceProviderInfo,
 	SurfaceReadResponse,
 	SurfaceResponse,
-	SurfaceRuntimeStatusResponse,
 	SurfaceScope,
 	SurfaceTab,
 	SurfaceTabId,

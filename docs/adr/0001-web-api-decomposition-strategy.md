@@ -66,10 +66,6 @@ and `AuthState` sub-structs already inside `AppState`.
   recorded (measurement skipped; extraction already applied). The dominant cost (`sea-orm`,
   `sqlx`, `aws-lc-rs`) remains in `web-api`; expect modest incremental wins for
   surface-proxy-only changes.
-- **SurfaceRuntimeRolloutState ownership (deferred):** `proxy/tests/provider_proxied/rollout.rs`
-  (moved but undeclared) references `SurfaceRuntimeRolloutState` which lives in `web-api`'s
-  `app_state.rs`. When the test directory is eventually wired in, decide whether this type
-  moves to `uptrakit-surface-proxy` or stays in `web-api` and is imported.
 - **surface_proxy sequencing note (resolved):** `surface_proxy` called `build_settings_bag`
   from the notification dispatcher. This was resolved by moving `build_settings_bag` to
   `uptrakit_web_api_queries::notification_settings` before extraction (commit 3). The

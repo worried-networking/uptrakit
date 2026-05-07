@@ -52,10 +52,7 @@ pub mod workload_claims;
 pub use app_state::OidcState;
 pub use app_state::{
     AppState, AppStateBuildError, AppStateBuilder, AuthState, BroadcastState, CertState,
-    NotificationState, SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT,
-    ServiceCredentialSources, SurfaceFrameworkGeneration, SurfaceProviderReport,
-    SurfaceProviderRequirement, SurfaceProxyDeps, SurfaceRuntimeMode, SurfaceRuntimeRolloutState,
-    default_surface_runtime_requirements,
+    NotificationState, ServiceCredentialSources, SurfaceProxyDeps,
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use embedded_support::EmbeddedServiceNotifier;
