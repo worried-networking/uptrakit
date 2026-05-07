@@ -7571,6 +7571,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-package-manager-routeros"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "parking_lot",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+]
+
+[[package]]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
 version = "0.0.1"
 dependencies = [
@@ -7743,6 +7760,7 @@ dependencies = [
  "uptrakit-notification-plugin-email",
  "uptrakit-notification-plugin-telegram",
  "uptrakit-notification-plugin-webhook",
+ "uptrakit-package-manager-routeros",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-discovery-uptrakit-self-update",
  "uptrakit-plugin-enhancement-dashboard-icons",

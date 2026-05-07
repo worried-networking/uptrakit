@@ -118,18 +118,15 @@ impl HostRuntime for MetadataAwareHostRuntime {
     }
 }
 
-/// Construct the appropriate `HostRuntime` for a host based on its capabilities.
+/// Construct a [`StandardHostRuntime`] for local/POSIX hosts.
 ///
-/// Currently always returns [`StandardHostRuntime`]. When non-standard host
-/// types are added (e.g., RouterOS), this function dispatches based on
-/// `caps.os_family`. This is the SINGLE point where runtime type selection
-/// happens on the agent side.
+/// This function is used by `agent-runtime` for the embedded agent path where
+/// all hosts are local POSIX machines. For remote SSH hosts (including RouterOS),
+/// `agent-ssh` builds the appropriate runtime in `client::build_host_runtime`.
 pub fn construct_host_runtime(
     executor: Arc<dyn CommandExecutor>,
     caps: HostCapabilities,
 ) -> Arc<dyn HostRuntime> {
-    // Future: match on caps.os_family to select the right runtime
-    // e.g., Some(OsFamily::RouterOs) => Arc::new(RouterOsHostRuntime::new(session, caps))
     Arc::new(StandardHostRuntime::new(executor, caps))
 }
 
