@@ -1,5 +1,6 @@
 #[macro_use]
 mod macros;
+mod embedded;
 
 pub mod backoff;
 pub mod build_info;
@@ -49,6 +50,7 @@ pub use cert_handler::{
 };
 pub use config_proxy::{PendingServiceConfigRequest, ServiceConfigProxy, ServiceConfigProxyError};
 pub use connection::ControllerConnection;
+pub use embedded::run_embedded_service;
 pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,
     is_rustls_cert_expired,
