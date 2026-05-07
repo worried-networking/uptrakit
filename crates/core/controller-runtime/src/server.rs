@@ -66,7 +66,20 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
     let mut router = uptrakit_web_api::build_router(Arc::clone(&cfg.app_state));
     #[cfg(feature = "mcp")]
     {
-        router = router.merge(uptrakit_mcp::build_mcp_router(Arc::clone(&cfg.app_state)));
+        use uptrakit_controller_core::auth::AuthStateSource;
+        use uptrakit_controller_core::db::DbStateSource;
+
+        let mcp_state = uptrakit_mcp::state::McpState::new(
+            cfg.app_state.db_state(),
+            cfg.app_state.auth_state(),
+            cfg.app_state.settings.clone(),
+            cfg.app_state.default_tenant_id,
+            cfg.app_state.controller_id,
+            cfg.app_state.audit_emitter.clone(),
+            cfg.app_state.shutdown_token.clone(),
+            Arc::clone(&cfg.app_state.update_dispatcher),
+        );
+        router = router.merge(uptrakit_mcp::build_mcp_router(mcp_state));
     }
     if let Some(ref dir) = cfg.static_dir {
         let index_for_fallback = dir.join("index.html");

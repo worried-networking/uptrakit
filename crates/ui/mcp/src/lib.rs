@@ -4,9 +4,10 @@ use axum::Router;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
-use uptrakit_web_api::AppState;
 
 use crate::auth::McpAuthLayer;
+use crate::settings::McpSettings;
+use crate::state::McpState;
 use crate::tools::McpHandler;
 
 pub mod auth;
@@ -19,20 +20,21 @@ pub mod tools;
 /// Mount the MCP Streamable HTTP transport at `/mcp`.
 ///
 /// The returned router has no axum state type parameter (`Router<()>`); the
-/// `McpHandler` captures `Arc<AppState>` directly so no `.with_state()` call
+/// `McpHandler` captures `McpState` directly so no `.with_state()` call
 /// is needed.
-pub fn build_mcp_router(state: Arc<AppState>) -> Router {
-    let config = build_config(&state);
+pub fn build_mcp_router(state: McpState) -> Router {
+    let mcp_settings = McpSettings::from(&state.settings);
+    let config = build_config(&mcp_settings);
     let raw_service = StreamableHttpService::new(
         {
-            let state = Arc::clone(&state);
-            move || Ok(McpHandler::new(Arc::clone(&state)))
+            let state = state.clone();
+            move || Ok(McpHandler::new(state.clone()))
         },
         Arc::new(LocalSessionManager::default()),
         config,
     );
 
-    let auth_layer = McpAuthLayer::new(Arc::clone(&state));
+    let auth_layer = McpAuthLayer::new(state.clone());
     let service = tower::ServiceBuilder::new()
         .layer(auth_layer)
         .service(raw_service);
@@ -40,9 +42,8 @@ pub fn build_mcp_router(state: Arc<AppState>) -> Router {
     Router::new().nest_service("/mcp", service)
 }
 
-fn build_config(state: &AppState) -> StreamableHttpServerConfig {
-    let sans = state.settings.sans();
-    let allowed_hosts = build_allowed_hosts(&sans);
+fn build_config(settings: &McpSettings) -> StreamableHttpServerConfig {
+    let allowed_hosts = build_allowed_hosts(&settings.sans);
     StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts)
 }
 

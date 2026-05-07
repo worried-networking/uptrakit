@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use axum::http::StatusCode;
@@ -12,9 +11,6 @@ use uptrakit_controller_core::auth::api_token::{
     authenticate_api_token, emit_api_token_auth_audit,
 };
 use uptrakit_controller_core::auth::{AuthFailure, Permission};
-use uptrakit_web_api::AppState;
-use uptrakit_web_api::McpAuthError as WebApiMcpAuthError;
-use uptrakit_web_api::validate_api_token_for_mcp as web_api_validate_token;
 
 use crate::context::{McpAuthError, McpRequestContext};
 use crate::state::McpState;
@@ -30,11 +26,13 @@ use crate::state::McpState;
 /// inserts [`McpRequestContext`] into request extensions for tool handlers.
 #[derive(Clone)]
 pub struct McpAuthLayer {
-    state: Arc<AppState>,
+    state: McpState,
 }
 
 impl McpAuthLayer {
-    pub fn new(state: Arc<AppState>) -> Self {
+    /// Create a new [`McpAuthLayer`] from the given [`McpState`].
+    #[must_use]
+    pub fn new(state: McpState) -> Self {
         Self { state }
     }
 }
@@ -45,7 +43,7 @@ impl<S> Layer<S> for McpAuthLayer {
     fn layer(&self, inner: S) -> Self::Service {
         McpAuthService {
             inner,
-            state: Arc::clone(&self.state),
+            state: self.state.clone(),
         }
     }
 }
@@ -58,7 +56,7 @@ impl<S> Layer<S> for McpAuthLayer {
 #[derive(Clone)]
 pub struct McpAuthService<S> {
     inner: S,
-    state: Arc<AppState>,
+    state: McpState,
 }
 
 impl<S, B> Service<axum::extract::Request<B>> for McpAuthService<S>
@@ -78,34 +76,34 @@ where
     }
 
     fn call(&mut self, mut req: axum::extract::Request<B>) -> Self::Future {
-        let state = Arc::clone(&self.state);
+        let state = self.state.clone();
         // Standard Tower clone-and-swap so the ready clone is used.
         let mut inner = self.inner.clone();
         std::mem::swap(&mut inner, &mut self.inner);
 
         Box::pin(async move {
             let token = extract_bearer_token(&req);
-            let mcp_ctx = match web_api_validate_token(&state, token.as_deref()).await {
+            let mcp_ctx = match validate_api_token_for_mcp(&state, token.as_deref()).await {
                 Ok(ctx) => ctx,
-                Err(WebApiMcpAuthError::MissingCredentials) => {
+                Err(McpAuthError::MissingCredentials) => {
                     return Ok(unauthorized(
                         "Authentication required: provide an API token via \
                          Authorization: Bearer <upk_...>",
                     ));
                 }
-                Err(WebApiMcpAuthError::JwtNotAccepted) => {
+                Err(McpAuthError::JwtNotAccepted) => {
                     return Ok(unauthorized(
                         "JWT tokens are not accepted for MCP access. \
                          Use an API token (upk_...)",
                     ));
                 }
-                Err(WebApiMcpAuthError::Forbidden) => {
+                Err(McpAuthError::Forbidden) => {
                     return Ok(plain(
                         StatusCode::FORBIDDEN,
                         "User is deactivated or lacks the AccessMcp permission",
                     ));
                 }
-                Err(WebApiMcpAuthError::Internal) => {
+                Err(McpAuthError::Internal) => {
                     return Ok(plain(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
