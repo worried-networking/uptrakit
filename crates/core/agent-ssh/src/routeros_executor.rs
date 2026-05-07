@@ -15,10 +15,6 @@ pub(crate) struct RouterOsSshExecutor {
 }
 
 impl RouterOsSshExecutor {
-    #[expect(
-        dead_code,
-        reason = "called from RouterOS host runtime construction in Plan B Task 5"
-    )]
     pub(crate) fn new(session: Arc<SshSession>) -> Self {
         Self {
             inner: SshCommandExecutor::new(session),
@@ -87,10 +83,6 @@ impl RouterOsExecutor for RouterOsSshExecutor {
 // ── Bootstrap helpers (not part of RouterOsExecutor trait) ──────────────
 
 impl RouterOsSshExecutor {
-    #[expect(
-        dead_code,
-        reason = "called from RouterOS bootstrap logic in Plan B Task 5"
-    )]
     pub(crate) async fn create_group(&self, policy_str: &str) -> crate::error::Result<()> {
         let cmd = format!("/user group add name=uptrakit policy={policy_str}");
         self.inner
@@ -100,10 +92,6 @@ impl RouterOsSshExecutor {
             .map_err(|e| rootcause::report!(crate::error::Error::SshCommand(e.to_string())))
     }
 
-    #[expect(
-        dead_code,
-        reason = "called from RouterOS bootstrap logic in Plan B Task 5"
-    )]
     pub(crate) async fn create_user(&self) -> crate::error::Result<()> {
         self.inner
             .exec_raw(
@@ -115,10 +103,6 @@ impl RouterOsSshExecutor {
             .map_err(|e| rootcause::report!(crate::error::Error::SshCommand(e.to_string())))
     }
 
-    #[expect(
-        dead_code,
-        reason = "called from RouterOS bootstrap logic in Plan B Task 5"
-    )]
     pub(crate) async fn import_ssh_key(&self, remote_path: &str) -> crate::error::Result<()> {
         let cmd = format!("/user ssh-keys import public-key-file={remote_path} user=uptrakit");
         self.inner

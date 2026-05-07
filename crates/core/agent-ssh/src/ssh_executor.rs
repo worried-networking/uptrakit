@@ -61,7 +61,6 @@ impl SshCommandExecutor {
     }
 
     /// Upload `data` to `remote_path` via SFTP.
-    #[expect(dead_code, reason = "used by RouterOS bootstrap in Plan B")]
     pub(crate) async fn sftp_put(
         &self,
         remote_path: &str,
@@ -71,7 +70,6 @@ impl SshCommandExecutor {
     }
 
     /// Delete `remote_path` via SFTP.
-    #[expect(dead_code, reason = "used by RouterOS bootstrap in Plan B")]
     pub(crate) async fn sftp_remove(
         &self,
         remote_path: &str,
