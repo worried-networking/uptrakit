@@ -227,7 +227,8 @@ jobs:
             exit 0
           fi
           npm --prefix frontend version --no-git-tag-version "$VERSION"
-          git add frontend/package.json
+          npm install --prefix frontend --package-lock-only
+          git add frontend/package.json frontend/package-lock.json
           git commit -m "chore: bump frontend version to $VERSION"
           git push origin "$HEAD_BRANCH"
 
