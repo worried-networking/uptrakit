@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
+use uptrakit_controller_core::db::DbStateSource;
 use uptrakit_plugin_infrastructure_registry::{ControllerUpdateProtection, PluginOps};
 
 use crate::auth::device_flow::DeviceFlowStore;
@@ -344,25 +345,7 @@ fn recompute_surface_runtime_guard(
     inner.incompatible_required_providers = incompatible_required_providers;
 }
 
-/// Newtype wrapper for [`DatabaseConnection`] used as a focused Axum sub-state.
-///
-/// The inner field is private. External code accesses the connection via
-/// [`DbState::db`]. Construction is restricted to within this crate via
-/// [`DbState::new`], preventing external crates from constructing `DbState`
-/// directly.
-#[derive(Clone)]
-pub struct DbState(DatabaseConnection);
-
-impl DbState {
-    pub(crate) fn new(db: DatabaseConnection) -> Self {
-        Self(db)
-    }
-
-    /// Returns a reference to the underlying database connection.
-    pub fn db(&self) -> &DatabaseConnection {
-        &self.0
-    }
-}
+pub use uptrakit_controller_core::db::DbState;
 
 /// Certificate-authority related state: snapshot receiver, key store, and
 /// notification/cache handles for CRL and rotation operations.
@@ -1077,9 +1060,12 @@ impl AppState {
     }
 }
 
-impl FromRef<Arc<AppState>> for DbState {
-    fn from_ref(state: &Arc<AppState>) -> Self {
-        state.db.clone()
+/// Allows Axum to extract [`DbState`] from `Arc<AppState>` via the blanket
+/// `impl<S: DbStateSource> FromRef<Arc<S>> for DbState` provided by
+/// `uptrakit-controller-core`.
+impl DbStateSource for AppState {
+    fn db_state(&self) -> DbState {
+        self.db.clone()
     }
 }
 
