@@ -7112,6 +7112,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-controller-core"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "parking_lot",
+ "rootcause",
+ "sea-orm",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uptrakit-audit-log",
+ "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-service-connections",
+ "uptrakit-shared-db",
+ "uptrakit-shared-types",
+ "uptrakit-web-api-auth",
+ "uptrakit-web-api-queries",
+ "uptrakit-wire",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-controller-runtime"
 version = "0.0.1"
 dependencies = [
@@ -8267,6 +8292,7 @@ dependencies = [
  "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-config-merge",
+ "uptrakit-controller-core",
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-github-client",

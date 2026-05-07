@@ -88,6 +88,7 @@ sha2 = { workspace = true }
 uptrakit-global-github-provider = { workspace = true }
 uptrakit-github-client = { workspace = true }
 uptrakit-notification-delivery = { workspace = true }
+uptrakit-controller-core = { workspace = true, features = ["axum-integration"] }
 uptrakit-service-connections = { workspace = true }
 uptrakit-surface-proxy = { workspace = true }
 
