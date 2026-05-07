@@ -279,7 +279,7 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
   };
   ```
 
-- [ ] **Step 2: Update `on_connected` signature**
+- [ ] **Step 2: Update `on_connected` signature and add embedded-mode note**
 
   Change (around line 158–162):
 
@@ -291,9 +291,13 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
   ) -> LoopResult<()>;
   ```
 
-  to:
+  to (also add the `/// Note` line to the existing doc-comment block):
 
   ```rust
+  /// Called when the service establishes a WebSocket connection to the controller.
+  ///
+  /// Note: **not called** by `run_embedded_service`. Embedded handlers must perform
+  /// any initialization that would normally happen here inside their constructor.
   async fn on_connected(
       &mut self,
       conn: &mut dyn ServiceTransport,
@@ -492,6 +496,9 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
 
 - Modify: `crates/shared/service-sdk/src/event_loop.rs`
 
+**Note:** Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
+`cargo check -p uptrakit-service-sdk` after this task.
+
 - [ ] **Step 1: Add `ServiceTransport` to imports**
 
   In `event_loop.rs`, update the `crate::wire_api` import (around line 19–21) to add
@@ -644,6 +651,10 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
 
 - Modify: `crates/core/agent/src/main.rs`
 
+**Note:** All `impl ServiceHandler for AgentHandler` steps below update method signatures only.
+Preserve the existing `#[async_trait::async_trait]` attribute on the `impl` block — do not remove it.
+Do NOT run `cargo check --all-features` until Task 7 is complete.
+
 - [ ] **Step 1: Update imports**
 
   In `crates/core/agent/src/main.rs`, remove `ControllerConnection` from the
@@ -765,6 +776,10 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
 **Files:**
 
 - Modify: `crates/core/mqtt/src/main.rs`
+
+**Note:** All `impl ServiceHandler for StandaloneMqttHandler` steps below update method signatures
+only. Preserve the existing `#[async_trait::async_trait]` attribute on the `impl` block — do not remove it.
+Do NOT run `cargo check --all-features` until Task 7 is complete.
 
 - [ ] **Step 1: Update imports**
 
@@ -955,6 +970,10 @@ Do NOT run `cargo check --all-features` until Task 7 is complete. Only run
 
 - Modify: `crates/core/scheduler-runtime/src/standalone.rs`
 
+**Note:** All `impl ServiceHandler for StandaloneSchedulerHandler` steps below update method
+signatures only. Preserve the existing `#[async_trait::async_trait]` attribute on the `impl`
+block — do not remove it.
+
 This handler directly calls `conn.send()` (returns `Result<(), Report<EnrollmentError>>`).
 After migration, use `conn.transport_send()` (returns `Result<(), TransportError>`) and map
 the error with `map_err(|e| report!(LoopError::Other(...)))`.
@@ -1143,6 +1162,14 @@ EmbeddedTransport` block (starting around line 78) currently ends with `is_yield
 
   `Arc` is already imported at the top of the file (`use std::sync::Arc;`).
 
+  **Name collision note:** `EmbeddedTransport` already has a `pub(crate)` inherent method named
+  `yield_change_notifier` at line ~68 that returns `Arc<Notify>` (not `Option<Arc<Notify>>`).
+  In Rust, an inherent method and a trait method with the same name coexist — the trait impl
+  does not remove the inherent one. Code inside `controller-runtime` calling
+  `transport.yield_change_notifier()` unqualified will call the inherent method (returning
+  `Arc<Notify>`). Code in `service-sdk` calling through the trait gets `Option<Arc<Notify>>`.
+  This is intentional. Do not rename or remove the inherent method.
+
 - [ ] **Step 2: Compile-check controller-runtime**
 
   ```bash
@@ -1195,6 +1222,11 @@ as its first message.
 
   Insert a private helper function in `embedded/mod.rs` (before the `impl EmbeddedServiceHost`
   block):
+
+  **Before writing this function:** verify `ServiceSettingsPayload` is not `#[non_exhaustive]`
+  by running `grep -n "non_exhaustive" crates/shared/wire/src/`. If it is `#[non_exhaustive]`,
+  a struct literal will fail to compile outside the defining crate — use a constructor or
+  builder pattern provided by `uptrakit-wire` instead.
 
   ```rust
   fn embedded_service_settings(
@@ -1260,10 +1292,10 @@ as its first message.
   capabilities: controller_capabilities_for_embedded(),
   ```
 
-- [ ] **Step 3: Send `ServiceSettings` after forwarder spawn in `EmbeddedServiceHost::add()`**
+- [ ] **Step 3: Send `ServiceSettings` BEFORE forwarder spawn in `EmbeddedServiceHost::add()`**
 
-  In the `add()` body, after the forwarder is spawned and tracked (around line 227 in the
-  current file), before the transport is moved into the service closure, add:
+  In the `add()` body, BEFORE the response forwarder is spawned (around line 227 in the
+  current file), add:
 
   ```rust
   // Send ServiceSettings to the embedded service. `run_embedded_service` waits
@@ -1275,9 +1307,15 @@ as its first message.
       .map_err(|_| rootcause::report!(rootcause::fmt("failed to send initial ServiceSettings to embedded service")))?;
   ```
 
-  **Important:** `ctrl_tx` is consumed by `bridge::run_response_forwarder` at step 4. You
-  must send `ServiceSettings` BEFORE the `tokio::spawn(bridge::run_response_forwarder(...))`.
-  Reorder so that `ctrl_tx` is used for the settings send first, then passed to the forwarder.
+  **Important:** `ctrl_tx` is moved by value into `bridge::run_response_forwarder` — it is
+  consumed by the `tokio::spawn(bridge::run_response_forwarder(..., ctrl_tx, ...))` call and
+  is unavailable afterward (a use-after-move is a compile error). The `ctrl_tx.send(settings)`
+  call must be the last use of `ctrl_tx` before it is passed to the spawn. There is no
+  "reorder" needed — just ensure the send precedes the spawn line.
+
+  The embedded service's transport receives messages via a channel created at line ~209 with
+  capacity 256. This buffer is load-bearing: `ServiceSettings` sits in it until
+  `run_embedded_service` starts reading. Do not reduce the channel capacity.
 
   After reordering, the sequence in `add()` is:
   1. Provision service
@@ -1439,6 +1477,8 @@ as its first message.
               }
               () = async {
                   if let Some(n) = &yield_notifier { n.notified().await }
+                  // `pending()` makes this arm never-ready when yield signalling is
+                  // unsupported. Do NOT replace with `unreachable!()` or `unwrap()`.
                   else { std::future::pending().await }
               } => {
                   // is_yielded() is &self; read before the &mut borrow.
@@ -1529,7 +1569,7 @@ as its first message.
   async fn dispatch_message<H: ServiceHandler>(
       msg: ControllerMessage,
       handler: &mut H,
-      transport: &mut impl ServiceTransport,
+      transport: &mut dyn ServiceTransport,
       shutdown_timeout: &mut Duration,
   ) -> Option<LoopOutcome> {
       match msg {
@@ -1622,8 +1662,13 @@ as its first message.
   cargo clippy -p uptrakit-service-sdk --all-features -- -D warnings
   ```
 
-  Expected: PASS (including no `large_futures` warning since `#[expect]` is present,
-  no `unwrap`/`expect` calls, etc.).
+  Expected: PASS (no `unwrap`/`expect` calls, etc.).
+
+  **Note on `#[expect(clippy::large_futures)]`:** If clippy passes without emitting a
+  `large_futures` warning (because the concrete instantiation is below the threshold),
+  `unfulfilled_lint_expectations` will produce a compile error — the `#[expect]` was
+  never satisfied. If that happens, remove the `#[expect]` line entirely rather than
+  fighting it. The annotation is only needed if the lint actually fires.
 
 - [ ] **Step 5: Commit**
 
@@ -1668,29 +1713,16 @@ called.
       // ── MockTransport ──────────────────────────────────────────────────────
 
       struct MockTransport {
-          ctrl_tx: mpsc::Sender<ControllerMessage>,
           svc_rx: mpsc::Receiver<ControllerMessage>,
+          yielded: bool,
       }
 
-      impl MockTransport {
-          /// Returns (transport, channel to inject controller messages, channel to observe service sends).
-          fn new_pair() -> (Self, mpsc::Sender<ControllerMessage>, mpsc::Receiver<ServiceMessage>) {
-              let (ctrl_tx, svc_rx) = mpsc::channel(16);
-              let (_svc_send, _svc_recv) = mpsc::channel(16);
-              (
-                  Self { ctrl_tx, svc_rx },
-                  ctrl_tx.clone(),
-                  _svc_recv,
-              )
-          }
+      fn make_transport(ctrl_in: mpsc::Receiver<ControllerMessage>) -> MockTransport {
+          MockTransport { svc_rx: ctrl_in, yielded: false }
       }
 
-      // Simpler pair for basic tests.
-      fn make_transport(
-          ctrl_in: mpsc::Receiver<ControllerMessage>,
-      ) -> MockTransport {
-          let (ctrl_tx, _) = mpsc::channel(1);
-          MockTransport { ctrl_tx, svc_rx: ctrl_in }
+      fn make_yielded_transport(ctrl_in: mpsc::Receiver<ControllerMessage>) -> MockTransport {
+          MockTransport { svc_rx: ctrl_in, yielded: true }
       }
 
       #[async_trait]
@@ -1708,6 +1740,9 @@ called.
           fn close_policy(&self) -> crate::wire_api::TransportClosePolicy {
               crate::wire_api::TransportClosePolicy::Shutdown
           }
+          fn is_yielded(&self) -> bool {
+              self.yielded
+          }
       }
 
       // ── MockHandler ────────────────────────────────────────────────────────
@@ -1717,6 +1752,7 @@ called.
           on_settings_called: bool,
           on_shutdown_called: bool,
           on_yield_change_called: bool,
+          on_message_called: bool,
       }
 
       struct MockHandler {
@@ -1751,6 +1787,7 @@ called.
               _msg: ControllerMessage,
               _conn: &mut dyn ServiceTransport,
           ) -> LoopResult<Option<LoopOutcome>> {
+              self.log.lock().on_message_called = true;
               Ok(None)
           }
 
@@ -1837,6 +1874,10 @@ called.
       }
 
       /// Normal startup: ServiceSettings arrives → on_settings called → drain → on_shutdown called.
+      ///
+      /// Drain is cancelled synchronously before calling `run_embedded_service`. The startup
+      /// phase reads settings from the buffered channel, then the event loop sees drain already
+      /// cancelled and calls `on_shutdown` immediately. No `sleep` needed.
       #[tokio::test]
       async fn normal_startup_then_drain_calls_on_shutdown() {
           let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
@@ -1849,12 +1890,9 @@ called.
               .send(ControllerMessage::ServiceSettings(make_settings()))
               .await
               .expect("send settings");
-
-          let drain_clone = drain.clone();
-          tokio::spawn(async move {
-              tokio::time::sleep(Duration::from_millis(10)).await;
-              drain_clone.cancel();
-          });
+          // Cancel synchronously — startup phase reads from buffered channel, then the
+          // biased event loop sees drain cancelled and calls on_shutdown immediately.
+          drain.cancel();
 
           run_embedded_service(handler, transport, drain, abort).await;
 
@@ -1883,6 +1921,38 @@ called.
           assert!(!log.lock().on_settings_called);
           assert!(!log.lock().on_shutdown_called);
       }
+
+      /// When transport is yielded, incoming messages are dropped silently — on_message is
+      /// never called. Service exits cleanly when the channel closes.
+      #[tokio::test]
+      async fn yielded_transport_drops_messages_silently() {
+          let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
+          // Transport starts in yielded state.
+          let transport = make_yielded_transport(ctrl_rx);
+          let (handler, log) = MockHandler::new();
+          let drain = CancellationToken::new();
+          let abort = CancellationToken::new();
+
+          // Send settings (processed during startup — not dropped by yield check).
+          ctrl_tx
+              .send(ControllerMessage::ServiceSettings(make_settings()))
+              .await
+              .expect("send settings");
+          // Send a regular message that should be dropped while yielded.
+          ctrl_tx
+              .send(ControllerMessage::Unknown)
+              .await
+              .expect("send unknown");
+          // Close channel — transport_recv returns None → service exits.
+          drop(ctrl_tx);
+
+          run_embedded_service(handler, transport, drain, abort).await;
+
+          let log = log.lock();
+          assert!(log.on_settings_called, "on_settings must be called");
+          assert!(!log.on_message_called, "on_message must NOT be called when yielded");
+          assert!(!log.on_shutdown_called, "on_shutdown not called on transport close");
+      }
   }
   ```
 
@@ -1892,7 +1962,7 @@ called.
   cargo test -p uptrakit-service-sdk -- embedded::tests
   ```
 
-  Expected: all 4 tests pass.
+  Expected: all 5 tests pass.
 
 - [ ] **Step 3: Commit**
 
