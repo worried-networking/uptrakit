@@ -531,6 +531,7 @@ mod surface_action_context_tests {
             self.user_id
         }
 
+        #[cfg(feature = "plugin-ops")]
         #[expect(
             clippy::unimplemented,
             reason = "tenant_db is never called by these unit tests"

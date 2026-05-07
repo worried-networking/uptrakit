@@ -746,6 +746,7 @@ mod controller_boundary_tests {
             self.user_id
         }
 
+        #[cfg(feature = "plugin-ops")]
         #[expect(
             clippy::unimplemented,
             reason = "tenant_db is never called by these unit tests"
@@ -756,6 +757,7 @@ mod controller_boundary_tests {
     }
 
     impl UpdateProtectionController for TestController {
+        #[cfg(feature = "plugin-ops")]
         #[expect(
             clippy::unimplemented,
             reason = "tenant_db is never called by these unit tests"
