@@ -130,13 +130,6 @@ impl RouterOsSshExecutor {
 }
 
 /// Parse a `key: value` line from RouterOS CLI output.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "used by RouterOS plugin discovery logic added in Plan B Task 3+"
-    )
-)]
 pub(crate) fn parse_routeros_field<'a>(output: &'a str, key: &str) -> Option<&'a str> {
     for line in output.lines() {
         if let Some(rest) = line.trim_start().strip_prefix(key)
