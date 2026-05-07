@@ -207,11 +207,7 @@ pub async fn update_zeroconf_settings(
     }
 
     // Update in-memory cache.
-    let updated = ZeroconfSnapshot {
-        enabled: snap.enabled,
-        url: snap.url.clone(),
-        pki_addr: snap.pki_addr.clone(),
-    };
+    let updated = ZeroconfSnapshot::new(snap.enabled, snap.url.clone(), snap.pki_addr.clone());
     state.settings.set_zeroconf(updated).await;
 
     let ca_fingerprint = state.cert.ca_snapshot.borrow().active_fingerprint.clone();
