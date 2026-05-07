@@ -30,7 +30,7 @@ pub struct NotificationService {
     /// Workload claim registry for tenant-scoped routing.
     claim_registry: Option<Arc<WorkloadClaimRegistry>>,
     #[cfg(feature = "nats")]
-    nats: Option<crate::nats_transport::NatsTransport>,
+    nats: Option<Arc<dyn uptrakit_controller_core::notification::NatsPublisher>>,
 }
 
 impl NotificationService {
@@ -56,9 +56,12 @@ impl NotificationService {
         self.claim_registry.as_ref()
     }
 
-    /// Attach a NATS transport for cross-controller delivery.
+    /// Attach a NATS publisher for cross-controller delivery.
     #[cfg(feature = "nats")]
-    pub fn with_nats(mut self, nats: crate::nats_transport::NatsTransport) -> Self {
+    pub fn with_nats(
+        mut self,
+        nats: Arc<dyn uptrakit_controller_core::notification::NatsPublisher>,
+    ) -> Self {
         self.nats = Some(nats);
         self.nats_configured = true;
         self

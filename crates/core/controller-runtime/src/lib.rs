@@ -315,7 +315,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                     _ => AppError::Config("NATS initialization failed".to_string()),
                 }
             })?;
-        notification_service = notification_service.with_nats(nats.clone());
+        notification_service = notification_service.with_nats(Arc::new(nats.clone()));
         Some(nats)
     } else {
         None
@@ -344,7 +344,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let mut event_broadcaster = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
     #[cfg(feature = "nats")]
     if let Some(ref nats) = nats_transport {
-        event_broadcaster = event_broadcaster.with_nats(nats.clone(), controller_id);
+        event_broadcaster = event_broadcaster.with_nats(Arc::new(nats.clone()), controller_id);
     }
 
     let token_denylist = Arc::new(
