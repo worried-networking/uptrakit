@@ -22,7 +22,10 @@ const KEY_REMOTE_PATH: &str = "uptrakit-bootstrap.pub";
 /// Parameters for the RouterOS bootstrap workflow.
 #[expect(
     dead_code,
-    reason = "auth and strict-checking fields used when SSH connection is established in Plan B Task 6+"
+    reason = "auth credential fields (auth_username, auth_password, auth_private_key_pem, \
+              use_ssh_agent, strict_host_key_checking) are stored for completeness but the \
+              bootstrap execute path receives an already-established SshSession rather than \
+              reconnecting with these credentials"
 )]
 pub(crate) struct RouterOsBootstrapParams {
     pub name: String,
@@ -87,10 +90,6 @@ pub(crate) fn plan_bootstrap_routeros(
 ///
 /// Generates an Ed25519 key pair, executes each planned action in order,
 /// and saves the host entry and RouterOS-specific config to the database.
-#[expect(
-    dead_code,
-    reason = "called from RouterOS host-bootstrap command added in Plan B Task 6+"
-)]
 pub(crate) async fn execute_bootstrap_routeros(
     params: &RouterOsBootstrapParams,
     session: Arc<SshSession>,
@@ -260,7 +259,7 @@ mod tests {
     fn plan_upload_precedes_import_precedes_delete() {
         use std::mem::discriminant;
         let plan = plan_bootstrap_routeros(&stub_params());
-        let ds: Vec<_> = plan.iter().map(|a| discriminant(a)).collect();
+        let ds: Vec<_> = plan.iter().map(discriminant).collect();
         let upload = ds
             .iter()
             .position(|&d| {
