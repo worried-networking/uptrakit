@@ -11,14 +11,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::wire_api::{
-    Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
+    Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload, ServiceTransport,
     surfaces::{
         SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
     },
 };
 use rootcause::prelude::*;
 
-use crate::connection::ControllerConnection;
 use crate::error::EnrollmentError;
 use crate::identity::ServiceIdentityState;
 use crate::signal::Signal;
@@ -160,9 +159,13 @@ pub trait ServiceHandler: Send {
     /// Called after the WebSocket connection is established.
     ///
     /// Send initial messages (e.g. `ReportHosts`, `Register`) here.
+    ///
+    /// Note: **not called** by `run_embedded_service`. Embedded handlers must
+    /// perform any initialization that would normally happen here inside their
+    /// constructor.
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()>;
 
@@ -176,20 +179,19 @@ pub trait ServiceHandler: Send {
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>>;
 
     /// Called after the SDK processes shared `ServiceSettings` fields.
     ///
     /// The SDK already handles capability negotiation, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this to send capability-
-    /// dependent messages (e.g. `SurfaceRegistration` when `UiSurfaces` is
-    /// in `conn.agreed_capabilities()`) or for additional service-specific
-    /// settings processing.
+    /// dependent messages or for additional service-specific settings processing.
     async fn on_settings(
         &mut self,
         _settings: &ServiceSettingsPayload,
-        _conn: &mut ControllerConnection,
+        _conn: &mut dyn ServiceTransport,
+        _agreed_capabilities: &BTreeSet<Capability>,
     ) {
     }
 
@@ -218,7 +220,7 @@ pub trait ServiceHandler: Send {
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>>;
 
     /// Handle a service config ACK from the controller.
@@ -229,6 +231,13 @@ pub trait ServiceHandler: Send {
     /// using [`ServiceConfigProxy`](crate::ServiceConfigProxy) should override
     /// this to call `proxy.complete()`.
     fn on_service_config_ack(&self, _ack: crate::wire_api::payloads::ServiceConfigAckPayload) {}
+
+    /// Called when the embedded yield state changes.
+    ///
+    /// Only invoked by `run_embedded_service`. The default no-op is appropriate
+    /// for services that drop messages silently when yielded. MQTT overrides
+    /// this to call `runtime.handle_yield_change()` for reconnect-storm logic.
+    async fn on_yield_change(&mut self, _is_yielded: bool, _conn: &mut dyn ServiceTransport) {}
 
     /// Handle a surface action response from the controller.
     ///
@@ -246,7 +255,7 @@ pub trait ServiceHandler: Send {
     async fn on_surface_action_request(
         &mut self,
         request: SurfaceActionRequest,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<()> {
         let response = SurfaceActionResponse {
             request_id: request.request_id,
@@ -258,7 +267,7 @@ pub trait ServiceHandler: Send {
                 details: None,
             }),
         };
-        conn.send(ServiceMessage::SurfaceActionResponse(response))
+        conn.transport_send(ServiceMessage::SurfaceActionResponse(response))
             .await
             .map_err(|e| {
                 report!(LoopError::Other(format!(
@@ -286,7 +295,7 @@ pub trait ServiceHandler: Send {
     /// justifying the deviation.  See ADR-0037.
     async fn on_shutdown(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         shutdown_timeout: Duration,
     ) -> LoopOutcome;

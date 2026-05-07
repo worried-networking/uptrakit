@@ -485,7 +485,7 @@ async fn process_service_settings<H: ServiceHandler>(
 
     handle_service_settings(settings, loop_state, identity, ctx).await;
 
-    handler.on_settings(settings, conn).await;
+    handler.on_settings(settings, conn, &agreed).await;
 }
 
 /// Map a WebSocket close reason to a [`LoopOutcome`].
