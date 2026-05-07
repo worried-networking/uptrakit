@@ -67,7 +67,7 @@ fn reject_config_model_none_plugin_type(
     state: &AppState,
     plugin_type_id: &PluginTypeId,
 ) -> Option<Response> {
-    let descriptor = match state.plugin_ops.get(plugin_type_id) {
+    let descriptor = match state.plugin.plugin_ops.get(plugin_type_id) {
         Some(d) => d,
         None => {
             return Some(error_response(
@@ -259,12 +259,14 @@ pub async fn list_plugin_types(
     }
 
     let types: Vec<PluginTypeInfo> = state
+        .plugin
         .plugin_ops
         .known_type_ids()
         .into_iter()
         .map(|id| {
-            let capabilities = state.plugin_ops.capabilities(&id);
+            let capabilities = state.plugin.plugin_ops.capabilities(&id);
             let config_form_fields = state
+                .plugin
                 .plugin_ops
                 .config_form_schema(&id)
                 .unwrap_or_default()
@@ -272,28 +274,31 @@ pub async fn list_plugin_types(
                 .map(plugin_field_to_api_field)
                 .collect();
             let type_settings_form_fields = state
+                .plugin
                 .plugin_ops
                 .type_settings_form_schema(&id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(plugin_field_to_api_field)
                 .collect();
-            let type_settings_sample = state.plugin_ops.type_settings_sample(&id);
-            let display_name = state.plugin_ops.display_name(&id);
+            let type_settings_sample = state.plugin.plugin_ops.type_settings_sample(&id);
+            let display_name = state.plugin.plugin_ops.display_name(&id);
             let plugin_type = id.clone();
             let supports_plugin_configs = state
+                .plugin
                 .plugin_ops
                 .get(&id)
                 .map(|d| !descriptor_is_config_model_none(d))
                 .unwrap_or(false);
             let sample_config = state
+                .plugin
                 .plugin_ops
                 .get(&id)
                 .map(|d| {
                     if descriptor_is_config_model_none(d) {
                         serde_json::json!({})
                     } else {
-                        state.plugin_ops.sample_config(&id)
+                        state.plugin.plugin_ops.sample_config(&id)
                     }
                 })
                 .unwrap_or_default();
@@ -356,6 +361,7 @@ pub async fn create_plugin_config(
         return Ok(rejection);
     }
     if let Err(e) = state
+        .plugin
         .plugin_ops
         .validate_config(&plugin_type_id, &req.config)
     {
@@ -385,7 +391,8 @@ pub async fn create_plugin_config(
         ));
     }
 
-    let resp = pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await?;
+    let resp =
+        pc_queries::create_plugin_config(state.plugin.plugin_ops.as_ref(), &tenant_db, req).await?;
     emit_plugin_config_semantic_audit(
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
@@ -452,7 +459,7 @@ pub async fn list_plugin_configs(
 ) -> Response {
     let pagination = PaginationParams::from(&params);
     match pc_queries::list_plugin_configs(
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         &tenant_db,
         &pagination,
         params.plugin_type.as_deref(),
@@ -487,7 +494,9 @@ pub async fn get_plugin_config(
     Path(config_id): Path<Uuid>,
     CanViewSoftware(_user): CanViewSoftware,
 ) -> Response {
-    match pc_queries::get_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id).await {
+    match pc_queries::get_plugin_config(state.plugin.plugin_ops.as_ref(), &tenant_db, config_id)
+        .await
+    {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
@@ -585,9 +594,13 @@ pub async fn update_plugin_config(
         ));
     }
 
-    let resp =
-        pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
-            .await?;
+    let resp = pc_queries::update_plugin_config(
+        state.plugin.plugin_ops.as_ref(),
+        &tenant_db,
+        config_id,
+        req,
+    )
+    .await?;
     emit_plugin_config_semantic_audit(
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
@@ -783,6 +796,7 @@ pub async fn discover_plugin_config(
     let plugin_type_id = PluginTypeId::new(&cfg.plugin_type);
 
     if !state
+        .plugin
         .plugin_ops
         .discovery_plugins()
         .contains(&plugin_type_id)
@@ -1149,7 +1163,7 @@ pub async fn test_plugin_config(
     if let Some(rejection) = reject_config_model_none_plugin_type(&state, &plugin_type_id) {
         return rejection;
     }
-    let caps = state.plugin_ops.capabilities(&plugin_type_id);
+    let caps = state.plugin.plugin_ops.capabilities(&plugin_type_id);
 
     // 2. Merge with saved config if plugin_config_id is provided.
     let config = if let Some(config_id) = body.plugin_config_id {
@@ -1181,7 +1195,11 @@ pub async fn test_plugin_config(
     };
 
     // 3. Validate merged config.
-    if let Err(e) = state.plugin_ops.validate_config(&plugin_type_id, &config) {
+    if let Err(e) = state
+        .plugin
+        .plugin_ops
+        .validate_config(&plugin_type_id, &config)
+    {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!("Invalid plugin config: {e}"),

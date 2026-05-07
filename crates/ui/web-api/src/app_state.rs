@@ -438,6 +438,56 @@ pub struct OidcState {
     pub oidc_registration_store: OidcRegistrationStore,
 }
 
+/// Grouped TLS server configuration for hot-reload.
+///
+/// `#[non_exhaustive]`: fields may be added (e.g. OCSP stapling config).
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct ServerState {
+    /// Path to the PKI directory (for server cert renewal).
+    pub pki_path: std::path::PathBuf,
+    /// RustlsConfig handle for hot-reloading TLS.
+    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+}
+
+impl ServerState {
+    /// Creates a new [`ServerState`].
+    pub fn new(
+        pki_path: std::path::PathBuf,
+        rustls_config: axum_server::tls_rustls::RustlsConfig,
+    ) -> Self {
+        Self {
+            pki_path,
+            rustls_config,
+        }
+    }
+}
+
+/// Grouped plugin-ops state for plugin configuration and global provider runtimes.
+///
+/// `#[non_exhaustive]`: fields may be added (e.g. plugin metrics registry).
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct PluginState {
+    /// Plugin operations abstraction used by plugin-config route handlers.
+    pub plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>,
+    /// Host-owned global provider runtimes shared by singleton plugins.
+    pub global_providers: Arc<crate::global_providers::GlobalProviders>,
+}
+
+impl PluginState {
+    /// Creates a new [`PluginState`].
+    pub fn new(
+        plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>,
+        global_providers: Arc<crate::global_providers::GlobalProviders>,
+    ) -> Self {
+        Self {
+            plugin_ops,
+            global_providers,
+        }
+    }
+}
+
 /// Shared application state available to all handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -460,14 +510,8 @@ pub struct AppState {
     pub cert_signer: Arc<dyn crate::cert_signer::AgentCertSigner>,
     /// Unified registry of connected services (agents and MQTT) for push notifications.
     pub service_connections: ServiceConnectionRegistry,
-    /// Plugin operations abstraction used by plugin-config route handlers.
-    ///
-    /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
-    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginCatalog`]
-    /// and can be tested with a mock implementation.
-    pub plugin_ops: Arc<dyn PluginOps>,
-    /// Host-owned global provider runtimes shared by singleton plugins.
-    pub global_providers: Arc<crate::global_providers::GlobalProviders>,
+    /// Grouped plugin operations and global provider runtimes.
+    pub plugin: PluginState,
     /// Credential sources for services with credential capabilities.
     pub credential_sources: ServiceCredentialSources,
     /// Cancellation token signalled during server shutdown to terminate open SSE streams.
@@ -492,10 +536,8 @@ pub struct AppState {
     pub surface_proxy_deps: SurfaceProxyDeps,
     /// Request/response proxy for plugin configuration test invocations.
     pub config_test_proxy: Arc<ConfigTestProxy>,
-    /// Path to the PKI directory (for server cert renewal).
-    pub pki_path: std::path::PathBuf,
-    /// RustlsConfig handle for hot-reloading TLS.
-    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Grouped TLS server configuration for hot-reload.
+    pub server: ServerState,
     /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
     pub default_tenant_id: uuid::Uuid,
     /// Unique identifier for this controller instance (used for cross-controller notification delivery).
@@ -1022,9 +1064,8 @@ impl AppStateBuilder {
                 .ok_or_else(|| report!(AppStateBuildError("cert_signer")))?,
             service_connections: self
                 .service_connections
-                .ok_or_else(|| report!(AppStateBuildError("service_connections")))?,
-            plugin_ops,
-            global_providers,
+                .ok_or(AppStateBuildError("service_connections"))?,
+            plugin: PluginState::new(plugin_ops, global_providers),
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
             embedded_service_notifier: self.embedded_service_notifier,
@@ -1043,12 +1084,11 @@ impl AppStateBuilder {
             config_test_proxy: self
                 .config_test_proxy
                 .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
-            pki_path: self
-                .pki_path
-                .ok_or_else(|| report!(AppStateBuildError("pki_path")))?,
-            rustls_config: self
-                .rustls_config
-                .ok_or_else(|| report!(AppStateBuildError("rustls_config")))?,
+            server: ServerState::new(
+                self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
+                self.rustls_config
+                    .ok_or(AppStateBuildError("rustls_config"))?,
+            ),
             default_tenant_id: self
                 .default_tenant_id
                 .ok_or_else(|| report!(AppStateBuildError("default_tenant_id")))?,
@@ -1077,7 +1117,12 @@ impl AppState {
 
     /// Returns the host-owned global provider runtimes.
     pub fn global_providers(&self) -> Arc<crate::global_providers::GlobalProviders> {
-        Arc::clone(&self.global_providers)
+        Arc::clone(&self.plugin.global_providers)
+    }
+
+    /// Returns the plugin operations abstraction.
+    pub fn plugin_ops(&self) -> Arc<dyn PluginOps> {
+        self.plugin.plugin_ops.clone()
     }
 
     /// Returns a reference to the underlying database connection.
@@ -1095,7 +1140,7 @@ impl AppState {
 
     /// Returns the controller-side update-protection singleton, if registered.
     pub fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
-        self.plugin_ops.controller_update_protection()
+        self.plugin.plugin_ops.controller_update_protection()
     }
 
     /// Returns the controller-side update-hook singleton, if registered.
@@ -1103,7 +1148,7 @@ impl AppState {
     pub fn controller_update_hook(
         &self,
     ) -> Option<Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>> {
-        self.plugin_ops.controller_update_hook()
+        self.plugin.plugin_ops.controller_update_hook()
     }
 }
 
@@ -1148,13 +1193,13 @@ impl FromRef<Arc<AppState>> for AuditEmitterState {
 
 impl FromRef<Arc<AppState>> for PluginOpsState {
     fn from_ref(state: &Arc<AppState>) -> Self {
-        PluginOpsState(state.plugin_ops.clone())
+        PluginOpsState(state.plugin.plugin_ops.clone())
     }
 }
 
 impl FromRef<Arc<AppState>> for GlobalProvidersState {
     fn from_ref(state: &Arc<AppState>) -> Self {
-        GlobalProvidersState(state.global_providers.clone())
+        GlobalProvidersState(state.plugin.global_providers.clone())
     }
 }
 

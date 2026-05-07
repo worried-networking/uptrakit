@@ -56,7 +56,7 @@ pub async fn get_system_alerts(
     }
 
     // Check if server cert is signed by a non-active trusted CA (needs re-issue)
-    let server_cert_path = state.pki_path.join("server.crt");
+    let server_cert_path = state.server.pki_path.join("server.crt");
     if let Ok(server_cert_pem) = std::fs::read_to_string(&server_cert_path)
         && let Ok(server_not_after) = cert_not_after_from_pem(&server_cert_pem)
     {

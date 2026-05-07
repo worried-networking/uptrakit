@@ -1102,7 +1102,7 @@ async fn trigger_host_progression_after_awaiting_restart(
         #[cfg(feature = "plugin-ops")]
         hook: state.controller_update_hook(),
         #[cfg(feature = "plugin-ops")]
-        notification_ops: Some(state.plugin_ops.as_ref()),
+        notification_ops: Some(state.plugin.plugin_ops.as_ref()),
     };
 
     if let Some(batch_id) = record.batch_id {
@@ -1514,6 +1514,7 @@ pub(super) async fn handle_report_plugin_config(
     // Validate the plugin type is known
     let plugin_type_id = uptrakit_shared_types::PluginTypeId::new(&payload.plugin_type);
     if let Err(e) = state
+        .plugin
         .plugin_ops
         .validate_config(&plugin_type_id, &payload.config)
     {
@@ -1640,7 +1641,7 @@ async fn enrich_discovered_items(state: &AppState, service_model: &service::Mode
     let lifecycle_ctx = match crate::queries::plugin_type_settings::preload_lifecycle_type_settings(
         state.db(),
         tenant_id,
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
     )
     .await
     {
@@ -1670,6 +1671,7 @@ async fn enrich_discovered_items(state: &AppState, service_model: &service::Mode
             item.icon_url.clone(),
         );
         match state
+            .plugin
             .plugin_ops
             .on_software_item_created(&event, &lifecycle_ctx)
             .await
