@@ -58,7 +58,7 @@ pub struct EventBroadcaster {
     #[cfg(feature = "nats")]
     controller_id: Uuid,
     #[cfg(feature = "nats")]
-    nats: Option<crate::nats_transport::NatsTransport>,
+    nats: Option<Arc<dyn uptrakit_controller_core::notification::NatsPublisher>>,
 }
 
 impl EventBroadcaster {
@@ -81,7 +81,7 @@ impl EventBroadcaster {
     #[cfg(feature = "nats")]
     pub fn with_nats(
         mut self,
-        nats: crate::nats_transport::NatsTransport,
+        nats: Arc<dyn uptrakit_controller_core::notification::NatsPublisher>,
         controller_id: Uuid,
     ) -> Self {
         self.nats = Some(nats);

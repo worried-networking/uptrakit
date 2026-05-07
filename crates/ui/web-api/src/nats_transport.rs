@@ -326,6 +326,25 @@ impl NatsTransport {
     }
 }
 
+#[async_trait::async_trait]
+impl uptrakit_controller_core::notification::NatsPublisher for NatsTransport {
+    async fn publish(
+        &self,
+        source_controller_id: Uuid,
+        target_service_id: Option<Uuid>,
+        target_capability: Option<&str>,
+        msg: ControllerMessage,
+    ) {
+        self.publish(
+            source_controller_id,
+            target_service_id,
+            target_capability,
+            msg,
+        )
+        .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use uptrakit_nats::subjects::determine;
