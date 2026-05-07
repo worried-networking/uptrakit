@@ -9,10 +9,10 @@ use uptrakit_mqtt_runtime::{
     MqttRuntimeLoopOutcome, MqttRuntimeSettings, mqtt_capabilities,
 };
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, default_resolve_shutdown,
+    LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
+    default_resolve_shutdown,
 };
-use uptrakit_wire::{Capability, ControllerMessage};
+use uptrakit_wire::{Capability, ControllerMessage, ServiceTransport};
 
 struct StandaloneMqttHandler {
     runtime: MqttRuntime,
@@ -32,7 +32,7 @@ impl ServiceHandler for StandaloneMqttHandler {
     )]
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         self.runtime
@@ -57,7 +57,7 @@ impl ServiceHandler for StandaloneMqttHandler {
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         self.runtime
             .handle_controller_message(msg, conn)
@@ -73,14 +73,13 @@ impl ServiceHandler for StandaloneMqttHandler {
     async fn on_settings(
         &mut self,
         settings: &uptrakit_wire::ServiceSettingsPayload,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
+        agreed_capabilities: &std::collections::BTreeSet<Capability>,
     ) {
         self.runtime
             .apply_settings(
                 MqttRuntimeSettings {
-                    ui_surfaces_enabled: conn
-                        .agreed_capabilities()
-                        .contains(&Capability::UiSurfaces),
+                    ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
                     tenant_id: settings.tenant_id,
                 },
                 conn,
@@ -99,7 +98,7 @@ impl ServiceHandler for StandaloneMqttHandler {
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         Ok(self
             .runtime
@@ -119,6 +118,10 @@ impl ServiceHandler for StandaloneMqttHandler {
         self.runtime.on_service_config_ack(ack);
     }
 
+    async fn on_yield_change(&mut self, is_yielded: bool, conn: &mut dyn ServiceTransport) {
+        self.runtime.handle_yield_change(is_yielded, conn).await;
+    }
+
     #[expect(
         clippy::map_err_ignore,
         reason = "internal runtime errors are mapped to LoopError::Other(String) with a descriptive message; the original error type is not part of the public interface"
@@ -126,7 +129,7 @@ impl ServiceHandler for StandaloneMqttHandler {
     async fn on_surface_action_request(
         &mut self,
         request: uptrakit_wire::surfaces::SurfaceActionRequest,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<()> {
         self.runtime
             .handle_controller_message(ControllerMessage::SurfaceActionRequest(request), conn)
@@ -141,7 +144,7 @@ impl ServiceHandler for StandaloneMqttHandler {
 
     async fn on_shutdown(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         _shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
