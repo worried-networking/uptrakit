@@ -1218,11 +1218,17 @@ pub async fn trigger_update(
                     "trigger_update.agent_unavailable",
                     None,
                 ),
-                UpdateDispatchError::Internal | _ => {
+                UpdateDispatchError::Internal => ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.",
+                    "trigger_update.internal_error",
+                    Some(format_report_summary(&err)),
+                ),
+                _ => {
                     tracing::warn!(
                         host_id = %host_id,
                         item_id = %item_id,
-                        "unhandled UpdateDispatchError in HTTP trigger_update"
+                        "unhandled UpdateDispatchError variant; mapping to 500"
                     );
                     ApiError::new(
                         StatusCode::INTERNAL_SERVER_ERROR,

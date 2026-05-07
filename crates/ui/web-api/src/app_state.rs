@@ -942,16 +942,19 @@ impl AppStateBuilder {
             self.event_broadcaster.unwrap_or_default(),
         );
         let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-            self.plugin_ops.unwrap_or_else(|| {
-                let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
-                    global_provider_lookup: Some(global_providers.clone()),
-                    ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
-                };
-                Arc::new(
-                    uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                        .expect("default catalog should build"),
-                )
-            });
+            match self.plugin_ops {
+                Some(p) => p,
+                None => {
+                    let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
+                        global_provider_lookup: Some(global_providers.clone()),
+                        ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
+                    };
+                    Arc::new(
+                        uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+                            .map_err(|_| AppStateBuildError("plugin_catalog"))?,
+                    )
+                }
+            };
         let update_output_broadcaster = self.update_output_broadcaster.unwrap_or_default();
         let update_dispatcher: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher> =
             self.update_dispatcher.unwrap_or_else(|| {

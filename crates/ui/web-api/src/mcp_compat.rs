@@ -209,7 +209,8 @@ pub async fn mcp_trigger_update(
                 UpdateDispatchError::UpdateAlreadyActive => McpTriggerError::AlreadyInProgress,
                 UpdateDispatchError::NotConfigured => McpTriggerError::NotConfigured,
                 UpdateDispatchError::AgentUnavailable => McpTriggerError::AgentUnavailable,
-                UpdateDispatchError::Internal | _ => {
+                UpdateDispatchError::Internal => McpTriggerError::Internal,
+                _ => {
                     tracing::warn!(
                         host_id = %host_id,
                         software_item_id = %software_item_id,

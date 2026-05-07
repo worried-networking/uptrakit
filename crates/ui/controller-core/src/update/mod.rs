@@ -57,30 +57,21 @@ pub struct UpdateDispatchResult {
 /// `#[non_exhaustive]`: new validation errors may be added. External match sites
 /// must include a wildcard arm with `tracing::warn!`.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum UpdateDispatchError {
+    #[error("host not found")]
     HostNotFound,
+    #[error("software item not found")]
     SoftwareItemNotFound,
+    #[error("update already active for this host")]
     UpdateAlreadyActive,
+    #[error("host not configured for updates")]
     NotConfigured,
+    #[error("no approved agent linked to host")]
     AgentUnavailable,
+    #[error("internal error")]
     Internal,
 }
-
-impl std::fmt::Display for UpdateDispatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::HostNotFound => write!(f, "host not found"),
-            Self::SoftwareItemNotFound => write!(f, "software item not found"),
-            Self::UpdateAlreadyActive => write!(f, "update already active for this host"),
-            Self::NotConfigured => write!(f, "host not configured for updates"),
-            Self::AgentUnavailable => write!(f, "no approved agent linked to host"),
-            Self::Internal => write!(f, "internal error"),
-        }
-    }
-}
-
-impl std::error::Error for UpdateDispatchError {}
 
 /// Parameters for triggering a software update via `UpdateDispatcher::dispatch`.
 ///
