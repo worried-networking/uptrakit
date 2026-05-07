@@ -11,14 +11,17 @@ publish.workspace = true
 [dependencies]
 uptrakit-web-api-auth                   = { workspace = true }
 uptrakit-web-api-queries                = { workspace = true }
+uptrakit-web-api-types                  = { workspace = true }
 uptrakit-shared-types                   = { workspace = true }
 uptrakit-shared-db                      = { workspace = true }
 uptrakit-audit-log                      = { workspace = true }
+uptrakit-crypto                         = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-wire                           = { workspace = true }
 uptrakit-service-connections            = { workspace = true }
 async-trait  = { workspace = true }
 axum         = { workspace = true, optional = true }
+ipnet        = { workspace = true }
 sea-orm      = { workspace = true }
 serde_json   = { workspace = true }
 time         = { workspace = true }
