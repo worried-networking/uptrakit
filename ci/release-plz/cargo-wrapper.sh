@@ -32,19 +32,32 @@ unset CARGO
 saw_package=false
 saw_workspace=false
 already_no_verify=false
+already_registry=false
 for arg in "$@"; do
   case "$arg" in
     package)      saw_package=true ;;
     --workspace)  saw_workspace=true ;;
     --no-verify)  already_no_verify=true ;;
+    --registry)   already_registry=true ;;
   esac
 done
 
-if ! $saw_package || ! $saw_workspace || $already_no_verify; then
+if ! $saw_package || ! $saw_workspace; then
   exec "$real_cargo" "$@"
 fi
 
-"$real_cargo" "$@" --no-verify
+extra_args=()
+$already_no_verify || extra_args+=(--no-verify)
+# Always specify the registry explicitly. release-plz conditionally passes
+# --registry only when the package it's currently analyzing has
+# publish = ["uptrakit-private"]. When it analyzes a crate without new
+# commits (e.g. after a release commit), it skips that crate, never sets up
+# the registry, and cargo fails with "not all package.publish settings agree".
+# Owning the flag here makes it unconditional regardless of which packages
+# release-plz happens to be processing.
+$already_registry || extra_args+=(--registry uptrakit-private)
+
+"$real_cargo" "$@" "${extra_args[@]}"
 
 # Resolve the target directory cargo actually used. release-plz reads
 # `<target_directory>/package/<name>-<ver>/Cargo.toml` from `cargo
