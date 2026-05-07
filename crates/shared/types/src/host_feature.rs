@@ -61,7 +61,7 @@ pub mod host_features {
     pub const PRIVILEGE_ESCALATION: HostFeature = HostFeature::from_static("privilege_escalation");
     /// Systemd init system. Agent checks: `systemctl --version`.
     pub const SYSTEMD: HostFeature = HostFeature::from_static("systemd");
-    /// RouterOS CLI available. Groundwork only — no runtime implementation yet.
+    /// RouterOS CLI available. Set during bootstrap when `/system resource print` succeeds.
     pub const ROUTER_OS_CLI: HostFeature = HostFeature::from_static("router_os_cli");
 }
 
