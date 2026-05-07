@@ -326,11 +326,11 @@ pub(crate) async fn reconcile_all_settings(
         )
         .await?;
 
-        let zeroconf_snapshot = uptrakit_web_api::settings::ZeroconfSnapshot {
-            enabled: zeroconf_enabled,
-            url: zeroconf_url_opt,
-            pki_addr: zeroconf_pki_addr_opt,
-        };
+        let zeroconf_snapshot = uptrakit_web_api::settings::ZeroconfSnapshot::new(
+            zeroconf_enabled,
+            zeroconf_url_opt,
+            zeroconf_pki_addr_opt,
+        );
         settings.set_zeroconf(zeroconf_snapshot).await;
     }
 

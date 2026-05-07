@@ -111,6 +111,16 @@ pub struct ZeroconfSnapshot {
     pub pki_addr: Option<String>,
 }
 
+impl ZeroconfSnapshot {
+    pub fn new(enabled: bool, url: Option<String>, pki_addr: Option<String>) -> Self {
+        Self {
+            enabled,
+            url,
+            pki_addr,
+        }
+    }
+}
+
 /// Immutable snapshot of all settings. Published atomically via a watch channel
 /// so readers never see a mix of old and new values.
 #[non_exhaustive]

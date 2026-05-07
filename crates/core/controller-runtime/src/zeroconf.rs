@@ -152,11 +152,7 @@ mod tests {
     #[test]
     fn txt_record_basic() {
         let ca = test_ca_snapshot();
-        let zeroconf = ZeroconfSnapshot {
-            enabled: true,
-            url: None,
-            pki_addr: None,
-        };
+        let zeroconf = ZeroconfSnapshot::new(true, None, None);
         let props = build_txt_properties(&ca, &zeroconf);
         assert_eq!(props.len(), 1);
         assert_eq!(props[0], ("ca_fp", "abcd1234".to_string()));
@@ -165,11 +161,11 @@ mod tests {
     #[test]
     fn txt_record_with_url_override() {
         let ca = test_ca_snapshot();
-        let zeroconf = ZeroconfSnapshot {
-            enabled: true,
-            url: Some("https://proxy.example.com:443".to_string()),
-            pki_addr: None,
-        };
+        let zeroconf = ZeroconfSnapshot::new(
+            true,
+            Some("https://proxy.example.com:443".to_string()),
+            None,
+        );
         let props = build_txt_properties(&ca, &zeroconf);
         assert_eq!(props.len(), 2);
         assert_eq!(
@@ -201,11 +197,11 @@ mod tests {
     #[test]
     fn txt_record_with_all_overrides() {
         let ca = test_ca_snapshot();
-        let zeroconf = ZeroconfSnapshot {
-            enabled: true,
-            url: Some("https://proxy.example.com:443".to_string()),
-            pki_addr: Some("http://pki.local:8080".to_string()),
-        };
+        let zeroconf = ZeroconfSnapshot::new(
+            true,
+            Some("https://proxy.example.com:443".to_string()),
+            Some("http://pki.local:8080".to_string()),
+        );
         let props = build_txt_properties(&ca, &zeroconf);
         assert_eq!(props.len(), 3);
         assert_eq!(props[0], ("ca_fp", "abcd1234".to_string()));
