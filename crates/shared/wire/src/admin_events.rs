@@ -18,7 +18,15 @@ use uuid::Uuid;
 ///
 /// Sent as SSE with `event:` set to [`event_name()`](Self::event_name) and
 /// `data:` set to the JSON-serialised inner fields of the variant.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for event type strings received from a newer
+/// server that this client does not yet recognise. Serde deserialization is
+/// infallible: an unknown variant becomes `Other(variant_name)` rather than a
+/// parse error, allowing older consumers to survive rolling upgrades without
+/// failing.
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AdminEvent {
@@ -100,14 +108,21 @@ pub enum AdminEvent {
     /// Carries no payload — coarse invalidation signal. The frontend re-fetches
     /// `GET /api/v1/surfaces` and provider availability on receipt.
     SurfacesChanged,
+    /// An unknown event variant received from a newer peer.
+    ///
+    /// The inner string is the raw variant name as it appeared on the wire.
+    /// Deserialization is infallible — unknown variants are captured here rather
+    /// than causing a parse error, so older consumers survive rolling upgrades.
+    Other(String),
 }
 
 impl AdminEvent {
     /// Returns the SSE `event:` field name for this variant.
     ///
     /// The name is the snake_case version of the variant name, matching the
-    /// serde `rename_all = "snake_case"` serialisation.
-    pub fn event_name(&self) -> &'static str {
+    /// serde `rename_all = "snake_case"` serialisation. For `Other`, returns
+    /// the raw variant string as received on the wire.
+    pub fn event_name(&self) -> &str {
         match self {
             Self::HostUpdated { .. } => "host_updated",
             Self::HostCreated { .. } => "host_created",
@@ -132,6 +147,284 @@ impl AdminEvent {
             }
             Self::DataReset => "data_reset",
             Self::SurfacesChanged => "surfaces_changed",
+            Self::Other(v) => v.as_str(),
+        }
+    }
+}
+
+// ── Custom Deserialize for wire forward-compatibility ─────────────────────────
+//
+// `AdminEvent` uses serde's externally-tagged format (default for enums):
+//   - struct variants:  `{"host_updated": {"id": "..."}}`
+//   - unit variants:    `"data_reset"` (bare string)
+//
+// We cannot use `#[derive(Deserialize)]` directly because serde's derived impl
+// would return an error for unknown variant keys. Instead we deserialize into a
+// `serde_json::Value` first, extract the variant key, and if unknown return
+// `Other(key)` rather than failing. This preserves rolling-upgrade safety.
+impl<'de> Deserialize<'de> for AdminEvent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        // Unit variants serialize as bare strings.
+        if let serde_json::Value::String(ref s) = value {
+            return match s.as_str() {
+                "data_reset" => Ok(Self::DataReset),
+                "surfaces_changed" => Ok(Self::SurfacesChanged),
+                other => {
+                    tracing::debug!(variant = other, "received unknown AdminEvent variant");
+                    Ok(Self::Other(other.to_string()))
+                }
+            };
+        }
+
+        // Struct variants serialize as `{"variant_name": {...fields...}}`.
+        let obj = match value {
+            serde_json::Value::Object(map) => map,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "expected string or object for AdminEvent",
+                ));
+            }
+        };
+
+        let (key, inner) = match obj.into_iter().next() {
+            Some(pair) => pair,
+            None => {
+                return Err(serde::de::Error::custom(
+                    "expected non-empty object for AdminEvent",
+                ));
+            }
+        };
+
+        match key.as_str() {
+            "host_updated" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostUpdated { id })
+            }
+            "host_created" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostCreated { id })
+            }
+            "host_deleted" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostDeleted { id })
+            }
+            "service_status_changed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                    status: String,
+                }
+                let Inner { id, status } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::ServiceStatusChanged { id, status })
+            }
+            "software_item_updated" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::SoftwareItemUpdated { id })
+            }
+            "software_item_created" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::SoftwareItemCreated { id })
+            }
+            "version_check_completed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    host_id: Uuid,
+                    software_item_id: Uuid,
+                }
+                let Inner {
+                    host_id,
+                    software_item_id,
+                } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::VersionCheckCompleted {
+                    host_id,
+                    software_item_id,
+                })
+            }
+            "update_triggered" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    update_history_id: Uuid,
+                    host_id: Uuid,
+                    software_item_id: Uuid,
+                }
+                let Inner {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::UpdateTriggered {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                })
+            }
+            "update_protection_started" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    update_history_id: Uuid,
+                    host_id: Uuid,
+                    software_item_id: Uuid,
+                }
+                let Inner {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::UpdateProtectionStarted {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                })
+            }
+            "update_started" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    update_history_id: Uuid,
+                    host_id: Uuid,
+                    software_item_id: Uuid,
+                    interactive: bool,
+                }
+                let Inner {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                    interactive,
+                } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::UpdateStarted {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                    interactive,
+                })
+            }
+            "update_completed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    update_history_id: Uuid,
+                    host_id: Uuid,
+                    software_item_id: Uuid,
+                    status: String,
+                }
+                let Inner {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                    status,
+                } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::UpdateCompleted {
+                    update_history_id,
+                    host_id,
+                    software_item_id,
+                    status,
+                })
+            }
+            "discovery_completed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    host_id: Uuid,
+                }
+                let Inner { host_id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::DiscoveryCompleted { host_id })
+            }
+            "system_service_status_changed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                    status: String,
+                }
+                let Inner { id, status } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::SystemServiceStatusChanged { id, status })
+            }
+            "scheduler_task_completed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    task_id: Uuid,
+                }
+                let Inner { task_id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::SchedulerTaskCompleted { task_id })
+            }
+            "host_tag_created" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostTagCreated { id })
+            }
+            "host_tag_updated" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostTagUpdated { id })
+            }
+            "host_tag_deleted" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    id: Uuid,
+                }
+                let Inner { id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostTagDeleted { id })
+            }
+            "host_tags_changed" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    host_id: Uuid,
+                }
+                let Inner { host_id } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::HostTagsChanged { host_id })
+            }
+            // Note: serde's snake_case renaming converts "GitHub" → "git_hub",
+            // so the wire key is "global_git_hub_provider_misconfigured".
+            "global_git_hub_provider_misconfigured" => {
+                #[derive(Deserialize)]
+                struct Inner {
+                    problem: String,
+                }
+                let Inner { problem } =
+                    serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
+                Ok(Self::GlobalGitHubProviderMisconfigured { problem })
+            }
+            other => {
+                tracing::debug!(variant = other, "received unknown AdminEvent variant");
+                Ok(Self::Other(other.to_string()))
+            }
         }
     }
 }
@@ -140,7 +433,32 @@ impl AdminEvent {
 mod tests {
     use super::*;
 
-    /// All known variants for exhaustive testing.
+    /// All known (non-Other) variants for exhaustive testing.
+    const KNOWN_VARIANTS: &[&str] = &[
+        "host_updated",
+        "host_created",
+        "host_deleted",
+        "service_status_changed",
+        "software_item_updated",
+        "software_item_created",
+        "version_check_completed",
+        "update_triggered",
+        "update_protection_started",
+        "update_started",
+        "update_completed",
+        "discovery_completed",
+        "system_service_status_changed",
+        "scheduler_task_completed",
+        "host_tag_created",
+        "host_tag_updated",
+        "host_tag_deleted",
+        "host_tags_changed",
+        "global_git_hub_provider_misconfigured",
+        "data_reset",
+        "surfaces_changed",
+    ];
+
+    /// All known variants as `AdminEvent` instances for exhaustive testing.
     fn all_variants() -> Vec<AdminEvent> {
         let id = Uuid::nil();
         vec![
@@ -195,16 +513,6 @@ mod tests {
             AdminEvent::DataReset,
             AdminEvent::SurfacesChanged,
         ]
-    }
-
-    #[test]
-    fn serde_round_trip_all_variants() {
-        for event in all_variants() {
-            let json = serde_json::to_string(&event).unwrap();
-            let deserialized: AdminEvent = serde_json::from_str(&json).unwrap();
-            // Verify the event_name matches after round-trip
-            assert_eq!(event.event_name(), deserialized.event_name());
-        }
     }
 
     #[test]
@@ -293,17 +601,9 @@ mod tests {
 
     #[test]
     fn event_name_count_matches_variant_count() {
-        // If a new variant is added without updating event_name(), this
-        // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 21);
-    }
-
-    #[test]
-    fn serde_uses_snake_case_tag() {
-        let event = AdminEvent::HostUpdated { id: Uuid::nil() };
-        let json = serde_json::to_string(&event).unwrap();
-        // The tagged enum serialises with a type discriminator
-        assert!(json.contains("host_updated"), "json was: {json}");
+        // Variant guard: if a new variant is added without updating KNOWN_VARIANTS
+        // and all_variants(), this test will fail.
+        assert_eq!(all_variants().len(), KNOWN_VARIANTS.len());
     }
 
     #[test]
@@ -315,5 +615,58 @@ mod tests {
             software_item_id: id,
         };
         assert_eq!(event.event_name(), "update_protection_started");
+    }
+
+    /// Verify OUR custom `Deserialize` impl: unknown variants deserialize to
+    /// `Other(String)` rather than returning an error, enabling rolling upgrades.
+    #[test]
+    fn unknown_variant_deserializes_to_other() {
+        // Struct-style unknown variant (object form)
+        let json = r#"{"future_variant":{"host_id":"00000000-0000-0000-0000-000000000000"}}"#;
+        let event: AdminEvent = serde_json::from_str(json).expect("should accept unknown variant");
+        assert!(
+            matches!(event, AdminEvent::Other(ref v) if v == "future_variant"),
+            "expected Other(\"future_variant\"), got: {event:?}"
+        );
+    }
+
+    /// Verify unit-style unknown variants also deserialize to `Other(String)`.
+    #[test]
+    fn unknown_unit_variant_deserializes_to_other() {
+        let json = r#""brand_new_unit_event""#;
+        let event: AdminEvent = serde_json::from_str(json).expect("should accept unknown variant");
+        assert!(
+            matches!(event, AdminEvent::Other(ref v) if v == "brand_new_unit_event"),
+            "expected Other(\"brand_new_unit_event\"), got: {event:?}"
+        );
+    }
+
+    /// Verify that all known variants round-trip through serialize → deserialize
+    /// and that event_name() is preserved. This tests OUR custom Deserialize impl,
+    /// not serde's generic derive behavior.
+    #[test]
+    fn known_variants_round_trip_through_custom_deserialize() {
+        for event in all_variants() {
+            let json = serde_json::to_string(&event).expect("serialization should succeed");
+            let deserialized: AdminEvent =
+                serde_json::from_str(&json).expect("deserialization should succeed");
+            assert_eq!(
+                event.event_name(),
+                deserialized.event_name(),
+                "event_name mismatch after round-trip for: {json}"
+            );
+            // Deserialized known variants must NOT produce Other(_).
+            assert!(
+                !matches!(deserialized, AdminEvent::Other(_)),
+                "known variant round-tripped to Other: {json}"
+            );
+        }
+    }
+
+    /// Verify that `Other(String)` event_name() returns the raw variant string.
+    #[test]
+    fn other_event_name_returns_raw_string() {
+        let event = AdminEvent::Other("some_future_event".to_string());
+        assert_eq!(event.event_name(), "some_future_event");
     }
 }
