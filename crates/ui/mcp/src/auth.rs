@@ -7,8 +7,17 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tower::{Layer, Service};
 
+use uptrakit_audit_log::AuditOutcome;
+use uptrakit_controller_core::auth::api_token::{
+    authenticate_api_token, emit_api_token_auth_audit,
+};
+use uptrakit_controller_core::auth::{AuthFailure, Permission};
 use uptrakit_web_api::AppState;
-use uptrakit_web_api::{McpAuthError, validate_api_token_for_mcp};
+use uptrakit_web_api::McpAuthError as WebApiMcpAuthError;
+use uptrakit_web_api::validate_api_token_for_mcp as web_api_validate_token;
+
+use crate::context::{McpAuthError, McpRequestContext};
+use crate::state::McpState;
 
 // ---------------------------------------------------------------------------
 // Tower layer
@@ -76,27 +85,27 @@ where
 
         Box::pin(async move {
             let token = extract_bearer_token(&req);
-            let mcp_ctx = match validate_api_token_for_mcp(&state, token.as_deref()).await {
+            let mcp_ctx = match web_api_validate_token(&state, token.as_deref()).await {
                 Ok(ctx) => ctx,
-                Err(McpAuthError::MissingCredentials) => {
+                Err(WebApiMcpAuthError::MissingCredentials) => {
                     return Ok(unauthorized(
                         "Authentication required: provide an API token via \
                          Authorization: Bearer <upk_...>",
                     ));
                 }
-                Err(McpAuthError::JwtNotAccepted) => {
+                Err(WebApiMcpAuthError::JwtNotAccepted) => {
                     return Ok(unauthorized(
                         "JWT tokens are not accepted for MCP access. \
                          Use an API token (upk_...)",
                     ));
                 }
-                Err(McpAuthError::Forbidden) => {
+                Err(WebApiMcpAuthError::Forbidden) => {
                     return Ok(plain(
                         StatusCode::FORBIDDEN,
                         "User is deactivated or lacks the AccessMcp permission",
                     ));
                 }
-                Err(McpAuthError::Internal) => {
+                Err(WebApiMcpAuthError::Internal) => {
                     return Ok(plain(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -147,6 +156,100 @@ fn plain(status: StatusCode, body: &'static str) -> Response {
 
 fn unauthorized(body: &'static str) -> Response {
     plain(StatusCode::UNAUTHORIZED, body)
+}
+
+// ---------------------------------------------------------------------------
+// McpState-based auth
+// ---------------------------------------------------------------------------
+
+/// Validate a bearer token for an MCP request using only [`McpState`].
+///
+/// Accepts `None` (missing header) or `Some(token_str)`. Handles the full
+/// auth path: missing token, JWT rejection, DB lookup, `AccessMcp` permission
+/// check, and audit emission. Does not require `AppState`.
+///
+/// # Errors
+///
+/// Returns [`McpAuthError::MissingCredentials`] if no token is present,
+/// [`McpAuthError::JwtNotAccepted`] for non-API-token bearer values,
+/// [`McpAuthError::Unauthorized`] for invalid/revoked tokens,
+/// [`McpAuthError::Forbidden`] for deactivated users or missing `AccessMcp`,
+/// and [`McpAuthError::Internal`] on database failures.
+pub async fn validate_api_token_for_mcp(
+    state: &McpState,
+    token: Option<&str>,
+) -> Result<McpRequestContext, McpAuthError> {
+    let token = match token {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            emit_api_token_auth_audit(
+                &state.audit_emitter,
+                state.default_tenant_id,
+                None,
+                AuditOutcome::Denied,
+                "missing_authorization_header",
+            );
+            return Err(McpAuthError::MissingCredentials);
+        }
+    };
+
+    if !token.starts_with("upk_") {
+        emit_api_token_auth_audit(
+            &state.audit_emitter,
+            state.default_tenant_id,
+            None,
+            AuditOutcome::Denied,
+            "jwt_not_accepted_for_mcp",
+        );
+        return Err(McpAuthError::JwtNotAccepted);
+    }
+
+    let (auth_user, token_id) =
+        match authenticate_api_token(state.db.db(), state.default_tenant_id, token).await {
+            Ok(pair) => pair,
+            Err(failure) => {
+                if let Some(reason) = failure.api_token_reason_code() {
+                    emit_api_token_auth_audit(
+                        &state.audit_emitter,
+                        state.default_tenant_id,
+                        None,
+                        AuditOutcome::Denied,
+                        reason,
+                    );
+                }
+                return Err(match failure {
+                    AuthFailure::UserDeactivated => McpAuthError::Forbidden,
+                    AuthFailure::InternalError => McpAuthError::Internal,
+                    _ => McpAuthError::Unauthorized,
+                });
+            }
+        };
+
+    if !auth_user.has_permission(Permission::AccessMcp) {
+        emit_api_token_auth_audit(
+            &state.audit_emitter,
+            state.default_tenant_id,
+            None,
+            AuditOutcome::Denied,
+            "missing_access_mcp_permission",
+        );
+        return Err(McpAuthError::Forbidden);
+    }
+
+    emit_api_token_auth_audit(
+        &state.audit_emitter,
+        state.default_tenant_id,
+        None,
+        AuditOutcome::Success,
+        "authenticated",
+    );
+
+    Ok(McpRequestContext::new(
+        auth_user.user_id,
+        token_id,
+        state.default_tenant_id,
+        auth_user.permissions,
+    ))
 }
 
 // ---------------------------------------------------------------------------
