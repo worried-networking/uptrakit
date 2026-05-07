@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use crate::wire_api::{
     Capability, CloseReason, ControllerMessage, PingPayload, ServiceMessage,
-    ServiceSettingsPayload, now_millis,
+    ServiceSettingsPayload, ServiceTransport, now_millis,
 };
 
 use rootcause::prelude::*;
@@ -116,7 +116,9 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
     let config_dir = identity.config_dir().to_path_buf();
 
     // Let the service handle post-connect initialization.
-    handler.on_connected(conn, identity).await?;
+    handler
+        .on_connected(conn as &mut dyn ServiceTransport, identity)
+        .await?;
 
     // Ping timer — not started until ServiceSettings arrives with ping_interval.
     let mut ping_timer: Option<tokio::time::Interval> = None;
@@ -143,7 +145,7 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
             // 1. Service-specific events (highest priority, budget-limited).
             event = handler.poll_service_event(), if poll_service => {
                 consecutive_service_events += 1;
-                match handler.on_service_event(event, conn).await? {
+                match handler.on_service_event(event, conn as &mut dyn ServiceTransport).await? {
                     Some(outcome) => break outcome,
                     None => continue,
                 }
@@ -200,7 +202,7 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
                 tracing::info!(%signal, "received signal, initiating graceful shutdown");
                 break handler
                     .on_shutdown(
-                        conn,
+                        conn as &mut dyn ServiceTransport,
                         ShutdownCause::Signal(signal),
                         shutdown_timeout,
                     )
@@ -428,7 +430,7 @@ async fn handle_controller_message<H: ServiceHandler>(
             );
             let outcome = handler
                 .on_shutdown(
-                    conn,
+                    conn as &mut dyn ServiceTransport,
                     ShutdownCause::ServerRestarting,
                     *loop_state.shutdown_timeout,
                 )
@@ -436,7 +438,9 @@ async fn handle_controller_message<H: ServiceHandler>(
             Ok(Some(outcome))
         }
         Some(ControllerMessage::SurfaceActionRequest(payload)) => {
-            handler.on_surface_action_request(payload, conn).await?;
+            handler
+                .on_surface_action_request(payload, conn as &mut dyn ServiceTransport)
+                .await?;
             Ok(None)
         }
         Some(ControllerMessage::SurfaceActionResponse(payload)) => {
@@ -454,7 +458,11 @@ async fn handle_controller_message<H: ServiceHandler>(
             );
             Ok(None)
         }
-        Some(msg) => handler.on_message(msg, conn).await,
+        Some(msg) => {
+            handler
+                .on_message(msg, conn as &mut dyn ServiceTransport)
+                .await
+        }
         None => Ok(Some(dispatch_close_reason(conn.close_reason()))),
     }
 }
@@ -485,7 +493,9 @@ async fn process_service_settings<H: ServiceHandler>(
 
     handle_service_settings(settings, loop_state, identity, ctx).await;
 
-    handler.on_settings(settings, conn, &agreed).await;
+    handler
+        .on_settings(settings, conn as &mut dyn ServiceTransport, &agreed)
+        .await;
 }
 
 /// Map a WebSocket close reason to a [`LoopOutcome`].
@@ -619,7 +629,7 @@ mod tests {
 
         async fn on_connected(
             &mut self,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
             _identity: &ServiceIdentityState,
         ) -> LoopResult<()> {
             Ok(())
@@ -628,7 +638,7 @@ mod tests {
         async fn on_message(
             &mut self,
             _msg: ControllerMessage,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<Option<LoopOutcome>> {
             Ok(None)
         }
@@ -643,7 +653,7 @@ mod tests {
         async fn on_service_event(
             &mut self,
             _event: Self::ServiceEvent,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<Option<LoopOutcome>> {
             self.processed_count.fetch_add(1, Ordering::SeqCst);
             Ok(None)
@@ -651,7 +661,7 @@ mod tests {
 
         async fn on_shutdown(
             &mut self,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
             _cause: ShutdownCause,
             _shutdown_timeout: Duration,
         ) -> LoopOutcome {
@@ -749,7 +759,7 @@ mod tests {
 
         async fn on_connected(
             &mut self,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
             _identity: &ServiceIdentityState,
         ) -> LoopResult<()> {
             Ok(())
@@ -758,7 +768,7 @@ mod tests {
         async fn on_message(
             &mut self,
             _msg: ControllerMessage,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<Option<LoopOutcome>> {
             Ok(None)
         }
@@ -770,7 +780,7 @@ mod tests {
         async fn on_service_event(
             &mut self,
             _event: Self::ServiceEvent,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<Option<LoopOutcome>> {
             Ok(None)
         }
@@ -778,7 +788,7 @@ mod tests {
         async fn on_surface_action_request(
             &mut self,
             request: crate::wire_api::surfaces::SurfaceActionRequest,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<()> {
             let mut state = self.state.lock().expect("lock");
             state.surface_request_count += 1;
@@ -796,7 +806,7 @@ mod tests {
 
         async fn on_shutdown(
             &mut self,
-            _conn: &mut ControllerConnection,
+            _conn: &mut dyn ServiceTransport,
             _cause: ShutdownCause,
             _shutdown_timeout: Duration,
         ) -> LoopOutcome {
