@@ -13,7 +13,7 @@ pub enum OsFamily {
     Linux,
     MacOs,
     FreeBsd,
-    /// Groundwork for future MikroTik/RouterOS support. No runtime implementation yet.
+    /// MikroTik RouterOS. Detected via `/system resource print` during bootstrap.
     RouterOs,
     /// Groundwork for future Windows support. No runtime implementation yet.
     Windows,
