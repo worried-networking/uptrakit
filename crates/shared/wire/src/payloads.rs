@@ -1455,7 +1455,7 @@ impl StdinAttentionPayload {
 /// Cross-controller admin event broadcast payload.
 ///
 /// Published via NATS to the `controller` subject by any controller instance
-/// when it emits an [`AdminEvent`](uptrakit_web_api_types::events::AdminEvent)
+/// when it emits an [`AdminEvent`](crate::admin_events::AdminEvent)
 /// to local SSE subscribers. Receiving controller instances decode the payload
 /// and re-broadcast to their own local SSE subscribers without re-publishing
 /// to NATS (to avoid infinite loops).

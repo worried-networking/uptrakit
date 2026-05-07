@@ -1,3 +1,4 @@
+pub mod admin_events;
 pub mod capabilities;
 pub mod close_reason;
 pub mod envelope;
@@ -16,6 +17,7 @@ pub mod transport;
 mod wire_validate_impls;
 
 // Re-export all public items from submodules.
+pub use admin_events::AdminEvent;
 pub use capabilities::*;
 pub use close_reason::CloseReason;
 pub use envelope::*;
