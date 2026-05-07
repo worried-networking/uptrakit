@@ -6,4 +6,4 @@ pub mod version;
 
 pub use config::RouterOsConfig;
 pub use error::RouterOsError;
-pub use plugin::RouterOsPlugin;
+pub use plugin::{DESCRIPTOR, RouterOsPlugin};

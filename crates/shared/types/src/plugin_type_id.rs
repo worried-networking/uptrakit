@@ -102,6 +102,8 @@ pub mod plugin_ids {
         PluginTypeId::from_static("package_manager_snap");
     pub const PACKAGE_MANAGER_CARGO: PluginTypeId =
         PluginTypeId::from_static("package_manager_cargo");
+    pub const PACKAGE_MANAGER_ROUTEROS: PluginTypeId =
+        PluginTypeId::from_static("package_manager_routeros");
     pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic_shell");
     pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook_shell");
     pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook_systemd");
@@ -136,6 +138,7 @@ pub mod plugin_ids {
         PACKAGE_MANAGER_APK,
         PACKAGE_MANAGER_SNAP,
         PACKAGE_MANAGER_CARGO,
+        PACKAGE_MANAGER_ROUTEROS,
         GENERIC_SHELL,
         HOOK_SHELL,
         HOOK_SYSTEMD,
@@ -222,7 +225,7 @@ mod tests {
     #[test]
     fn all_constants_count() {
         // Update this if you add a new well-known constant.
-        assert_eq!(plugin_ids::ALL.len(), 24);
+        assert_eq!(plugin_ids::ALL.len(), 25);
     }
 
     #[test]
