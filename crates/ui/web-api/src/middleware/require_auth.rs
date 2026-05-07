@@ -14,45 +14,13 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 
+pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser};
+
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::permissions::Permission;
 use crate::auth::{AuthError, AuthMethod};
 use crate::error_response::error_response;
-
-/// Extension type to carry the authenticated user ID, auth method, and permissions through the request.
-#[derive(Clone, Debug)]
-pub struct AuthenticatedUser {
-    pub user_id: uuid::Uuid,
-    pub auth_method: AuthMethod,
-    pub permissions: Vec<Permission>,
-    /// JTI of the JWT access token, if authenticated via JWT (None for API token auth).
-    pub jti: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct AuthenticatedApiTokenId(pub uuid::Uuid);
-
-impl AuthenticatedUser {
-    pub fn has_permission(&self, perm: Permission) -> bool {
-        self.permissions.contains(&perm)
-    }
-
-    pub fn audit_actor(
-        &self,
-        api_token_id: Option<AuthenticatedApiTokenId>,
-    ) -> (uptrakit_audit_log::AuditActorType, Option<uuid::Uuid>) {
-        match self.auth_method {
-            AuthMethod::ApiToken => (
-                uptrakit_audit_log::AuditActorType::ApiToken,
-                api_token_id.map(|token| token.0),
-            ),
-            AuthMethod::Password | AuthMethod::Oidc { .. } => {
-                (uptrakit_audit_log::AuditActorType::User, Some(self.user_id))
-            }
-        }
-    }
-}
 
 pub fn authenticated_user_audit_actor(
     user: &AuthenticatedUser,
@@ -189,107 +157,6 @@ pub async fn require_auth(
     next.run(req).await
 }
 
-/// Lightweight error type for authentication failures, replacing `Result<_, Response>`
-/// to avoid the `clippy::result_large_err` lint.
-#[derive(Debug)]
-pub(crate) enum AuthFailure {
-    InvalidApiToken,
-    UserNotFound,
-    UserDeactivated,
-    InvalidOrExpiredToken,
-    InvalidTokenSubject,
-    TokenRevoked,
-    InvalidOidcSessionMissingProvider,
-    InternalError,
-}
-
-impl AuthFailure {
-    pub(crate) fn api_token_reason_code(&self) -> Option<&'static str> {
-        match self {
-            Self::InvalidApiToken => Some("invalid_or_revoked_api_token"),
-            Self::UserNotFound => Some("user_not_found"),
-            Self::UserDeactivated => Some("user_deactivated"),
-            Self::InternalError => None,
-            _ => Some("authentication_denied"),
-        }
-    }
-
-    fn jwt_audit_attributes(
-        &self,
-    ) -> Option<(
-        uptrakit_audit_log::AuditActorType,
-        uptrakit_audit_log::AuditOutcome,
-        &'static str,
-    )> {
-        match self {
-            Self::InvalidOrExpiredToken => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "invalid_or_expired_token",
-            )),
-            Self::InvalidTokenSubject => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "invalid_token_subject",
-            )),
-            Self::TokenRevoked => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "token_revoked",
-            )),
-            Self::InvalidOidcSessionMissingProvider => Some((
-                uptrakit_audit_log::AuditActorType::Oidc,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "invalid_oidc_session_missing_provider",
-            )),
-            Self::UserNotFound => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "user_not_found",
-            )),
-            Self::UserDeactivated => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                "user_deactivated",
-            )),
-            Self::InternalError => Some((
-                uptrakit_audit_log::AuditActorType::User,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                "jwt_authenticate_failed",
-            )),
-            Self::InvalidApiToken => None,
-        }
-    }
-}
-
-impl IntoResponse for AuthFailure {
-    fn into_response(self) -> Response {
-        match self {
-            Self::InvalidApiToken => {
-                error_response(StatusCode::UNAUTHORIZED, "Invalid or revoked API token")
-            }
-            Self::UserNotFound => error_response(StatusCode::UNAUTHORIZED, "User not found"),
-            Self::UserDeactivated => error_response(StatusCode::FORBIDDEN, "User is deactivated"),
-            Self::InvalidOrExpiredToken => {
-                error_response(StatusCode::UNAUTHORIZED, "Invalid or expired token")
-            }
-            Self::InvalidTokenSubject => {
-                error_response(StatusCode::UNAUTHORIZED, "Invalid token subject")
-            }
-            Self::TokenRevoked => {
-                error_response(StatusCode::UNAUTHORIZED, "Token has been revoked")
-            }
-            Self::InvalidOidcSessionMissingProvider => error_response(
-                StatusCode::UNAUTHORIZED,
-                "Invalid OIDC session: missing provider",
-            ),
-            Self::InternalError => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        }
-    }
-}
-
 /// Authenticate using a `upk_`-prefixed API token (requires DB lookup).
 pub(crate) async fn authenticate_api_token(
     state: &AppState,
@@ -322,12 +189,7 @@ pub(crate) async fn authenticate_api_token(
         })?;
 
     Ok((
-        AuthenticatedUser {
-            user_id,
-            auth_method: AuthMethod::ApiToken,
-            permissions,
-            jti: None,
-        },
+        AuthenticatedUser::new(user_id, AuthMethod::ApiToken, permissions, None),
         token_id,
     ))
 }
@@ -373,12 +235,12 @@ pub(crate) async fn authenticate_jwt(
         AuthMethod::Password
     };
 
-    Ok(AuthenticatedUser {
+    Ok(AuthenticatedUser::new(
         user_id,
         auth_method,
-        permissions: claims.permissions,
-        jti: Some(claims.jti.clone()),
-    })
+        claims.permissions,
+        Some(claims.jti.clone()),
+    ))
 }
 
 /// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.

@@ -2525,12 +2525,7 @@ mod tests {
     }
 
     fn auth_user_with(permission: Permission) -> AuthenticatedUser {
-        AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![permission],
-            jti: None,
-        }
+        AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, vec![permission], None)
     }
 
     #[tokio::test]
@@ -3035,12 +3030,12 @@ mod tests {
         let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
         insert_execute_update_plugin(&db, host.id, item_id, host_software_item_id).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerUpdates],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerUpdates],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = trigger_update(
@@ -3111,12 +3106,12 @@ mod tests {
         let item_id = Uuid::now_v7();
         insert_software_item_row(&db, tenant_id, item_id).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerUpdates],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerUpdates],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = trigger_update(
@@ -3180,12 +3175,12 @@ mod tests {
 
         let missing_item_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerUpdates],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerUpdates],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = trigger_update(
@@ -3256,12 +3251,12 @@ mod tests {
         insert_execute_update_plugin(&db, host.id, item_id, host_software_item_id).await;
 
         let token_id = Uuid::now_v7();
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::ApiToken,
-            permissions: vec![Permission::TriggerUpdates],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::ApiToken,
+            vec![Permission::TriggerUpdates],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = trigger_update(
@@ -3329,12 +3324,12 @@ mod tests {
         let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
         insert_detect_version_plugin(&db, host.id, item_id, host_software_item_id, "agent").await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerChecks],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerChecks],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = check_versions(
@@ -3385,12 +3380,12 @@ mod tests {
         let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
         insert_detect_version_plugin(&db, host.id, item_id, host_software_item_id, "agent").await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerChecks],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerChecks],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = check_versions_host(
@@ -3432,12 +3427,12 @@ mod tests {
         let item_id = Uuid::now_v7();
         insert_software_item_row(&db, tenant_id, item_id).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::TriggerChecks],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::TriggerChecks],
+            None,
+        );
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = check_versions_host(

@@ -919,14 +919,14 @@ mod tests {
                 crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
                 ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             },
-            auth: crate::app_state::AuthState {
-                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+            auth: crate::app_state::AuthState::new(
+                Arc::new(crate::auth::jwt::JwtManager::from_secret(
                     b"test-secret-for-logout-tests",
                 )),
-                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            },
+                crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            ),
             notification: crate::app_state::NotificationState {
                 notification_service,
                 notification_dispatcher,
@@ -1033,12 +1033,12 @@ mod tests {
             .await
             .unwrap();
 
-        let auth_user = AuthenticatedUser {
+        let auth_user = AuthenticatedUser::new(
             user_id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewServices],
-            jti: None,
-        };
+            AuthMethod::Password,
+            vec![Permission::ViewServices],
+            None,
+        );
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1103,12 +1103,12 @@ mod tests {
             .await
             .unwrap();
 
-        let auth_user = AuthenticatedUser {
-            user_id: User::find().one(&db).await.unwrap().unwrap().id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            User::find().one(&db).await.unwrap().unwrap().id,
+            AuthMethod::Password,
+            vec![Permission::ViewServices],
+            None,
+        );
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1149,12 +1149,12 @@ mod tests {
         let state = test_state(db.clone()).await;
         let user_id = User::find().one(&db).await.unwrap().unwrap().id;
 
-        let auth_user = AuthenticatedUser {
+        let auth_user = AuthenticatedUser::new(
             user_id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewServices],
-            jti: None,
-        };
+            AuthMethod::Password,
+            vec![Permission::ViewServices],
+            None,
+        );
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1200,12 +1200,12 @@ mod tests {
             .await
             .expect("drop session table");
 
-        let auth_user = AuthenticatedUser {
+        let auth_user = AuthenticatedUser::new(
             user_id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewServices],
-            jti: None,
-        };
+            AuthMethod::Password,
+            vec![Permission::ViewServices],
+            None,
+        );
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1257,12 +1257,12 @@ mod tests {
         .await
         .expect("install revoke failure trigger");
 
-        let auth_user = AuthenticatedUser {
+        let auth_user = AuthenticatedUser::new(
             user_id,
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewServices],
-            jti: None,
-        };
+            AuthMethod::Password,
+            vec![Permission::ViewServices],
+            None,
+        );
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")

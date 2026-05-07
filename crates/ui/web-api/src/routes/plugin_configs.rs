@@ -1978,12 +1978,12 @@ mod tests {
         let response = match create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
             Validated(CreatePluginConfigRequest {
                 name: "Denied Dangerous Config".to_string(),
@@ -2029,12 +2029,12 @@ mod tests {
         let response = match create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(CreatePluginConfigRequest {
                 name: "Risky Config".to_string(),
@@ -2095,12 +2095,12 @@ mod tests {
         let create_response = match create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(CreatePluginConfigRequest {
                 name: "Update Risk Seed".to_string(),
@@ -2130,12 +2130,12 @@ mod tests {
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Json(UpdatePluginConfigRequest {
                 name: Some("Update Risk Applied".to_string()),
@@ -2184,12 +2184,12 @@ mod tests {
         let create_response = match create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(CreatePluginConfigRequest {
                 name: "Delete Risk Seed".to_string(),
@@ -2221,12 +2221,12 @@ mod tests {
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
         )
         .await;
@@ -2266,12 +2266,12 @@ mod tests {
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(missing_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
         )
         .await;
@@ -2309,12 +2309,12 @@ mod tests {
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(uuid::Uuid::now_v7()),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
         )
         .await;
@@ -2347,12 +2347,12 @@ mod tests {
         let create_response = match create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(CreatePluginConfigRequest {
                 name: "Delete Failure Seed".to_string(),
@@ -2388,12 +2388,12 @@ mod tests {
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
         )
         .await;
@@ -2426,12 +2426,12 @@ mod tests {
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(BatchActionRequest {
                 action: "archive".to_string(),
@@ -2470,12 +2470,12 @@ mod tests {
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(BatchActionRequest {
                 action: "delete".to_string(),
@@ -2513,12 +2513,12 @@ mod tests {
         let create_response = match create_plugin_config(
             State(state),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(CreatePluginConfigRequest {
                 name: name.to_string(),
@@ -2572,12 +2572,12 @@ mod tests {
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(BatchActionRequest {
                 action: "delete".to_string(),
@@ -2622,12 +2622,12 @@ mod tests {
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(BatchActionRequest {
                 action: "delete".to_string(),
@@ -2663,12 +2663,12 @@ mod tests {
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
-            CanManageCommands::new(AuthenticatedUser {
-                user_id: actor_user_id,
-                auth_method: AuthMethod::ApiToken,
-                permissions: vec![Permission::ManageCommands],
-                jti: None,
-            }),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
             None,
             Validated(BatchActionRequest {
                 action: "delete".to_string(),

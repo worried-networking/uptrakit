@@ -66,12 +66,12 @@ mod tests {
         mut req: AxumRequest,
         next: axum::middleware::Next,
     ) -> axum::response::Response {
-        req.extensions_mut().insert(AuthenticatedUser {
-            user_id: uuid::Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: Vec::new(),
-            jti: None,
-        });
+        req.extensions_mut().insert(AuthenticatedUser::new(
+            uuid::Uuid::now_v7(),
+            AuthMethod::Password,
+            Vec::new(),
+            None,
+        ));
         next.run(req).await
     }
 

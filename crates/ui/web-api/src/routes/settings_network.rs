@@ -591,12 +591,12 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: uuid::Uuid::now_v7(),
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                uuid::Uuid::now_v7(),
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNetworkSettingsRequest {
                 trusted_proxies: Some(vec!["not-an-ip".to_string()]),
@@ -648,12 +648,12 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: uuid::Uuid::now_v7(),
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                uuid::Uuid::now_v7(),
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
             Validated(UpdateNetworkSettingsRequest {
                 trusted_proxies: None,

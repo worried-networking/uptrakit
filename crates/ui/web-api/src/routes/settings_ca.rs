@@ -175,12 +175,12 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = rotate_ca(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user_id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
         )
         .await
@@ -221,12 +221,12 @@ mod tests {
 
         let response = rotate_ca(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser {
-                user_id: uuid::Uuid::now_v7(),
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageGlobalSettings],
-                jti: None,
-            }),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                uuid::Uuid::now_v7(),
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
             None,
         )
         .await

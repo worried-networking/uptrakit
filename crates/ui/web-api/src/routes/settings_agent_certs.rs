@@ -307,12 +307,12 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_agent_certificate_settings(
             State(Arc::clone(&state)),
-            CanManageAgentCerts::new(AuthenticatedUser {
+            CanManageAgentCerts::new(AuthenticatedUser::new(
                 user_id,
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageAgentCerts],
-                jti: None,
-            }),
+                AuthMethod::Password,
+                vec![Permission::ManageAgentCerts],
+                None,
+            )),
             None,
             Json(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(0),
@@ -361,12 +361,12 @@ mod tests {
 
         let response = update_agent_certificate_settings(
             State(Arc::clone(&state)),
-            CanManageAgentCerts::new(AuthenticatedUser {
-                user_id: uuid::Uuid::now_v7(),
-                auth_method: AuthMethod::Password,
-                permissions: vec![Permission::ManageAgentCerts],
-                jti: None,
-            }),
+            CanManageAgentCerts::new(AuthenticatedUser::new(
+                uuid::Uuid::now_v7(),
+                AuthMethod::Password,
+                vec![Permission::ManageAgentCerts],
+                None,
+            )),
             None,
             Json(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(24),

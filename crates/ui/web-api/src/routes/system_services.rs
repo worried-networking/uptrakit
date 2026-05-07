@@ -741,12 +741,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let service = insert_pending_system_service(&db).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::UpdateSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::UpdateSystemServices],
+            None,
+        );
 
         let response = update_system_service(
             State(Arc::clone(&state)),
@@ -784,12 +784,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let service = insert_pending_system_service(&db).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ViewSystemServices],
+            None,
+        );
 
         let response = batch_system_services(
             State(Arc::clone(&state)),
@@ -823,12 +823,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_service_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ApproveSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ApproveSystemServices],
+            None,
+        );
 
         let response = approve_system_service(
             State(Arc::clone(&state)),
@@ -875,12 +875,12 @@ mod tests {
             insert_system_service_with_status(&db, system_service::SystemServiceStatus::Approved)
                 .await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ApproveSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ApproveSystemServices],
+            None,
+        );
 
         let response = approve_system_service(
             State(Arc::clone(&state)),
@@ -925,12 +925,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_service_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::RejectSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::RejectSystemServices],
+            None,
+        );
 
         let response = reject_system_service(
             State(Arc::clone(&state)),
@@ -976,12 +976,12 @@ mod tests {
         let service = insert_pending_system_service(&db).await;
         let service = set_system_service_embedded(&db, service, true).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::RemoveSystemServices],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::RemoveSystemServices],
+            None,
+        );
 
         let response = deactivate_system_service(
             State(Arc::clone(&state)),

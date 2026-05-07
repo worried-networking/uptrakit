@@ -404,12 +404,12 @@ mod tests {
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ManageGlobalSettings],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ManageGlobalSettings],
+            None,
+        );
 
         let response = create_system_enrollment_token(
             State(DbState::from_ref(&state)),
@@ -445,12 +445,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ManageGlobalSettings],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ManageGlobalSettings],
+            None,
+        );
 
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),
@@ -485,12 +485,12 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let token = insert_system_enrollment_token(&db).await;
 
-        let auth_user = AuthenticatedUser {
-            user_id: Uuid::now_v7(),
-            auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ManageGlobalSettings],
-            jti: None,
-        };
+        let auth_user = AuthenticatedUser::new(
+            Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::ManageGlobalSettings],
+            None,
+        );
 
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),
