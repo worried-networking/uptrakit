@@ -409,7 +409,11 @@ mod tests {
 
         let plugin_type = "package_manager_cargo";
         let plugin_type_id = PluginTypeId::new(plugin_type);
-        let config = app.state.plugin_ops.type_settings_sample(&plugin_type_id);
+        let config = app
+            .state
+            .plugin
+            .plugin_ops
+            .type_settings_sample(&plugin_type_id);
         let config_field_count = config.as_object().map(|v| v.len()).unwrap_or(0);
 
         let request = UpsertPluginTypeSettingsRequest { config };
@@ -527,7 +531,11 @@ mod tests {
 
         let plugin_type = "package_manager_cargo";
         let plugin_type_id = PluginTypeId::new(plugin_type);
-        let config = app.state.plugin_ops.type_settings_sample(&plugin_type_id);
+        let config = app
+            .state
+            .plugin
+            .plugin_ops
+            .type_settings_sample(&plugin_type_id);
 
         app.db
             .execute_unprepared("DROP TABLE plugin_type_settings")

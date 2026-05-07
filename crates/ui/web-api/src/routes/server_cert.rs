@@ -196,10 +196,10 @@ pub(crate) async fn renew_server_certificate_inner(
 
     // Write to disk with secure permissions (0o600) and atomic rename to
     // prevent world-readable keys and mismatched cert/key on crash.
-    let cert_path = state.pki_path.join("server.crt");
-    let key_path = state.pki_path.join("server.key");
-    let cert_tmp = state.pki_path.join("server.crt.tmp");
-    let key_tmp = state.pki_path.join("server.key.tmp");
+    let cert_path = state.server.pki_path.join("server.crt");
+    let key_path = state.server.pki_path.join("server.key");
+    let cert_tmp = state.server.pki_path.join("server.crt.tmp");
+    let key_tmp = state.server.pki_path.join("server.key.tmp");
 
     uptrakit_directories::write_secure_file_str(&key_tmp, &key_pem)
         .await
@@ -222,6 +222,7 @@ pub(crate) async fn renew_server_certificate_inner(
     let server_config =
         build_server_tls_config(&cert_pem, &key_pem, &snapshot.bundle_pem).context_to()?;
     state
+        .server
         .rustls_config
         .reload_from_config(Arc::new(server_config));
 

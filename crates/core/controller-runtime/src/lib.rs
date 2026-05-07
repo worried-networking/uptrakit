@@ -520,7 +520,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 uptrakit_web_api::queries::update_dispatch::finalize_post_update_hook(
                     app_state.db(),
                     app_state.controller_update_hook(),
-                    app_state.plugin_ops.as_ref(),
+                    app_state.plugin.plugin_ops.as_ref(),
                     record,
                 )
                 .await
@@ -557,7 +557,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                         #[cfg(feature = "plugin-ops")]
                         hook: app_state.controller_update_hook(),
                         #[cfg(feature = "plugin-ops")]
-                        notification_ops: Some(app_state.plugin_ops.as_ref()),
+                        notification_ops: Some(app_state.plugin.plugin_ops.as_ref()),
                     },
                     batch_id,
                     record.host_id,
@@ -593,7 +593,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                         #[cfg(feature = "plugin-ops")]
                         hook: app_state.controller_update_hook(),
                         #[cfg(feature = "plugin-ops")]
-                        notification_ops: Some(app_state.plugin_ops.as_ref()),
+                        notification_ops: Some(app_state.plugin.plugin_ops.as_ref()),
                     },
                     record.host_id,
                     record.tenant_id,

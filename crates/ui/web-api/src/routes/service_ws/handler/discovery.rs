@@ -40,7 +40,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
     host_id: uuid::Uuid,
     host_machine_id: &str,
 ) {
-    let discovery_types = state.plugin_ops.discovery_plugins();
+    let discovery_types = state.plugin.plugin_ops.discovery_plugins();
 
     // Determine the effective allowlist for this host.
     let host_allowed = load_host_allowlist_set(state.db(), host_id).await;
@@ -67,7 +67,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 
         let wire_plugin_type = plugin_type.clone();
 
-        if state.plugin_ops.has_type_settings(&plugin_type) {
+        if state.plugin.plugin_ops.has_type_settings(&plugin_type) {
             // Package manager types read config from plugin_type_settings.
             let type_str = plugin_type.to_string();
             let config = match plugin_type_setting::Entity::find()

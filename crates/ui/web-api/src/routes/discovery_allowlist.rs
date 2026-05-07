@@ -146,7 +146,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
         .unwrap_or(true);
 
     let entry = match allowlist_queries::add_tenant_allowlist_entry(
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id(),
         req.plugin_type,
@@ -454,7 +454,7 @@ pub async fn add_host_discovery_allowlist_entry(
         .unwrap_or(true);
 
     let entry = match allowlist_queries::add_host_allowlist_entry(
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id(),
         host_id,

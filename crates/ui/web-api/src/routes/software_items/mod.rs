@@ -746,8 +746,13 @@ pub async fn assign_hosts(
     }
 
     let assignment_count = req.host_assignments.len();
-    let resp = match item_queries::assign_hosts(state.plugin_ops.as_ref(), &tenant_db, item_id, req)
-        .await
+    let resp = match item_queries::assign_hosts(
+        state.plugin.plugin_ops.as_ref(),
+        &tenant_db,
+        item_id,
+        req,
+    )
+    .await
     {
         Ok(resp) => resp,
         Err(err) => {
@@ -971,7 +976,7 @@ pub async fn update_host_assignment(
     let role = req.role.as_str().to_string();
     let ordinal = req.ordinal;
     let resp = match item_queries::update_host_assignment(
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         &tenant_db,
         item_id,
         host_id,
@@ -2134,7 +2139,7 @@ async fn fire_software_item_lifecycle(
     let lifecycle_ctx = match pts_queries::preload_lifecycle_type_settings(
         tenant_db.db(),
         tenant_db.tenant_id(),
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
     )
     .await
     {
@@ -2150,6 +2155,7 @@ async fn fire_software_item_lifecycle(
     };
 
     state
+        .plugin
         .plugin_ops
         .on_software_item_created(&event, &lifecycle_ctx)
         .await

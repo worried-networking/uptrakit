@@ -275,7 +275,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
             #[cfg(feature = "plugin-ops")]
             hook: state.controller_update_hook(),
             #[cfg(feature = "plugin-ops")]
-            notification_ops: Some(state.plugin_ops.as_ref()),
+            notification_ops: Some(state.plugin.plugin_ops.as_ref()),
         },
         &params,
         outdated,

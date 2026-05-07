@@ -489,7 +489,7 @@ pub(crate) fn spawn_server_cert_renewal(
     app_state: Arc<AppState>,
     crl_manager: Arc<crate::crl_manager::CrlManager>,
 ) -> JoinHandle<()> {
-    let pki_path = app_state.pki_path.clone();
+    let pki_path = app_state.server.pki_path.clone();
     let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
 
     tokio::spawn(async move {

@@ -98,7 +98,7 @@ async fn finalize_post_update_best_effort(state: &Arc<AppState>, record: &update
     if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
         state.db(),
         state.controller_update_hook(),
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         record,
     )
     .await
@@ -134,7 +134,7 @@ async fn finalize_post_update_with_recovery_timeout_best_effort(
     if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
         state.db(),
         state.controller_update_hook(),
-        state.plugin_ops.as_ref(),
+        state.plugin.plugin_ops.as_ref(),
         record,
     )
     .await
@@ -1526,7 +1526,7 @@ pub(super) async fn handle_update_result(
                 #[cfg(feature = "plugin-ops")]
                 state.controller_update_hook(),
                 #[cfg(feature = "plugin-ops")]
-                Some(state.plugin_ops.as_ref()),
+                Some(state.plugin.plugin_ops.as_ref()),
                 payload.update_history_id,
                 payload.error.clone(),
                 final_output.clone(),
@@ -1857,7 +1857,7 @@ async fn dispatch_next_batch_update_with_notifier(
             #[cfg(feature = "plugin-ops")]
             hook: state.controller_update_hook(),
             #[cfg(feature = "plugin-ops")]
-            notification_ops: Some(state.plugin_ops.as_ref()),
+            notification_ops: Some(state.plugin.plugin_ops.as_ref()),
         },
         batch_id,
         host_id,

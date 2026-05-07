@@ -1251,6 +1251,7 @@ async fn send_email_change_emails(
     );
 
     state
+        .plugin
         .plugin_ops
         .send_transactional_email(
             &tenant_db,
@@ -1288,6 +1289,7 @@ async fn send_email_change_emails(
     );
 
     state
+        .plugin
         .plugin_ops
         .send_transactional_email(
             &tenant_db,

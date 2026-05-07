@@ -220,24 +220,25 @@ pub async fn create_channel(
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let resp = match notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
-                "notification_channel",
-                "pending".to_string(),
-                body.name.clone().into(),
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
-        }
-    };
+    let resp =
+        match notif_queries::create_channel(&tenant_db, &body, &*state.plugin.plugin_ops).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                let (outcome, reason_code) = err.current_context().audit_classification();
+                emit_notification_audit(
+                    &audit_ctx,
+                    uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+                    "notification_channel",
+                    "pending".to_string(),
+                    body.name.clone().into(),
+                    outcome,
+                    serde_json::json!({
+                        "reason_code": reason_code,
+                    }),
+                );
+                return Err(err.into());
+            }
+        };
     emit_notification_audit(
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
@@ -277,7 +278,7 @@ pub async fn list_channels(
     CanViewNotifications(_user): CanViewNotifications,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match notif_queries::list_channels(&tenant_db, &params, &*state.plugin_ops).await {
+    match notif_queries::list_channels(&tenant_db, &params, &*state.plugin.plugin_ops).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "failed to list notification channels");
@@ -310,7 +311,7 @@ pub async fn get_channel(
     CanViewNotifications(_user): CanViewNotifications,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
-    match notif_queries::get_channel(&tenant_db, channel_id, &*state.plugin_ops).await {
+    match notif_queries::get_channel(&tenant_db, channel_id, &*state.plugin.plugin_ops).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
@@ -371,7 +372,9 @@ pub async fn update_channel(
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await {
+    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin.plugin_ops)
+        .await
+    {
         Err(err) => {
             let (outcome, reason_code) = err.current_context().audit_classification();
             emit_notification_audit(
@@ -598,7 +601,7 @@ pub async fn test_channel(
 
     // Look up channel implementation
     let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel_model.channel_type);
-    let channel_transport = match state.plugin_ops.transport(&channel_type_id) {
+    let channel_transport = match state.plugin.plugin_ops.transport(&channel_type_id) {
         Some(c) => c,
         None => {
             emit_notification_audit(
@@ -1157,6 +1160,7 @@ pub async fn notification_callback(
     };
 
     match state
+        .plugin
         .plugin_ops
         .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
         .await
