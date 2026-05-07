@@ -1,10 +1,7 @@
-#![expect(
-    clippy::expect_used,
-    reason = "expect is used for infallible operations documented by invariants"
-)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+
+use rootcause::prelude::*;
 
 use axum::extract::FromRef;
 use sea_orm::DatabaseConnection;
@@ -921,8 +918,8 @@ impl AppStateBuilder {
     /// # Errors
     ///
     /// Returns an error if any required field was not set before calling `build`.
-    pub fn build(self) -> Result<AppState, AppStateBuildError> {
-        let db = self.db.ok_or(AppStateBuildError("db"))?;
+    pub fn build(self) -> Result<AppState, rootcause::Report<AppStateBuildError>> {
+        let db = self.db.ok_or_else(|| report!(AppStateBuildError("db")))?;
         let global_providers = self
             .global_providers
             .unwrap_or_else(|| Arc::new(crate::global_providers::GlobalProviders::new(db.clone())));
@@ -936,9 +933,9 @@ impl AppStateBuilder {
             .unwrap_or_else(|| uptrakit_audit_log::AuditEmitter::new(audit_log_dispatcher.clone()));
         let notification = NotificationState::new(
             self.notification_service
-                .ok_or(AppStateBuildError("notification_service"))?,
+                .ok_or_else(|| report!(AppStateBuildError("notification_service")))?,
             self.notification_dispatcher
-                .ok_or(AppStateBuildError("notification_dispatcher"))?,
+                .ok_or_else(|| report!(AppStateBuildError("notification_dispatcher")))?,
             self.event_broadcaster.unwrap_or_default(),
         );
         let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
@@ -951,7 +948,7 @@ impl AppStateBuilder {
                     };
                     Arc::new(
                         uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                            .map_err(|_| AppStateBuildError("plugin_catalog"))?,
+                            .context(AppStateBuildError("plugin_catalog"))?,
                     )
                 }
             };
@@ -971,28 +968,30 @@ impl AppStateBuilder {
         Ok(AppState {
             db: DbState::new(db),
             cert: CertState {
-                ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
+                ca_snapshot: self
+                    .ca_snapshot
+                    .ok_or_else(|| report!(AppStateBuildError("ca_snapshot")))?,
                 ca_key_store: self
                     .ca_key_store
-                    .ok_or(AppStateBuildError("ca_key_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("ca_key_store")))?,
                 revocation_notify: self
                     .revocation_notify
-                    .ok_or(AppStateBuildError("revocation_notify"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("revocation_notify")))?,
                 crl_pem_cache: self
                     .crl_pem_cache
-                    .ok_or(AppStateBuildError("crl_pem_cache"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("crl_pem_cache")))?,
                 ca_rotation_trigger: self
                     .ca_rotation_trigger
-                    .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("ca_rotation_trigger")))?,
             },
             auth: AuthState::new(
-                self.jwt.ok_or(AppStateBuildError("jwt"))?,
+                self.jwt.ok_or_else(|| report!(AppStateBuildError("jwt")))?,
                 self.device_flow_store
-                    .ok_or(AppStateBuildError("device_flow_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("device_flow_store")))?,
                 self.rate_limit_store
-                    .ok_or(AppStateBuildError("rate_limit_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("rate_limit_store")))?,
                 self.token_denylist
-                    .ok_or(AppStateBuildError("token_denylist"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("token_denylist")))?,
             ),
             notification,
             broadcast: BroadcastState {
@@ -1004,22 +1003,26 @@ impl AppStateBuilder {
             oidc: OidcState {
                 oidc_flow_store: self
                     .oidc_flow_store
-                    .ok_or(AppStateBuildError("oidc_flow_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("oidc_flow_store")))?,
                 account_link_store: self
                     .account_link_store
-                    .ok_or(AppStateBuildError("account_link_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("account_link_store")))?,
                 oidc_token_exchange_store: self
                     .oidc_token_exchange_store
-                    .ok_or(AppStateBuildError("oidc_token_exchange_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("oidc_token_exchange_store")))?,
                 oidc_registration_store: self
                     .oidc_registration_store
-                    .ok_or(AppStateBuildError("oidc_registration_store"))?,
+                    .ok_or_else(|| report!(AppStateBuildError("oidc_registration_store")))?,
             },
-            settings: self.settings.ok_or(AppStateBuildError("settings"))?,
-            cert_signer: self.cert_signer.ok_or(AppStateBuildError("cert_signer"))?,
+            settings: self
+                .settings
+                .ok_or_else(|| report!(AppStateBuildError("settings")))?,
+            cert_signer: self
+                .cert_signer
+                .ok_or_else(|| report!(AppStateBuildError("cert_signer")))?,
             service_connections: self
                 .service_connections
-                .ok_or(AppStateBuildError("service_connections"))?,
+                .ok_or_else(|| report!(AppStateBuildError("service_connections")))?,
             plugin_ops,
             global_providers,
             credential_sources: self.credential_sources.unwrap_or_default(),
@@ -1040,16 +1043,18 @@ impl AppStateBuilder {
             config_test_proxy: self
                 .config_test_proxy
                 .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
-            pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
+            pki_path: self
+                .pki_path
+                .ok_or_else(|| report!(AppStateBuildError("pki_path")))?,
             rustls_config: self
                 .rustls_config
-                .ok_or(AppStateBuildError("rustls_config"))?,
+                .ok_or_else(|| report!(AppStateBuildError("rustls_config")))?,
             default_tenant_id: self
                 .default_tenant_id
-                .ok_or(AppStateBuildError("default_tenant_id"))?,
+                .ok_or_else(|| report!(AppStateBuildError("default_tenant_id")))?,
             controller_id: self
                 .controller_id
-                .ok_or(AppStateBuildError("controller_id"))?,
+                .ok_or_else(|| report!(AppStateBuildError("controller_id")))?,
             workload_claim_registry: self
                 .workload_claim_registry
                 .unwrap_or_else(|| Arc::new(crate::workload_claims::WorkloadClaimRegistry::new())),
