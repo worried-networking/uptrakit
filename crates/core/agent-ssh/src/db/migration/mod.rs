@@ -13,6 +13,7 @@ mod m20260308_000003_ssh_host_uuid_columns;
 mod m20260310_000001_data_encryption_keys;
 mod m20260313_000001_drop_ssh_host_is_pve_node;
 mod m20260322_000001_ssh_hosts_lower_name_index;
+mod m20260507_000001_add_routeros_host_config;
 
 pub(crate) struct Migrator;
 
@@ -43,6 +44,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260308_000003_ssh_host_uuid_columns::Migration),
             Box::new(m20260313_000001_drop_ssh_host_is_pve_node::Migration),
             Box::new(m20260322_000001_ssh_hosts_lower_name_index::Migration),
+            Box::new(m20260507_000001_add_routeros_host_config::Migration),
         ];
 
         // Append plugin-owned service migrations so they run after the core
