@@ -9,10 +9,10 @@ use uptrakit_agent_runtime::{
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, default_resolve_shutdown,
+    LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
+    default_resolve_shutdown,
 };
-use uptrakit_wire::Capability;
+use uptrakit_wire::{Capability, ServiceTransport};
 
 use cli::Args;
 
@@ -30,7 +30,7 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         self.runtime
@@ -42,7 +42,8 @@ impl ServiceHandler for AgentHandler {
     async fn on_settings(
         &mut self,
         _settings: &uptrakit_wire::ServiceSettingsPayload,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
+        _agreed_capabilities: &std::collections::BTreeSet<Capability>,
     ) {
         if let Err(error) = self.runtime.send_pending_initial_report(conn).await {
             tracing::warn!(error = %error, "failed to send initial ReportHosts message");
@@ -52,7 +53,7 @@ impl ServiceHandler for AgentHandler {
     async fn on_message(
         &mut self,
         msg: uptrakit_wire::ControllerMessage,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         self.runtime.handle_controller_message(msg, conn).await;
         Ok(None)
@@ -65,7 +66,7 @@ impl ServiceHandler for AgentHandler {
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         Ok(self.runtime.handle_event(event, conn).await)
     }
@@ -76,7 +77,7 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_shutdown(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
