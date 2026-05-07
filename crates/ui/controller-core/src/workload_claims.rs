@@ -8,12 +8,6 @@
 //! The registry is shared across all WebSocket handlers on a single controller
 //! instance and synchronized across controllers via NATS announcements.
 
-#![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
-#![expect(
-    clippy::unwrap_used,
-    reason = "unwrap on value checked to be Some in preceding logic"
-)]
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use time::OffsetDateTime;
@@ -232,6 +226,10 @@ impl WorkloadClaimRegistry {
                 }
             }
             // Grant the claim
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "key is from `to_claim`, a subset of `claims`"
+            )]
             let tenant_id = claims[key];
             inner.claims.insert(
                 key.clone(),
@@ -311,6 +309,10 @@ impl WorkloadClaimRegistry {
             if let Some(owner) = inner.claims.get(key)
                 && owner.service_id == service_id
             {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "key was just verified present by the preceding if-let guard"
+                )]
                 let owner = inner.claims.remove(key).unwrap();
                 released.insert(key.clone(), owner.tenant_id);
                 if let Some(svc_keys) = inner.by_service.get_mut(&service_id) {

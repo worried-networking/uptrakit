@@ -400,11 +400,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
             )
         )]
-        let mut sources = uptrakit_web_api::ServiceCredentialSources {
-            db_url: Some(db_url),
-            nats_url: None,
-            master_key_hex,
-        };
+        let mut sources =
+            uptrakit_web_api::ServiceCredentialSources::new(Some(db_url), None, master_key_hex);
         #[cfg(feature = "nats")]
         if let Some(ref url) = reconciled.nats_url {
             sources.nats_url = Some(url.clone());
