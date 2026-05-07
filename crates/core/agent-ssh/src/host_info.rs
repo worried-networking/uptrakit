@@ -6,8 +6,11 @@
 //! `"unknown"` for `machine_id`) without aborting the entire collection.
 
 use uptrakit_command::CommandExecutor;
+use uptrakit_plugin_infrastructure_registry::RouterOsExecutor;
+use uptrakit_shared_types::host_features;
 use uptrakit_wire::HostInfo;
 
+use crate::routeros_executor::{RouterOsSshExecutor, parse_routeros_field};
 use crate::ssh_transport::SshSession;
 
 /// Collect host information from a remote machine via SSH.
@@ -217,6 +220,66 @@ fn parse_sw_vers(output: &str) -> Option<String> {
     }
 }
 
+// ── RouterOS host info ────────────────────────────────────────────────
+
+/// Parse `serial-number` from `/system routerboard print` output.
+pub(crate) fn extract_machine_id_routerboard(output: &str) -> Option<String> {
+    let val = parse_routeros_field(output, "serial-number")?;
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    }
+}
+
+/// Parse `software-id` from `/system license print` output.
+pub(crate) fn extract_machine_id_license(output: &str) -> Option<String> {
+    let val = parse_routeros_field(output, "software-id")?;
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    }
+}
+
+/// Collect host information from a RouterOS device.
+#[expect(
+    dead_code,
+    reason = "called from RouterOS host runtime added in Plan B Task 5+"
+)]
+pub(crate) async fn collect_remote_host_info_routeros(exec: &RouterOsSshExecutor) -> HostInfo {
+    let machine_id = collect_routeros_machine_id(exec).await;
+    HostInfo {
+        machine_id,
+        os_type: Some("routeros".to_string()),
+        os_version: None,
+        architecture: None,
+        hostname: None,
+        ip_address: None,
+        agent_host_id: None,
+        features: Some(vec![host_features::ROUTER_OS_CLI.as_str().to_string()]),
+    }
+}
+
+async fn collect_routeros_machine_id(exec: &RouterOsSshExecutor) -> String {
+    if let Ok(output) = exec.routerboard_print().await {
+        if let Some(id) = extract_machine_id_routerboard(&output) {
+            return id;
+        }
+    }
+    if let Ok(output) = exec.license_print().await {
+        if let Some(id) = extract_machine_id_license(&output) {
+            return id;
+        }
+    }
+    let fallback = format!("unknown-{}", uuid::Uuid::now_v7());
+    tracing::warn!(
+        fallback,
+        "RouterOS machine-ID could not be determined; using session-unique fallback"
+    );
+    fallback
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +445,31 @@ mod tests {
         let a = format!("unknown-{}", uuid::Uuid::now_v7());
         let b = format!("unknown-{}", uuid::Uuid::now_v7());
         assert_ne!(a, b, "two fallback machine-IDs must be distinct");
+    }
+
+    // ── RouterOS machine-ID extraction ───────────────────────────────────
+
+    #[test]
+    fn routerboard_serial_extracts_correctly() {
+        let output = "routerboard: yes\nserial-number: ABC123XYZ\ncurrent-firmware: 7.14.2\n";
+        assert_eq!(
+            extract_machine_id_routerboard(output),
+            Some("ABC123XYZ".to_string())
+        );
+    }
+
+    #[test]
+    fn routerboard_serial_missing_returns_none() {
+        let output = "routerboard: yes\ncurrent-firmware: 7.14.2\n";
+        assert_eq!(extract_machine_id_routerboard(output), None);
+    }
+
+    #[test]
+    fn license_software_id_extracts_correctly() {
+        let output = "software-id: ABCD-EFGH\nlevel: 6\n";
+        assert_eq!(
+            extract_machine_id_license(output),
+            Some("ABCD-EFGH".to_string())
+        );
     }
 }
