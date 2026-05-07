@@ -79,6 +79,7 @@ pub async fn authenticate_api_token(
     ))
 }
 
+// Mirrors `require_auth::get_user_permissions`; cannot delegate because controller-core must not depend on web-api.
 async fn get_user_permissions(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -128,6 +129,43 @@ async fn get_user_permissions(
 fn classify_api_token_verify_error(error: &rootcause::Report<AuthError>) -> AuthFailure {
     match error.current_context() {
         AuthError::ApiTokenNotFound | AuthError::ApiTokenRevoked => AuthFailure::InvalidApiToken,
-        _ => AuthFailure::InternalError,
+        _ => {
+            tracing::warn!(err = %error, "unexpected error variant classifying api token verify failure");
+            AuthFailure::InternalError
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rootcause::report;
+    use uptrakit_web_api_auth::auth::AuthError;
+
+    #[test]
+    fn classify_not_found_returns_invalid_api_token() {
+        let err = report!(AuthError::ApiTokenNotFound);
+        match classify_api_token_verify_error(&err) {
+            AuthFailure::InvalidApiToken => (),
+            other => panic!("expected InvalidApiToken, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_revoked_returns_invalid_api_token() {
+        let err = report!(AuthError::ApiTokenRevoked);
+        match classify_api_token_verify_error(&err) {
+            AuthFailure::InvalidApiToken => (),
+            other => panic!("expected InvalidApiToken, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_internal_returns_internal_error() {
+        let err = report!(AuthError::Internal("db fail".into()));
+        match classify_api_token_verify_error(&err) {
+            AuthFailure::InternalError => (),
+            other => panic!("expected InternalError, got {other:?}"),
+        }
     }
 }
