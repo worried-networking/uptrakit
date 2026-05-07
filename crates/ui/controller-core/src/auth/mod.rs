@@ -11,6 +11,65 @@ pub use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 pub use uptrakit_web_api_auth::auth::token_denylist::TokenDenylist;
 pub use uptrakit_web_api_auth::auth::{AuthError, AuthMethod};
 
+/// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
+/// and token denylist.
+///
+/// `#[non_exhaustive]`: OAuth 2.1 will add fields (e.g. OIDC provider registry).
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct AuthState {
+    /// JWT signing/validation manager for access tokens.
+    pub jwt: std::sync::Arc<JwtManager>,
+    /// Database-backed store for pending device authorization flows.
+    pub device_flow_store: DeviceFlowStore,
+    /// Database-backed rate limiter for public authentication endpoints.
+    pub rate_limit_store: RateLimitStore,
+    /// In-memory denylist for immediate JWT access token revocation.
+    pub token_denylist: std::sync::Arc<TokenDenylist>,
+}
+
+impl AuthState {
+    /// Creates a new [`AuthState`].
+    pub fn new(
+        jwt: std::sync::Arc<JwtManager>,
+        device_flow_store: DeviceFlowStore,
+        rate_limit_store: RateLimitStore,
+        token_denylist: std::sync::Arc<TokenDenylist>,
+    ) -> Self {
+        Self {
+            jwt,
+            device_flow_store,
+            rate_limit_store,
+            token_denylist,
+        }
+    }
+}
+
+/// Implemented by `AppState` so the blanket `FromRef<Arc<S>> for AuthState` can live
+/// in controller-core without violating the orphan rule.
+#[cfg(feature = "axum-integration")]
+pub trait AuthStateSource {
+    /// Returns a clone of the [`AuthState`] held by this state.
+    fn auth_state(&self) -> AuthState;
+}
+
+/// Enables Axum to extract [`AuthState`] from any `Arc<S>` where `S: AuthStateSource`.
+///
+/// This blanket implementation satisfies Axum's sub-state extraction for any
+/// application state type that implements [`AuthStateSource`]. The `Arc<S>`
+/// wrapping matches the typical Axum router state pattern.
+///
+/// Only available with the `axum-integration` feature.
+#[cfg(feature = "axum-integration")]
+impl<S> axum::extract::FromRef<std::sync::Arc<S>> for AuthState
+where
+    S: AuthStateSource + Clone + Send + Sync + 'static,
+{
+    fn from_ref(state: &std::sync::Arc<S>) -> Self {
+        state.auth_state()
+    }
+}
+
 /// Struct holding the result of a successful authentication attempt.
 ///
 /// `#[non_exhaustive]`: OAuth 2.1 will add fields (e.g. scope, sub claim).
