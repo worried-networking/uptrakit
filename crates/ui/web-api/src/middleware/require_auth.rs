@@ -17,9 +17,8 @@ use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser};
 
 use crate::AppState;
-use crate::auth::api_token::ApiTokenService;
+use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
-use crate::auth::{AuthError, AuthMethod};
 use crate::error_response::error_response;
 
 pub fn authenticated_user_audit_actor(
@@ -35,19 +34,13 @@ pub(crate) fn emit_api_token_auth_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: &'static str,
 ) {
-    let entry = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
-    )
-    .tenant_scope(state.default_tenant_id)
-    .actor(uptrakit_audit_log::AuditActorType::ApiToken, None)
-    .outcome(outcome)
-    .details(serde_json::json!({ "reason_code": reason_code }))
-    .request_id_opt(request_id)
-    .build();
-
-    if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
-    }
+    uptrakit_controller_core::auth::api_token::emit_api_token_auth_audit(
+        &state.audit_emitter,
+        state.default_tenant_id,
+        request_id,
+        outcome,
+        reason_code,
+    );
 }
 
 fn emit_jwt_auth_audit(
@@ -69,13 +62,6 @@ fn emit_jwt_auth_audit(
 
     if let Ok(entry) = entry {
         state.audit_emitter.emit_best_effort(entry);
-    }
-}
-
-fn classify_api_token_verify_error(error: &rootcause::Report<AuthError>) -> AuthFailure {
-    match error.current_context() {
-        AuthError::ApiTokenNotFound | AuthError::ApiTokenRevoked => AuthFailure::InvalidApiToken,
-        _ => AuthFailure::InternalError,
     }
 }
 
@@ -162,36 +148,12 @@ pub(crate) async fn authenticate_api_token(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<(AuthenticatedUser, uuid::Uuid), AuthFailure> {
-    let service = ApiTokenService::new(state.db().clone());
-
-    let (user_id, token_id) = service
-        .verify_token(token)
-        .await
-        .map_err(|error| classify_api_token_verify_error(&error))?;
-
-    // Check user is active
-    let user = User::find_by_id(user_id)
-        .one(state.db())
-        .await
-        .map_err(|_| AuthFailure::InternalError)?
-        .ok_or(AuthFailure::UserNotFound)?;
-
-    if !user.is_active {
-        return Err(AuthFailure::UserDeactivated);
-    }
-
-    // Fetch permissions from DB
-    let permissions = get_user_permissions(state.db(), state.default_tenant_id, user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(err = %e, user_id = %user_id, "Failed to load user permissions");
-            AuthFailure::InternalError
-        })?;
-
-    Ok((
-        AuthenticatedUser::new(user_id, AuthMethod::ApiToken, permissions, None),
-        token_id,
-    ))
+    uptrakit_controller_core::auth::api_token::authenticate_api_token(
+        state.db(),
+        state.default_tenant_id,
+        token,
+    )
+    .await
 }
 
 /// Authenticate using a JWT access token (stateless validation + denylist check).
@@ -751,15 +713,6 @@ mod tests {
             details["reason_code"],
             serde_json::json!("invalid_or_revoked_api_token")
         );
-    }
-
-    #[test]
-    fn classify_api_token_verify_error_treats_database_failures_as_internal() {
-        let error = rootcause::report!(AuthError::Internal("boom".to_string()));
-        assert!(matches!(
-            classify_api_token_verify_error(&error),
-            AuthFailure::InternalError
-        ));
     }
 
     #[tokio::test]
