@@ -125,6 +125,7 @@ mod feature_arrays {
         host_features::POSIX_SHELL,
         host_features::PRIVILEGE_ESCALATION,
     ];
+    pub(super) static ROUTER_OS_CLI: [HostFeature; 1] = [host_features::ROUTER_OS_CLI];
 }
 
 impl HostRequirements {
@@ -160,6 +161,14 @@ impl HostRequirements {
         &feature_arrays::POSIX_SHELL_AND_SUDO,
         false,
     );
+
+    /// RouterOS host with CLI access.
+    ///
+    /// Assigned to `VersionDetector` and `UpdateExecutor` roles of the RouterOS
+    /// package-manager plugin. Fails for any POSIX host — the `OsFamily::RouterOs`
+    /// requirement ensures the plugin only runs on MikroTik devices.
+    pub const ROUTER_OS: Self =
+        Self::new(&[OsFamily::RouterOs], &feature_arrays::ROUTER_OS_CLI, false);
 
     /// Validate that the given host capabilities satisfy these requirements.
     pub fn is_compatible_with(
@@ -332,6 +341,34 @@ mod tests {
         assert_eq!(
             RoleKey::from_plugin_role(&PluginRole::Other("custom_role".to_string())),
             None,
+        );
+    }
+
+    #[test]
+    fn router_os_compatible_with_routeros_cli_host() {
+        let caps = HostCapabilities {
+            os_family: Some(OsFamily::RouterOs),
+            features: [host_features::ROUTER_OS_CLI].iter().cloned().collect(),
+            ..Default::default()
+        };
+        assert!(
+            HostRequirements::ROUTER_OS
+                .is_compatible_with(&caps)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn router_os_incompatible_with_linux() {
+        let caps = HostCapabilities {
+            os_family: Some(OsFamily::Linux),
+            features: BTreeSet::new(),
+            ..Default::default()
+        };
+        assert!(
+            HostRequirements::ROUTER_OS
+                .is_compatible_with(&caps)
+                .is_err()
         );
     }
 }
