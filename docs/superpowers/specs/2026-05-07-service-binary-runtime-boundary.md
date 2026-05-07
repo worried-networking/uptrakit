@@ -385,7 +385,8 @@ No changes required.
 | `CONTEXT.md`                                       | No changes needed; Embedded Mode already defined                                              |
 
 ADR numbering context: 0001 = web-api decomposition, 0002 = routeros non-POSIX probe,
-0003 = service-handler transport abstraction (prerequisite, ships first), 0005 = this spec.
+0003 = controller-core-boundary, 0004 = service-handler transport abstraction (prerequisite),
+0005 = this spec.
 
 ---
 
