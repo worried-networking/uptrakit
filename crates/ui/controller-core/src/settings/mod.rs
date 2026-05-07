@@ -73,6 +73,7 @@ fn warn_unrecognised_keys(raw: &RawSettings) {
 
 /// Network-related settings persisted in the DB and changeable at runtime
 /// (except for listen addresses which require a restart).
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct NetworkSettings {
     pub trusted_proxies: Vec<IpNet>,
@@ -99,6 +100,7 @@ impl Default for NetworkSettings {
 }
 
 /// Zero-configuration discovery settings for mDNS/DNS-SD advertising.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default)]
 pub struct ZeroconfSnapshot {
     /// Whether mDNS/DNS-SD advertising is enabled on the controller.
@@ -111,6 +113,7 @@ pub struct ZeroconfSnapshot {
 
 /// Immutable snapshot of all settings. Published atomically via a watch channel
 /// so readers never see a mix of old and new values.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct SettingsSnapshot {
     pub registration: RegistrationSettings,
@@ -127,6 +130,7 @@ pub struct SettingsSnapshot {
     pub zeroconf: ZeroconfSnapshot,
 }
 
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct Settings {
     inner: Arc<Inner>,
