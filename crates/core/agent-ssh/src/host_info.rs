@@ -262,15 +262,15 @@ pub(crate) async fn collect_remote_host_info_routeros(exec: &RouterOsSshExecutor
 }
 
 async fn collect_routeros_machine_id(exec: &RouterOsSshExecutor) -> String {
-    if let Ok(output) = exec.routerboard_print().await {
-        if let Some(id) = extract_machine_id_routerboard(&output) {
-            return id;
-        }
+    if let Ok(output) = exec.routerboard_print().await
+        && let Some(id) = extract_machine_id_routerboard(&output)
+    {
+        return id;
     }
-    if let Ok(output) = exec.license_print().await {
-        if let Some(id) = extract_machine_id_license(&output) {
-            return id;
-        }
+    if let Ok(output) = exec.license_print().await
+        && let Some(id) = extract_machine_id_license(&output)
+    {
+        return id;
     }
     let fallback = format!("unknown-{}", uuid::Uuid::now_v7());
     tracing::warn!(
