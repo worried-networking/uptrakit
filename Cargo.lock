@@ -7117,6 +7117,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "axum",
+ "ipnet",
  "parking_lot",
  "rootcause",
  "sea-orm",
@@ -7126,12 +7127,14 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-audit-log",
+ "uptrakit-crypto",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-connections",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
  "uptrakit-web-api-auth",
  "uptrakit-web-api-queries",
+ "uptrakit-web-api-types",
  "uptrakit-wire",
  "uuid",
 ]

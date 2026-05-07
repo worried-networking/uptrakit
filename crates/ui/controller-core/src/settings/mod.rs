@@ -154,7 +154,7 @@ struct Inner {
     /// Global settings version counter (for cross-instance invalidation).
     global_version: AtomicI64,
     /// Serialises writes so that concurrent set_* calls don't clobber each other.
-    write_mutex: tokio::sync::Mutex<()>,
+    write_sem: tokio::sync::Semaphore,
 }
 
 impl Settings {
@@ -190,7 +190,7 @@ impl Settings {
                 snapshot_rx: rx,
                 version: AtomicI64::new(0),
                 global_version: AtomicI64::new(0),
-                write_mutex: tokio::sync::Mutex::new(()),
+                write_sem: tokio::sync::Semaphore::new(1),
             }),
         }
     }
@@ -253,7 +253,7 @@ impl Settings {
                 snapshot_rx: rx,
                 version: AtomicI64::new(version),
                 global_version: AtomicI64::new(global_version),
-                write_mutex: tokio::sync::Mutex::new(()),
+                write_sem: tokio::sync::Semaphore::new(1),
             }),
         };
 
@@ -361,7 +361,9 @@ impl Settings {
         let zeroconf = Self::load_zeroconf_settings(&combined);
 
         // Publish complete snapshot atomically
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return Ok(());
+        };
         let _ = self.inner.snapshot_tx.send(SettingsSnapshot {
             registration,
             authentication,
@@ -419,9 +421,11 @@ impl Settings {
         self.inner.snapshot_rx.borrow().registration.clone()
     }
 
-    /// Replace registration settings (acquires write mutex for atomic publish).
+    /// Replace registration settings (acquires write semaphore for atomic publish).
     pub async fn set_registration(&self, reg: RegistrationSettings) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.registration = reg);
@@ -434,9 +438,11 @@ impl Settings {
         self.inner.snapshot_rx.borrow().authentication.clone()
     }
 
-    /// Replace authentication settings (acquires write mutex for atomic publish).
+    /// Replace authentication settings (acquires write semaphore for atomic publish).
     pub async fn set_authentication(&self, auth: AuthenticationSettings) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.authentication = auth);
@@ -451,7 +457,9 @@ impl Settings {
 
     /// Update the agent certificate lifetime in hours.
     pub async fn set_agent_cert_lifetime_hours(&self, hours: u32) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.agent_cert_lifetime_hours = hours);
@@ -484,7 +492,9 @@ impl Settings {
     /// Pass `Some(hours)` to pin the window to an explicit value.
     /// Pass `None` to restore automatic mode (1/5 of lifetime, 14-day ceiling).
     pub async fn set_renewal_window_hours_override(&self, hours: Option<u16>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.renewal_window_hours_override = hours);
@@ -529,7 +539,9 @@ impl Settings {
 
     /// Replace all network settings.
     pub async fn set_network(&self, net: NetworkSettings) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network = net);
@@ -537,7 +549,9 @@ impl Settings {
 
     /// Update only trusted proxies.
     pub async fn set_trusted_proxies(&self, proxies: Vec<IpNet>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.trusted_proxies = proxies);
@@ -545,7 +559,9 @@ impl Settings {
 
     /// Update only real IP header.
     pub async fn set_real_ip_header(&self, header: String) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.real_ip_header = header);
@@ -553,7 +569,9 @@ impl Settings {
 
     /// Update certificate SANs.
     pub async fn set_sans(&self, sans: Vec<String>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.sans = sans);
@@ -561,7 +579,9 @@ impl Settings {
 
     /// Update only HTTPS listen address.
     pub async fn set_https_addr(&self, addr: SocketAddr) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.https_addr = addr);
@@ -579,7 +599,9 @@ impl Settings {
 
     /// Update forwarded client cert info header name.
     pub async fn set_forwarded_client_cert_info_header(&self, header: Option<String>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.forwarded_client_cert_info_header = header);
@@ -597,7 +619,9 @@ impl Settings {
 
     /// Update forwarded client cert PEM header name.
     pub async fn set_forwarded_client_cert_pem_header(&self, header: Option<String>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.forwarded_client_cert_pem_header = header);
@@ -610,7 +634,9 @@ impl Settings {
 
     /// Update the backend URL.
     pub async fn set_pki_addr(&self, url: Option<String>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.pki_addr = url);
@@ -623,9 +649,11 @@ impl Settings {
         self.inner.snapshot_rx.borrow().nats_url.clone()
     }
 
-    /// Replace the NATS URL (acquires write mutex for atomic publish).
+    /// Replace the NATS URL (acquires write semaphore for atomic publish).
     pub async fn set_nats_url(&self, url: Option<MaskedUrl>) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.nats_url = url);
@@ -667,9 +695,11 @@ impl Settings {
         self.inner.snapshot_rx.borrow().zeroconf.clone()
     }
 
-    /// Replace zeroconf settings (acquires write mutex for atomic publish).
+    /// Replace zeroconf settings (acquires write semaphore for atomic publish).
     pub async fn set_zeroconf(&self, zeroconf: ZeroconfSnapshot) {
-        let _guard = self.inner.write_mutex.lock().await;
+        let Ok(_permit) = self.inner.write_sem.acquire().await else {
+            return;
+        };
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.zeroconf = zeroconf);

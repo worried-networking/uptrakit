@@ -56,6 +56,7 @@ impl SurfaceProxyDeps {
 /// Stored in [`AppState`] and only used by the service WebSocket handler during
 /// credential delivery. The values are set at controller startup from CLI
 /// arguments and environment variables.
+#[non_exhaustive]
 #[derive(Clone, Default)]
 pub struct ServiceCredentialSources {
     /// Database URL to provide to services with `database_access` capability.
@@ -64,6 +65,21 @@ pub struct ServiceCredentialSources {
     pub nats_url: Option<String>,
     /// Master key hex to provide to services with `master_key_access` capability.
     pub master_key_hex: Option<uptrakit_wire::SecretString>,
+}
+
+impl ServiceCredentialSources {
+    /// Creates a new [`ServiceCredentialSources`] with all fields explicit.
+    pub fn new(
+        db_url: Option<String>,
+        nats_url: Option<String>,
+        master_key_hex: Option<uptrakit_wire::SecretString>,
+    ) -> Self {
+        Self {
+            db_url,
+            nats_url,
+            master_key_hex,
+        }
+    }
 }
 
 /// First-party service app name for the SSH agent.
@@ -85,6 +101,7 @@ pub enum SurfaceRuntimeMode {
 pub type SurfaceFrameworkGeneration = uptrakit_wire::surfaces::FrameworkGeneration;
 
 /// Compatibility report from a first-party surface provider.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceProviderReport {
     /// Provider app name (e.g., `uptrakit-agent-ssh`).
@@ -111,6 +128,7 @@ impl SurfaceProviderReport {
 }
 
 /// Compatibility requirement for a first-party surface provider.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceProviderRequirement {
     /// Provider app name that must be compatible.
@@ -156,6 +174,7 @@ pub fn default_surface_runtime_requirements(
 /// Phase 0 keeps `mode = LegacyOnly` unless both:
 /// - rollout is explicitly requested, and
 /// - all required first-party providers are compatible.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceRuntimeRolloutSnapshot {
     /// Whether rollout was explicitly requested by controller config/flag.
@@ -349,6 +368,7 @@ pub use uptrakit_controller_core::db::DbState;
 
 /// Certificate-authority related state: snapshot receiver, key store, and
 /// notification/cache handles for CRL and rotation operations.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct CertState {
     /// Watch receiver for the current CA snapshot (bundle PEM, fingerprints, etc.).
@@ -400,6 +420,7 @@ impl AuthState {
 }
 
 /// Real-time broadcast channels for SSE event delivery.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct BroadcastState {
     /// Per-device-flow broadcast channels for real-time device auth SSE delivery.
@@ -411,6 +432,7 @@ pub struct BroadcastState {
 }
 
 /// Notification side-effect state used by mutation actions.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct NotificationState {
     /// Cross-controller notification service for push message delivery via outbox pattern.
