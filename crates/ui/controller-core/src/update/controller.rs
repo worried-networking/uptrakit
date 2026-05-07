@@ -23,6 +23,7 @@ use uptrakit_web_api_queries::queries::update_triggers::{
     PendingProtectionWork, TriggerUpdateParams, trigger_update_for_host,
 };
 use uptrakit_web_api_queries::queries::update_types::ActorType;
+use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
 use uptrakit_wire::AdminEvent;
 use uuid::Uuid;
 
@@ -41,8 +42,13 @@ use uptrakit_web_api_queries::queries::update_dispatch::prepare_pre_update_hook;
 ///
 /// Holds all external dependencies explicitly so it can be constructed without
 /// an `AppState` reference. Used by both `web-api` and `mcp` crates.
+#[non_exhaustive]
 pub struct ControllerUpdateDispatcher {
     db: sea_orm::DatabaseConnection,
+    #[expect(
+        dead_code,
+        reason = "retained for future use by dispatchers that need to reach peer services"
+    )]
     service_connections: ServiceConnectionRegistry,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
@@ -135,11 +141,24 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
             }
         };
 
+        // Fix 3: Pending → Queued (agent offline, will deliver on reconnect).
+        // Sent is only for confirmed agent delivery (not returned by trigger_update_for_host).
         let outcome = match trigger_result.initial_status {
-            update_history::UpdateStatus::Pending => DispatchOutcome::Sent,
+            update_history::UpdateStatus::Pending => DispatchOutcome::Queued,
             update_history::UpdateStatus::Queued => DispatchOutcome::Queued,
             update_history::UpdateStatus::Failed => DispatchOutcome::Failed,
-            _ => DispatchOutcome::Queued,
+            _ => {
+                tracing::warn!("unexpected UpdateStatus after trigger; defaulting to Queued");
+                DispatchOutcome::Queued
+            }
+        };
+
+        // Fix 4: Use TriggerUpdateStatus for the audit dispatch_status string
+        // ("pending", "queued", "failed") — matches the web-api route behaviour.
+        let dispatch_status_str = match trigger_result.initial_status {
+            update_history::UpdateStatus::Pending => TriggerUpdateStatus::Pending.to_string(),
+            update_history::UpdateStatus::Failed => TriggerUpdateStatus::Failed.to_string(),
+            _ => TriggerUpdateStatus::Queued.to_string(),
         };
 
         emit_update_audit(
@@ -152,9 +171,31 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
                 "to_version": params.to_version,
                 "interactive": params.interactive,
                 "update_history_id": trigger_result.update_history_id,
-                "dispatch_status": format!("{outcome:?}").to_lowercase(),
+                "dispatch_status": dispatch_status_str,
             }),
         );
+
+        // Fix 2: Push software states for all initial statuses (not just Pending).
+        // The web-api trigger_update action always calls push_software_states_for_tenant
+        // immediately after trigger_update_for_host succeeds.
+        self.notification
+            .notification_service
+            .push_software_states_for_tenant(&self.db, params.tenant_id)
+            .await;
+
+        // Fix 1: Emit AdminEvent::UpdateTriggered so SSE subscribers can reflect
+        // the new pending/queued entry in real-time without polling.
+        self.notification
+            .event_broadcaster
+            .send(
+                params.tenant_id,
+                AdminEvent::UpdateTriggered {
+                    update_history_id: trigger_result.update_history_id,
+                    host_id: params.host_id,
+                    software_item_id: params.software_item_id,
+                },
+            )
+            .await;
 
         if let Some(work) = trigger_result.pending_protection_work {
             self.spawn_protection_and_dispatch(*work);
@@ -176,18 +217,14 @@ impl ControllerUpdateDispatcher {
     /// to the agent.
     fn spawn_protection_and_dispatch(&self, work: PendingProtectionWork) {
         let db = self.db.clone();
-        let service_connections = self.service_connections.clone();
         let notification = self.notification.clone();
         let output_stream = self.output_stream.clone();
         let plugin_ops = self.plugin_ops.clone();
-        let audit_emitter = self.audit_emitter.clone();
         tokio::spawn(run_protection_and_dispatch(
             db,
-            service_connections,
             notification,
             output_stream,
             plugin_ops,
-            audit_emitter,
             work,
         ));
     }
@@ -200,11 +237,9 @@ impl ControllerUpdateDispatcher {
 #[tracing::instrument(skip_all, fields(update_id = %work.update_history_id))]
 async fn run_protection_and_dispatch(
     db: sea_orm::DatabaseConnection,
-    _service_connections: ServiceConnectionRegistry,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
     plugin_ops: Arc<dyn PluginOps>,
-    _audit_emitter: uptrakit_audit_log::AuditEmitter,
     work: PendingProtectionWork,
 ) {
     let update_history_id = work.update_history_id;
