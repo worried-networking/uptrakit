@@ -7128,6 +7128,7 @@ dependencies = [
  "tracing",
  "uptrakit-audit-log",
  "uptrakit-crypto",
+ "uptrakit-notification-delivery",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-connections",
  "uptrakit-shared-db",
