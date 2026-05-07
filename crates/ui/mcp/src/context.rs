@@ -20,6 +20,7 @@ pub struct McpRequestContext {
 
 impl McpRequestContext {
     /// Creates a new [`McpRequestContext`].
+    #[must_use]
     pub fn new(
         user_id: Uuid,
         token_id: Uuid,

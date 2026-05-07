@@ -34,6 +34,7 @@ pub struct McpState {
 
 impl McpState {
     /// Creates a new [`McpState`].
+    #[must_use]
     #[expect(
         clippy::too_many_arguments,
         reason = "McpState::new is the sole construction path for this #[non_exhaustive] struct; a builder would add indirection for a single call site"

@@ -41,6 +41,7 @@ pub struct SurfaceProxyDeps {
 
 impl SurfaceProxyDeps {
     /// Creates a new [`SurfaceProxyDeps`] from a registry and proxy.
+    #[must_use]
     pub fn new(registry: Arc<SurfaceRegistry>, proxy: Arc<SurfaceProxy>) -> Self {
         Self { registry, proxy }
     }
@@ -111,6 +112,7 @@ pub struct SurfaceProviderReport {
 
 impl SurfaceProviderReport {
     /// Builds a provider report.
+    #[must_use]
     pub fn new(
         app_name: impl Into<String>,
         framework_generation: SurfaceFrameworkGeneration,
@@ -216,6 +218,7 @@ pub struct SurfaceRuntimeRolloutState {
 
 impl SurfaceRuntimeRolloutState {
     /// Builds a Phase 0 rollout state from controller-owned requirements and known reports.
+    #[must_use]
     pub fn phase0(
         rollout_requested: bool,
         required_providers: Vec<SurfaceProviderRequirement>,
@@ -452,6 +455,7 @@ pub struct ServerState {
 
 impl ServerState {
     /// Creates a new [`ServerState`].
+    #[must_use]
     pub fn new(
         pki_path: std::path::PathBuf,
         rustls_config: axum_server::tls_rustls::RustlsConfig,
@@ -477,6 +481,7 @@ pub struct PluginState {
 
 impl PluginState {
     /// Creates a new [`PluginState`].
+    #[must_use]
     pub fn new(
         plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>,
         global_providers: Arc<crate::global_providers::GlobalProviders>,
@@ -1114,6 +1119,7 @@ impl AppState {
     ///
     /// This is the only public way to construct an `AppState` from outside the
     /// crate, preserving the `db` field encapsulation enforced by [`AppState::db`].
+    #[must_use]
     pub fn builder() -> AppStateBuilder {
         AppStateBuilder::new()
     }
