@@ -365,8 +365,23 @@ pub(crate) async fn request_certificate_ws(
                             tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
                             bail!(EnrollmentError::Protocol(ProtocolError::ReceiveClosed));
                         }
+                        ControllerMessage::Rejected(_) => {
+                            // Bail immediately rather than waiting for the 60s RESPONSE_TIMEOUT
+                            // to expire — the service was rejected after approval was confirmed.
+                            bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+                                "service was rejected while waiting for certificate".to_string(),
+                            )));
+                        }
                         _ => {
-                            bail!(EnrollmentError::Protocol(ProtocolError::UnexpectedMessage));
+                            // The server may push non-enrollment messages (e.g.
+                            // HostConnectivityUpdated) to this connection while the cert request
+                            // is in flight — the service is registered in service_connections
+                            // with its full capability set before the certificate is issued.
+                            // Ignore and keep waiting for Certificate.
+                            tracing::debug!(
+                                "ignoring unexpected push message while waiting for Certificate"
+                            );
+                            continue;
                         }
                     }
                 }

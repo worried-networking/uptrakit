@@ -115,7 +115,7 @@ impl OcspResponder {
         Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
     }
 
-    async fn start_http_with_listener(
+    pub(crate) async fn start_http_with_listener(
         listener: TcpListener,
         ca_cert_pem: &str,
         ca_key_pem: &str,
@@ -174,7 +174,7 @@ impl OcspResponder {
         .await
     }
 
-    async fn start_https_with_listener(
+    pub(crate) async fn start_https_with_listener(
         listener: TcpListener,
         ca_cert_pem: &str,
         ca_key_pem: &str,

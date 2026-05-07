@@ -4,6 +4,7 @@
     reason = "integration test infrastructure: panics are acceptable in reverse-proxy test helpers"
 )]
 
+use std::net::TcpListener;
 use std::sync::OnceLock;
 
 use tempfile::TempDir;
@@ -84,34 +85,59 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     .await;
 
     // Revoked cert → should be rejected by Nginx OCSP check.
-    // Nginx returns 400 "The SSL certificate error" when OCSP says revoked.
-    let result = client_revoked_cert
-        .get(format!("https://localhost:{proxy_port}/healthz"))
-        .send()
-        .await;
+    //
+    // Nginx's ssl_ocsp performs the OCSP fetch asynchronously on first encounter
+    // per cert serial: before the fetch completes and the result is cached, nginx
+    // may fail-open and return 200. Retry to give nginx time to complete the
+    // fetch, cache "revoked", and enforce it on the next request. We additionally
+    // require ocsp.request_count() > 0 before treating a rejection as success —
+    // a 400 without any OCSP query means nginx rejected the cert for a structural
+    // reason rather than revocation, which would be a test infrastructure bug.
+    const MAX_RETRIES: usize = 5;
+    let mut revoked_rejected = false;
+    for attempt in 0..MAX_RETRIES {
+        let result = client_revoked_cert
+            .get(format!("https://localhost:{proxy_port}/healthz"))
+            .send()
+            .await;
 
-    match result {
-        Ok(resp) => {
-            assert!(
-                resp.status() == reqwest::StatusCode::BAD_REQUEST
-                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
-                "revoked cert should be rejected, got status {}",
-                resp.status()
-            );
-        }
-        Err(e) => {
-            // Connection reset or TLS error is also acceptable
-            assert!(
-                e.is_connect() || e.is_request(),
-                "expected connection error for revoked cert, got: {e}"
-            );
+        match result {
+            Ok(resp)
+                if (resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN)
+                    && ocsp.request_count() > 0 =>
+            {
+                revoked_rejected = true;
+                break;
+            }
+            Err(e) if (e.is_connect() || e.is_request()) && ocsp.request_count() > 0 => {
+                revoked_rejected = true;
+                break;
+            }
+            Ok(resp) if attempt + 1 < MAX_RETRIES => {
+                tracing::debug!(
+                    attempt,
+                    status = %resp.status(),
+                    ocsp_requests = ocsp.request_count(),
+                    "revoked cert not yet rejected via OCSP; retrying after 1s"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            Ok(resp) => {
+                let logs = get_nginx_logs(&container);
+                panic!(
+                    "revoked cert should be rejected, got status {} after {MAX_RETRIES} attempts \
+                     (OCSP requests: {})\nNginx logs:\n{logs}",
+                    resp.status(),
+                    ocsp.request_count()
+                );
+            }
+            Err(e) => panic!("unexpected error for revoked cert: {e}"),
         }
     }
-
-    // OCSP responder should have received at least one request
     assert!(
-        ocsp.request_count() > 0,
-        "OCSP responder should have received at least one request"
+        revoked_rejected,
+        "revoked cert not rejected after {MAX_RETRIES} retries"
     );
 
     server.shutdown();
@@ -135,10 +161,12 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     let pki = TestPki::generate();
     let host_gateway_ip = resolve_docker_host_gateway_ip();
 
-    // Reserve a port so we can embed it in the AIA extension before starting
-    // the OCSP responder. Bind, read the port, then drop the listener so the
-    // responder can bind to the same port immediately after.
-    let ocsp_port = reserve_port();
+    // Bind the listener before generating certs so the port is embedded in the
+    // AIA extension while the OS socket is still held. This avoids the TOCTOU
+    // window where another process could claim the port between dropping the
+    // listener and the responder rebinding to the same port.
+    let ocsp_listener = TcpListener::bind("0.0.0.0:0").expect("bind OCSP listener");
+    let ocsp_port = ocsp_listener.local_addr().expect("local addr").port();
 
     let aia_url = format!("http://{host_gateway_ip}:{ocsp_port}/api/v1/pki/ocsp");
 
@@ -149,9 +177,8 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
         pki.generate_extra_agent_cert_with_aia(&aia_url);
     let revoked_serial = extract_serial_hex(&revoked_cert_pem);
 
-    // Start OCSP responder on the reserved port.
-    let ocsp = OcspResponder::start_on_port(
-        ocsp_port,
+    let ocsp = OcspResponder::start_http_with_listener(
+        ocsp_listener,
         &pki.ca_cert_pem,
         &pki.ca_key_pem,
         vec![revoked_serial],
@@ -202,31 +229,59 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     .await;
 
     // Revoked cert → should be rejected (Nginx reads AIA, queries HTTP OCSP).
-    let result = client_revoked_cert
-        .get(format!("https://localhost:{proxy_port}/healthz"))
-        .send()
-        .await;
+    //
+    // Nginx's ssl_ocsp performs the OCSP fetch asynchronously on first encounter
+    // per cert serial: before the fetch completes and the result is cached, nginx
+    // may fail-open and return 200. Retry to give nginx time to complete the
+    // fetch, cache "revoked", and enforce it on the next request. We additionally
+    // require ocsp.request_count() > 0 before treating a rejection as success —
+    // a 400 without any OCSP query means nginx rejected the cert for a structural
+    // reason rather than revocation, which would be a test infrastructure bug.
+    const MAX_RETRIES: usize = 5;
+    let mut revoked_rejected = false;
+    for attempt in 0..MAX_RETRIES {
+        let result = client_revoked_cert
+            .get(format!("https://localhost:{proxy_port}/healthz"))
+            .send()
+            .await;
 
-    match result {
-        Ok(resp) => {
-            assert!(
-                resp.status() == reqwest::StatusCode::BAD_REQUEST
-                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
-                "revoked cert should be rejected via AIA HTTP OCSP, got status {}",
-                resp.status()
-            );
-        }
-        Err(e) => {
-            assert!(
-                e.is_connect() || e.is_request(),
-                "expected connection error for revoked cert, got: {e}"
-            );
+        match result {
+            Ok(resp)
+                if (resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN)
+                    && ocsp.request_count() > 0 =>
+            {
+                revoked_rejected = true;
+                break;
+            }
+            Err(e) if (e.is_connect() || e.is_request()) && ocsp.request_count() > 0 => {
+                revoked_rejected = true;
+                break;
+            }
+            Ok(resp) if attempt + 1 < MAX_RETRIES => {
+                tracing::debug!(
+                    attempt,
+                    status = %resp.status(),
+                    ocsp_requests = ocsp.request_count(),
+                    "revoked cert not yet rejected via AIA HTTP OCSP; retrying after 1s"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            Ok(resp) => {
+                let logs = get_nginx_logs(&container);
+                panic!(
+                    "revoked cert should be rejected via AIA HTTP OCSP, got status {} after \
+                     {MAX_RETRIES} attempts (OCSP requests: {})\nNginx logs:\n{logs}",
+                    resp.status(),
+                    ocsp.request_count()
+                );
+            }
+            Err(e) => panic!("unexpected error for revoked cert: {e}"),
         }
     }
-
     assert!(
-        ocsp.request_count() > 0,
-        "OCSP responder should have received at least one request via AIA"
+        revoked_rejected,
+        "revoked cert not rejected after {MAX_RETRIES} retries"
     );
 
     server.shutdown();
@@ -251,8 +306,10 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
     let pki = TestPki::generate();
     let host_gateway_ip = resolve_docker_host_gateway_ip();
 
-    // Reserve a port for the HTTPS OCSP responder.
-    let ocsp_port = reserve_port();
+    // Bind the listener before generating certs — same TOCTOU fix as the HTTP
+    // AIA test: the port is embedded in the cert while the socket is still held.
+    let ocsp_listener = TcpListener::bind("0.0.0.0:0").expect("bind HTTPS OCSP listener");
+    let ocsp_port = ocsp_listener.local_addr().expect("local addr").port();
 
     let aia_url = format!("https://{host_gateway_ip}:{ocsp_port}/api/v1/pki/ocsp");
 
@@ -262,9 +319,8 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
         pki.generate_extra_agent_cert_with_aia(&aia_url);
     let revoked_serial = extract_serial_hex(&revoked_cert_pem);
 
-    // Start HTTPS OCSP responder on the reserved port.
-    let ocsp = OcspResponder::start_https_on_port(
-        ocsp_port,
+    let ocsp = OcspResponder::start_https_with_listener(
+        ocsp_listener,
         &pki.ca_cert_pem,
         &pki.ca_key_pem,
         &pki.server_cert_pem,
@@ -423,17 +479,6 @@ async fn nginx_ocsp_rejects_https_ssl_ocsp_responder() {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Reserve an ephemeral port by binding and immediately releasing it.
-///
-/// The port is used to embed a deterministic URL in certificates before
-/// starting the actual server on that port.
-fn reserve_port() -> u16 {
-    let listener = std::net::TcpListener::bind("0.0.0.0:0").expect("bind for port reservation");
-    let port = listener.local_addr().expect("local addr").port();
-    drop(listener);
-    port
-}
-
 /// Write CA cert, server cert, and server key files to the Nginx config dir.
 fn write_common_nginx_tls_files(tmp: &TempDir, pki: &TestPki) {
     std::fs::write(tmp.path().join("ca.crt"), &pki.ca_cert_pem).expect("write ca.crt");
@@ -503,6 +548,7 @@ server {{
 
     # OCSP checking — no explicit responder; Nginx reads AIA from client cert
     ssl_ocsp leaf;
+    ssl_ocsp_cache shared:OCSP:10m;
 
     location / {{
         proxy_pass https://{host_gateway_ip}:{backend_port};
