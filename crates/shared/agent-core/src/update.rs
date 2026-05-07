@@ -19,10 +19,11 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-use uptrakit_command::{CommandExecutor, UpdateOutputLine};
+#[cfg(feature = "interactive")]
+use uptrakit_command::CommandExecutor;
+use uptrakit_command::UpdateOutputLine;
 use uptrakit_plugin_infrastructure_registry::{
-    ExecuteUpdateResult, HostCapabilities, PluginError, UpdateLifecycleContext,
-    construct_host_runtime, get_descriptor,
+    ExecuteUpdateResult, HostRuntime, PluginError, UpdateLifecycleContext, get_descriptor,
 };
 use uptrakit_wire::{
     AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
@@ -107,7 +108,7 @@ pub struct UpdateOutputMessage {
 async fn execute_update_pipeline(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     accumulated_output: &mut String,
 ) -> PipelineResult {
     // Run pre-update lifecycle hook plugins
@@ -120,7 +121,7 @@ async fn execute_update_pipeline(
     if let Err(e) = run_pre_hook_plugins(
         &payload.pre_update_hook_plugins,
         &lifecycle_ctx,
-        Arc::clone(&executor),
+        Arc::clone(&runtime),
         output_tx,
         accumulated_output,
     )
@@ -159,7 +160,7 @@ async fn execute_update_pipeline(
     .await;
 
     tracing::debug!("executing plugin update");
-    match execute_plugin_update(payload, output_tx, Arc::clone(&executor)).await {
+    match execute_plugin_update(payload, output_tx, Arc::clone(&runtime)).await {
         Ok(exec_result) => {
             tracing::debug!(
                 resumable = exec_result.resumable,
@@ -205,7 +206,7 @@ async fn execute_update_pipeline(
 #[tracing::instrument(skip_all, fields(software_item = %payload.software_item_name, update_history_id = %payload.update_history_id))]
 pub async fn execute_update(
     payload: ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
     early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
 ) -> UpdateExecutionResult {
@@ -215,7 +216,7 @@ pub async fn execute_update(
     let timeout_duration = payload.timeout;
 
     // Detect current version (from_version)
-    let from_version = detect_current_version(&payload, Arc::clone(&executor)).await;
+    let from_version = detect_current_version(&payload, Arc::clone(&runtime)).await;
     tracing::debug!(from_version = ?from_version, "detected current version before update");
 
     let mut accumulated_output = String::new();
@@ -229,7 +230,7 @@ pub async fn execute_update(
         execute_update_pipeline(
             &payload,
             &output_tx,
-            Arc::clone(&executor),
+            Arc::clone(&runtime),
             &mut accumulated_output,
         ),
     )
@@ -314,14 +315,14 @@ pub async fn execute_update(
             "spawning post-update hooks for resumable update"
         );
         let post_hook_plugins = payload.post_update_hook_plugins.clone();
-        let post_executor = Arc::clone(&executor);
+        let post_runtime = Arc::clone(&runtime);
         let post_output_tx = output_tx.clone();
         tokio::spawn(async move {
             let mut spawned_output = String::new();
             run_post_hook_plugins(
                 &post_hook_plugins,
                 &post_ctx,
-                post_executor,
+                post_runtime,
                 &post_output_tx,
                 &mut spawned_output,
             )
@@ -337,7 +338,7 @@ pub async fn execute_update(
         run_post_hook_plugins(
             &payload.post_update_hook_plugins,
             &post_ctx,
-            Arc::clone(&executor),
+            Arc::clone(&runtime),
             &output_tx,
             &mut accumulated_output,
         )
@@ -367,7 +368,7 @@ pub async fn execute_update(
                 OutputStreamType::System,
             )
             .await;
-            let detected = detect_current_version(&payload, Arc::clone(&executor)).await;
+            let detected = detect_current_version(&payload, Arc::clone(&runtime)).await;
             tracing::debug!(to_version = ?detected, "post-update version detected");
             detected
         }
@@ -397,7 +398,7 @@ pub async fn execute_update(
 #[tracing::instrument(skip_all, fields(software_item = %payload.software_item_name))]
 async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
 ) -> Option<String> {
     // The connection context has already been merged into the plugin config
     // by the caller before the update task was spawned.
@@ -405,7 +406,7 @@ async fn detect_current_version(
     let outcome = crate::version_check::check_version(
         detect_assignment,
         None,
-        executor,
+        runtime,
         &crate::connection_context::ConnectionContext::default(),
     )
     .await;
@@ -428,10 +429,9 @@ async fn detect_current_version(
 async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
 ) -> UpdateResult<ExecuteUpdateResult> {
     let eu = &payload.execute_update_plugin;
-    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
     let desc = get_descriptor(eu.plugin_type.as_str()).ok_or_else(|| {
         report!(UpdateError::InstallFailed(format!(
@@ -500,7 +500,7 @@ fn make_output_bridge(
 async fn run_pre_hook_plugins(
     plugins: &[PluginAssignment],
     ctx: &UpdateLifecycleContext,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     accumulated_output: &mut String,
 ) -> Result<(), AgentCoreError> {
@@ -530,8 +530,6 @@ async fn run_pre_hook_plugins(
         )
         .await;
 
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-
         let desc = get_descriptor(assignment.plugin_type.as_str()).ok_or_else(|| {
             AgentCoreError::PreUpdateHookFailed(format!(
                 "unknown plugin type: {}",
@@ -546,7 +544,7 @@ async fn run_pre_hook_plugins(
             ))
         })?;
 
-        let lifecycle = (slot.create)(&assignment.config, runtime).map_err(|e| {
+        let lifecycle = (slot.create)(&assignment.config, Arc::clone(&runtime)).map_err(|e| {
             AgentCoreError::PreUpdateHookFailed(format!(
                 "failed to create hook plugin {}: {e}",
                 assignment.plugin_type
@@ -606,7 +604,7 @@ async fn run_pre_hook_plugins(
 async fn run_post_hook_plugins(
     plugins: &[PluginAssignment],
     ctx: &UpdateLifecycleContext,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     accumulated_output: &mut String,
 ) {
@@ -636,8 +634,6 @@ async fn run_post_hook_plugins(
         )
         .await;
 
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-
         let Some(desc) = get_descriptor(assignment.plugin_type.as_str()) else {
             let msg = format!("unknown plugin type: {}", assignment.plugin_type);
             tracing::warn!(msg, "skipping post-update hook plugin");
@@ -659,7 +655,7 @@ async fn run_post_hook_plugins(
             continue;
         };
 
-        let lifecycle = match (slot.create)(&assignment.config, runtime) {
+        let lifecycle = match (slot.create)(&assignment.config, Arc::clone(&runtime)) {
             Ok(lc) => lc,
             Err(e) => {
                 let msg = format!(
@@ -717,11 +713,9 @@ async fn run_post_hook_plugins(
 pub(crate) async fn run_batch_pre_hook_plugins(
     plugins: &[PluginAssignment],
     ctx: &UpdateLifecycleContext,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
 ) -> UpdateResult<()> {
     for assignment in plugins {
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-
         let desc = get_descriptor(assignment.plugin_type.as_str()).ok_or_else(|| {
             report!(UpdateError::HookFailed(format!(
                 "unknown plugin type: {}",
@@ -736,7 +730,7 @@ pub(crate) async fn run_batch_pre_hook_plugins(
             )))
         })?;
 
-        let lifecycle = (slot.create)(&assignment.config, runtime).map_err(|e| {
+        let lifecycle = (slot.create)(&assignment.config, Arc::clone(&runtime)).map_err(|e| {
             report!(UpdateError::HookFailed(format!(
                 "failed to create hook plugin {}: {e}",
                 assignment.plugin_type
@@ -776,11 +770,9 @@ pub(crate) async fn run_batch_pre_hook_plugins(
 pub(crate) async fn run_batch_post_hook_plugins(
     plugins: &[PluginAssignment],
     ctx: &UpdateLifecycleContext,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
 ) {
     for assignment in plugins {
-        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
-
         let Some(desc) = get_descriptor(assignment.plugin_type.as_str()) else {
             tracing::warn!(
                 plugin_type = %assignment.plugin_type,
@@ -793,7 +785,7 @@ pub(crate) async fn run_batch_post_hook_plugins(
             continue;
         };
 
-        let lifecycle = match (slot.create)(&assignment.config, runtime) {
+        let lifecycle = match (slot.create)(&assignment.config, Arc::clone(&runtime)) {
             Ok(lc) => lc,
             Err(e) => {
                 tracing::warn!(
@@ -1163,19 +1155,28 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
 #[cfg(feature = "interactive")]
 pub async fn execute_update_interactive(
     payload: ExecuteUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
+    runtime: Arc<dyn HostRuntime>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
     early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
 ) -> InteractiveUpdateHandle {
     let (channels_tx, channels_rx) = tokio::sync::oneshot::channel::<InteractiveChannels>();
 
-    let forwarding = Arc::new(ForwardingInteractiveExecutor {
-        inner: executor,
-        channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
-    });
+    // Extract the inner executor from the runtime to wrap in ForwardingInteractiveExecutor.
+    // The forwarding executor intercepts the first execute() call and promotes it to
+    // execute_interactive(). We then re-wrap using construct_host_runtime so that
+    // the capabilities are preserved.
+    use uptrakit_plugin_infrastructure_registry::construct_host_runtime;
+    let inner_executor = runtime.executor();
+    let caps = runtime.capabilities().clone();
+    let forwarding_executor: Arc<dyn uptrakit_command::CommandExecutor> =
+        Arc::new(ForwardingInteractiveExecutor {
+            inner: inner_executor,
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+        });
+    let forwarding_runtime = construct_host_runtime(forwarding_executor, caps);
 
     let handle = tokio::spawn(async move {
-        execute_update(payload, forwarding, output_tx, early_result_tx).await
+        execute_update(payload, forwarding_runtime, output_tx, early_result_tx).await
     });
 
     // Await delivery of the interactive channels from
@@ -1210,7 +1211,6 @@ mod tests {
     )]
 
     use super::*;
-    use uptrakit_command::LocalCommandExecutor;
     use uptrakit_wire::plugin_ids;
 
     fn test_payload() -> ExecuteUpdatePayload {
@@ -1234,8 +1234,13 @@ mod tests {
         }
     }
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        use uptrakit_command::LocalCommandExecutor;
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, StandardHostRuntime};
+        Arc::new(StandardHostRuntime::new(
+            Arc::new(LocalCommandExecutor),
+            HostCapabilities::default(),
+        ))
     }
 
     // ── Bounded output tests ────────────────────────────────────────────────
@@ -1286,7 +1291,7 @@ mod tests {
         payload.release_info = None;
 
         let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
-        let result = execute_update(payload, test_executor(), tx, early_tx).await;
+        let result = execute_update(payload, test_runtime(), tx, early_tx).await;
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         rx.close();
@@ -1311,7 +1316,7 @@ mod tests {
         }];
 
         let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
-        let result = execute_update(payload, test_executor(), tx, early_tx).await;
+        let result = execute_update(payload, test_runtime(), tx, early_tx).await;
 
         assert_eq!(result.result.status, UpdateFinalStatus::Failed);
         assert!(result.result.error.is_some(), "Expected error but got None");
@@ -1325,7 +1330,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_pre_hook("pkg", "1.0", None, None);
         let mut output = String::new();
-        let result = run_pre_hook_plugins(&[], &ctx, test_executor(), &tx, &mut output).await;
+        let result = run_pre_hook_plugins(&[], &ctx, test_runtime(), &tx, &mut output).await;
         assert!(result.is_ok());
     }
 
@@ -1334,21 +1339,21 @@ mod tests {
         let (tx, _rx) = mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_post_hook("pkg", "1.0", None, None, true);
         let mut output = String::new();
-        run_post_hook_plugins(&[], &ctx, test_executor(), &tx, &mut output).await;
+        run_post_hook_plugins(&[], &ctx, test_runtime(), &tx, &mut output).await;
         // No panic or error — noop
     }
 
     #[tokio::test]
     async fn test_run_batch_pre_hook_plugins_empty_is_noop() {
         let ctx = UpdateLifecycleContext::for_pre_hook("", "", None, None);
-        let result = run_batch_pre_hook_plugins(&[], &ctx, test_executor()).await;
+        let result = run_batch_pre_hook_plugins(&[], &ctx, test_runtime()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_run_batch_post_hook_plugins_empty_is_noop() {
         let ctx = UpdateLifecycleContext::for_post_hook("", "", None, None, true);
-        run_batch_post_hook_plugins(&[], &ctx, test_executor()).await;
+        run_batch_post_hook_plugins(&[], &ctx, test_runtime()).await;
         // No panic or error — noop
     }
 
