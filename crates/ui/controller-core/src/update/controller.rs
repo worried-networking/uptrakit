@@ -26,6 +26,7 @@ use uptrakit_web_api_queries::queries::update_types::ActorType;
 use uptrakit_wire::AdminEvent;
 use uuid::Uuid;
 
+use crate::connections::ServiceConnectionRegistry;
 use crate::notification::NotificationState;
 
 use super::{
@@ -42,6 +43,7 @@ use uptrakit_web_api_queries::queries::update_dispatch::prepare_pre_update_hook;
 /// an `AppState` reference. Used by both `web-api` and `mcp` crates.
 pub struct ControllerUpdateDispatcher {
     db: sea_orm::DatabaseConnection,
+    service_connections: ServiceConnectionRegistry,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
     plugin_ops: Arc<dyn PluginOps>,
@@ -52,6 +54,7 @@ impl ControllerUpdateDispatcher {
     /// Construct a new dispatcher.
     pub fn new(
         db: sea_orm::DatabaseConnection,
+        service_connections: ServiceConnectionRegistry,
         notification: NotificationState,
         output_stream: Arc<dyn UpdateOutputStream>,
         plugin_ops: Arc<dyn PluginOps>,
@@ -59,6 +62,7 @@ impl ControllerUpdateDispatcher {
     ) -> Self {
         Self {
             db,
+            service_connections,
             notification,
             output_stream,
             plugin_ops,
@@ -153,14 +157,7 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
         );
 
         if let Some(work) = trigger_result.pending_protection_work {
-            spawn_protection_and_dispatch(
-                self.db.clone(),
-                self.notification.clone(),
-                self.output_stream.clone(),
-                self.plugin_ops.clone(),
-                self.audit_emitter.clone(),
-                *work,
-            );
+            self.spawn_protection_and_dispatch(*work);
         }
 
         Ok(UpdateDispatchResult {
@@ -171,27 +168,29 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
 }
 
 // ---------------------------------------------------------------------------
-// Spawn helper
+// Spawn helper (impl method)
 // ---------------------------------------------------------------------------
 
-/// Spawn a background task that runs pre-update protection then dispatches to
-/// the agent.
-pub(crate) fn spawn_protection_and_dispatch(
-    db: sea_orm::DatabaseConnection,
-    notification: NotificationState,
-    output_stream: Arc<dyn UpdateOutputStream>,
-    plugin_ops: Arc<dyn PluginOps>,
-    audit_emitter: uptrakit_audit_log::AuditEmitter,
-    work: PendingProtectionWork,
-) {
-    tokio::spawn(run_protection_and_dispatch(
-        db,
-        notification,
-        output_stream,
-        plugin_ops,
-        audit_emitter,
-        work,
-    ));
+impl ControllerUpdateDispatcher {
+    /// Spawn a background task that runs pre-update protection then dispatches
+    /// to the agent.
+    fn spawn_protection_and_dispatch(&self, work: PendingProtectionWork) {
+        let db = self.db.clone();
+        let service_connections = self.service_connections.clone();
+        let notification = self.notification.clone();
+        let output_stream = self.output_stream.clone();
+        let plugin_ops = self.plugin_ops.clone();
+        let audit_emitter = self.audit_emitter.clone();
+        tokio::spawn(run_protection_and_dispatch(
+            db,
+            service_connections,
+            notification,
+            output_stream,
+            plugin_ops,
+            audit_emitter,
+            work,
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +200,7 @@ pub(crate) fn spawn_protection_and_dispatch(
 #[tracing::instrument(skip_all, fields(update_id = %work.update_history_id))]
 async fn run_protection_and_dispatch(
     db: sea_orm::DatabaseConnection,
+    _service_connections: ServiceConnectionRegistry,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
     plugin_ops: Arc<dyn PluginOps>,
