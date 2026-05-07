@@ -253,3 +253,259 @@ async fn dispatch_message<H: ServiceHandler>(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    use crate::shared_types::{LoopOutcome, LoopResult, ServiceHandler, ShutdownCause};
+    use crate::wire_api::{
+        Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload, ServiceTransport,
+        TransportError,
+    };
+
+    use super::run_embedded_service;
+
+    struct MockTransport {
+        svc_rx: mpsc::Receiver<ControllerMessage>,
+        yielded: bool,
+    }
+
+    fn make_transport(ctrl_in: mpsc::Receiver<ControllerMessage>) -> MockTransport {
+        MockTransport {
+            svc_rx: ctrl_in,
+            yielded: false,
+        }
+    }
+
+    fn make_yielded_transport(ctrl_in: mpsc::Receiver<ControllerMessage>) -> MockTransport {
+        MockTransport {
+            svc_rx: ctrl_in,
+            yielded: true,
+        }
+    }
+
+    #[async_trait]
+    impl ServiceTransport for MockTransport {
+        async fn transport_send(&mut self, _msg: ServiceMessage) -> Result<(), TransportError> {
+            Ok(())
+        }
+        async fn transport_send_best_effort(&mut self, _msg: ServiceMessage) {}
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: ServiceMessage,
+        ) -> Result<(), TransportError> {
+            self.transport_send(msg).await
+        }
+        async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+            self.svc_rx.recv().await
+        }
+        fn close_policy(&self) -> crate::wire_api::TransportClosePolicy {
+            crate::wire_api::TransportClosePolicy::Shutdown
+        }
+        fn is_yielded(&self) -> bool {
+            self.yielded
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct CallLog {
+        on_settings_called: bool,
+        on_shutdown_called: bool,
+        on_yield_change_called: bool,
+        on_message_called: bool,
+    }
+
+    struct MockHandler {
+        log: std::sync::Arc<parking_lot::Mutex<CallLog>>,
+    }
+
+    impl MockHandler {
+        fn new() -> (Self, std::sync::Arc<parking_lot::Mutex<CallLog>>) {
+            let log = std::sync::Arc::new(parking_lot::Mutex::new(CallLog::default()));
+            (Self { log: log.clone() }, log)
+        }
+    }
+
+    #[async_trait]
+    impl ServiceHandler for MockHandler {
+        const DIR_NAME: &'static str = "mock";
+        const SERVICE_LABEL: &'static str = "mock service";
+        const SERVICE_APP_NAME: &'static str = "mock";
+
+        type ServiceEvent = std::convert::Infallible;
+
+        async fn on_connected(
+            &mut self,
+            _conn: &mut dyn ServiceTransport,
+            _identity: &crate::identity::ServiceIdentityState,
+        ) -> LoopResult<()> {
+            Ok(())
+        }
+
+        async fn on_message(
+            &mut self,
+            _msg: ControllerMessage,
+            _conn: &mut dyn ServiceTransport,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            self.log.lock().on_message_called = true;
+            Ok(None)
+        }
+
+        async fn on_settings(
+            &mut self,
+            _settings: &ServiceSettingsPayload,
+            _conn: &mut dyn ServiceTransport,
+            _agreed: &BTreeSet<Capability>,
+        ) {
+            self.log.lock().on_settings_called = true;
+        }
+
+        async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+            std::future::pending().await
+        }
+
+        async fn on_service_event(
+            &mut self,
+            event: Self::ServiceEvent,
+            _conn: &mut dyn ServiceTransport,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            match event {}
+        }
+
+        async fn on_shutdown(
+            &mut self,
+            _conn: &mut dyn ServiceTransport,
+            _cause: ShutdownCause,
+            _timeout: Duration,
+        ) -> LoopOutcome {
+            self.log.lock().on_shutdown_called = true;
+            LoopOutcome::Shutdown
+        }
+
+        async fn on_yield_change(&mut self, _is_yielded: bool, _conn: &mut dyn ServiceTransport) {
+            self.log.lock().on_yield_change_called = true;
+        }
+    }
+
+    fn make_settings() -> ServiceSettingsPayload {
+        ServiceSettingsPayload {
+            capabilities: BTreeSet::new(),
+            tenant_id: None,
+            ping_interval: Duration::from_secs(60),
+            renewal_window_hours: 0,
+            ca_bundle_hash: String::new(),
+            report_page_limits: Default::default(),
+            shutdown_timeout: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn exits_when_transport_closed_before_settings() {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(1);
+        drop(ctrl_tx);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        run_embedded_service(handler, transport, drain, abort).await;
+
+        let log = log.lock();
+        assert!(!log.on_settings_called, "on_settings must not be called");
+        assert!(!log.on_shutdown_called, "on_shutdown must not be called");
+    }
+
+    #[tokio::test]
+    async fn abort_before_settings_exits_immediately() {
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(1);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+        abort.cancel();
+
+        run_embedded_service(handler, transport, drain, abort).await;
+
+        assert!(!log.lock().on_settings_called);
+    }
+
+    #[tokio::test]
+    async fn normal_startup_then_drain_calls_on_shutdown() {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings()))
+            .await
+            .expect("send settings");
+        drain.cancel();
+
+        run_embedded_service(handler, transport, drain, abort).await;
+
+        let log = log.lock();
+        assert!(log.on_settings_called, "on_settings must be called");
+        assert!(
+            log.on_shutdown_called,
+            "on_shutdown must be called on drain"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn startup_timeout_exits_without_callback() {
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(1);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        let task = tokio::spawn(run_embedded_service(handler, transport, drain, abort));
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+
+        task.await.expect("task panicked");
+
+        assert!(!log.lock().on_settings_called);
+        assert!(!log.lock().on_shutdown_called);
+    }
+
+    #[tokio::test]
+    async fn yielded_transport_drops_messages_silently() {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
+        let transport = make_yielded_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings()))
+            .await
+            .expect("send settings");
+        ctrl_tx
+            .send(ControllerMessage::Unknown)
+            .await
+            .expect("send unknown");
+        drop(ctrl_tx);
+
+        run_embedded_service(handler, transport, drain, abort).await;
+
+        let log = log.lock();
+        assert!(log.on_settings_called, "on_settings must be called");
+        assert!(
+            !log.on_message_called,
+            "on_message must NOT be called when yielded"
+        );
+        assert!(
+            !log.on_shutdown_called,
+            "on_shutdown not called on transport close"
+        );
+    }
+}
