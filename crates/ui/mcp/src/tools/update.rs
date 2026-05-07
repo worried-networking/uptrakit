@@ -3,9 +3,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use uptrakit_controller_core::update::{ActorInfo, DispatchOutcome, UpdateDispatchParams};
+use uptrakit_web_api_queries::queries::update_types::ActorType;
+
+use crate::context::{McpRequestContext as NewMcpRequestContext, McpTriggerError};
+use crate::state::McpState;
 use crate::tools::{McpHandler, mcp_error};
 use uptrakit_web_api::McpRequestContext;
-use uptrakit_web_api::mcp_trigger_update;
+use uptrakit_web_api::mcp_trigger_update as web_api_mcp_trigger_update;
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -69,7 +74,7 @@ impl McpHandler {
             )
         })?;
 
-        let (update_history_id, status) = mcp_trigger_update(
+        let (update_history_id, status) = web_api_mcp_trigger_update(
             std::sync::Arc::clone(&self.state),
             &ctx,
             host_id,
@@ -84,6 +89,45 @@ impl McpHandler {
             status: status.to_string(),
         }))
     }
+}
+
+// ---------------------------------------------------------------------------
+// McpState-based trigger
+// ---------------------------------------------------------------------------
+
+/// Trigger a software update from an MCP tool call.
+///
+/// Uses `McpState.update_dispatcher` — no `AppState` required.
+/// Returns `(update_history_id, DispatchOutcome)` on success.
+///
+/// # Errors
+///
+/// Returns [`McpTriggerError`] if the host is not found, the software item is
+/// not found, an update is already active, the host is not configured,
+/// the agent is unavailable, or an internal error occurs.
+pub async fn mcp_trigger_update(
+    state: &McpState,
+    ctx: &NewMcpRequestContext,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    to_version: String,
+) -> Result<(Uuid, DispatchOutcome), McpTriggerError> {
+    let params = UpdateDispatchParams::new(
+        ctx.tenant_id,
+        host_id,
+        software_item_id,
+        to_version,
+        ActorInfo::new(ActorType::ApiToken, ctx.token_id.to_string()),
+        None,
+        false,
+    );
+
+    state
+        .update_dispatcher
+        .dispatch(params)
+        .await
+        .map(|r| (r.update_history_id, r.outcome))
+        .map_err(|e| McpTriggerError::from(e.current_context()))
 }
 
 // ---------------------------------------------------------------------------
