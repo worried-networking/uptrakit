@@ -400,7 +400,7 @@ impl<T> PluginOps for T where
 {
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "plugin-ops"))]
 mod update_hook_ops_tests {
     use super::*;
 
@@ -408,7 +408,6 @@ mod update_hook_ops_tests {
     impl ControllerUpdateHookOps for TestOps {}
 
     #[test]
-    #[cfg(feature = "plugin-ops")]
     fn default_impl_returns_none() {
         let ops = TestOps;
         assert!(ops.controller_update_hook().is_none());

@@ -121,7 +121,8 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{
-    HostRuntime, MetadataAwareHostRuntime, StandardHostRuntime, construct_host_runtime,
+    HostRuntime, MetadataAwareHostRuntime, RouterOsExecutor, RouterOsHostRuntime,
+    StandardHostRuntime, construct_host_runtime, construct_routeros_host_runtime,
 };
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 #[cfg(feature = "plugin-ops")]
