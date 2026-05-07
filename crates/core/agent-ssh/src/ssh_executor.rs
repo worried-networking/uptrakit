@@ -63,6 +63,25 @@ impl SshCommandExecutor {
     pub(crate) fn session(&self) -> &Arc<SshSession> {
         &self.session
     }
+
+    /// Upload `data` to `remote_path` via SFTP.
+    #[expect(dead_code, reason = "used by RouterOS bootstrap in Plan B")]
+    pub(crate) async fn sftp_put(
+        &self,
+        remote_path: &str,
+        data: &[u8],
+    ) -> std::result::Result<(), crate::ssh_transport::SshExecError> {
+        self.session.sftp_put(remote_path, data).await
+    }
+
+    /// Delete `remote_path` via SFTP.
+    #[expect(dead_code, reason = "used by RouterOS bootstrap in Plan B")]
+    pub(crate) async fn sftp_remove(
+        &self,
+        remote_path: &str,
+    ) -> std::result::Result<(), crate::ssh_transport::SshExecError> {
+        self.session.sftp_remove(remote_path).await
+    }
 }
 
 // ── POSIX wrapper ─────────────────────────────────────────────────────

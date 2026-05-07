@@ -298,7 +298,8 @@ skip = [
     { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
     { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
 
-    # hashbrown: 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause, 0.17.x via newer crates
+    # hashbrown: 0.14.x via dashmap (russh-sftp), 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause, 0.17.x via newer crates
+    { crate = "hashbrown@0.14.5", reason = "pulled by dashmap 6.x (russh-sftp); newer 0.15.x used by sqlx-core" },
     { crate = "hashbrown@0.15.5", reason = "pulled by sqlx-core; newer 0.16.x used by indexmap, rootcause" },
     { crate = "hashbrown@0.16.1", reason = "pulled by indexmap 2.x; newer 0.17.x used by newer crates" },
 
