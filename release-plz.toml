@@ -69,6 +69,10 @@ name = "uptrakit-config-merge"
 release = false
 
 [[package]]
+name = "uptrakit-controller-core"
+release = false
+
+[[package]]
 name = "uptrakit-nats"
 release = false
 
@@ -258,6 +262,7 @@ git_release_name = "uptrakit-controller v{{ version }}"
 changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
+  "uptrakit-controller-core",
   "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-web-api",
@@ -304,6 +309,7 @@ git_release_name = "uptrakit-controller-standalone v{{ version }}"
 changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
+  "uptrakit-controller-core",
   "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-agent-runtime",
