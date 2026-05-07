@@ -81,27 +81,22 @@ pub(crate) struct Foo {
 }
 ```
 
-**Feature-conditional expression sites** (where `#[expect]` would be unfulfilled under the
-opposing feature variant) cannot use `#[cfg_attr]`. Use a module-level `#![expect]` that covers
-the file-scoped `#[allow]`, keeping both `allow_attributes` and `allow_attributes_without_reason`
-in a single module-level attribute:
+**Feature-conditional expression sites** (where a `let` binding is only mutated under a
+`#[cfg(feature = "...")]` block) are also handled by `#[cfg_attr]`. The suppression only exists
+in the build variant where the lint fires:
 
 ```rust
-// top of file — explains the single #[allow] below
-#![expect(
-    clippy::allow_attributes,
-    clippy::allow_attributes_without_reason,
-    reason = "feature-conditional: unused_mut fires only when the interactive feature is disabled"
+#[cfg_attr(
+    not(feature = "interactive"),
+    expect(unused_mut, reason = "mut only needed when interactive feature enables .take() calls below")
 )]
-
-// …later in the file…
-#[allow(unused_mut)]         // no reason here; the module-level attribute documents it
 let mut handle = start(…);
 ```
 
-Do not mix a module-level `#![expect(clippy::allow_attributes)]` with a local
-`#[expect(clippy::allow_attributes)]` for the same `#[allow]` — Clippy counts the lint event
-once, so one of the two `#[expect]` attributes will be unfulfilled.
+`clippy::allow_attributes` and `clippy::allow_attributes_without_reason` must **never** be
+suppressed. They exist specifically to catch bare `#[allow]` attributes — suppressing the
+watchdog defeats the whole mechanism. If you believe you need a bare `#[allow]`, the correct
+fix is always `#[cfg_attr(..., expect(...))]` or `#[expect(..., reason = "...")]`.
 
 ### Test-mode exemptions
 
