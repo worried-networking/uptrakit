@@ -60,8 +60,9 @@ pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 pub use uptrakit_plugin_infrastructure_core::roles::ReleaseFetcher;
 pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, ExecuteUpdateResult,
-    HostCapabilities, HostCompatibility, InfraBundle, PluginError, PluginFamily,
-    ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
+    HostCapabilities, HostCompatibility, InfraBundle, PluginError, PluginFamily, RouterOsExecutor,
+    RouterOsHostRuntime, ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
+    construct_routeros_host_runtime,
 };
 pub use uptrakit_plugin_infrastructure_core::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
