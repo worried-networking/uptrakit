@@ -22,6 +22,17 @@ use uptrakit_shared_types::OutputStreamType;
 
 use crate::error::{Error, Result};
 
+// ── Raw exec error ────────────────────────────────────────────────────
+
+/// Error from a raw SSH exec or SFTP operation.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SshExecError {
+    #[error("SSH exec failed: {0}")]
+    Exec(String),
+    #[error("SSH exec timed out")]
+    TimedOut,
+}
+
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -236,6 +247,29 @@ impl SshSession {
             .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
 
         Ok(channel)
+    }
+
+    /// Execute a raw command on the remote host, returning combined stdout + stderr.
+    ///
+    /// This is a low-level helper that makes no POSIX assumptions about the remote
+    /// shell. The timeout is optional; `None` means no deadline.
+    pub(crate) async fn exec_raw(
+        &self,
+        cmd: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> std::result::Result<String, SshExecError> {
+        let fut = self.exec_command(cmd);
+        let result = if let Some(dur) = timeout {
+            tokio::time::timeout(dur, fut)
+                .await
+                .map_err(|_elapsed| SshExecError::TimedOut)?
+                .map_err(|e| SshExecError::Exec(e.to_string()))?
+        } else {
+            fut.await.map_err(|e| SshExecError::Exec(e.to_string()))?
+        };
+        let mut out = result.stdout;
+        out.push_str(&result.stderr);
+        Ok(out)
     }
 
     /// Execute a command on the remote host and collect stdout/stderr.

@@ -26,7 +26,7 @@ use crate::commands::sudoers::{
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
 use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -531,7 +531,7 @@ async fn setup_sudoers_and_plugins(
     // Run host-compatibility checks via an SSH executor so that only the
     // commands applicable to *this* host are included.
     tracing::info!("configuring sudoers");
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
+    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();

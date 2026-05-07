@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_registry::{CatalogConfig, build_catalog, compatible_sudo_commands_for_host};
+use uptrakit_plugin_infrastructure_registry::{
+    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+};
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -23,7 +25,7 @@ use crate::error::{Error, Result};
 use crate::host_ops::{self, update_host_sudo_state};
 use crate::operations::sync::{NoopGuestBootstrap, NoopInfraActionInvoker};
 use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 use uptrakit_plugin_infrastructure_registry::agent_infra::InfraPluginContext;
@@ -233,7 +235,7 @@ async fn collect_plugin_sudo_commands(
     executor: &SshRemoteExecutor,
     privileged: bool,
 ) -> Result<Vec<ResolvedSudoCommand>> {
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
+    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
@@ -307,13 +309,15 @@ async fn run_infra_sync(
     };
 
     for bundle in &infra_bundles {
-        let (Some(report), Some(lifecycle)) =
-            (bundle.report.as_ref(), bundle.lifecycle.as_ref())
+        let (Some(report), Some(lifecycle)) = (bundle.report.as_ref(), bundle.lifecycle.as_ref())
         else {
             continue;
         };
         if report.has_infra_state(db, host.id).await {
-            match lifecycle.on_host_synced(&infra_ctx, executor, host.id).await {
+            match lifecycle
+                .on_host_synced(&infra_ctx, executor, host.id)
+                .await
+            {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
