@@ -268,8 +268,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         service_connections,
         default_tenant_id: tenant_id,
         controller_id,
-        plugin_ops,
-        global_providers,
+        plugin: crate::app_state::PluginState::new(plugin_ops, global_providers),
         credential_sources: ServiceCredentialSources::default(),
         shutdown_token: Default::default(),
         embedded_service_notifier: None,
@@ -286,8 +285,10 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         ),
         config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
         workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
-        pki_path: std::path::PathBuf::from("/tmp/test-pki"),
-        rustls_config: rustls_cfg,
+        server: crate::app_state::ServerState::new(
+            std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_cfg,
+        ),
         reject_dangerous_commands: false,
         #[cfg(feature = "interactive")]
         interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),

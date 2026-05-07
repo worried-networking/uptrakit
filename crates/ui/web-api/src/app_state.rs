@@ -990,7 +990,10 @@ impl AppStateBuilder {
                     };
                     Arc::new(
                         uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                            .context(AppStateBuildError("plugin_catalog"))?,
+                            .map_err(|e| {
+                                tracing::error!(error = %e, "failed to build plugin catalog");
+                                AppStateBuildError("plugin_catalog")
+                            })?,
                     )
                 }
             };
