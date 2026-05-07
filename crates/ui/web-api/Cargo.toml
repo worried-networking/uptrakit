@@ -11,7 +11,7 @@ version = "0.0.1"
 default = ["oidc"]
 oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
-nats = ["dep:async-nats", "dep:uptrakit-nats"]
+nats = ["dep:async-nats", "dep:uptrakit-nats", "uptrakit-controller-core/nats"]
 interactive = []
 dashboard-icons = ["uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 notifications-telegram = ["uptrakit-surface-proxy/notifications-telegram"]
@@ -101,6 +101,7 @@ strum = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-surface-proxy = { workspace = true, features = ["testing"] }
+uptrakit-controller-core = { workspace = true, features = ["testing"] }
 tokio-tungstenite = { workspace = true }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 

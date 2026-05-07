@@ -3549,11 +3549,11 @@ mod tests {
                 crate::auth::rate_limit::RateLimitStore::new(db.clone()),
                 Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             ),
-            notification: crate::app_state::NotificationState {
+            notification: crate::app_state::NotificationState::new(
                 notification_service,
                 notification_dispatcher,
-                event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
-            },
+                crate::event_broadcaster::EventBroadcaster::new(),
+            ),
             broadcast: crate::app_state::BroadcastState {
                 device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
                 ),
