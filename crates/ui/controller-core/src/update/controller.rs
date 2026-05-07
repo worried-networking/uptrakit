@@ -27,7 +27,6 @@ use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
 use uptrakit_wire::AdminEvent;
 use uuid::Uuid;
 
-use crate::connections::ServiceConnectionRegistry;
 use crate::notification::NotificationState;
 
 use super::{
@@ -45,11 +44,6 @@ use uptrakit_web_api_queries::queries::update_dispatch::prepare_pre_update_hook;
 #[non_exhaustive]
 pub struct ControllerUpdateDispatcher {
     db: sea_orm::DatabaseConnection,
-    #[expect(
-        dead_code,
-        reason = "retained for future use by dispatchers that need to reach peer services"
-    )]
-    service_connections: ServiceConnectionRegistry,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
     plugin_ops: Arc<dyn PluginOps>,
@@ -60,7 +54,6 @@ impl ControllerUpdateDispatcher {
     /// Construct a new dispatcher.
     pub fn new(
         db: sea_orm::DatabaseConnection,
-        service_connections: ServiceConnectionRegistry,
         notification: NotificationState,
         output_stream: Arc<dyn UpdateOutputStream>,
         plugin_ops: Arc<dyn PluginOps>,
@@ -68,7 +61,6 @@ impl ControllerUpdateDispatcher {
     ) -> Self {
         Self {
             db,
-            service_connections,
             notification,
             output_stream,
             plugin_ops,
