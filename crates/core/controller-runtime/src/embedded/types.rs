@@ -121,6 +121,10 @@ impl uptrakit_wire::ServiceTransport for EmbeddedTransport {
     fn is_yielded(&self) -> bool {
         self.yielded.load(Ordering::Relaxed)
     }
+
+    fn yield_change_notifier(&self) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        Some(Arc::clone(&self.yield_state_changed))
+    }
 }
 
 /// Info about an external service, used for yield decisions.
@@ -218,5 +222,12 @@ mod tests {
         assert!(transport.is_yielded());
         flag.store(false, Ordering::Release);
         assert!(!transport.is_yielded());
+    }
+
+    #[test]
+    fn yield_change_notifier_returns_some() {
+        let (transport, _flag, _rx, _tx) = make_transport(false);
+        let notifier = ServiceTransport::yield_change_notifier(&transport);
+        assert!(notifier.is_some());
     }
 }
