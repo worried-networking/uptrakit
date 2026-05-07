@@ -22,13 +22,16 @@ business logic, DB schema, and shared operations.**
 ## Prerequisite: service-sdk Embedded Transport Abstraction
 
 This spec describes the target architecture. Fully realising the controller side of the unified
-`ServiceHandler` path (Work Stream 5) requires a prerequisite: making `ControllerConnection`
-transport-agnostic so the same handler type works with both a WebSocket and an
-`EmbeddedTransport`. That change is specified in
-`docs/superpowers/specs/2026-05-07-service-sdk-embedded-transport.md` and planned in
-`docs/superpowers/plans/2026-05-07-service-sdk-embedded-transport.md`; it must ship first.
+`ServiceHandler` path (Work Stream 5) required a prerequisite: making `ControllerConnection`
+transport-agnostic so the same handler type works with both a WebSocket and an `EmbeddedTransport`.
 
-Work Streams 1–4 in this spec are independent of the prerequisite and can proceed immediately.
+**The prerequisite has shipped.** `run_embedded_service`, `ShutdownCause::EmbeddedDrain`,
+`dyn ServiceTransport` handler signatures, `EmbeddedTransport::yield_change_notifier`, and
+controller-side `ServiceSettings` injection are all in place. Work Stream 5 is now unblocked.
+
+The prerequisite spec and plan remain at:
+`docs/superpowers/specs/2026-05-07-service-sdk-embedded-transport.md` and
+`docs/superpowers/plans/2026-05-07-service-sdk-embedded-transport.md`.
 
 ---
 
@@ -82,14 +85,14 @@ Runtime crates that own a DB override this on their single `ServiceHandler` impl
 The controller calls it as an associated function on the concrete type:
 
 ```rust
-// controller-runtime startup (after prerequisite ships):
+// controller-runtime startup:
 let migrations = AgentSshHandler::service_migrations();
 run_migrations_with_plugins(db, migrations).await?;
 ```
 
-Until the prerequisite ships, the controller calls a transitional free function
-`uptrakit_agent_ssh_runtime::service_migrations()` that the `ServiceHandler` impl delegates to
-internally. The free function is removed once the unified embedded path is in place.
+Until WS5 ships (the controller unified embedded path), the controller calls a transitional
+free function `uptrakit_agent_ssh_runtime::service_migrations()` that the `ServiceHandler` impl
+delegates to internally. The free function is removed as part of WS5.
 
 ---
 
@@ -172,7 +175,7 @@ match service registrations by app name; changing it breaks existing enrolled ag
 calls `AgentSshHandler::new(local_db, state_dir, AgentSshMode::Binary, None)`,
 then `run_lifecycle_and_handle_errors`.
 
-**Controller embedded** (after prerequisite): generates ECIES keypair via
+**Controller embedded** (WS5): generates ECIES keypair via
 `generate_ecies_keypair()`, passes shared `DatabaseConnection`,
 calls `AgentSshHandler::new(shared_db, ssh_state_dir, AgentSshMode::Embedded, Some(keypair))`,
 then `run_embedded_service::<AgentSshHandler>`.
@@ -348,18 +351,8 @@ Already satisfies the contract. `mqtt-runtime` exports `MqttRuntime`; the binary
 making the binary a minimal shell. No migrations; `service_migrations()` uses the default
 `vec![]`.
 
-The rename happens as part of this WS4 implementation. To keep the prerequisite plan
-(which references `StandaloneMqttHandler` by name in Tasks 6–7) compiling without changes, add
-a transitional re-export in `mqtt-runtime` until the prerequisite plan is merged:
-
-```rust
-// mqtt-runtime/src/lib.rs — removed once prerequisite plan merges
-#[deprecated(since = "0.0.0", note = "renamed to MqttHandler")]
-pub type StandaloneMqttHandler = MqttHandler;
-```
-
-The prerequisite plan's tasks update the handler by that name; when those tasks run against
-the renamed `MqttHandler`, remove the alias.
+The rename happens as part of this WS4 implementation. The prerequisite has already merged
+with `StandaloneMqttHandler` intact, so no transitional alias is needed — rename directly.
 
 ### `agent`
 
@@ -368,12 +361,11 @@ No changes required.
 
 ---
 
-## Work Stream 5 — Controller Unified Embedded Path (post-prerequisite)
+## Work Stream 5 — Controller Unified Embedded Path
 
-_Blocked on the service-sdk embedded transport abstraction spec._
+**Prerequisite shipped — now actionable.**
 
-Once `ControllerConnection` is transport-agnostic and `run_embedded_service::<H>` exists in
-service-sdk:
+`run_embedded_service::<H>` is in service-sdk and `ControllerConnection` is transport-agnostic:
 
 - `controller-runtime/src/ssh_agent/mod.rs`'s `run_embedded_ssh_agent` free function is deleted.
 - Controller constructs `AgentSshHandler::new(shared_db, ...)` and calls
