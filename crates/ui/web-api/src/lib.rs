@@ -44,11 +44,6 @@ pub mod surface_registry {
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
-pub mod mcp_compat;
-pub use mcp_compat::{
-    McpAuthError, McpRequestContext, McpTriggerError, mcp_trigger_update,
-    validate_api_token_for_mcp,
-};
 pub mod tenant_db;
 pub mod update_output_broadcaster;
 pub mod workload_claims;
