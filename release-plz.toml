@@ -109,6 +109,9 @@ name = "uptrakit-web-api-auth"
 [[package]]
 name = "uptrakit-web-api-queries"
 
+[[package]]
+name = "uptrakit-mcp"
+
 # ===== Plugin crates =====
 # Analyzed for commits. Per user direction, plugin commits roll up only
 # into the controller (lean + standalone) changelogs — not into agent,
@@ -255,6 +258,7 @@ git_release_name = "uptrakit-controller v{{ version }}"
 changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
+  "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
@@ -300,6 +304,7 @@ git_release_name = "uptrakit-controller-standalone v{{ version }}"
 changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
+  "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-agent-runtime",
   "uptrakit-agent-ssh-runtime",
