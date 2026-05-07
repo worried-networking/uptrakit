@@ -121,7 +121,12 @@ impl ReleaseFetcher for RouterOsPlugin {
             .map_err(|e| report!(e))?;
 
         let Some(latest) = parse_latest_version(&output) else {
-            return Ok(vec![]);
+            return Err(report!(RouterOsError::VersionUnavailable(
+                "latest-version absent from package update print output; \
+                 ensure the router has completed a check-for-updates cycle"
+                    .to_string()
+            ))
+            .context_to::<PluginError>());
         };
 
         let version = Version::new(&latest);
@@ -413,18 +418,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_releases_returns_empty_when_no_latest() {
+    async fn fetch_releases_returns_err_when_no_latest() {
         let plugin = make_plugin(
             "",
             "  channel: stable\n  installed-version: 7.14\n",
             false,
             false,
         );
-        let releases = plugin
-            .fetch_releases("routeros")
-            .await
-            .expect("should succeed");
-        assert!(releases.is_empty());
+        let result = plugin.fetch_releases("routeros").await;
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("latest-version absent")
+                || format!("{err:?}").contains("VersionUnavailable"),
+            "expected VersionUnavailable error, got: {err}"
+        );
     }
 
     // ── ros_runtime downcast failure ──────────────────────────────────────────

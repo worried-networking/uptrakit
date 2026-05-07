@@ -2,11 +2,6 @@
     clippy::let_underscore_must_use,
     reason = "fire-and-forget channel sends; errors mean the receiver is gone and we must not block"
 )]
-#![expect(
-    clippy::allow_attributes,
-    clippy::allow_attributes_without_reason,
-    reason = "feature-conditional #[allow] for unused_mut; #[expect] would be unfulfilled when interactive feature is enabled"
-)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,7 +22,7 @@ use uptrakit_wire::{
 };
 
 use crate::db::entity::ssh_host::Model;
-use crate::host_info::collect_remote_host_info;
+use crate::host_info::{collect_remote_host_info, collect_remote_host_info_routeros};
 use crate::host_ops::{find_host_by_machine_id, list_hosts, update_host_machine_id};
 use crate::routeros_executor::RouterOsSshExecutor;
 use crate::ssh_executor::PosixSshCommandExecutor;
@@ -199,24 +194,37 @@ async fn collect_one_host_for_report(
         }
     };
 
-    // Verify that command execution is available via the CommandExecutor
-    // interface before proceeding with host information collection.
-    let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
-    if executor
-        .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
-        .await
-        .is_err()
-    {
-        tracing::warn!(
-            host_name = %host.name,
-            hostname = %host.hostname,
-            "SSH command executor check failed, evicting session and skipping host"
-        );
-        pool.evict(host.id).await;
-        return None;
-    }
+    use crate::db::entity::routeros_host_config;
+    use sea_orm::EntityTrait as _;
 
-    let mut info = collect_remote_host_info(&session, &executor).await;
+    let is_routeros = routeros_host_config::Entity::find_by_id(host.id)
+        .one(&db)
+        .await
+        .unwrap_or(None)
+        .is_some();
+
+    let mut info = if is_routeros {
+        let ros_exec = RouterOsSshExecutor::new(Arc::clone(&session));
+        collect_remote_host_info_routeros(&ros_exec).await
+    } else {
+        // Verify that command execution is available via the CommandExecutor
+        // interface before proceeding with host information collection.
+        let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
+        if executor
+            .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                host_name = %host.name,
+                hostname = %host.hostname,
+                "SSH command executor check failed, evicting session and skipping host"
+            );
+            pool.evict(host.id).await;
+            return None;
+        }
+        collect_remote_host_info(&session, &executor).await
+    };
     // Set the SSH target address as the host's ip_address.
     info.ip_address = Some(host.hostname.clone());
     // Provide the agent-local UUID so the controller can use it as hosts.id.
@@ -357,8 +365,22 @@ async fn collect_one_host_for_reload(
         }
     };
 
-    let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
-    let mut info = collect_remote_host_info(&session, &executor).await;
+    use crate::db::entity::routeros_host_config;
+    use sea_orm::EntityTrait as _;
+
+    let is_routeros = routeros_host_config::Entity::find_by_id(host.id)
+        .one(&db)
+        .await
+        .unwrap_or(None)
+        .is_some();
+
+    let mut info = if is_routeros {
+        let ros_exec = RouterOsSshExecutor::new(Arc::clone(&session));
+        collect_remote_host_info_routeros(&ros_exec).await
+    } else {
+        let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
+        collect_remote_host_info(&session, &executor).await
+    };
     info.ip_address = Some(host.hostname.clone());
     info.agent_host_id = Some(host.id);
 
@@ -555,7 +577,13 @@ pub async fn handle_execute_update_ssh(
     let runtime =
         build_host_runtime(host.id, Arc::clone(&session), Arc::clone(&executor), db).await;
 
-    #[allow(unused_mut)]
+    #[cfg_attr(
+        not(feature = "interactive"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when interactive feature enables .take() calls on in_flight fields"
+        )
+    )]
     let mut in_flight = uptrakit_agent_core::start_update(payload, runtime, conn, &ctx).await;
 
     // Extract interactive channels before moving InFlightUpdate into the forwarder.

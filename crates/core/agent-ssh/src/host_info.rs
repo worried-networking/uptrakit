@@ -243,10 +243,6 @@ pub(crate) fn extract_machine_id_license(output: &str) -> Option<String> {
 }
 
 /// Collect host information from a RouterOS device.
-#[expect(
-    dead_code,
-    reason = "called from RouterOS host runtime added in Plan B Task 5+"
-)]
 pub(crate) async fn collect_remote_host_info_routeros(exec: &RouterOsSshExecutor) -> HostInfo {
     let machine_id = collect_routeros_machine_id(exec).await;
     HostInfo {
