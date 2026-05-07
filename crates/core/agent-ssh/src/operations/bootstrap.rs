@@ -27,7 +27,7 @@ use crate::operations::sudoers::{
     install_helper_script, resolve_command_path, write_sudoers_file,
 };
 use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -171,7 +171,7 @@ pub(crate) async fn bootstrap_connect(
         gather_remote_host_info(&session, &executor, params, use_sudo, state_dir, &db).await?;
 
     // Collect plugin sudo commands to build a preview for the review step.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let sudo_command_previews: Vec<String> = plugin_sudo_cmds
@@ -1033,7 +1033,7 @@ async fn setup_sudoers_and_plugins(
     // Run host-compatibility checks via an SSH executor so that only the
     // commands applicable to *this* host are included.
     tracing::info!("configuring sudoers");
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
+    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
 

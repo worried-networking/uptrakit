@@ -28,7 +28,7 @@ use uptrakit_wire::{
 use crate::db::entity::ssh_host::Model;
 use crate::host_info::collect_remote_host_info;
 use crate::host_ops::{find_host_by_machine_id, list_hosts, update_host_machine_id};
-use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_pool::SshConnectionPool;
 
 // Re-export shared update types for use in main.rs.
@@ -145,7 +145,7 @@ async fn collect_one_host_for_report(
 
     // Verify that command execution is available via the CommandExecutor
     // interface before proceeding with host information collection.
-    let executor = SshCommandExecutor::new(Arc::clone(&session));
+    let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
     if executor
         .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
         .await
@@ -301,7 +301,7 @@ async fn collect_one_host_for_reload(
         }
     };
 
-    let executor = SshCommandExecutor::new(Arc::clone(&session));
+    let executor = PosixSshCommandExecutor::new(Arc::clone(&session));
     let mut info = collect_remote_host_info(&session, &executor).await;
     info.ip_address = Some(host.hostname.clone());
     info.agent_host_id = Some(host.id);
@@ -480,7 +480,8 @@ pub async fn handle_execute_update_ssh(
     // update task, keeping the SSH connection alive for the duration of the
     // update.  The pool's own Arc remains so the session is returned to the
     // pool after the task completes.
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let raw: Arc<dyn CommandExecutor> =
+        Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
@@ -650,7 +651,8 @@ async fn run_check_versions_ssh(
     };
 
     let ctx = build_connection_context();
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let raw: Arc<dyn CommandExecutor> =
+        Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
@@ -745,7 +747,8 @@ async fn run_discover_software_ssh(
     };
 
     let ctx = build_connection_context();
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let raw: Arc<dyn CommandExecutor> =
+        Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
@@ -873,7 +876,8 @@ async fn run_execute_batch_update_ssh(
     };
 
     let ctx = build_connection_context();
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let raw: Arc<dyn CommandExecutor> =
+        Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
@@ -1073,7 +1077,8 @@ async fn run_config_test_ssh(
         }
     };
 
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let raw: Arc<dyn CommandExecutor> =
+        Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),

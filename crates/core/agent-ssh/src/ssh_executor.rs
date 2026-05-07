@@ -1,8 +1,15 @@
-//! SSH-backed [`CommandExecutor`] implementation.
+//! SSH-backed [`CommandExecutor`] implementations.
 //!
-//! [`SshCommandExecutor`] runs commands on remote hosts via an
-//! [`SshSession`], bridging the plugin command abstraction with
-//! the SSH transport layer.
+//! [`SshCommandExecutor`] is the raw, protocol-agnostic base: it wraps an
+//! [`SshSession`] and exposes `exec_raw` + a session accessor with no
+//! assumptions about the remote shell.
+//!
+//! [`PosixSshCommandExecutor`] wraps the base and implements
+//! [`CommandExecutor`] with POSIX command-string building.  This is the
+//! implementation used for all existing Linux/macOS SSH hosts.
+//!
+//! A future `RouterOsSshExecutor` will wrap [`SshCommandExecutor`] with
+//! RouterOS-specific command encoding instead.
 
 use std::sync::Arc;
 
@@ -14,17 +21,66 @@ use uptrakit_command::{
 };
 
 use crate::ssh_stdio_tunnel::SshStdioTunnel;
-use crate::ssh_transport::SshSession;
+use crate::ssh_transport::{SshExecError, SshSession};
 
-/// Executes commands on a remote host via an SSH session.
+// ── Raw base ──────────────────────────────────────────────────────────
+
+/// Raw SSH exec channel with no POSIX assumptions.
+///
+/// Used as the foundation for both [`PosixSshCommandExecutor`] and the
+/// upcoming `RouterOsSshExecutor`.
 pub(crate) struct SshCommandExecutor {
     session: Arc<SshSession>,
 }
 
 impl SshCommandExecutor {
-    /// Create a new executor backed by the given SSH session.
+    /// Create a new raw executor backed by the given SSH session.
     pub(crate) fn new(session: Arc<SshSession>) -> Self {
         Self { session }
+    }
+
+    /// Execute a raw command string on the remote host.
+    ///
+    /// Returns combined stdout + stderr. The timeout is optional; `None` means
+    /// no deadline.
+    #[expect(
+        dead_code,
+        reason = "consumed by RouterOsSshExecutor which is added in a subsequent task"
+    )]
+    pub(crate) async fn exec_raw(
+        &self,
+        cmd: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> std::result::Result<String, SshExecError> {
+        self.session.exec_raw(cmd, timeout).await
+    }
+
+    /// Access the underlying [`SshSession`].
+    #[expect(
+        dead_code,
+        reason = "consumed by RouterOsSshExecutor which is added in a subsequent task"
+    )]
+    pub(crate) fn session(&self) -> &Arc<SshSession> {
+        &self.session
+    }
+}
+
+// ── POSIX wrapper ─────────────────────────────────────────────────────
+
+/// Executes POSIX commands on a remote host via SSH.
+///
+/// Wraps [`SshCommandExecutor`] and implements [`CommandExecutor`] by building
+/// POSIX-safe command strings with `build_remote_command_string`.
+pub(crate) struct PosixSshCommandExecutor {
+    inner: SshCommandExecutor,
+}
+
+impl PosixSshCommandExecutor {
+    /// Create a new POSIX executor backed by the given SSH session.
+    pub(crate) fn new(session: Arc<SshSession>) -> Self {
+        Self {
+            inner: SshCommandExecutor::new(session),
+        }
     }
 
     /// Shared implementation for `execute` and `execute_quiet`.
@@ -41,7 +97,10 @@ impl SshCommandExecutor {
         let remote_cmd = build_remote_command_string(spec)?;
         tracing::debug!(cmd_len = remote_cmd.len(), "executing remote SSH command");
 
-        let fut = self.session.exec_command_streaming(&remote_cmd, output_tx);
+        let fut = self
+            .inner
+            .session
+            .exec_command_streaming(&remote_cmd, output_tx);
 
         let result = if let Some(dur) = spec.timeout {
             #[expect(
@@ -82,7 +141,7 @@ impl SshCommandExecutor {
 }
 
 #[async_trait]
-impl CommandExecutor for SshCommandExecutor {
+impl CommandExecutor for PosixSshCommandExecutor {
     async fn execute(
         &self,
         spec: &CommandSpec,
@@ -115,7 +174,8 @@ impl CommandExecutor for SshCommandExecutor {
             cmd_len = remote_cmd.len(),
             "executing interactive remote SSH command"
         );
-        self.session
+        self.inner
+            .session
             .exec_command_interactive(&remote_cmd, output_tx)
             .await
             .map_err(|e| {
@@ -131,6 +191,7 @@ impl CommandExecutor for SshCommandExecutor {
     ) -> uptrakit_command::Result<Box<dyn StdioTunnel>> {
         tracing::debug!("opening SSH stdio tunnel");
         let channel = self
+            .inner
             .session
             .open_channel_for_command(command)
             .await
@@ -142,6 +203,8 @@ impl CommandExecutor for SshCommandExecutor {
         Ok(Box::new(SshStdioTunnel::new(channel)))
     }
 }
+
+// ── Shared helpers ────────────────────────────────────────────────────
 
 /// Log stderr (and stdout if stderr is empty) from a failed remote command.
 ///

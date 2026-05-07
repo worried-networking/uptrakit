@@ -36,7 +36,7 @@ use crate::operations::sudoers::{
     write_sudoers_file,
 };
 use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 
 // ── Noop infra impls for sync context ────────────────────────────────
@@ -306,7 +306,7 @@ pub(crate) async fn sync_connect(
     };
 
     // Collect plugin sudo commands to determine whether sudoers would change.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let has_sudo_commands = plugin_sudo_cmds.iter().any(|(_, v)| !v.is_empty());
@@ -458,7 +458,7 @@ pub(crate) async fn sync_execute(
 
     // ── Sudoers ──────────────────────────────────────────────────────
     if !skip_actions.contains(ACTION_UPDATE_SUDOERS) {
-        let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)))
             as Arc<dyn uptrakit_command::CommandExecutor>;
         let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
         let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
