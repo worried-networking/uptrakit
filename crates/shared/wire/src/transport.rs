@@ -32,6 +32,8 @@
 //! Close semantics are transport-specific and managed by lifecycle owners,
 //! not by shared business logic.
 
+use std::sync::Arc;
+
 use crate::CloseReason;
 use crate::messages::{ControllerMessage, ServiceMessage};
 
@@ -103,6 +105,17 @@ pub trait ServiceTransport: Send {
     /// Whether this transport is currently yielded to an external counterpart.
     fn is_yielded(&self) -> bool {
         false
+    }
+
+    /// Optional notifier fired when the yield state changes.
+    ///
+    /// Returns `Some` only for transports that support embedded yield signalling
+    /// (i.e. `EmbeddedTransport`). `ControllerConnection` uses the default `None`.
+    ///
+    /// Called once before the `run_embedded_service` loop to obtain a stable
+    /// notifier handle. The `Arc<Notify>` is valid for the transport lifetime.
+    fn yield_change_notifier(&self) -> Option<Arc<tokio::sync::Notify>> {
+        None
     }
 }
 
@@ -186,5 +199,11 @@ mod tests {
         let policy = TransportClosePolicy::Shutdown;
         let debug = format!("{policy:?}");
         assert!(debug.contains("Shutdown"), "Debug output was: {debug}");
+    }
+
+    #[test]
+    fn default_yield_change_notifier_returns_none() {
+        let t = DefaultTransport;
+        assert!(t.yield_change_notifier().is_none());
     }
 }
