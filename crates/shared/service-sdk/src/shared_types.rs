@@ -89,13 +89,18 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
 /// | `Signal(Hangup)` | `Restart` | `Restart` |
 /// | `Signal(_)` | `Shutdown` | `Shutdown` |
 /// | `ServerRestarting` | `Restart` | `Disconnected` |
+/// | `EmbeddedDrain` | `Shutdown` | `Shutdown` |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ShutdownCause {
     /// An OS signal was received (`SIGINT`, `SIGTERM`, `SIGHUP`).
     Signal(Signal),
     /// The controller sent `ServerRestarting`; the service should disconnect
     /// and reconnect once the controller is available again.
     ServerRestarting,
+    /// The embedded drain token was cancelled; graceful shutdown of an
+    /// in-process embedded service.
+    EmbeddedDrain,
 }
 
 /// Outcome of the authenticated event loop.

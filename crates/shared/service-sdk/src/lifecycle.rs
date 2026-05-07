@@ -26,6 +26,7 @@ use crate::signal::{Signal, SignalWatcher};
 /// | `Signal(Hangup)` | `Restart` | `Restart` |
 /// | `Signal(_)` | `Shutdown` | `Shutdown` |
 /// | `ServerRestarting` | `Restart` | `Disconnected` |
+/// | `EmbeddedDrain` | `Shutdown` | `Shutdown` |
 pub fn default_resolve_shutdown(
     cause: ShutdownCause,
 ) -> (crate::wire_api::DisconnectReason, LoopOutcome) {
@@ -35,6 +36,7 @@ pub fn default_resolve_shutdown(
         ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
         ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
         ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
+        ShutdownCause::EmbeddedDrain => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
     }
 }
 
@@ -606,6 +608,13 @@ mod tests {
             matches!(converted.current_context(), LoopError::TransientNetwork(_)),
             "IO broken pipe should map to TransientNetwork"
         );
+    }
+
+    #[test]
+    fn default_resolve_shutdown_embedded_drain() {
+        let (reason, outcome) = default_resolve_shutdown(ShutdownCause::EmbeddedDrain);
+        assert_eq!(reason, DisconnectReason::Shutdown);
+        assert_eq!(outcome, LoopOutcome::Shutdown);
     }
 
     #[test]
