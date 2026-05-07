@@ -9,6 +9,17 @@ delete `mcp_compat.rs`, drop `uptrakit-web-api` from MCP's Cargo.toml, add `Serv
 
 **Prerequisite:** Phase 3 plan complete and all CI gates passing.
 
+**Phase 1 deviation check:** `AuthState` was left in `web-api/src/app_state.rs` during Phase 1 due to the orphan
+rule. Phase 2 Task 2b moves it to controller-core using the `AuthStateSource` trait pattern. Before starting Phase
+4, verify this migration is complete:
+
+```bash
+grep "pub struct AuthState" crates/ui/controller-core/src/auth/mod.rs
+```
+
+Expected: one match. If missing, complete Phase 2 Task 2b before proceeding — `McpState` in Task 1 below
+imports `uptrakit_controller_core::auth::AuthState` and will not compile without it.
+
 **Architecture:**
 
 - `McpState` holds only the controller-core types MCP needs (`DbState`, `AuthState`, `Settings`, `default_tenant_id`, `controller_id`, `audit_emitter`,
@@ -175,7 +186,8 @@ git commit --only crates/ui/mcp/src/state.rs crates/ui/mcp/src/settings.rs \
 ```rust
 use uuid::Uuid;
 
-use uptrakit_controller_core::auth::permissions::Permission;
+// Permission is a flat re-export from controller-core::auth — no `permissions` submodule.
+use uptrakit_controller_core::auth::Permission;
 use uptrakit_controller_core::update::UpdateDispatchError;
 
 /// Per-request auth context injected into MCP request extensions by `McpAuthLayer`.
@@ -300,7 +312,8 @@ use uptrakit_audit_log::AuditOutcome;
 use uptrakit_controller_core::auth::api_token::{
     authenticate_api_token, emit_api_token_auth_audit,
 };
-use uptrakit_controller_core::auth::{AuthFailure, permissions::Permission};
+// Permission is a flat re-export — no `permissions` submodule in controller-core.
+use uptrakit_controller_core::auth::{AuthFailure, Permission};
 
 use crate::context::{McpAuthError, McpRequestContext};
 use crate::state::McpState;
@@ -422,7 +435,16 @@ ls crates/ui/mcp/src/tools/
 
 If `update.rs` exists, read it. Otherwise create it.
 
-- [ ] **Step 2: Write `mcp_trigger_update` in tools/update.rs (or the appropriate tools file)**
+- [ ] **Step 2: Verify `ActorInfo::new` and `UpdateDispatchParams::new` signatures before writing**
+
+```bash
+grep -n "pub fn new" crates/ui/controller-core/src/update.rs | head -10
+```
+
+Confirm the exact argument count and order for both constructors. The code below assumes a specific
+signature — adjust if the actual API differs.
+
+- [ ] **Step 3: Write `mcp_trigger_update` in tools/update.rs (or the appropriate tools file)**
 
 ```rust
 use uuid::Uuid;
@@ -465,7 +487,7 @@ pub async fn mcp_trigger_update(
 }
 ```
 
-- [ ] **Step 3: Update tool handler(s) to call the local `mcp_trigger_update`**
+- [ ] **Step 4: Update tool handler(s) to call the local `mcp_trigger_update`**
 
 Find the MCP tool handler that currently calls `uptrakit_web_api::mcp_compat::mcp_trigger_update`:
 
@@ -476,13 +498,13 @@ grep -rn "mcp_trigger_update\|mcp_compat" crates/ui/mcp/src/tools/
 Update each call site to use `crate::tools::update::mcp_trigger_update` with `McpState` (not `Arc<AppState>`). The tool handler will need access to
 `McpState` — this is wired in Task 5.
 
-- [ ] **Step 4: Verify compile**
+- [ ] **Step 5: Verify compile**
 
 ```bash
 cargo check --all-features 2>&1 | grep -E "^error" | head -10
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git commit --only crates/ui/mcp/src/tools/ \
@@ -559,19 +581,56 @@ fn build_config(settings: &crate::settings::McpSettings) -> rmcp::transport::str
 
 Remove `use uptrakit_web_api::AppState;` from `lib.rs`.
 
-- [ ] **Step 4a: Add `db_state()` accessor to `AppState` in `crates/ui/web-api/src/app_state.rs`**
+- [ ] **Step 4a: Add `McpState`-construction accessors to `AppState` in `crates/ui/web-api/src/app_state.rs`**
 
-`AppState.db` is `pub(crate)` — controller-runtime (a different crate) cannot access it directly.
-Add a pub accessor to expose the `DbState` for McpState construction:
+Most `AppState` fields are `pub(crate)` — controller-runtime (a different crate) cannot access them directly.
+First check which fields used in the `McpState::new(…)` call in Step 4b are already public:
+
+```bash
+grep -n "pub\s\+auth\|pub\s\+settings\|pub\s\+audit_emitter\|pub\s\+update_dispatcher\|pub\s\+shutdown_token\|pub\s\+controller_id\|pub\s\+default_tenant_id" \
+  crates/ui/web-api/src/app_state.rs | head -20
+```
+
+For every field that is NOT `pub` (only `pub(crate)`), add a corresponding accessor. Common pattern — add all six
+below, removing any that turn out to already be accessible:
 
 ```rust
 /// Returns a clone of the database state for constructing `McpState`.
 pub fn db_state(&self) -> uptrakit_controller_core::db::DbState {
     self.db.clone()
 }
+
+/// Returns the auth state for constructing `McpState`.
+pub fn auth_state(&self) -> uptrakit_controller_core::auth::AuthState {
+    self.auth.clone()
+}
+
+/// Returns settings for constructing `McpState`.
+pub fn settings(&self) -> uptrakit_controller_core::settings::Settings {
+    self.settings.clone()
+}
+
+/// Returns the audit emitter for constructing `McpState`.
+pub fn audit_emitter(&self) -> uptrakit_audit_log::AuditEmitter {
+    self.audit_emitter.clone()
+}
+
+/// Returns the update dispatcher for constructing `McpState`.
+pub fn update_dispatcher(&self) -> std::sync::Arc<dyn uptrakit_controller_core::update::UpdateDispatcher> {
+    std::sync::Arc::clone(&self.update_dispatcher)
+}
+
+/// Returns the shutdown token for constructing `McpState`.
+pub fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
+    self.shutdown_token.clone()
+}
 ```
 
-Place this with the other pub accessor methods near the `db()` method (search: `grep -n "pub fn db(" crates/ui/web-api/src/app_state.rs`).
+For `default_tenant_id` and `controller_id`: if they are already `pub`, use direct field access in Step 4b.
+If not, add equivalent accessors. Check with the grep above.
+
+Place these with the other pub accessor methods near the `db()` method
+(search: `grep -n "pub fn db(" crates/ui/web-api/src/app_state.rs`).
 
 - [ ] **Step 4b: Update `controller-runtime/src/server.rs` to build `McpState`**
 
@@ -582,15 +641,16 @@ In `crates/core/controller-runtime/src/server.rs`, change the `#[cfg(feature = "
 {
     // McpState is #[non_exhaustive] — must use ::new() (struct literal would fail
     // since controller-runtime is a different crate).
+    // All field accesses use the pub accessors added in Step 4a.
     let mcp_state = uptrakit_mcp::state::McpState::new(
         cfg.app_state.db_state(),
-        cfg.app_state.auth.clone(),
-        cfg.app_state.settings.clone(),
-        cfg.app_state.default_tenant_id,
-        cfg.app_state.controller_id,
-        cfg.app_state.audit_emitter.clone(),
-        cfg.app_state.shutdown_token.clone(),
-        Arc::clone(&cfg.app_state.update_dispatcher),
+        cfg.app_state.auth_state(),
+        cfg.app_state.settings(),
+        cfg.app_state.default_tenant_id,  // verify pub or add accessor
+        cfg.app_state.controller_id,      // verify pub or add accessor
+        cfg.app_state.audit_emitter(),
+        cfg.app_state.shutdown_token(),
+        cfg.app_state.update_dispatcher(),
     );
     router = router.merge(uptrakit_mcp::build_mcp_router(mcp_state));
 }
@@ -675,7 +735,6 @@ Expected: **no output**. This is the primary constraint from the spec.
 - [ ] **Step 7: Commit**
 
 ```bash
-git rm crates/ui/web-api/src/mcp_compat.rs
 git commit --only crates/ui/web-api/src/lib.rs crates/ui/mcp/Cargo.toml \
     crates/ui/web-api/src/mcp_compat.rs \
   -m "feat(mcp): delete mcp_compat.rs, remove uptrakit-web-api dep from mcp"
@@ -707,6 +766,15 @@ pub struct ServerState {
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
 }
 
+impl ServerState {
+    pub fn new(
+        pki_path: std::path::PathBuf,
+        rustls_config: axum_server::tls_rustls::RustlsConfig,
+    ) -> Self {
+        Self { pki_path, rustls_config }
+    }
+}
+
 /// Grouped plugin-ops state for plugin configuration and global provider runtimes.
 ///
 /// `#[non_exhaustive]`: fields may be added (e.g. plugin metrics registry).
@@ -715,6 +783,15 @@ pub struct ServerState {
 pub struct PluginState {
     pub plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>,
     pub global_providers: Arc<crate::global_providers::GlobalProviders>,
+}
+
+impl PluginState {
+    pub fn new(
+        plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>,
+        global_providers: Arc<crate::global_providers::GlobalProviders>,
+    ) -> Self {
+        Self { plugin_ops, global_providers }
+    }
 }
 ```
 
@@ -752,15 +829,15 @@ global_providers,
 pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
 rustls_config: self.rustls_config.ok_or(AppStateBuildError("rustls_config"))?,
 
-// After:
-plugin: PluginState {
-    plugin_ops: self.plugin_ops.unwrap_or_else(|| { … }),
+// After — use ::new() constructors (project convention for #[non_exhaustive] structs):
+plugin: PluginState::new(
+    self.plugin_ops.unwrap_or_else(|| { … }),
     global_providers,
-},
-server: ServerState {
-    pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
-    rustls_config: self.rustls_config.ok_or(AppStateBuildError("rustls_config"))?,
-},
+),
+server: ServerState::new(
+    self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
+    self.rustls_config.ok_or(AppStateBuildError("rustls_config"))?,
+),
 ```
 
 - [ ] **Step 4: Update `PluginOpsState` and `GlobalProvidersState` `FromRef` impls**
@@ -1029,8 +1106,8 @@ git commit --only crates/ui/ crates/core/ \
 - [x] ADR written (Task 8)
 - [x] `controller-core/src/lib.rs` invariant doc-comment (Phase 1, Task 1)
 
-**Type consistency:** `McpRequestContext` uses `Permission` from `uptrakit_controller_core::auth::permissions::Permission`. Verify `Permission` is
-re-exported from controller-core after Phase 1 Task 4. If not, add the re-export to `controller-core/src/auth/mod.rs`.
+**Type consistency:** `McpRequestContext` uses `Permission` from `uptrakit_controller_core::auth::Permission` (flat re-export — no `permissions`
+submodule in controller-core). Verify the re-export exists after Phase 1 Task 4. If not, add it to `controller-core/src/auth/mod.rs`.
 
 **Idiom audit — `McpTriggerError` wildcard arm:** The wildcard arm in `From<&UpdateDispatchError> for McpTriggerError` uses `tracing::warn!` per codebase
 convention for `#[non_exhaustive]` enums at external match sites. The `Failed` variant from `DispatchOutcome` in `send_completed` (Phase 3, Task 2) also

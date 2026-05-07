@@ -90,7 +90,8 @@ use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEntry, AuditEmitt
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
-use uptrakit_web_api_auth::auth::permissions::Permission;
+// Alias to avoid name collision with the DB `Permission` entity from entity::prelude::*.
+use uptrakit_web_api_auth::auth::permissions::Permission as AuthPermission;
 use uptrakit_web_api_auth::auth::{AuthError, AuthMethod};
 
 use crate::auth::{AuthFailure, AuthenticatedUser};
@@ -115,8 +116,10 @@ pub fn emit_api_token_auth_audit(
         .request_id_opt(request_id)
         .build();
 
-    if let Ok(entry) = entry {
-        audit_emitter.emit_best_effort(entry);
+    // `unused_result_ok` deny: handle both arms.
+    match entry {
+        Ok(e) => audit_emitter.emit_best_effort(e),
+        Err(e) => tracing::warn!(err = %e, "failed to build audit entry for api token auth"),
     }
 }
 
@@ -139,7 +142,10 @@ pub async fn authenticate_api_token(
     let user = User::find_by_id(user_id)
         .one(db)
         .await
-        .map_err(|_| AuthFailure::InternalError)?
+        .map_err(|e| {
+            tracing::error!(err = %e, %user_id, "db error fetching user for api token auth");
+            AuthFailure::InternalError
+        })?
         .ok_or(AuthFailure::UserNotFound)?;
 
     if !user.is_active {
@@ -168,7 +174,7 @@ async fn get_user_permissions(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     user_id: Uuid,
-) -> uptrakit_web_api_auth::auth::Result<Vec<Permission>> {
+) -> uptrakit_web_api_auth::auth::Result<Vec<AuthPermission>> {
     use rootcause::prelude::*;
 
     let user_roles = UserRole::find()
@@ -197,15 +203,17 @@ async fn get_user_permissions(
         return Ok(Vec::new());
     }
 
-    let permissions = Permission::find()
+    // `Permission` here is the DB entity from entity::prelude::*; `AuthPermission` is the enum.
+    let db_permissions = Permission::find()
         .filter(permission::Column::Id.is_in(permission_ids))
         .all(db)
         .await
         .context_to()?;
 
-    Ok(permissions
+    // Parse DB name string into the auth enum via `FromStr`; skip unknown variants.
+    Ok(db_permissions
         .into_iter()
-        .filter_map(|p| uptrakit_web_api_auth::auth::permissions::Permission::from_db(&p))
+        .filter_map(|p| p.name.parse::<AuthPermission>().ok())
         .collect())
 }
 
@@ -279,6 +287,135 @@ git commit --only crates/ui/controller-core/src/auth/api_token.rs crates/ui/web-
 
 ---
 
+## Task 2b: Move `AuthState` to controller-core
+
+**Files:**
+
+- Modify: `crates/ui/controller-core/src/auth/mod.rs` (add `AuthState`, `AuthStateSource` trait)
+- Modify: `crates/ui/web-api/src/app_state.rs` (remove `AuthState` definition, implement `AuthStateSource`)
+
+**Why now:** Phase 4 `McpState` imports `uptrakit_controller_core::auth::AuthState`. Phase 1 left `AuthState` in
+web-api because the `impl FromRef<Arc<AppState>> for AuthState` orphan rule blocked a naive move. Solution is the
+same `DbStateSource` blanket-impl pattern used in Phase 1 for `DbState`.
+
+All `AuthState` fields (`JwtManager`, `DeviceFlowStore`, `RateLimitStore`, `TokenDenylist`) come from
+`uptrakit-web-api-auth`, already in controller-core's deps — no dep graph change needed.
+
+- [ ] **Step 1: Add `AuthState` and `AuthStateSource` to `controller-core/src/auth/mod.rs`**
+
+Add after the existing auth re-exports:
+
+```rust
+use std::sync::Arc;
+
+/// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
+/// and token denylist.
+///
+/// `#[non_exhaustive]`: OAuth 2.1 will add fields (e.g. OIDC provider registry).
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct AuthState {
+    pub jwt: Arc<JwtManager>,
+    pub device_flow_store: DeviceFlowStore,
+    pub rate_limit_store: RateLimitStore,
+    pub token_denylist: Arc<TokenDenylist>,
+}
+
+impl AuthState {
+    /// Creates a new [`AuthState`].
+    pub fn new(
+        jwt: Arc<JwtManager>,
+        device_flow_store: DeviceFlowStore,
+        rate_limit_store: RateLimitStore,
+        token_denylist: Arc<TokenDenylist>,
+    ) -> Self {
+        Self { jwt, device_flow_store, rate_limit_store, token_denylist }
+    }
+}
+
+/// Implemented by `AppState` so the blanket `FromRef<Arc<S>> for AuthState` can live
+/// in controller-core without violating the orphan rule.
+///
+/// Gated by `axum-integration` — mirrors the `DbStateSource` pattern from Phase 1.
+/// Both the trait and blanket impl are gated so no axum types leak in without the feature.
+#[cfg(feature = "axum-integration")]
+pub trait AuthStateSource {
+    fn auth_state(&self) -> AuthState;
+}
+
+#[cfg(feature = "axum-integration")]
+impl<S> axum::extract::FromRef<std::sync::Arc<S>> for AuthState
+where
+    S: AuthStateSource + Clone + Send + Sync + 'static,
+{
+    fn from_ref(state: &std::sync::Arc<S>) -> Self {
+        state.auth_state()
+    }
+}
+```
+
+> **File placement:** Add this code directly into `crates/ui/controller-core/src/auth/mod.rs` — NOT in a new
+> file. `auth/mod.rs` already re-exports `DeviceFlowStore`, `JwtManager`, `RateLimitStore`, `TokenDenylist` from
+> `uptrakit_web_api_auth`, so those names are in scope without extra `use` statements. If you add the code to a
+> separate file, those re-exports won't be in scope and the build will fail. Verify the exact type paths match the
+> existing re-exports — grep web-api's `app_state.rs` for `use uptrakit_web_api_auth` lines.
+
+- [ ] **Step 2: In `crates/ui/web-api/src/app_state.rs`, replace the `AuthState` definition**
+
+Remove these three blocks (must all be removed before the blanket impl compiles — having both the manual
+`impl FromRef<Arc<AppState>> for AuthState` AND the blanket impl is an E0119 duplicate-impl error):
+
+1. `pub struct AuthState { … }` block
+2. `impl AuthState { pub fn new() … }` block
+3. `impl FromRef<Arc<AppState>> for AuthState { … }` block
+
+Add re-export and `AuthStateSource` impl in their place:
+
+```rust
+pub use uptrakit_controller_core::auth::AuthState;
+
+#[cfg(feature = "axum-integration")]
+impl uptrakit_controller_core::auth::AuthStateSource for AppState {
+    fn auth_state(&self) -> uptrakit_controller_core::auth::AuthState {
+        self.auth.clone()
+    }
+}
+```
+
+- [ ] **Step 3: Update `AppStateBuilder::build()` construction of `AuthState`**
+
+The build currently uses `AuthState { jwt, device_flow_store, rate_limit_store, token_denylist }` struct literal.
+Since `AuthState` is now from controller-core (external), switch to the constructor:
+
+```rust
+auth: AuthState::new(
+    self.jwt.ok_or(AppStateBuildError("jwt"))?,
+    self.device_flow_store.ok_or(AppStateBuildError("device_flow_store"))?,
+    self.rate_limit_store.ok_or(AppStateBuildError("rate_limit_store"))?,
+    self.token_denylist.ok_or(AppStateBuildError("token_denylist"))?,
+),
+```
+
+Verify the exact field names and builder accessors match what's in `AppStateBuilder`.
+
+- [ ] **Step 4: Verify compile**
+
+```bash
+cargo check --all-features 2>&1 | grep -E "^error" | head -20
+```
+
+Expected: no errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit --only crates/ui/controller-core/src/auth/mod.rs \
+    crates/ui/web-api/src/app_state.rs \
+  -m "refactor(controller-core): move AuthState using AuthStateSource trait pattern"
+```
+
+---
+
 ## Task 3: Remove Phase 1 re-export shims
 
 **Files:**
@@ -344,11 +481,17 @@ pub use admin_events::AdminEvent;
 
 Ensure the moved types carry `#[non_exhaustive]` and `serde(rename_all = "camelCase")` if they already had it.
 
-- [ ] **Step 3: In `crates/ui/web-api-types/src/events.rs`, replace the definitions with re-exports**
+- [ ] **Step 3: In `crates/ui/web-api-types/src/events.rs`, replace the definitions with explicit re-exports**
+
+List every type that was in `events.rs` (noted in Step 1) individually — avoid `pub use uptrakit_wire::admin_events::*`
+which silently re-exports any future types added to that module:
 
 ```rust
-pub use uptrakit_wire::admin_events::*;
+// Replace the original definitions with explicit re-exports.
+// List every pub type from Step 1 — for example:
+pub use uptrakit_wire::admin_events::AdminEvent;
 pub use uptrakit_wire::AdminEvent;
+// Add more if Step 1 found additional pub types in events.rs.
 ```
 
 Add `uptrakit-wire = { workspace = true }` to `crates/ui/web-api-types/Cargo.toml` if not already present.
@@ -405,7 +548,23 @@ git commit --only crates/shared/wire/ crates/ui/web-api-types/src/events.rs \
 `NotificationService` and `EventBroadcaster` both hold `Option<crate::nats_transport::NatsTransport>` behind `#[cfg(feature = "nats")]`. Replacing with
 `Arc<dyn NatsPublisher>` removes the web-api-specific type from the data structure.
 
+- [ ] **Step 0: Discover what `NotificationService` and `EventBroadcaster` call on `NatsTransport`**
+
+Before designing the trait interface, read the actual call sites:
+
+```bash
+grep -n "nats\." crates/ui/web-api/src/notification_service.rs
+grep -n "nats\." crates/ui/web-api/src/event_broadcaster.rs
+grep -n "pub async fn\|pub fn" crates/ui/web-api/src/nats_transport.rs | head -20
+```
+
+Note every method called on `NatsTransport` in both files. The trait's method set must match exactly
+what the consumers call — not a generic `publish(String, Bytes)` that mismatches the actual API.
+
 - [ ] **Step 1: Define `NatsPublisher` trait in `crates/ui/controller-core/src/notification.rs`**
+
+Based on Step 0 findings, define methods that match the NatsTransport call sites. Trait uses
+native `async fn` — no `#[async_trait::async_trait]` (project uses Rust Edition 2024):
 
 ```rust
 use std::sync::Arc;
@@ -413,34 +572,21 @@ use std::sync::Arc;
 /// Abstraction over NATS publishing used by `NotificationService` and `EventBroadcaster`.
 ///
 /// Allows controller-core types to publish NATS messages without depending on
-/// `uptrakit-nats` or `uptrakit-web-api`.
-#[async_trait::async_trait]
+/// `uptrakit-nats` or `uptrakit-web-api`. Methods here must match what
+/// `notification_service.rs` and `event_broadcaster.rs` actually call on `NatsTransport`.
 pub trait NatsPublisher: Send + Sync {
-    async fn publish(&self, subject: String, payload: bytes::Bytes);
+    // Define async methods based on Step 0 findings — do NOT assume publish(String, Bytes).
+    // Example: if NatsTransport has `publish_event(AdminEvent)`, define that here.
 }
 ```
 
-Add `bytes = { workspace = true }` to controller-core Cargo.toml if not present. Check workspace deps first: `grep "^bytes" Cargo.toml`.
+Only add `bytes = { workspace = true }` to controller-core Cargo.toml if the actual API uses raw bytes.
 
 - [ ] **Step 2: Implement `NatsPublisher` on `NatsTransport` in web-api**
 
-In `crates/ui/web-api/src/nats_transport.rs`, add:
-
-```rust
-#[async_trait::async_trait]
-impl uptrakit_controller_core::notification::NatsPublisher for NatsTransport {
-    async fn publish(&self, subject: String, payload: bytes::Bytes) {
-        // delegate to the existing publish method on NatsTransport
-        self.publish_bytes(subject, payload).await;
-    }
-}
-```
-
-Adjust method name to match the actual `NatsTransport` API — search with:
-
-```bash
-grep -n "pub async fn publish" crates/ui/web-api/src/nats_transport.rs
-```
+In `crates/ui/web-api/src/nats_transport.rs`, add an `impl` block implementing the trait methods
+you defined in Step 1, delegating to the actual `NatsTransport` methods discovered in Step 0.
+No `#[async_trait::async_trait]` — use native async fn.
 
 - [ ] **Step 3: Update `NotificationService` to use `Arc<dyn NatsPublisher>`**
 
@@ -521,12 +667,20 @@ git commit --only crates/ui/controller-core/src/notification.rs \
 After Tasks 4 and 5, `NotificationService`, `NotificationDispatcher`, and `EventBroadcaster` no longer have web-api-specific imports.
 They can move to controller-core.
 
-- [ ] **Step 1: Add `uptrakit-notification-delivery` to controller-core Cargo.toml**
+- [ ] **Step 1: Verify/add required deps in controller-core Cargo.toml**
 
-`NotificationDispatcher` uses `uptrakit_notification_delivery::NotificationEvent`. Add to deps:
+`NotificationDispatcher` uses `uptrakit_notification_delivery::NotificationEvent`. `NotificationService`
+implements `uptrakit_web_api_queries::notifier::ServiceNotifier`. Both crates must be deps:
+
+```bash
+grep "uptrakit-notification-delivery\|uptrakit-web-api-queries" crates/ui/controller-core/Cargo.toml
+```
+
+Add any missing entries:
 
 ```toml
 uptrakit-notification-delivery = { workspace = true }
+uptrakit-web-api-queries = { workspace = true }   # needed for ServiceNotifier impl
 ```
 
 - [ ] **Step 2: Verify `NotificationDispatcher` has no remaining crate:: imports**
@@ -552,9 +706,9 @@ Copy the content of `crates/ui/web-api/src/notification_service.rs` into the not
 | `crate::queries::update_tracking_states::*`             | `uptrakit_web_api_queries::queries::update_tracking_states::*`   |
 | `crate::ServiceNotifier`                                | `uptrakit_web_api_queries::notifier::ServiceNotifier`            |
 
-> **Visibility note:** If `NotificationService` uses a `mutation_context()` method that is currently `pub(crate)`, promote it to `pub` before the move
-> — controller-core is a different crate and will fail to compile without it. Check with:
-> `grep -n "pub(crate).*mutation_context\|fn mutation_context" crates/ui/web-api/src/notification_service.rs`.
+> **Note on `mutation_context()`:** Do NOT promote `mutation_context()` visibility in `NotificationService`. This method returns
+> `crate::actions::MutationContext<'_>` — a web-api type — so it cannot move to controller-core with `NotificationService`. It stays in
+> web-api via the extension trait defined in Step 6b. No visibility change needed here.
 
 - [ ] **Step 4: Move `EventBroadcaster` to controller-core/src/notification.rs**
 
@@ -570,14 +724,55 @@ Copy the content of `crates/ui/web-api/src/notifications/dispatcher.rs`. Update 
 
 - [ ] **Step 6: Add `NotificationState` struct to controller-core/src/notification.rs**
 
+Phase 1 added `#[non_exhaustive]` to `NotificationState`. The controller-core definition must carry the
+annotation and a constructor — otherwise `AppStateBuilder::build()` (in web-api, an external crate) cannot
+use struct literal syntax.
+
 ```rust
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct NotificationState {
     pub notification_service: NotificationService,
     pub notification_dispatcher: NotificationDispatcher,
     pub event_broadcaster: EventBroadcaster,
 }
+
+impl NotificationState {
+    pub fn new(
+        notification_service: NotificationService,
+        notification_dispatcher: NotificationDispatcher,
+        event_broadcaster: EventBroadcaster,
+    ) -> Self {
+        Self { notification_service, notification_dispatcher, event_broadcaster }
+    }
+}
 ```
+
+- [ ] **Step 6b: Keep `mutation_context()` in web-api via extension trait**
+
+`mutation_context()` is `pub(crate)` in web-api and returns `crate::actions::MutationContext<'_>` — a web-api
+type. Inherent methods must be in the defining crate, so this method cannot move to controller-core with
+`NotificationState`. After the re-export is in place, keep it in web-api via an extension trait:
+
+```rust
+// In crates/ui/web-api/src/app_state.rs (or notification_service.rs),
+// after `pub use uptrakit_controller_core::notification::NotificationState;`
+pub(crate) trait NotificationStateMutationExt {
+    fn mutation_context(&self) -> crate::actions::MutationContext<'_>;
+}
+
+impl NotificationStateMutationExt for NotificationState {
+    fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+        crate::actions::MutationContext {
+            notification_service: &self.notification_service,
+            notification_dispatcher: &self.notification_dispatcher,
+            event_broadcaster: &self.event_broadcaster,
+        }
+    }
+}
+```
+
+Update all `state.notification.mutation_context()` call sites to call via the trait (bring it into scope where used with `use crate::app_state::NotificationStateMutationExt`).
 
 - [ ] **Step 7: Replace `NotificationState` definition in `crates/ui/web-api/src/app_state.rs`**
 
@@ -585,7 +780,21 @@ pub struct NotificationState {
 pub use uptrakit_controller_core::notification::NotificationState;
 ```
 
-Remove the local `pub struct NotificationState { … }` block.
+Remove the local `pub struct NotificationState { … }` block and its `impl NotificationState { mutation_context() }`
+block (moved to Step 6b's extension trait).
+
+Update `AppStateBuilder::build()` (line ~984) to use the constructor — struct literal syntax is no longer valid
+from an external crate:
+
+```rust
+notification: NotificationState::new(
+    self.notification_service
+        .ok_or(AppStateBuildError("notification_service"))?,
+    self.notification_dispatcher
+        .ok_or(AppStateBuildError("notification_dispatcher"))?,
+    self.event_broadcaster.unwrap_or_default(),
+),
+```
 
 - [ ] **Step 8: Add re-export shims in web-api for moved types**
 
@@ -660,14 +869,22 @@ Expected: all clean.
 - [x] `authenticate_api_token` extracted with explicit params (Task 2)
 - [x] `emit_api_token_auth_audit` extracted with explicit params (Task 2)
 - [x] Web-api call sites delegating to controller-core (Task 2 Steps 2–3)
+- [x] `AuthState` moved to controller-core via `AuthStateSource` trait (Task 2b) — prerequisite for Phase 4
 - [x] Phase 1 shims verified as final form (Task 3)
 - [x] `AdminEvent` moved to wire (Task 4) — prerequisite for EventBroadcaster move
 - [x] `NatsTransport` dependency removed from `NotificationService`/`EventBroadcaster` (Task 5)
-- [x] `NotificationState` moved (Task 6)
+- [x] `NotificationState` moved with `#[non_exhaustive]` + `new()` constructor (Task 6)
+- [x] `AppStateBuilder::build()` updated to use `NotificationState::new()` (Task 6 Step 7)
+- [x] `mutation_context()` kept in web-api via extension trait (Task 6 Step 6b)
 
 **Type consistency:** `AuthenticatedUser` returned by `authenticate_api_token` (controller-core) is the same type used by `require_auth.rs` middleware
 (imported from controller-core). `AuthFailure` variants match between old and new location — the Phase 1 plan moved the type; this plan moves the function.
+`AuthState` follows same blanket-impl pattern as `DbState` from Phase 1.
 
 **Spec gap addressed:** The spec notes "Before Phase 2, verify that NotificationService, NotificationDispatcher, and EventBroadcaster carry no remaining
 uptrakit-web-api-specific imports beyond WorkloadClaimRegistry." Tasks 4 and 5 resolve the two blockers found: `AdminEvent` (web-api-types) and
 `NatsTransport` (web-api-specific). `uptrakit-notification-delivery` is added to controller-core Cargo.toml for `NotificationDispatcher`.
+
+**Phase 1 deviation addressed:** `AuthState` was left in web-api during Phase 1 due to orphan-rule constraints on `impl FromRef<Arc<AppState>> for AuthState`.
+Task 2b resolves this using the `AuthStateSource` trait pattern (same approach as `DbStateSource` in Phase 1), unblocking Phase 4's `McpState` which
+requires `AuthState` to be importable from controller-core.
