@@ -1117,10 +1117,10 @@ mod tests {
                 settings,
                 cert_signer: Arc::new(NoopCertSigner),
                 service_connections,
-                plugin_ops,
-                global_providers: Arc::new(crate::global_providers::GlobalProviders::new(
-                    db.clone(),
-                )),
+                plugin: crate::app_state::PluginState::new(
+                    plugin_ops,
+                    Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
+                ),
                 credential_sources: ServiceCredentialSources::default(),
                 shutdown_token: Default::default(),
                 embedded_service_notifier: None,
@@ -1139,8 +1139,10 @@ mod tests {
                 workload_claim_registry: Arc::new(
                     crate::workload_claims::WorkloadClaimRegistry::new(),
                 ),
-                pki_path: std::path::PathBuf::from("/tmp/test-pki"),
-                rustls_config: rustls_cfg,
+                server: crate::app_state::ServerState::new(
+                    std::path::PathBuf::from("/tmp/test-pki"),
+                    rustls_cfg,
+                ),
                 default_tenant_id: tenant_id,
                 controller_id,
                 reject_dangerous_commands: false,
