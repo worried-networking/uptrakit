@@ -49,6 +49,7 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
         &uptrakit_plugin_package_manager_apk::DESCRIPTOR,
         &uptrakit_plugin_package_manager_snap::DESCRIPTOR,
         &uptrakit_plugin_package_manager_cargo::DESCRIPTOR,
+        &uptrakit_package_manager_routeros::DESCRIPTOR,
         // Software — Generic
         &uptrakit_plugin_generic_shell::DESCRIPTOR,
         // Hooks
@@ -100,6 +101,7 @@ pub fn is_package_manager_plugin(plugin_type_id: &PluginTypeId) -> bool {
         plugin_ids::PACKAGE_MANAGER_APK,
         plugin_ids::PACKAGE_MANAGER_SNAP,
         plugin_ids::PACKAGE_MANAGER_CARGO,
+        plugin_ids::PACKAGE_MANAGER_ROUTEROS,
     ];
 
     PACKAGE_MANAGER_IDS
@@ -271,6 +273,7 @@ mod tests {
             &plugin_ids::PACKAGE_MANAGER_APK,
             &plugin_ids::PACKAGE_MANAGER_SNAP,
             &plugin_ids::PACKAGE_MANAGER_CARGO,
+            &plugin_ids::PACKAGE_MANAGER_ROUTEROS,
             &plugin_ids::GENERIC_SHELL,
             &plugin_ids::HOOK_SHELL,
             &plugin_ids::HOOK_SYSTEMD,
@@ -307,6 +310,7 @@ mod tests {
             plugin_ids::PACKAGE_MANAGER_APK,
             plugin_ids::PACKAGE_MANAGER_SNAP,
             plugin_ids::PACKAGE_MANAGER_CARGO,
+            plugin_ids::PACKAGE_MANAGER_ROUTEROS,
         ];
         let github = PluginTypeId::from_static("releases_github");
 

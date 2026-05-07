@@ -50,6 +50,7 @@ uptrakit-plugin-package-manager-pkg = { workspace = true }
 uptrakit-plugin-package-manager-apk = { workspace = true }
 uptrakit-plugin-package-manager-snap = { workspace = true }
 uptrakit-plugin-package-manager-cargo = { workspace = true }
+uptrakit-package-manager-routeros = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
 uptrakit-plugin-hook-systemd = { workspace = true }
 uptrakit-plugin-hook-shell = { workspace = true }
