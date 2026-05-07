@@ -11,6 +11,7 @@ use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditFor
 use uptrakit_command::{
     CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext,
 };
+use uptrakit_plugin_infrastructure_core::{HostCapabilities, HostRuntime, StandardHostRuntime};
 use uptrakit_wire::{
     AuditEventPayload, Capability, ControllerMessage, DisconnectReason, RegisterPayload,
     ReportHostsPayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload, TransportError,
@@ -79,6 +80,18 @@ pub fn agent_capabilities() -> BTreeSet<Capability> {
 pub fn make_local_executor() -> Arc<dyn CommandExecutor> {
     let raw: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
     Arc::new(SudoAwareCommandExecutor::new(raw, SudoContext::default()))
+}
+
+/// Build a standard host runtime wrapping the given executor.
+///
+/// Used at every agent-core call site to convert `Arc<dyn CommandExecutor>`
+/// into `Arc<dyn HostRuntime>` so that agent-ssh can later inject alternative
+/// runtime implementations (e.g. `RouterOsHostRuntime`) for non-POSIX hosts.
+fn make_standard_runtime(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+    Arc::new(StandardHostRuntime::new(
+        executor,
+        HostCapabilities::default(),
+    ))
 }
 
 /// Static configuration for [`AgentRuntime`].
@@ -270,10 +283,10 @@ impl AgentRuntime {
             ControllerMessage::CheckVersions(payload)
                 if self.machine_id_matches("CheckVersions", &payload.host_machine_id) =>
             {
-                let executor = Arc::clone(&self.executor);
+                let runtime = make_standard_runtime(Arc::clone(&self.executor));
                 let ctx = self.ctx.clone();
                 spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
+                    uptrakit_agent_core::run_check_versions(payload, runtime, &ctx).await
                 });
             }
             ControllerMessage::ExecuteUpdate(payload) => {
@@ -283,7 +296,7 @@ impl AgentRuntime {
                 if allowed {
                     uptrakit_agent_core::handle_execute_update(
                         *payload,
-                        Arc::clone(&self.executor),
+                        make_standard_runtime(Arc::clone(&self.executor)),
                         &mut self.in_flight_update,
                         transport,
                         &self.ctx,
@@ -294,10 +307,10 @@ impl AgentRuntime {
             ControllerMessage::DiscoverSoftware(payload)
                 if self.machine_id_matches("DiscoverSoftware", &payload.host_machine_id) =>
             {
-                let executor = Arc::clone(&self.executor);
+                let runtime = make_standard_runtime(Arc::clone(&self.executor));
                 let ctx = self.ctx.clone();
                 spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
+                    uptrakit_agent_core::run_discover_software(payload, runtime, &ctx).await
                 });
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
@@ -306,11 +319,10 @@ impl AgentRuntime {
                     && !self.execution_frozen("ExecuteBatchUpdate").await
                     && self.accept_update_execution("ExecuteBatchUpdate");
                 if allowed {
-                    let executor = Arc::clone(&self.executor);
+                    let runtime = make_standard_runtime(Arc::clone(&self.executor));
                     let ctx = self.ctx.clone();
                     spawn_background(&self.bg_tx, async move {
-                        uptrakit_agent_core::run_execute_batch_update(*payload, executor, &ctx)
-                            .await
+                        uptrakit_agent_core::run_execute_batch_update(*payload, runtime, &ctx).await
                     });
                 }
             }
