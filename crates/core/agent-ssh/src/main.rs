@@ -16,10 +16,10 @@ use uptrakit_agent_ssh_runtime::{
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, default_resolve_shutdown,
+    LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
+    default_resolve_shutdown,
 };
-use uptrakit_wire::Capability;
+use uptrakit_wire::{Capability, ServiceTransport};
 
 use cli::{Args, Commands};
 
@@ -51,7 +51,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         let encryption_public_key = identity.public_key_raw().map(|bytes| {
@@ -75,7 +75,7 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_message(
         &mut self,
         msg: uptrakit_wire::ControllerMessage,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         self.runtime.handle_controller_message(msg, conn).await;
         Ok(None)
@@ -84,16 +84,15 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_settings(
         &mut self,
         settings: &uptrakit_wire::ServiceSettingsPayload,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
+        agreed_capabilities: &std::collections::BTreeSet<Capability>,
     ) {
         if let Err(error) = self
             .runtime
             .apply_settings(
                 SshAgentSettings {
                     tenant_id: settings.tenant_id,
-                    ui_surfaces_enabled: conn
-                        .agreed_capabilities()
-                        .contains(&Capability::UiSurfaces),
+                    ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
                     persist_tenant_id: true,
                 },
                 conn,
@@ -115,7 +114,7 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<Option<LoopOutcome>> {
         Ok(self.runtime.handle_event(event, conn).await)
     }
@@ -130,7 +129,7 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_surface_action_request(
         &mut self,
         request: uptrakit_wire::surfaces::SurfaceActionRequest,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
     ) -> LoopResult<()> {
         self.runtime
             .handle_controller_message(
@@ -143,7 +142,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_shutdown(
         &mut self,
-        conn: &mut ControllerConnection,
+        conn: &mut dyn ServiceTransport,
         cause: ShutdownCause,
         shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
