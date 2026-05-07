@@ -53,7 +53,13 @@ impl AuthenticatedUser {
         use uptrakit_audit_log::AuditActorType;
         match self.auth_method {
             AuthMethod::ApiToken => (AuditActorType::ApiToken, api_token_id.map(|t| t.0)),
-            _ => (AuditActorType::User, Some(self.user_id)),
+            _ => {
+                tracing::warn!(
+                    auth_method = ?self.auth_method,
+                    "unknown AuthMethod variant in audit_actor; defaulting to User actor type"
+                );
+                (AuditActorType::User, Some(self.user_id))
+            }
         }
     }
 }
