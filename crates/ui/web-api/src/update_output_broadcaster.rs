@@ -178,16 +178,16 @@ impl Default for UpdateOutputBroadcaster {
 
 #[async_trait::async_trait]
 impl uptrakit_controller_core::update::UpdateOutputStream for UpdateOutputBroadcaster {
-    async fn create_channel(&self, update_id: uuid::Uuid) {
+    async fn create_channel(&self, update_id: Uuid) {
         self.create_channel(update_id).await;
     }
 
     async fn send_line(
         &self,
-        update_id: uuid::Uuid,
-        line_id: uuid::Uuid,
+        update_id: Uuid,
+        line_id: Uuid,
         text: String,
-        stream: uptrakit_shared_types::OutputStreamType,
+        stream: OutputStreamType,
         ts: time::OffsetDateTime,
     ) {
         self.send_line(update_id, line_id, text, stream, ts).await;
@@ -195,7 +195,7 @@ impl uptrakit_controller_core::update::UpdateOutputStream for UpdateOutputBroadc
 
     async fn send_completed(
         &self,
-        update_id: uuid::Uuid,
+        update_id: Uuid,
         outcome: uptrakit_controller_core::update::DispatchOutcome,
         error: Option<String>,
     ) {
