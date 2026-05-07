@@ -31,7 +31,9 @@ use sea_orm::{ActiveValue, EntityTrait};
 use tokio_util::sync::CancellationToken;
 use uptrakit_shared_db::entity::embedded_service_runtime_state;
 use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
-use uptrakit_wire::Capability;
+use uptrakit_wire::{
+    Capability, ControllerMessage, ReportPageLimits, payloads::ServiceSettingsPayload,
+};
 use uuid::Uuid;
 
 use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
@@ -84,6 +86,42 @@ struct EmbeddedServiceHandle {
     yield_state_changed: Arc<tokio::sync::Notify>,
     capabilities: BTreeSet<Capability>,
     coexistence_policy: CoexistencePolicy,
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn controller_capabilities_for_embedded() -> std::collections::BTreeSet<Capability> {
+    [
+        Capability::SoftwareDiscovery,
+        Capability::UpdateHooks,
+        Capability::GracefulShutdown,
+        Capability::UpdateTracking,
+        Capability::SshRemote,
+        Capability::Scheduler,
+        Capability::DatabaseAccess,
+        Capability::NatsAccess,
+        Capability::MasterKeyAccess,
+        Capability::CaManagement,
+        Capability::UiSurfaces,
+    ]
+    .into_iter()
+    .collect()
+}
+
+fn embedded_service_settings(tenant_id: Option<Uuid>) -> ServiceSettingsPayload {
+    ServiceSettingsPayload {
+        capabilities: controller_capabilities_for_embedded(),
+        tenant_id,
+        // Non-zero: tokio::time::interval panics on Duration::ZERO.
+        // The embedded loop ignores the ping timer entirely.
+        ping_interval: std::time::Duration::from_secs(60),
+        renewal_window_hours: 0,
+        ca_bundle_hash: String::new(),
+        report_page_limits: ReportPageLimits::default(),
+        shutdown_timeout: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +250,17 @@ impl EmbeddedServiceHost {
         let yielded = Arc::new(AtomicBool::new(false));
         let yielding_service_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
         let yield_state_changed = Arc::new(tokio::sync::Notify::new());
+
+        // Send ServiceSettings to the embedded service. `run_embedded_service` waits
+        // for this as its first message before entering the event loop.
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(
+                embedded_service_settings(tenant_id),
+            ))
+            .await
+            .map_err(|_| {
+                rootcause::report!("failed to send initial ServiceSettings to embedded service")
+            })?;
 
         // 4. Spawn response forwarder (push_rx → ctrl_tx).
         let forwarder_cancel = bg.child_token();
