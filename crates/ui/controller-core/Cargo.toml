@@ -12,6 +12,7 @@ publish.workspace = true
 uptrakit-web-api-auth                   = { workspace = true }
 uptrakit-web-api-queries                = { workspace = true }
 uptrakit-web-api-types                  = { workspace = true }
+uptrakit-notification-delivery          = { workspace = true }
 uptrakit-shared-types                   = { workspace = true }
 uptrakit-shared-db                      = { workspace = true }
 uptrakit-audit-log                      = { workspace = true }
@@ -34,6 +35,10 @@ tracing      = { workspace = true }
 
 [features]
 axum-integration = ["dep:axum"]
+nats = []
+# Expose test-only helpers (e.g. `NotificationDispatcher::test_channel`) to
+# dependent crates' test targets without requiring #[cfg(test)].
+testing = []
 
 [lints]
 workspace = true

@@ -399,21 +399,14 @@ pub struct BroadcastState {
     pub batch_progress_broadcaster: crate::batch_progress_broadcaster::BatchProgressBroadcaster,
 }
 
-/// Notification side-effect state used by mutation actions.
-#[non_exhaustive]
-#[derive(Clone)]
-pub struct NotificationState {
-    /// Cross-controller notification service for push message delivery via outbox pattern.
-    pub notification_service: NotificationService,
-    /// Notification dispatcher for fire-and-forget event delivery.
-    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
-    /// Per-tenant broadcast channels for real-time admin event SSE delivery.
-    pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
+pub use uptrakit_controller_core::notification::NotificationState;
+
+pub(crate) trait NotificationStateMutationExt {
+    fn mutation_context(&self) -> crate::actions::MutationContext<'_>;
 }
 
-impl NotificationState {
-    /// Returns a [`MutationContext`] borrowing the common notification side-effect handles.
-    pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+impl NotificationStateMutationExt for NotificationState {
+    fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
         crate::actions::MutationContext {
             notification_service: &self.notification_service,
             notification_dispatcher: &self.notification_dispatcher,
@@ -946,15 +939,13 @@ impl AppStateBuilder {
                 self.token_denylist
                     .ok_or(AppStateBuildError("token_denylist"))?,
             ),
-            notification: NotificationState {
-                notification_service: self
-                    .notification_service
+            notification: NotificationState::new(
+                self.notification_service
                     .ok_or(AppStateBuildError("notification_service"))?,
-                notification_dispatcher: self
-                    .notification_dispatcher
+                self.notification_dispatcher
                     .ok_or(AppStateBuildError("notification_dispatcher"))?,
-                event_broadcaster: self.event_broadcaster.unwrap_or_default(),
-            },
+                self.event_broadcaster.unwrap_or_default(),
+            ),
             broadcast: BroadcastState {
                 device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
                 update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
@@ -1052,6 +1043,7 @@ impl AppState {
     /// handles from this `AppState`. Pass it to action functions together with
     /// any domain-specific handles.
     pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+        use crate::app_state::NotificationStateMutationExt;
         self.notification.mutation_context()
     }
 
@@ -1090,9 +1082,9 @@ impl uptrakit_controller_core::auth::AuthStateSource for AppState {
     }
 }
 
-impl FromRef<Arc<AppState>> for NotificationState {
-    fn from_ref(state: &Arc<AppState>) -> Self {
-        state.notification.clone()
+impl uptrakit_controller_core::notification::NotificationStateSource for AppState {
+    fn notification_state(&self) -> NotificationState {
+        self.notification.clone()
     }
 }
 
