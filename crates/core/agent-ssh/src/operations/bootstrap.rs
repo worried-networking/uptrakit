@@ -22,12 +22,15 @@ use uptrakit_shared_types::SecretString;
 
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
+use crate::operations::bootstrap_routeros::{
+    RouterOsBootstrapParams, execute_bootstrap_routeros, plan_bootstrap_routeros,
+};
 use crate::operations::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
     install_helper_script, resolve_command_path, write_sudoers_file,
 };
 use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::PosixSshCommandExecutor;
+use crate::ssh_executor::{PosixSshCommandExecutor, SshCommandExecutor};
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -36,6 +39,49 @@ const MAX_USERNAME_LEN: usize = 32;
 
 /// Default SSH connect timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Timeout for the OS detection probe command.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+// ── Host OS detection ──────────────────────────────────────────────────────
+
+/// Detected operating system class of the remote host.
+#[derive(Debug)]
+enum HostOs {
+    RouterOs,
+    Posix,
+}
+
+/// Probe the remote host to determine whether it is RouterOS or a POSIX system.
+///
+/// Sends `/system resource print` with a short timeout.  A response
+/// containing `"platform:"` or `"MikroTik"` identifies the host as RouterOS.
+/// A response that looks like a permission error (not a shell "not found")
+/// is treated as a RouterOS host with insufficient access.  All other
+/// outcomes (including SSH errors) fall back to POSIX.
+async fn detect_host_os(exec: &SshCommandExecutor) -> Result<HostOs> {
+    match exec
+        .exec_raw("/system resource print", Some(PROBE_TIMEOUT))
+        .await
+    {
+        Ok(output) if output.contains("platform:") || output.contains("MikroTik") => {
+            Ok(HostOs::RouterOs)
+        }
+        Ok(output)
+            if output.contains("not enough permissions")
+                && !output.contains("No such file or directory")
+                && !output.contains("command not found")
+                && !output.contains("Permission denied") =>
+        {
+            bail!(Error::SshCommand(
+                "RouterOS device detected but insufficient permissions for \
+                 `/system resource print` — grant `read` policy to the connecting account"
+                    .to_string()
+            ))
+        }
+        _ => Ok(HostOs::Posix),
+    }
+}
 
 // ── Bootstrap parameters ─────────────────────────────────────────────
 
@@ -73,6 +119,9 @@ pub(crate) struct BootstrapParams {
     /// Remove existing Uptrakit-managed keys from `authorized_keys` before
     /// writing the new entry.
     pub remove_stale_keys: bool,
+    /// Whether to grant the `reboot` policy to the RouterOS `uptrakit` group.
+    /// Only relevant for RouterOS hosts; ignored for POSIX bootstrap.
+    pub allow_reboot: bool,
 }
 
 /// Result of a successful bootstrap, carrying metadata for the event loop.
@@ -165,6 +214,27 @@ pub(crate) async fn bootstrap_connect(
 
     let (session, observed_fp, executor, use_sudo) =
         prepare_bootstrap_connection(params, port).await?;
+
+    // 3b. DETECT HOST OS — route to RouterOS plan when applicable.
+    let base_exec = SshCommandExecutor::new(Arc::clone(&session));
+    if let HostOs::RouterOs = detect_host_os(&base_exec).await? {
+        drop(executor);
+        SshSession::disconnect_shared(session).await;
+
+        let ros_params = routeros_params_from_bootstrap(params);
+        let ros_plan = plan_bootstrap_routeros(&ros_params);
+        let actions = routeros_plan_to_planned_actions(&ros_plan, &ros_params);
+        let host_info = BootstrapHostInfo {
+            hostname: params.hostname.clone(),
+            port,
+            auth_user: params.auth_username.clone(),
+            is_root: true,
+            os_info: Some("RouterOS".to_string()),
+            host_key_fingerprint: observed_fp,
+            target_user_exists: false,
+        };
+        return Ok(BootstrapPlan { host_info, actions });
+    }
 
     // 4. GATHER HOST INFORMATION
     let remote_info =
@@ -476,6 +546,18 @@ pub(crate) async fn bootstrap_execute(
     let (session, observed_fp, executor, use_sudo) =
         prepare_bootstrap_connection(&params, port).await?;
 
+    // Detect host OS — route to RouterOS execute path when applicable.
+    let base_exec = SshCommandExecutor::new(Arc::clone(&session));
+    if let HostOs::RouterOs = detect_host_os(&base_exec).await? {
+        drop(executor);
+        let ros_params = routeros_params_from_bootstrap_with_fp(&params, observed_fp);
+        execute_bootstrap_routeros(&ros_params, session, &db).await?;
+        return Ok(BootstrapResult {
+            infra_results: Vec::new(),
+        });
+    }
+    drop(base_exec);
+
     // Execute non-skipped actions.
     let target_same_as_auth = params.target_username == params.auth_username;
 
@@ -621,6 +703,124 @@ pub(crate) async fn bootstrap_execute(
     }
 
     Ok(BootstrapResult { infra_results })
+}
+
+// ── RouterOS conversion helpers ───────────────────────────────────────
+
+/// Build [`RouterOsBootstrapParams`] from a generic [`BootstrapParams`]
+/// (used in the connect phase, where no fingerprint is available yet).
+fn routeros_params_from_bootstrap(params: &BootstrapParams) -> RouterOsBootstrapParams {
+    RouterOsBootstrapParams {
+        name: params.name.clone(),
+        hostname: params.hostname.clone(),
+        port: params.port,
+        auth_username: params.auth_username.clone(),
+        auth_password: params.auth_password.clone(),
+        auth_private_key_pem: params.auth_private_key_pem.clone(),
+        use_ssh_agent: params.use_ssh_agent,
+        host_key_fingerprint: params.host_key_fingerprint.clone(),
+        strict_host_key_checking: params.strict_host_key_checking,
+        allow_reboot: params.allow_reboot,
+        host_id: params.host_id,
+    }
+}
+
+/// Build [`RouterOsBootstrapParams`] with a confirmed host-key fingerprint
+/// (used in the execute phase after the fingerprint has been observed).
+fn routeros_params_from_bootstrap_with_fp(
+    params: &BootstrapParams,
+    observed_fp: String,
+) -> RouterOsBootstrapParams {
+    RouterOsBootstrapParams {
+        host_key_fingerprint: Some(observed_fp),
+        ..routeros_params_from_bootstrap(params)
+    }
+}
+
+/// Convert a RouterOS planned-action list into the generic [`PlannedAction`]
+/// format understood by the UI review step.
+fn routeros_plan_to_planned_actions(
+    plan: &[crate::operations::bootstrap_routeros::RouterOsPlannedAction],
+    params: &RouterOsBootstrapParams,
+) -> Vec<PlannedAction> {
+    use crate::operations::bootstrap_routeros::RouterOsPlannedAction;
+
+    plan.iter()
+        .map(|action| match action {
+            RouterOsPlannedAction::CreateGroup { policies } => PlannedAction {
+                id: "routeros_create_group".to_string(),
+                label: "Create uptrakit group".to_string(),
+                description: format!(
+                    "Create a RouterOS user group named 'uptrakit' with policies: {}.",
+                    policies.join(", ")
+                ),
+                security_impact: uptrakit_shared_types::Severity::Medium,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![format!(
+                    "/user group add name=uptrakit policy={}",
+                    policies.join(",")
+                )],
+            },
+            RouterOsPlannedAction::CreateUser => PlannedAction {
+                id: "routeros_create_user".to_string(),
+                label: "Create uptrakit user".to_string(),
+                description: "Create a RouterOS user named 'uptrakit' in the 'uptrakit' group."
+                    .to_string(),
+                security_impact: uptrakit_shared_types::Severity::Medium,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![r#"/user add name=uptrakit group=uptrakit password="""#.to_string()],
+            },
+            RouterOsPlannedAction::UploadPublicKey { remote_path } => PlannedAction {
+                id: "routeros_upload_key".to_string(),
+                label: "Upload SSH public key".to_string(),
+                description: format!(
+                    "Upload the generated Ed25519 public key to '{remote_path}' via SFTP."
+                ),
+                security_impact: uptrakit_shared_types::Severity::Low,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![],
+            },
+            RouterOsPlannedAction::ImportSshKey { remote_path } => PlannedAction {
+                id: "routeros_import_key".to_string(),
+                label: "Import SSH key".to_string(),
+                description: format!(
+                    "Import '{remote_path}' into `/user ssh-keys` for the 'uptrakit' user."
+                ),
+                security_impact: uptrakit_shared_types::Severity::Medium,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![format!(
+                    "/user ssh-keys import public-key-file={remote_path} user=uptrakit"
+                )],
+            },
+            RouterOsPlannedAction::DeletePublicKey { remote_path } => PlannedAction {
+                id: "routeros_delete_key_file".to_string(),
+                label: "Remove temporary key file".to_string(),
+                description: format!(
+                    "Delete '{remote_path}' from the RouterOS device after import."
+                ),
+                security_impact: uptrakit_shared_types::Severity::Low,
+                default_enabled: true,
+                skippable: true,
+                commands: vec![],
+            },
+            RouterOsPlannedAction::SaveHostEntry => PlannedAction {
+                id: "routeros_save_host".to_string(),
+                label: "Save host entry".to_string(),
+                description: format!(
+                    "Persist the RouterOS host '{}' (allow_reboot={}) to the local database.",
+                    params.name, params.allow_reboot
+                ),
+                security_impact: uptrakit_shared_types::Severity::Low,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![],
+            },
+        })
+        .collect()
 }
 
 // ── Shared input validation ──────────────────────────────────────────
@@ -1386,6 +1586,14 @@ pub(crate) fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── HostOs compile test ──────────────────────────────────────────
+
+    #[test]
+    fn host_os_enum_variants_exist() {
+        let _ = HostOs::Posix;
+        let _ = HostOs::RouterOs;
+    }
 
     // ── Username validation tests ────────────────────────────────────
 

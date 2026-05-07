@@ -1635,6 +1635,10 @@ fn parse_bootstrap_params(
     let strict_host_key_checking = param_bool(params, "strict_host_key_checking");
     let allow_all = param_bool(params, "allow_all");
     let remove_stale_keys = param_bool(params, "remove_stale_keys");
+    let allow_reboot = params
+        .get("allow_reboot")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     let host_id = uuid::Uuid::now_v7();
 
@@ -1655,6 +1659,7 @@ fn parse_bootstrap_params(
         service_id,
         tenant_id,
         remove_stale_keys,
+        allow_reboot,
     })
 }
 
