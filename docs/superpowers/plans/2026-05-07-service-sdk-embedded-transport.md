@@ -37,7 +37,7 @@ sends `ServiceSettings` over the in-process channel immediately after spawning t
 | Modify | `crates/core/scheduler-runtime/src/standalone.rs`        | `StandaloneSchedulerHandler`: update all params, `conn.send` → `transport_send`, `EmbeddedDrain` match arm                      |
 | Modify | `crates/core/controller-runtime/src/embedded/types.rs`   | Override `yield_change_notifier` on `EmbeddedTransport`                                                                         |
 | Modify | `crates/core/controller-runtime/src/embedded/mod.rs`     | Send `ServiceSettings` after forwarder spawn                                                                                    |
-| Create | `docs/adr/0003-service-handler-transport-abstraction.md` | ADR: why `dyn ServiceTransport` not `ControllerConnection`                                                                      |
+| Create | `docs/adr/0004-service-handler-transport-abstraction.md` | ADR: why `dyn ServiceTransport` not `ControllerConnection`                                                                      |
 | Modify | `docs/development/coding-standards.md`                   | Add `ServiceHandler` transport-abstraction rule                                                                                 |
 
 ---
@@ -1977,12 +1977,12 @@ called.
 
 **Files:**
 
-- Create: `docs/adr/0003-service-handler-transport-abstraction.md`
+- Create: `docs/adr/0004-service-handler-transport-abstraction.md`
 - Modify: `docs/development/coding-standards.md`
 
-- [ ] **Step 1: Write ADR 0003**
+- [ ] **Step 1: Write ADR 0004**
 
-  Create `docs/adr/0003-service-handler-transport-abstraction.md`:
+  Create `docs/adr/0004-service-handler-transport-abstraction.md`:
 
   ```markdown
   # `ServiceHandler` Transport Abstraction
@@ -2052,10 +2052,10 @@ called.
 - [ ] **Step 3: Lint and format the new docs**
 
   ```bash
-  npx prettier --write docs/adr/0003-service-handler-transport-abstraction.md \
+  npx prettier --write docs/adr/0004-service-handler-transport-abstraction.md \
                        docs/development/coding-standards.md
   npx markdownlint --config .markdownlint.json \
-    docs/adr/0003-service-handler-transport-abstraction.md \
+    docs/adr/0004-service-handler-transport-abstraction.md \
     docs/development/coding-standards.md
   ```
 
@@ -2064,9 +2064,9 @@ called.
 - [ ] **Step 4: Commit**
 
   ```bash
-  git add docs/adr/0003-service-handler-transport-abstraction.md \
+  git add docs/adr/0004-service-handler-transport-abstraction.md \
           docs/development/coding-standards.md
-  git commit -m "docs: add ADR 0003 and coding-standards rule for ServiceHandler transport abstraction"
+  git commit -m "docs: add ADR 0004 and coding-standards rule for ServiceHandler transport abstraction"
   ```
 
 ---
@@ -2117,9 +2117,9 @@ called.
 - **Startup timeout:** Included in Task 10 code (`EMBEDDED_STARTUP_TIMEOUT = 10s`) ✓
 - **EmbeddedDrain on_shutdown clarified:** Included in Task 10 dispatch code ✓
 - **StandaloneSchedulerHandler conn.send migration detail:** Task 7 covers both `on_connected` and `drain_service_events` with exact error mapping ✓
-- **Embedded identity invariant:** ADR 0003 (Task 12) documents it ✓
+- **Embedded identity invariant:** ADR 0004 (Task 12) documents it ✓
 - **large_futures suppression:** `#[expect(clippy::large_futures, reason = "...")]` on `run_embedded_service` ✓
 - **Non-zero ping_interval in ServiceSettings:** Task 9 `embedded_service_settings` uses `Duration::from_secs(60)` ✓
 - **on_yield_change borrow order:** `let is_yielded = transport.is_yielded();` then `handler.on_yield_change(is_yielded, &mut transport).await;`
   — `is_yielded` (`&self`) read before `&mut transport` borrow ✓
-- **Documentation deliverables:** ADR 0003 + coding-standards.md (Task 12) ✓
+- **Documentation deliverables:** ADR 0004 + coding-standards.md (Task 12) ✓
