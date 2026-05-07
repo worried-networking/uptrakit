@@ -469,7 +469,7 @@ the connection may already be closing (`TransportError::Closed` is expected).
 
 | Deliverable                                              | Action                                                                                                                                                  |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/adr/0003-service-handler-transport-abstraction.md` | New ADR: why `dyn ServiceTransport` not `ControllerConnection`; established pattern from `agent-runtime`/`mqtt-runtime`; embedded unification rationale |
+| `docs/adr/0004-service-handler-transport-abstraction.md` | New ADR: why `dyn ServiceTransport` not `ControllerConnection`; established pattern from `agent-runtime`/`mqtt-runtime`; embedded unification rationale |
 | `docs/development/coding-standards.md`                   | Add to "Service binary/runtime boundary" section: `ServiceHandler` implementations must not import `ControllerConnection`; use `dyn ServiceTransport`   |
 
 ---
