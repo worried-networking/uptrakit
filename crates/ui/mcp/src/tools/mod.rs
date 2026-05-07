@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rmcp::{
     ErrorData, Json, ServerHandler,
     handler::server::tool::Extension,
@@ -8,8 +6,8 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use uptrakit_web_api::AppState;
-use uptrakit_web_api::McpRequestContext;
+use crate::context::McpRequestContext;
+use crate::state::McpState;
 
 pub mod history;
 pub mod update;
@@ -25,14 +23,16 @@ pub(crate) fn mcp_error(msg: impl Into<String>) -> ErrorData {
     ErrorData::internal_error(msg.into(), None)
 }
 
-/// Minimal MCP handler wired to `AppState`.
+/// Minimal MCP handler wired to [`McpState`].
 #[derive(Clone)]
 pub struct McpHandler {
-    pub(crate) state: Arc<AppState>,
+    pub(crate) state: McpState,
 }
 
 impl McpHandler {
-    pub fn new(state: Arc<AppState>) -> Self {
+    /// Create a new [`McpHandler`] from the given [`McpState`].
+    #[must_use]
+    pub fn new(state: McpState) -> Self {
         Self { state }
     }
 }

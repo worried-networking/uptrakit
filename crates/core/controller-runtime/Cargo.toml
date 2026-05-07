@@ -36,6 +36,7 @@ uptrakit-wire = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-migrate"] }
 uptrakit-web-api = { workspace = true }
+uptrakit-controller-core = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }

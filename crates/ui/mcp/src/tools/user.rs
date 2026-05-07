@@ -4,8 +4,8 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use uptrakit_shared_db::entity::prelude::User;
 
+use crate::context::McpRequestContext;
 use crate::tools::{McpHandler, mcp_error};
-use uptrakit_web_api::McpRequestContext;
 
 /// Result returned by the `get_current_user` MCP tool.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -29,7 +29,7 @@ impl McpHandler {
         ctx: McpRequestContext,
     ) -> Result<Json<GetCurrentUserResult>, ErrorData> {
         let user = User::find_by_id(ctx.user_id)
-            .one(self.state.db())
+            .one(self.state.db.db())
             .await
             .map_err(|e| mcp_error(format!("database error: {e}")))?
             .ok_or_else(|| mcp_error("authenticated user not found in database"))?;
@@ -53,7 +53,7 @@ impl McpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_web_api::auth::permissions::Permission;
+    use uptrakit_controller_core::auth::Permission;
     use uuid::Uuid;
 
     #[test]

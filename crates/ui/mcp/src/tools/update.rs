@@ -3,14 +3,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use uptrakit_controller_core::auth::Permission;
 use uptrakit_controller_core::update::{ActorInfo, DispatchOutcome, UpdateDispatchParams};
 use uptrakit_web_api_queries::queries::update_types::ActorType;
 
-use crate::context::{McpRequestContext as NewMcpRequestContext, McpTriggerError};
+use crate::context::{McpRequestContext, McpTriggerError};
 use crate::state::McpState;
 use crate::tools::{McpHandler, mcp_error};
-use uptrakit_web_api::McpRequestContext;
-use uptrakit_web_api::mcp_trigger_update as web_api_mcp_trigger_update;
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -47,7 +46,6 @@ impl McpHandler {
         ctx: McpRequestContext,
         input: TriggerUpdateInput,
     ) -> Result<Json<TriggerUpdateResult>, ErrorData> {
-        use uptrakit_web_api::auth::permissions::Permission;
         if !ctx.has_permission(&Permission::TriggerUpdates) {
             return Err(ErrorData::invalid_request(
                 "permission denied: TriggerUpdates required",
@@ -74,20 +72,38 @@ impl McpHandler {
             )
         })?;
 
-        let (update_history_id, status) = web_api_mcp_trigger_update(
-            std::sync::Arc::clone(&self.state),
+        let (update_history_id, outcome) = mcp_trigger_update(
+            &self.state,
             &ctx,
             host_id,
             software_item_id,
-            input.to_version.clone(),
+            input.to_version,
         )
         .await
         .map_err(|err| mcp_error(format!("trigger_update failed: {err}")))?;
 
+        let status = dispatch_outcome_to_str(&outcome);
+
         Ok(Json(TriggerUpdateResult {
             update_history_id: update_history_id.to_string(),
-            status: status.to_string(),
+            status: status.to_owned(),
         }))
+    }
+}
+
+/// Convert a [`DispatchOutcome`] to the string status exposed by the MCP tool.
+///
+/// `DispatchOutcome` is `#[non_exhaustive]`; the wildcard arm logs a warning
+/// and returns `"failed"` so new variants are handled safely.
+fn dispatch_outcome_to_str(outcome: &DispatchOutcome) -> &'static str {
+    match outcome {
+        DispatchOutcome::Sent => "pending",
+        DispatchOutcome::Queued => "queued",
+        DispatchOutcome::Failed => "failed",
+        _ => {
+            tracing::warn!("unhandled DispatchOutcome variant; reporting status as \"failed\"");
+            "failed"
+        }
     }
 }
 
@@ -107,7 +123,7 @@ impl McpHandler {
 /// the agent is unavailable, or an internal error occurs.
 pub async fn mcp_trigger_update(
     state: &McpState,
-    ctx: &NewMcpRequestContext,
+    ctx: &McpRequestContext,
     host_id: Uuid,
     software_item_id: Uuid,
     to_version: String,
@@ -137,7 +153,6 @@ pub async fn mcp_trigger_update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_web_api::McpTriggerError;
 
     #[test]
     fn trigger_update_input_type_exists() {
@@ -166,5 +181,20 @@ mod tests {
         let _ = McpTriggerError::AgentUnavailable;
         let _ = McpTriggerError::AlreadyInProgress;
         let _ = McpTriggerError::Internal;
+    }
+
+    #[test]
+    fn dispatch_outcome_sent_maps_to_pending() {
+        assert_eq!(dispatch_outcome_to_str(&DispatchOutcome::Sent), "pending");
+    }
+
+    #[test]
+    fn dispatch_outcome_queued_maps_to_queued() {
+        assert_eq!(dispatch_outcome_to_str(&DispatchOutcome::Queued), "queued");
+    }
+
+    #[test]
+    fn dispatch_outcome_failed_maps_to_failed() {
+        assert_eq!(dispatch_outcome_to_str(&DispatchOutcome::Failed), "failed");
     }
 }

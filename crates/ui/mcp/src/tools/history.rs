@@ -6,10 +6,11 @@ use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateHistoryResponse};
 use uuid::Uuid;
 
+use uptrakit_controller_core::auth::Permission;
+use uptrakit_web_api_queries::queries;
+
+use crate::context::McpRequestContext;
 use crate::tools::{McpHandler, mcp_error};
-use uptrakit_web_api::McpRequestContext;
-use uptrakit_web_api::auth::permissions::Permission;
-use uptrakit_web_api::queries;
 
 // ---------------------------------------------------------------------------
 // Input types
@@ -246,7 +247,7 @@ impl McpHandler {
             input.per_page,
         );
 
-        let tenant_db = TenantDb::new(self.state.db().clone(), ctx.tenant_id);
+        let tenant_db = TenantDb::new(self.state.db.db().clone(), ctx.tenant_id);
 
         let paginated = queries::update_history::list_update_history(&tenant_db, &query)
             .await
@@ -276,7 +277,7 @@ impl McpHandler {
             ErrorData::invalid_params(format!("invalid id UUID: {}", input.id), None)
         })?;
 
-        let tenant_db = TenantDb::new(self.state.db().clone(), ctx.tenant_id);
+        let tenant_db = TenantDb::new(self.state.db.db().clone(), ctx.tenant_id);
 
         let record = queries::update_history::get_update_history(&tenant_db, id)
             .await
