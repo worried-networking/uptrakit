@@ -44,6 +44,7 @@ pub enum DispatchOutcome {
 
 /// Result returned by a successful `UpdateDispatcher::dispatch` call.
 #[non_exhaustive]
+#[derive(Debug)]
 pub struct UpdateDispatchResult {
     pub update_history_id: Uuid,
     pub outcome: DispatchOutcome,
@@ -85,6 +86,7 @@ impl std::error::Error for UpdateDispatchError {}
 /// `#[non_exhaustive]`: new fields (e.g. `force`, `dry_run`) may be added.
 /// External crates must construct via `UpdateDispatchParams::new(…)`.
 #[non_exhaustive]
+#[derive(Debug)]
 pub struct UpdateDispatchParams {
     pub tenant_id: Uuid,
     pub host_id: Uuid,
