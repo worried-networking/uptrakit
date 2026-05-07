@@ -9,7 +9,6 @@ version = "0.0.1"
 publish.workspace = true
 
 [dependencies]
-uptrakit-web-api          = { workspace = true }
 uptrakit-web-api-types    = { workspace = true }
 uptrakit-shared-db        = { workspace = true }
 uptrakit-controller-core  = { workspace = true }
