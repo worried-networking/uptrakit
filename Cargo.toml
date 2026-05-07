@@ -161,6 +161,7 @@ uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discov
 dirs = "6"
 rpassword = "7"
 russh = { version = "0.60" }
+russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
 ssh2-config = "0.7"
 tower-http = { version = "0.6", default-features = false }

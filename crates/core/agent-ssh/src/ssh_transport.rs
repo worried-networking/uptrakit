@@ -527,6 +527,69 @@ impl SshSession {
         })
     }
 
+    /// Upload `data` bytes to `remote_path` via an SFTP subsystem channel.
+    pub(crate) async fn sftp_put(
+        &self,
+        remote_path: &str,
+        data: &[u8],
+    ) -> std::result::Result<(), SshExecError> {
+        use russh_sftp::client::SftpSession;
+        use tokio::io::AsyncWriteExt as _;
+
+        let channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP channel open failed: {e}")))?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP subsystem request failed: {e}")))?;
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP session init failed: {e}")))?;
+
+        let mut file = sftp
+            .create(remote_path)
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP create '{remote_path}' failed: {e}")))?;
+        file.write_all(data).await.map_err(|e| {
+            SshExecError::Exec(format!("SFTP write to '{remote_path}' failed: {e}"))
+        })?;
+        file.shutdown()
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP flush '{remote_path}' failed: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Delete `remote_path` via an SFTP subsystem channel.
+    pub(crate) async fn sftp_remove(
+        &self,
+        remote_path: &str,
+    ) -> std::result::Result<(), SshExecError> {
+        use russh_sftp::client::SftpSession;
+
+        let channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP channel open failed: {e}")))?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP subsystem request failed: {e}")))?;
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP session init failed: {e}")))?;
+
+        sftp.remove_file(remote_path)
+            .await
+            .map_err(|e| SshExecError::Exec(format!("SFTP remove '{remote_path}' failed: {e}")))?;
+
+        Ok(())
+    }
+
     /// Disconnect the SSH session.
     pub(crate) async fn disconnect(self) {
         #[expect(
