@@ -1,6 +1,6 @@
 [package]
 name = "uptrakit-controller-core"
-description = "Pure business-logic state types — zero web-api/mcp dependency"
+description = "Controller core state types — no HTTP routing or MCP layer dependency"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

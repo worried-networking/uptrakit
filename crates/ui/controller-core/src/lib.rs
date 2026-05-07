@@ -1,8 +1,8 @@
-//! `uptrakit-controller-core` — pure business-logic state types.
+//! `uptrakit-controller-core` — controller core state types.
 //!
-//! **Invariant**: this crate must never directly import `uptrakit-web-api` (the HTTP
-//! routing layer), `uptrakit-mcp`, or any crate that depends on either of those two.
-//! `uptrakit-web-api-auth` is an allowed dep (shared auth library, not the routing layer).
+//! **Invariant**: no direct dependency on `uptrakit-web-api` (HTTP routing/Axum handlers)
+//! or `uptrakit-mcp`. Shared library crates (`uptrakit-web-api-auth`, `uptrakit-web-api-queries`)
+//! are permitted — they provide auth and query primitives without importing the routing layer.
 //! Enforced by the absence of `uptrakit-web-api` and `uptrakit-mcp` in `Cargo.toml`.
 
 pub mod audit;
