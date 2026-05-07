@@ -12,10 +12,6 @@
     clippy::let_underscore_must_use,
     reason = "fire-and-forget channel sends intentionally drop the send result"
 )]
-#![expect(
-    clippy::allow_attributes,
-    reason = "feature-conditional #[allow] for unused_variables; #[expect] would be unfulfilled when nats feature is enabled"
-)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -42,6 +38,7 @@ use crate::workload_claims::WorkloadClaimRegistry;
 /// (`NatsTransport`) and delegates to the real NATS JetStream connection.
 ///
 /// Fire-and-forget: implementors log errors internally and do not propagate them.
+#[cfg(feature = "nats")]
 #[async_trait::async_trait]
 pub trait NatsPublisher: Send + Sync {
     /// Publish a [`ControllerMessage`] to NATS JetStream.
@@ -546,9 +543,12 @@ impl EventBroadcaster {
     /// Publish an `AdminEvent` to NATS so other controller instances can
     /// relay it to their local SSE subscribers.  No-op when NATS is not
     /// configured or the `nats` feature is disabled.
-    #[allow(
-        unused_variables,
-        reason = "tenant_id and event are used only when nats feature is enabled"
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(
+            unused_variables,
+            reason = "params only used when nats feature is enabled"
+        )
     )]
     async fn maybe_publish_nats(&self, tenant_id: Option<Uuid>, event: AdminEvent) {
         #[cfg(feature = "nats")]
