@@ -258,8 +258,10 @@ impl EmbeddedServiceHost {
                 embedded_service_settings(tenant_id),
             ))
             .await
-            .map_err(|_| {
-                rootcause::report!("failed to send initial ServiceSettings to embedded service")
+            .map_err(|e| {
+                rootcause::report!(
+                    "failed to send initial ServiceSettings to embedded service: {e}"
+                )
             })?;
 
         // 4. Spawn response forwarder (push_rx → ctrl_tx).
