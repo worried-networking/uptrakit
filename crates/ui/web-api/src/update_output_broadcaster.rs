@@ -176,6 +176,44 @@ impl Default for UpdateOutputBroadcaster {
     }
 }
 
+#[async_trait::async_trait]
+impl uptrakit_controller_core::update::UpdateOutputStream for UpdateOutputBroadcaster {
+    async fn create_channel(&self, update_id: uuid::Uuid) {
+        self.create_channel(update_id).await;
+    }
+
+    async fn send_line(
+        &self,
+        update_id: uuid::Uuid,
+        line_id: uuid::Uuid,
+        text: String,
+        stream: uptrakit_shared_types::OutputStreamType,
+        ts: time::OffsetDateTime,
+    ) {
+        self.send_line(update_id, line_id, text, stream, ts).await;
+    }
+
+    async fn send_completed(
+        &self,
+        update_id: uuid::Uuid,
+        outcome: uptrakit_controller_core::update::DispatchOutcome,
+        error: Option<String>,
+    ) {
+        use uptrakit_controller_core::update::DispatchOutcome;
+        let status = match outcome {
+            DispatchOutcome::Sent | DispatchOutcome::Queued => "completed".to_string(),
+            DispatchOutcome::Failed => "failed".to_string(),
+            _ => {
+                tracing::warn!(
+                    "unhandled DispatchOutcome variant in UpdateOutputStream::send_completed"
+                );
+                "failed".to_string()
+            }
+        };
+        self.send_completed(update_id, status, error).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
