@@ -10,7 +10,9 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 
 - The `SshRemote` capability in the `Capability` enum (wire string: `ssh_remote`)
 - Controller-side enrollment and WebSocket dispatch for SSH agents (identified by `Capability::SshRemote`)
-- A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
+- A standalone binary (`uptrakit-agent-ssh`) — a thin CLI shell that delegates to
+  `uptrakit-agent-ssh-runtime`, which owns the `ServiceHandler` implementation
+  (`AgentSshHandler`)
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
 - CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove`)
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
@@ -53,8 +55,9 @@ The SSH agent follows the same enrollment and connection lifecycle as the regula
 
 The SSH agent can run in two modes:
 
-- **Standalone** (`uptrakit-agent-ssh` binary) -- connects to the controller over WebSocket
-  (mTLS), uses `ServiceHandler` from the service-sdk, manages its own master key
+- **Standalone** (`uptrakit-agent-ssh` binary, delegating to `uptrakit-agent-ssh-runtime`)
+  -- connects to the controller over WebSocket (mTLS), implements the `ServiceHandler`
+  trait via `AgentSshHandler` constructed in `Binary` mode, manages its own master key
   independently. This is the default and recommended mode for production.
 - **Embedded** (`embedded-ssh-agent` controller feature) -- runs inside the controller
   process via in-process mpsc channels (`EmbeddedTransport`). Uses the controller's shared
@@ -71,10 +74,10 @@ functions work identically over WebSocket or in-process channels.
 
 The SSH agent manages its own encryption key independently from the controller:
 
-| Component | Master Key | Encrypts |
-| --- | --- | --- |
+| Component  | Master Key                                      | Encrypts                              |
+| ---------- | ----------------------------------------------- | ------------------------------------- |
 | Controller | Controller's master key (`UPTRAKIT_MASTER_KEY`) | CA keys, OIDC secrets, MQTT passwords |
-| SSH Agent | SSH agent's master key (`UPTRAKIT_MASTER_KEY`) | SSH private keys in local SQLite |
+| SSH Agent  | SSH agent's master key (`UPTRAKIT_MASTER_KEY`)  | SSH private keys in local SQLite      |
 
 Both use the same `init_master_key()` function from `uptrakit-crypto` and the same `EncryptedString` type (AES-256-GCM), but with
 independent keys. The controller has no knowledge of the SSH agent's master key.
@@ -93,25 +96,25 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 
 ### `ssh_hosts`
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | TEXT (UUID) | Primary key |
-| `name` | TEXT | Friendly name for the host (UNIQUE) |
-| `hostname` | TEXT | SSH hostname or IP address |
-| `port` | INTEGER | SSH port (default: 22) |
-| `username` | TEXT | SSH username |
-| `private_key` | TEXT | `EncryptedString` — SSH private key (AES-256-GCM) |
-| `key_type` | TEXT | Key algorithm: `ed25519`, `rsa`, or `ecdsa` |
-| `host_key_fingerprint` | TEXT | Known host key (SHA-256), nullable |
-| `machine_id` | TEXT | Remote host machine ID (populated by `ReportHosts`; used for routing `CheckVersions` and `ExecuteUpdate`) |
-| `sudo_available` | BOOLEAN | NULL = unknown; TRUE = passwordless sudo works for this host |
-| `is_root` | BOOLEAN | NULL = unknown; TRUE = agent user is UID 0 |
-| `sudo_policy` | TEXT | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy |
-| `is_pve_node` | BOOLEAN | Whether this host is a Proxmox VE node (default: false) |
-| `pve_plugin_config_id` | TEXT | Plugin config ID for PVE credentials, nullable |
-| `pve_node_name` | TEXT | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `sync-host` and `bootstrap` |
-| `created_at` | INTEGER | Unix timestamp |
-| `updated_at` | INTEGER | Unix timestamp |
+| Column                 | Type        | Description                                                                                               |
+| ---------------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `id`                   | TEXT (UUID) | Primary key                                                                                               |
+| `name`                 | TEXT        | Friendly name for the host (UNIQUE)                                                                       |
+| `hostname`             | TEXT        | SSH hostname or IP address                                                                                |
+| `port`                 | INTEGER     | SSH port (default: 22)                                                                                    |
+| `username`             | TEXT        | SSH username                                                                                              |
+| `private_key`          | TEXT        | `EncryptedString` — SSH private key (AES-256-GCM)                                                         |
+| `key_type`             | TEXT        | Key algorithm: `ed25519`, `rsa`, or `ecdsa`                                                               |
+| `host_key_fingerprint` | TEXT        | Known host key (SHA-256), nullable                                                                        |
+| `machine_id`           | TEXT        | Remote host machine ID (populated by `ReportHosts`; used for routing `CheckVersions` and `ExecuteUpdate`) |
+| `sudo_available`       | BOOLEAN     | NULL = unknown; TRUE = passwordless sudo works for this host                                              |
+| `is_root`              | BOOLEAN     | NULL = unknown; TRUE = agent user is UID 0                                                                |
+| `sudo_policy`          | TEXT        | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy                             |
+| `is_pve_node`          | BOOLEAN     | Whether this host is a Proxmox VE node (default: false)                                                   |
+| `pve_plugin_config_id` | TEXT        | Plugin config ID for PVE credentials, nullable                                                            |
+| `pve_node_name`        | TEXT        | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `sync-host` and `bootstrap`        |
+| `created_at`           | INTEGER     | Unix timestamp                                                                                            |
+| `updated_at`           | INTEGER     | Unix timestamp                                                                                            |
 
 The `name` column has a UNIQUE index to prevent duplicate host names.
 
@@ -124,13 +127,13 @@ The three sudo columns are populated by the `bootstrap` and `sync-host` operatio
 The SSH agent is identified by its capability set rather than a dedicated `ServiceType` variant. The
 relevant capabilities are:
 
-| Capability | Wire string | Purpose |
-| --- | --- | --- |
-| `SshRemote` | `ssh_remote` | Identifies this service as SSH-backed (vs. local agent) |
-| `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows |
-| `UpdateHooks` | `update_hooks` | Supports pre-/post-update hook commands |
-| `GracefulShutdown` | `graceful_shutdown` | Participates in the graceful-shutdown protocol |
-| `UiSurfaces` | `ui_surfaces` | Enables shared-surface registration and interaction handling (host management page) |
+| Capability          | Wire string          | Purpose                                                                             |
+| ------------------- | -------------------- | ----------------------------------------------------------------------------------- |
+| `SshRemote`         | `ssh_remote`         | Identifies this service as SSH-backed (vs. local agent)                             |
+| `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows                                 |
+| `UpdateHooks`       | `update_hooks`       | Supports pre-/post-update hook commands                                             |
+| `GracefulShutdown`  | `graceful_shutdown`  | Participates in the graceful-shutdown protocol                                      |
+| `UiSurfaces`        | `ui_surfaces`        | Enables shared-surface registration and interaction handling (host management page) |
 
 Integration points:
 
@@ -149,13 +152,13 @@ directly on the local SQLite database.
 
 ### Subcommands
 
-| Command | Description |
-| --- | --- |
-| `host add` | Register a new SSH host with connection details and private key |
-| `host list` | List all registered SSH hosts in tabular format (includes sudo policy) |
-| `host show <name_or_id>` | Display detailed information for a specific host (includes sudo state) |
+| Command                    | Description                                                              |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `host add`                 | Register a new SSH host with connection details and private key          |
+| `host list`                | List all registered SSH hosts in tabular format (includes sudo policy)   |
+| `host show <name_or_id>`   | Display detailed information for a specific host (includes sudo state)   |
 | `host update <name_or_id>` | Update one or more fields of an existing host (includes `--sudo-policy`) |
-| `host remove <name_or_id>` | Remove an SSH host from the local database |
+| `host remove <name_or_id>` | Remove an SSH host from the local database                               |
 
 Bootstrap and sync operations are available through the shared surface runtime as multi-step
 workflow interactions (see [Shared Surface Runtime](#shared-surface-runtime)). The
@@ -170,12 +173,12 @@ When adding or updating a host, the `--private-key-file` argument accepts a path
 to a PEM-encoded private key file (or `-` for stdin). The key type is
 automatically detected from the file content:
 
-| PEM Header | Detected Type |
-| --- | --- |
-| `BEGIN RSA PRIVATE KEY` | RSA (PKCS#1) |
-| `BEGIN EC PRIVATE KEY` | ECDSA (SEC1) |
+| PEM Header                  | Detected Type                                               |
+| --------------------------- | ----------------------------------------------------------- |
+| `BEGIN RSA PRIVATE KEY`     | RSA (PKCS#1)                                                |
+| `BEGIN EC PRIVATE KEY`      | ECDSA (SEC1)                                                |
 | `BEGIN OPENSSH PRIVATE KEY` | Decoded from OpenSSH binary format (Ed25519, RSA, or ECDSA) |
-| `BEGIN PRIVATE KEY` | Decoded from PKCS#8 format via OID inspection |
+| `BEGIN PRIVATE KEY`         | Decoded from PKCS#8 format via OID inspection               |
 
 The detected key type is stored in the `key_type` column and displayed in host listings.
 
@@ -337,11 +340,11 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 
 `SudoContext` is built from the database columns:
 
-| DB column | `SudoContext` field | Unknown default |
-| --- | --- | --- |
-| `is_root` | `is_root: bool` | `false` (conservative) |
+| DB column        | `SudoContext` field    | Unknown default          |
+| ---------------- | ---------------------- | ------------------------ |
+| `is_root`        | `is_root: bool`        | `false` (conservative)   |
 | `sudo_available` | `sudo_available: bool` | `true` (backward compat) |
-| `sudo_policy` | `policy: SudoPolicy` | `Auto` |
+| `sudo_policy`    | `policy: SudoPolicy`   | `Auto`                   |
 
 ### Updating sudo state
 
@@ -677,90 +680,129 @@ controller-side cleanup is a separate operator action.
 
 ## Crate Structure
 
-The SSH agent depends on `uptrakit-agent-core` (`crates/shared/agent-core/`) for shared version check and update
-execution logic. See the [agent-core shared crate](#shared-uptrakit-agent-core-crate) section below.
+The SSH agent is split across two crates following the binary/runtime boundary documented in
+[ADR-0005](../adr/0005-service-binary-runtime-boundary.md):
 
-The `agent-ssh` crate is a dual lib+bin crate. `lib.rs` contains all shared modules and
-public API; `main.rs` is a thin CLI wrapper that imports from the library. This enables the
-controller to depend on `uptrakit-agent-ssh` as a library crate for embedded mode.
+- **`uptrakit-agent-ssh`** (binary, `crates/core/agent-ssh/`) — thin CLI shell. Holds
+  `main.rs`, `cli.rs`, and `host_cli.rs` (subcommand dispatch). Constructs an
+  `AgentSshHandler` in `Binary` mode and runs it through
+  `uptrakit_service_sdk::run_lifecycle_and_handle_errors`. No business logic, DB entities,
+  or migrations live here.
+- **`uptrakit-agent-ssh-runtime`** (library, `crates/core/agent-ssh-runtime/`) — owns the
+  `ServiceHandler` implementation (`AgentSshHandler`), the `AgentSshMode` enum, the
+  `EciesKeypair` struct, all DB entities and migrations, the surface runtime, the SSH
+  transport, and host-management modules. Shared by the standalone binary and by the
+  controller's embedded path (`embedded-ssh-agent` feature).
+
+The runtime crate also depends on `uptrakit-agent-core` (`crates/shared/agent-core/`) for
+the version-check and update-execution logic shared with the generic agent. See the
+[agent-core shared crate](#shared-uptrakit-agent-core-crate) section below.
 
 ```text
-crates/core/agent-ssh/
+crates/core/agent-ssh/                 # Binary shell — uptrakit-agent-ssh
+├── Cargo.toml
+└── src/
+    ├── main.rs          # Constructs AgentSshHandler in Binary mode, calls
+    │                    # uptrakit_service_sdk::run_lifecycle_and_handle_errors
+    ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
+    └── host_cli.rs      # `host` subcommand dispatch — argument parsing + thin calls
+                         # into agent-ssh-runtime operations
+
+crates/core/agent-ssh-runtime/         # Library — uptrakit-agent-ssh-runtime
 ├── Cargo.toml
 ├── build.rs
 └── src/
-    ├── lib.rs           # Library entry point: public modules, constants, helper functions
-    │                    # (register_ssh_column_aad, init_ssh_data_key_ring, reencrypt_ssh_to_v3,
-    │                    # diff_host_snapshots, handle_set_update_freeze); re-exports
-    │                    # ServiceSurfaceProxy from uptrakit_service_sdk
-    ├── main.rs          # Thin CLI wrapper: SshAgentHandler (ServiceHandler impl), SshAgentEvent,
-    │                    # rotate_ssh_master_key, entry point; imports all logic from lib.rs
-    ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
-    ├── client.rs        # Authenticated loop; spawn_check_versions_ssh(), spawn_discover_software_ssh(),
-    │                    # spawn_execute_batch_update_ssh() (background-spawned),
-    │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
-    │                    # SshInFlightUpdate struct, build_reload_host_infos(),
-    │                    # report_hosts_after_config_change() — all accept &mut impl ServiceTransport
-    ├── surface_runtime.rs # Shared-surface registration builder and action dispatch (list-hosts, bootstrap,
-    │                    # remove-host, list-discovered-guests, bootstrap-proxmox-guest),
-    │                    # ECIES decryption of sensitive params,
-    │                    # ServiceSurfaceProxy invocation helpers — accepts &mut impl ServiceTransport
+    ├── lib.rs           # Public modules and re-exports; capabilities helper
+    │                    # (ssh_agent_capabilities), init_ssh_data_key_ring,
+    │                    # register_ssh_column_aad, reencrypt_ssh_to_v3,
+    │                    # diff_host_snapshots, handle_set_update_freeze
+    ├── handler.rs       # AgentSshHandler (ServiceHandler impl with service_migrations()
+    │                    # override), AgentSshMode (Binary | Embedded), EciesKeypair
+    ├── runtime_support.rs # AgentSshRuntimeSupport — ties the handler to its dependencies
+    ├── client.rs        # Authenticated loop; spawn_check_versions_ssh(),
+    │                    # spawn_discover_software_ssh(), spawn_execute_batch_update_ssh()
+    │                    # (background-spawned), handle_execute_update_ssh() (per-host
+    │                    # guard + forwarder task), SshInFlightUpdate struct,
+    │                    # build_reload_host_infos(), report_hosts_after_config_change() —
+    │                    # all accept &mut dyn ServiceTransport
+    ├── surface_runtime.rs # Shared-surface registration builder and action dispatch
+    │                    # (list-hosts, bootstrap, sync-host, remove-host,
+    │                    # list-discovered-guests, bootstrap-proxmox-guest); ECIES
+    │                    # decryption of sensitive params; ServiceSurfaceProxy invocation
+    │                    # helpers — accepts &mut dyn ServiceTransport
+    ├── surface_runtime/  # (sub-modules of surface_runtime.rs)
     ├── error.rs         # Error types (rootcause + thiserror)
-    ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
-    ├── ssh_stdio_tunnel.rs  # SshStdioTunnel (AsyncRead + AsyncWrite wrapper around russh ChannelStream)
-    ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
-    ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs, validates hostname syntax)
-    ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
-    ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
-    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove,
-    │                    # update_host_sudo_state, update_host_pve_state, find_pve_hosts,
-    │                    # list_host_snapshots, ...)
+    ├── ssh_stdio_tunnel.rs  # SshStdioTunnel (AsyncRead + AsyncWrite over russh ChannelStream)
+    ├── ssh_key.rs       # SSH private key reading, key type auto-detection, Ed25519 keygen
+    ├── ssh_pool.rs      # Pooled SSH connections
+    ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs)
+    ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command
+    ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, ...)
+    ├── host_ops.rs      # CRUD operations for SSH hosts
     ├── remote_exec.rs   # SshRemoteExecutor, PveGuestExecutor (RemoteExecutor impls)
+    ├── routeros_executor.rs  # RouterOS-specific command executor
     ├── operations/
-    │   ├── mod.rs         # Operations module declarations
-    │   ├── host.rs        # Host subcommand handlers (dispatch, SSH config resolution, formatting)
-    │   ├── bootstrap.rs   # Bootstrap workflow (remote setup, verification, DB save; PVE detection, BootstrapResult; uses sudoers.rs)
+    │   ├── mod.rs              # Operations module declarations
+    │   ├── bootstrap.rs        # Bootstrap workflow (remote setup, verification, DB save)
     │   ├── bootstrap_proxmox.rs  # Proxmox guest bootstrap via PVE exec
-    │   ├── sudoers.rs     # Shared sudoers helpers: detect_is_root, detect_sudo_available,
-    │   │                  # resolve_command_path, generate_sudoers_content, write_sudoers_file;
-    │   │                  # uses &dyn RemoteExecutor
-    │   └── sync.rs            # sync operation (re-detect, resolve, write sudoers, detect PVE node name, verify PVE privileges)
+    │   ├── bootstrap_routeros.rs  # RouterOS bootstrap workflow
+    │   ├── sudoers.rs          # Shared sudoers helpers (detect_is_root,
+    │   │                       # detect_sudo_available, resolve_command_path,
+    │   │                       # generate_sudoers_content, write_sudoers_file) — uses
+    │   │                       # &dyn RemoteExecutor
+    │   └── sync.rs             # sync operation (re-detect, resolve, write sudoers,
+    │                           # detect PVE node name, verify PVE privileges)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
         ├── entity/
-        │   ├── mod.rs   # Entity module declarations
-        │   └── ssh_host.rs  # SeaORM entity (Model + resolved_sudo_context(), SshKeyType enum)
+        │   ├── mod.rs                # Entity module declarations
+        │   └── ssh_host.rs           # SeaORM entity (Model + resolved_sudo_context(),
+        │                             # SshKeyType enum)
         └── migration/
-            ├── mod.rs   # Migration runner
-            ├── m20260215_000001_initial.rs         # ssh_hosts table (with UNIQUE index on name)
-            ├── m20260222_000002_add_machine_id.rs  # Adds machine_id TEXT NOT NULL DEFAULT ''
-            ├── m20260224_000003_add_sudo_columns.rs  # Adds sudo_available, is_root, sudo_policy
-            ├── m20260306_000001_add_pve_columns.rs  # Adds is_pve_node, pve_plugin_config_id
-            └── m20260307_000001_add_pve_node_name.rs  # Adds pve_node_name
+            ├── mod.rs                                                      # Migrator
+            ├── m20260215_000001_initial.rs                                 # ssh_hosts table
+            ├── m20260222_000002_add_machine_id.rs                          # machine_id column
+            ├── m20260224_000003_add_sudo_columns.rs                        # sudo state columns
+            ├── m20260302_000001_convert_ssh_host_timestamps.rs             # timestamp migration
+            ├── m20260302_000002_ensure_machine_id_nullable.rs              # nullable cleanup
+            ├── m20260306_000001_add_pve_columns.rs                         # PVE columns
+            ├── m20260307_000001_add_pve_node_name.rs                       # pve_node_name
+            ├── m20260307_000002_pending_proxmox_matches.rs                 # pending matches table
+            ├── m20260308_000003_ssh_host_uuid_columns.rs                   # uuid columns
+            ├── m20260310_000001_data_encryption_keys.rs                    # DEK ring table
+            ├── m20260313_000001_drop_ssh_host_is_pve_node.rs               # cleanup
+            ├── m20260322_000001_ssh_hosts_lower_name_index.rs              # case-insensitive index
+            └── m20260507_000001_add_routeros_host_config.rs                # RouterOS config
 ```
+
+In embedded mode, the controller calls `AgentSshHandler::service_migrations()` at startup
+to collect this migration list and runs it alongside its own migrations. See ADR-0005 for
+the full rationale and the B+B1 strategy used to repair existing controller deployments
+that had previously carried a one-shot `m20260331_000001_ssh_agent_tables` migration in
+`shared-db`.
 
 ## Shared `uptrakit-agent-core` Crate
 
 Version check and update execution logic shared between `uptrakit-agent` and `uptrakit-agent-ssh` lives in
 `crates/shared/agent-core/` (`uptrakit-agent-core`). Public API:
 
-| Function / Type | Description |
-| --- | --- |
-| `check_version(plugin_assignment, executor)` | Runs a single version check for a role-based plugin assignment using the given executor |
-| `execute_update(payload, executor, output_tx)` | Executes an update using role-based plugin assignments and streams output lines |
-| `run_check_versions(payload, executor)` | Compute-only: runs version checks, returns `ServiceMessage::VersionCheckResults` |
-| `run_discover_software(payload, executor)` | Compute-only: runs discovery, returns `ServiceMessage::DiscoveryResults` |
-| `run_execute_batch_update(payload, executor)` | Compute-only: runs batch update, returns `ServiceMessage::BatchUpdateResult` |
-| `spawn_background(bg_tx, future)` | Spawns a background task and sends its `ServiceMessage` result through the channel |
-| `send_background_result(conn, msg)` | Forwards a background result to the controller; returns `Some(Disconnected)` on failure |
-| `start_update(payload, executor, conn, ctx)` | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate` |
-| `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight (global guard for single-host agent); delegates to `start_update()` |
-| `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains a single in-flight update before disconnecting (used by the regular agent) |
-| `InFlightUpdate` | Handle for a running update task (holds `JoinHandle` and output `mpsc::Receiver`) |
-| `UpdateEvent` | Enum of events emitted by an in-flight update (output line, completion) |
-| `send_update_output()` | Sends an `update_output` message to the controller |
-| `send_update_result()` | Sends an `update_result` message to the controller |
+| Function / Type                                                       | Description                                                                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `check_version(plugin_assignment, executor)`                          | Runs a single version check for a role-based plugin assignment using the given executor                 |
+| `execute_update(payload, executor, output_tx)`                        | Executes an update using role-based plugin assignments and streams output lines                         |
+| `run_check_versions(payload, executor)`                               | Compute-only: runs version checks, returns `ServiceMessage::VersionCheckResults`                        |
+| `run_discover_software(payload, executor)`                            | Compute-only: runs discovery, returns `ServiceMessage::DiscoveryResults`                                |
+| `run_execute_batch_update(payload, executor)`                         | Compute-only: runs batch update, returns `ServiceMessage::BatchUpdateResult`                            |
+| `spawn_background(bg_tx, future)`                                     | Spawns a background task and sends its `ServiceMessage` result through the channel                      |
+| `send_background_result(conn, msg)`                                   | Forwards a background result to the controller; returns `Some(Disconnected)` on failure                 |
+| `start_update(payload, executor, conn, ctx)`                          | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate`              |
+| `handle_execute_update(payload, executor, in_flight, conn)`           | Rejects if update already in flight (global guard for single-host agent); delegates to `start_update()` |
+| `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains a single in-flight update before disconnecting (used by the regular agent)                       |
+| `InFlightUpdate`                                                      | Handle for a running update task (holds `JoinHandle` and output `mpsc::Receiver`)                       |
+| `UpdateEvent`                                                         | Enum of events emitted by an in-flight update (output line, completion)                                 |
+| `send_update_output()`                                                | Sends an `update_output` message to the controller                                                      |
+| `send_update_result()`                                                | Sends an `update_result` message to the controller                                                      |
 
 The `run_*` functions are designed for background spawning: they take owned data (no `&mut conn`
 reference), perform all computation, and return a `ServiceMessage` that the caller can send through
@@ -828,25 +870,25 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 
 ### Surface descriptor
 
-| Property | Value |
-| --- | --- |
-| ID | `ssh-agent.hosts` |
-| Label | SSH Hosts |
-| Placement | Page (nav_section: `management`, icon: `server`) |
-| Permission | `manage_hosts` |
-| Targeting | Targeted (user selects which SSH agent instance) |
-| UI | DataTable with host columns + row/primary actions |
+| Property   | Value                                             |
+| ---------- | ------------------------------------------------- |
+| ID         | `ssh-agent.hosts`                                 |
+| Label      | SSH Hosts                                         |
+| Placement  | Page (nav_section: `management`, icon: `server`)  |
+| Permission | `manage_hosts`                                    |
+| Targeting  | Targeted (user selects which SSH agent instance)  |
+| UI         | DataTable with host columns + row/primary actions |
 
 ### Actions
 
-| Action | Type | Timeout | Description |
-| --- | --- | --- | --- |
-| `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
-| `bootstrap` | primary_action (wizard) | 120s | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute |
-| `sync-host` | row_action (wizard) | 120s | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
-| `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
-| `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceSurfaceProxy) |
-| `bootstrap-proxmox-guest` | primary_action (form) | 120s | Bootstrap a discovered Proxmox guest with auto-matching |
+| Action                    | Type                     | Timeout | Description                                                                                                          |
+| ------------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `list-hosts`              | data_action              | 30s     | Query local DB for all SSH hosts                                                                                     |
+| `bootstrap`               | primary_action (wizard)  | 120s    | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute                                      |
+| `sync-host`               | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
+| `remove-host`             | row_action (destructive) | 30s     | Remove a host from local DB                                                                                          |
+| `list-discovered-guests`  | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
+| `bootstrap-proxmox-guest` | primary_action (form)    | 120s    | Bootstrap a discovered Proxmox guest with auto-matching                                                              |
 
 ### E2E encryption for sensitive parameters
 
