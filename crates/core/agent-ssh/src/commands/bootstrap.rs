@@ -23,12 +23,14 @@ use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
     install_helper_script, resolve_command_path, write_sudoers_file,
 };
-use crate::error::{Error, Result};
-use crate::host_ops::{self, AddHostParams};
-use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::PosixSshCommandExecutor;
-use crate::ssh_key;
-use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_ssh_runtime::error::{Error, Result};
+use uptrakit_agent_ssh_runtime::host_ops::{self, AddHostParams};
+use uptrakit_agent_ssh_runtime::remote_exec::SshRemoteExecutor;
+use uptrakit_agent_ssh_runtime::ssh_executor::PosixSshCommandExecutor;
+use uptrakit_agent_ssh_runtime::ssh_key;
+use uptrakit_agent_ssh_runtime::ssh_transport::{
+    self, AuthMethod, SshConnectionConfig, SshSession,
+};
 
 /// Maximum length for POSIX usernames.
 const MAX_USERNAME_LEN: usize = 32;

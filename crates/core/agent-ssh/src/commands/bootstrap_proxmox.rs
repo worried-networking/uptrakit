@@ -19,12 +19,14 @@ use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
     write_sudoers_file,
 };
-use crate::db::entity::ssh_host::SshKeyType;
-use crate::error::{Error, Result};
-use crate::host_ops::{self, AddHostParams};
-use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_key;
-use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_ssh_runtime::db::entity::ssh_host::SshKeyType;
+use uptrakit_agent_ssh_runtime::error::{Error, Result};
+use uptrakit_agent_ssh_runtime::host_ops::{self, AddHostParams};
+use uptrakit_agent_ssh_runtime::remote_exec::SshRemoteExecutor;
+use uptrakit_agent_ssh_runtime::ssh_key;
+use uptrakit_agent_ssh_runtime::ssh_transport::{
+    self, AuthMethod, SshConnectionConfig, SshSession,
+};
 
 use std::path::Path;
 use std::time::Duration;

@@ -8,18 +8,20 @@ use uptrakit_service_sdk::ServiceIdentityState;
 use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};
 use crate::commands::sync::{self, SyncArgs};
-use crate::error::{Error, Result};
-use crate::host_ops::{self, AddHostParams, HostUpdates};
-use crate::ssh_config;
-use crate::ssh_key;
+use uptrakit_agent_ssh_runtime::error::{Error, Result};
+use uptrakit_agent_ssh_runtime::host_ops::{self, AddHostParams, HostUpdates};
+use uptrakit_agent_ssh_runtime::ssh_config;
+use uptrakit_agent_ssh_runtime::ssh_key;
 
 /// Dispatch a host subcommand.
 pub(crate) async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
-    let db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(sea_orm::DbErr::Custom(format!(
-            "failed to initialize local database: {e}"
-        ))))
-    })?;
+    let db = uptrakit_agent_ssh_runtime::db::init_db(state_dir)
+        .await
+        .map_err(|e| {
+            report!(Error::Database(sea_orm::DbErr::Custom(format!(
+                "failed to initialize local database: {e}"
+            ))))
+        })?;
 
     match command {
         HostCommands::Add {

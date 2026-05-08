@@ -20,14 +20,14 @@ use crate::commands::sudoers::{
     ensure_docker_group_membership, install_helper_script, resolve_command_path,
     write_sudoers_file,
 };
-use crate::db::entity::ssh_host::Model;
-use crate::error::{Error, Result};
-use crate::host_ops::{self, update_host_sudo_state};
-use crate::operations::sync::{NoopGuestBootstrap, NoopInfraActionInvoker};
-use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::PosixSshCommandExecutor;
-use crate::ssh_target::SshTarget;
-use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_ssh_runtime::db::entity::ssh_host::Model;
+use uptrakit_agent_ssh_runtime::error::{Error, Result};
+use uptrakit_agent_ssh_runtime::host_ops::{self, update_host_sudo_state};
+use uptrakit_agent_ssh_runtime::operations::sync::{NoopGuestBootstrap, NoopInfraActionInvoker};
+use uptrakit_agent_ssh_runtime::remote_exec::SshRemoteExecutor;
+use uptrakit_agent_ssh_runtime::ssh_executor::PosixSshCommandExecutor;
+use uptrakit_agent_ssh_runtime::ssh_target::SshTarget;
+use uptrakit_agent_ssh_runtime::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 use uptrakit_plugin_infrastructure_registry::agent_infra::InfraPluginContext;
 
 /// Arguments for the `sync` command.

@@ -1,25 +1,14 @@
 mod cli;
 mod host_cli;
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
-
 use clap::Parser;
 use rootcause::prelude::*;
-use uptrakit_agent_ssh::runtime_support::AgentSshRuntimeSupport;
-use uptrakit_agent_ssh::{
-    db, init_ssh_data_key_ring, reencrypt_ssh_to_v3, register_ssh_column_aad, ssh_pool,
-};
+
 use uptrakit_agent_ssh_runtime::{
-    SshAgentEvent, SshAgentIdentity, SshAgentRuntime, SshAgentRuntimeConfig, SshAgentSettings,
-    ssh_agent_capabilities,
+    AgentSshHandler, AgentSshMode, db, init_ssh_data_key_ring, reencrypt_ssh_to_v3,
+    register_ssh_column_aad, rotate_ssh_master_key,
 };
-use uptrakit_audit_log::RuntimeAuditEmitter;
-use uptrakit_service_sdk::{
-    LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
-    default_resolve_shutdown,
-};
-use uptrakit_wire::{Capability, ServiceTransport};
+use uptrakit_service_sdk::run_lifecycle_and_handle_errors;
 
 use cli::{Args, Commands};
 
@@ -36,122 +25,6 @@ enum InitError {
 }
 
 type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
-
-struct SshAgentHandler {
-    runtime: SshAgentRuntime<AgentSshRuntimeSupport>,
-}
-
-#[async_trait::async_trait]
-impl ServiceHandler for SshAgentHandler {
-    const DIR_NAME: &'static str = "agent-ssh";
-    const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
-    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
-
-    type ServiceEvent = SshAgentEvent;
-
-    async fn on_connected(
-        &mut self,
-        conn: &mut dyn ServiceTransport,
-        identity: &ServiceIdentityState,
-    ) -> LoopResult<()> {
-        let encryption_public_key = identity.public_key_raw().map(|bytes| {
-            use base64::Engine as _;
-            base64::engine::general_purpose::STANDARD.encode(&bytes)
-        });
-
-        self.runtime
-            .on_connected(
-                conn,
-                SshAgentIdentity {
-                    service_id: identity.service_id(),
-                    private_key_der: identity.private_key_pkcs8_der(),
-                    encryption_public_key,
-                },
-            )
-            .await
-            .map_err(|error| rootcause::Report::new(LoopError::Other(error.to_string())))
-    }
-
-    async fn on_message(
-        &mut self,
-        msg: uptrakit_wire::ControllerMessage,
-        conn: &mut dyn ServiceTransport,
-    ) -> LoopResult<Option<LoopOutcome>> {
-        self.runtime.handle_controller_message(msg, conn).await;
-        Ok(None)
-    }
-
-    async fn on_settings(
-        &mut self,
-        settings: &uptrakit_wire::ServiceSettingsPayload,
-        conn: &mut dyn ServiceTransport,
-        agreed_capabilities: &std::collections::BTreeSet<Capability>,
-    ) {
-        if let Err(error) = self
-            .runtime
-            .apply_settings(
-                SshAgentSettings {
-                    tenant_id: settings.tenant_id,
-                    ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
-                    persist_tenant_id: true,
-                },
-                conn,
-            )
-            .await
-        {
-            tracing::warn!(error = %error, "failed to apply SSH agent service settings");
-        }
-    }
-
-    fn capabilities(&self) -> BTreeSet<Capability> {
-        ssh_agent_capabilities()
-    }
-
-    async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        self.runtime.poll_event().await
-    }
-
-    async fn on_service_event(
-        &mut self,
-        event: Self::ServiceEvent,
-        conn: &mut dyn ServiceTransport,
-    ) -> LoopResult<Option<LoopOutcome>> {
-        Ok(self.runtime.handle_event(event, conn).await)
-    }
-
-    fn on_surface_action_response(
-        &mut self,
-        response: uptrakit_wire::surfaces::SurfaceActionResponse,
-    ) {
-        self.runtime.handle_surface_action_response(response);
-    }
-
-    async fn on_surface_action_request(
-        &mut self,
-        request: uptrakit_wire::surfaces::SurfaceActionRequest,
-        conn: &mut dyn ServiceTransport,
-    ) -> LoopResult<()> {
-        self.runtime
-            .handle_controller_message(
-                uptrakit_wire::ControllerMessage::SurfaceActionRequest(request),
-                conn,
-            )
-            .await;
-        Ok(())
-    }
-
-    async fn on_shutdown(
-        &mut self,
-        conn: &mut dyn ServiceTransport,
-        cause: ShutdownCause,
-        shutdown_timeout: std::time::Duration,
-    ) -> LoopOutcome {
-        let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
-        self.runtime
-            .shutdown(conn, shutdown_timeout, disconnect_reason, outcome)
-            .await
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -244,40 +117,9 @@ async fn main() {
         rotate_ssh_master_key(&local_db, new_key_path).await;
     }
 
-    let infra_bundles = {
-        let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
-        #[expect(
-            clippy::expect_used,
-            reason = "infallible at startup: catalog construction failures are static configuration errors that must abort process initialization"
-        )]
-        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-            .expect("plugin catalog must build successfully");
-        Arc::new(catalog.create_infra_bundles(&catalog_config))
-    };
-    let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
-    let support = AgentSshRuntimeSupport::new(
-        local_db,
-        state_dir.clone(),
-        ssh_pool::SshConnectionPool::new(),
-        surface_proxy,
-        infra_bundles,
-        true,
-    );
+    let mut handler = AgentSshHandler::new(local_db, state_dir, AgentSshMode::Binary, None);
 
-    let mut handler = SshAgentHandler {
-        runtime: SshAgentRuntime::new(SshAgentRuntimeConfig::with_audit_emitter(
-            support,
-            state_dir.join("update-freeze"),
-            RuntimeAuditEmitter::new(),
-        )),
-    };
-
-    uptrakit_service_sdk::run_lifecycle_and_handle_errors(
-        "uptrakit-agent-ssh",
-        &args.common,
-        &mut handler,
-    )
-    .await;
+    run_lifecycle_and_handle_errors("uptrakit-agent-ssh", &args.common, &mut handler).await;
 }
 
 async fn resolve_state_dir_from_common(
@@ -375,115 +217,6 @@ fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
         )))
     })?;
     Ok(key_bytes)
-}
-
-async fn rotate_ssh_master_key(db: &sea_orm::DatabaseConnection, new_key_path: &std::path::Path) {
-    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
-
-    let new_key_hex = match std::fs::read_to_string(new_key_path) {
-        Ok(contents) => contents,
-        Err(error) => {
-            tracing::error!(path = %new_key_path.display(), error = %error, "failed to read new master key file");
-            return;
-        }
-    };
-
-    let new_key_bytes = match uptrakit_shared_types::hex::decode(new_key_hex.trim()) {
-        Ok(bytes) => {
-            let array: [u8; 32] = match bytes.try_into() {
-                Ok(array) => array,
-                Err(_) => {
-                    tracing::error!("new master key must be exactly 32 bytes (64 hex chars)");
-                    return;
-                }
-            };
-            array
-        }
-        Err(error) => {
-            tracing::error!(error = %error, "failed to decode new master key hex");
-            return;
-        }
-    };
-    let new_kek = zeroize::Zeroizing::new(new_key_bytes);
-
-    let new_kek_fp = {
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(new_kek.as_slice());
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "infallible: `Sha256::digest` always returns 32 bytes, so `hash[..8]` is always in range"
-        )]
-        let prefix = &hash[..8];
-        uptrakit_shared_types::hex::encode(prefix)
-    };
-
-    let current_kek_fp = match uptrakit_crypto::master_key_fingerprint() {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to compute KEK fingerprint");
-            return;
-        }
-    };
-
-    if new_kek_fp == current_kek_fp {
-        tracing::warn!("new master key has same fingerprint as current — no rotation needed");
-        return;
-    }
-
-    let txn = match db.begin().await {
-        Ok(txn) => txn,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to begin transaction for key rotation");
-            return;
-        }
-    };
-
-    let rows = match uptrakit_agent_ssh::db::entity::data_encryption_key::Entity::find()
-        .all(&txn)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to query DEKs for rotation");
-            return;
-        }
-    };
-
-    for row in &rows {
-        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
-            Ok(dek) => dek,
-            Err(error) => {
-                tracing::error!(key_id = %row.key_id, error = %error, "failed to unwrap DEK");
-                return;
-            }
-        };
-        let new_wrapped = match uptrakit_crypto::wrap_data_key_with(&new_kek, &dek) {
-            Ok(wrapped) => wrapped,
-            Err(error) => {
-                tracing::error!(key_id = %row.key_id, error = %error, "failed to re-wrap DEK");
-                return;
-            }
-        };
-        let mut active_model: uptrakit_agent_ssh::db::entity::data_encryption_key::ActiveModel =
-            row.clone().into_active_model();
-        active_model.wrapped_key = sea_orm::Set(new_wrapped);
-        active_model.kek_fingerprint = sea_orm::Set(new_kek_fp.clone());
-        if let Err(error) = active_model.update(&txn).await {
-            tracing::error!(key_id = %row.key_id, error = %error, "failed to update DEK row");
-            return;
-        }
-    }
-
-    if let Err(error) = txn.commit().await {
-        tracing::error!(error = %error, "failed to commit key rotation transaction");
-        return;
-    }
-
-    tracing::info!(
-        dek_count = rows.len(),
-        new_kek_fp,
-        "SSH agent master key rotation complete — restart with the new key file"
-    );
 }
 
 #[cfg(test)]
