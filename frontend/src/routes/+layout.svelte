@@ -562,13 +562,17 @@
 						<ul class="space-y-0.5">
 							{#each navItems as item (item.href)}
 								{@const NavIcon = item.icon}
-								<li class={item.badgeHref ? 'flex items-center' : ''}>
+								<li
+									class={item.badgeHref
+										? 'group relative flex items-center rounded-card transition-colors hover:bg-[var(--bg-raised)]'
+										: ''}
+								>
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
 										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
@@ -588,7 +592,7 @@
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
 											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
-											class="pl-1.5 shrink-0"
+											class="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center"
 											data-ui="app-shell-nav-badge"
 										>
 											<StatusBadge tone="info" label={item.badge} />
@@ -626,13 +630,17 @@
 						<ul class="space-y-0.5">
 							{#each navItems as item (item.href)}
 								{@const NavIcon = item.icon}
-								<li class={item.badgeHref ? 'flex items-center' : ''}>
+								<li
+									class={item.badgeHref
+										? 'group relative flex items-center rounded-card transition-colors hover:bg-[var(--bg-raised)]'
+										: ''}
+								>
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
 										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
@@ -653,7 +661,7 @@
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
 											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
-											class="pl-1.5 shrink-0"
+											class="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center"
 											data-ui="app-shell-nav-badge"
 											onclick={() => (sidebarOverlayOpen = false)}
 										>
@@ -690,13 +698,15 @@
 					{#each mobilePrimaryNavItems as item (item.href)}
 						{@const NavIcon = item.icon}
 						{#if item.badgeHref && item.badge}
-							<div class="flex min-w-0 flex-1 flex-col items-center">
+							<div
+								class="flex min-w-0 flex-1 flex-col items-center rounded-card transition-colors hover:bg-[var(--bg-raised)]"
+							>
 								<a
 									href={item.href}
 									class={`flex w-full min-h-[2rem] flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 										isNavItemActive(item) && !isBadgeHrefActive(item.badgeHref)
 											? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-											: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+											: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 									}`}
 									aria-current={isNavItemActive(item) && !isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 									data-ui="app-shell-mobile-nav-item"
@@ -722,7 +732,7 @@
 								class={`flex min-w-0 flex-1 flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 									isNavItemActive(item)
 										? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-										: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+										: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 								}`}
 								aria-current={isNavItemActive(item) ? 'page' : undefined}
 								data-ui="app-shell-mobile-nav-item"
@@ -744,7 +754,7 @@
 							class={`flex min-w-0 flex-1 items-center justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 								mobileOverflowOpen || mobileOverflowActive
 									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 							}`}
 							type="button"
 							aria-expanded={mobileOverflowOpen}
@@ -776,13 +786,17 @@
 						<ul class="space-y-0.5">
 							{#each mobileOverflowNavItems as item (item.href)}
 								{@const NavIcon = item.icon}
-								<li class={item.badgeHref ? 'flex items-center' : ''}>
+								<li
+									class={item.badgeHref
+										? 'group relative flex items-center rounded-card transition-colors hover:bg-[var(--bg-raised)]'
+										: ''}
+								>
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)] group-hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
 										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
@@ -803,7 +817,7 @@
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
 											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
-											class="pl-1.5 shrink-0"
+											class="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center"
 											data-ui="app-shell-nav-badge"
 											onclick={() => (mobileOverflowOpen = false)}
 										>
