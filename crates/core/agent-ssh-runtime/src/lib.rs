@@ -1,6 +1,7 @@
 pub mod client;
 pub mod db;
 pub mod error;
+pub mod handler;
 pub mod host_ops;
 pub mod operations;
 pub mod runtime_support;
@@ -954,6 +955,309 @@ where
         }
     }
 }
+
+pub const AAD_SSH_PRIVATE_KEY: &str = "uptrakit:ssh_hosts:private_key";
+
+pub fn register_ssh_column_aad() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+    use uptrakit_crypto::ColumnAadEntry;
+    let entries: &[ColumnAadEntry] = &[ColumnAadEntry {
+        table: "ssh_hosts",
+        column: "private_key",
+        aad: AAD_SSH_PRIVATE_KEY,
+    }];
+    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
+    }
+}
+
+pub async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::{ActiveModelTrait, EntityTrait};
+
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    let kek_fp = match uptrakit_crypto::master_key_fingerprint() {
+        Ok(fp) => fp,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to compute KEK fingerprint");
+            return;
+        }
+    };
+
+    let rows = match db::entity::data_encryption_key::Entity::find()
+        .all(db)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to query data_encryption_keys");
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        let dek = match uptrakit_crypto::generate_data_key() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to generate initial DEK");
+                return;
+            }
+        };
+        let wrapped = match uptrakit_crypto::wrap_data_key(&dek) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to wrap initial DEK");
+                return;
+            }
+        };
+        let am = db::entity::data_encryption_key::ActiveModel {
+            id: sea_orm::Set(uuid::Uuid::now_v7()),
+            key_id: sea_orm::Set(dek.key_id.clone()),
+            wrapped_key: sea_orm::Set(wrapped),
+            kek_fingerprint: sea_orm::Set(kek_fp.clone()),
+            status: sea_orm::Set("active".to_string()),
+            created_at: sea_orm::Set(time::OffsetDateTime::now_utc()),
+            retired_at: sea_orm::Set(None),
+        };
+        if let Err(e) = am.insert(db).await {
+            tracing::debug!(error = %e, "initial DEK insert failed (may be race), will load existing");
+        } else {
+            tracing::info!(key_id = %dek.key_id, "generated initial data encryption key");
+        }
+        let rows = match db::entity::data_encryption_key::Entity::find()
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to re-read data_encryption_keys");
+                return;
+            }
+        };
+        build_and_init_ssh_ring(&rows, &kek_fp);
+        return;
+    }
+    build_and_init_ssh_ring(&rows, &kek_fp);
+}
+
+fn build_and_init_ssh_ring(rows: &[db::entity::data_encryption_key::Model], kek_fp: &str) {
+    let mut keys = std::collections::HashMap::new();
+    let mut active_key_id: Option<String> = None;
+    for row in rows {
+        if row.kek_fingerprint != kek_fp {
+            tracing::error!(
+                key_id = %row.key_id,
+                stored_fp = %row.kek_fingerprint,
+                current_fp = %kek_fp,
+                "DEK was wrapped with a different KEK — master key mismatch"
+            );
+            return;
+        }
+        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(key_id = %row.key_id, error = %e, "failed to unwrap DEK");
+                return;
+            }
+        };
+        keys.insert(dek.key_id.clone(), dek.key);
+        if row.status == "active" {
+            active_key_id = Some(row.key_id.clone());
+        }
+    }
+    let active = match active_key_id {
+        Some(id) => id,
+        None => {
+            tracing::error!("no active DEK found in data_encryption_keys table");
+            return;
+        }
+    };
+    let ring = match uptrakit_crypto::DataKeyRing::new(keys, active.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to construct data key ring");
+            return;
+        }
+    };
+    if let Err(e) = uptrakit_crypto::init_data_key_ring(ring) {
+        tracing::warn!(error = %e, "data key ring already initialized (harmless)");
+    } else {
+        tracing::info!(active_key_id = %active, "data key ring initialized");
+    }
+}
+
+pub async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
+    use uptrakit_crypto::EncryptedString;
+
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+    let rows = match db::entity::ssh_host::Entity::find().all(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to query ssh_hosts for v3 upgrade");
+            return;
+        }
+    };
+    let mut count = 0u64;
+    for row in rows {
+        if !row.private_key.needs_v3_upgrade() {
+            continue;
+        }
+        let plaintext = row.private_key.expose_secret().to_string();
+        let id = row.id;
+        match EncryptedString::new(plaintext, AAD_SSH_PRIVATE_KEY) {
+            Ok(encrypted) => {
+                let mut am = row.into_active_model();
+                am.private_key = sea_orm::Set(encrypted);
+                if let Err(e) = am.update(db).await {
+                    tracing::error!(id = %id, error = %e, "v3 upgrade failed: ssh_hosts.private_key");
+                } else {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                tracing::error!(id = %id, error = %e, "v3 encrypt failed: ssh_hosts.private_key")
+            }
+        }
+    }
+    if count > 0 {
+        tracing::info!(
+            table = "ssh_hosts",
+            column = "private_key",
+            count,
+            "upgraded to ENC:v3"
+        );
+    }
+}
+
+pub async fn rotate_ssh_master_key(
+    db: &sea_orm::DatabaseConnection,
+    new_key_path: &std::path::Path,
+) {
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
+
+    let new_key_hex = match std::fs::read_to_string(new_key_path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            tracing::error!(path = %new_key_path.display(), error = %error, "failed to read new master key file");
+            return;
+        }
+    };
+
+    let new_key_bytes = match uptrakit_shared_types::hex::decode(new_key_hex.trim()) {
+        Ok(bytes) => {
+            let array: [u8; 32] = match bytes.try_into() {
+                Ok(array) => array,
+                Err(_) => {
+                    tracing::error!("new master key must be exactly 32 bytes (64 hex chars)");
+                    return;
+                }
+            };
+            array
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "failed to decode new master key hex");
+            return;
+        }
+    };
+    let new_kek = zeroize::Zeroizing::new(new_key_bytes);
+
+    let new_kek_fp = {
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(new_kek.as_slice());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "infallible: `Sha256::digest` always returns 32 bytes, so `hash[..8]` is always in range"
+        )]
+        let prefix = &hash[..8];
+        uptrakit_shared_types::hex::encode(prefix)
+    };
+
+    let current_kek_fp = match uptrakit_crypto::master_key_fingerprint() {
+        Ok(fingerprint) => fingerprint,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to compute KEK fingerprint");
+            return;
+        }
+    };
+
+    if new_kek_fp == current_kek_fp {
+        tracing::warn!("new master key has same fingerprint as current — no rotation needed");
+        return;
+    }
+
+    let txn = match db.begin().await {
+        Ok(txn) => txn,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to begin transaction for key rotation");
+            return;
+        }
+    };
+
+    let rows = match crate::db::entity::data_encryption_key::Entity::find()
+        .all(&txn)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to query DEKs for rotation");
+            return;
+        }
+    };
+
+    for row in &rows {
+        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
+            Ok(dek) => dek,
+            Err(error) => {
+                tracing::error!(key_id = %row.key_id, error = %error, "failed to unwrap DEK");
+                return;
+            }
+        };
+        let new_wrapped = match uptrakit_crypto::wrap_data_key_with(&new_kek, &dek) {
+            Ok(wrapped) => wrapped,
+            Err(error) => {
+                tracing::error!(key_id = %row.key_id, error = %error, "failed to re-wrap DEK");
+                return;
+            }
+        };
+        let mut active_model: crate::db::entity::data_encryption_key::ActiveModel =
+            row.clone().into_active_model();
+        active_model.wrapped_key = sea_orm::Set(new_wrapped);
+        active_model.kek_fingerprint = sea_orm::Set(new_kek_fp.clone());
+        if let Err(error) = active_model.update(&txn).await {
+            tracing::error!(key_id = %row.key_id, error = %error, "failed to update DEK row");
+            return;
+        }
+    }
+
+    if let Err(error) = txn.commit().await {
+        tracing::error!(error = %error, "failed to commit key rotation transaction");
+        return;
+    }
+
+    tracing::info!(
+        dek_count = rows.len(),
+        new_kek_fp,
+        "SSH agent master key rotation complete — restart with the new key file"
+    );
+}
+
+/// Returns the agent-ssh schema migrations.
+///
+/// Called by `controller-runtime` until the `ServiceHandler` trait gains a
+/// `service_migrations()` method.
+pub fn service_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    use sea_orm_migration::MigratorTrait as _;
+    crate::db::migration::Migrator::migrations()
+}
+
+pub use handler::{AgentSshHandler, AgentSshMode, EciesKeypair};
 
 #[cfg(test)]
 mod tests {
