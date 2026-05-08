@@ -22,14 +22,7 @@ impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         // Keep legacy m20260307_000002_pending_proxmox_matches — existing
         // databases already have it recorded in seaql_migrations.
-        #[expect(
-            clippy::allow_attributes,
-            clippy::allow_attributes_without_reason,
-            reason = "feature-conditional: `mut` is needed when plugin migrations are appended; \
-                      `#[expect]` would fail under feature variants where the binding is never mutated"
-        )]
-        #[allow(unused_mut)]
-        let mut migrations: Vec<Box<dyn MigrationTrait>> = vec![
+        let migrations: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20260215_000001_initial::Migration),
             Box::new(m20260222_000002_add_machine_id::Migration),
             Box::new(m20260224_000003_add_sudo_columns::Migration),
