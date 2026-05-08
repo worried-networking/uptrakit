@@ -155,7 +155,7 @@ In `crates/core/agent-ssh-runtime/src/handler.rs`, add the following method insi
     where
         Self: Sized,
     {
-        crate::db::migration::service_migrations()
+        crate::service_migrations()
     }
 ```
 
@@ -217,13 +217,22 @@ Replace the entire contents of
 use crate::db::{DbError, Result};
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
+use sea_orm_migration::MigrationTrait;
 
 pub(crate) async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
-    let mut plugin_migrations = uptrakit_plugin_infrastructure_registry::all_descriptors()
-        .into_iter()
-        .filter_map(|d| d.migrations)
-        .flat_map(|f| f())
-        .collect::<Vec<_>>();
+    #[cfg_attr(
+        not(feature = "embedded-ssh-agent"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when embedded-ssh-agent extends the migration list"
+        )
+    )]
+    let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> =
+        uptrakit_plugin_infrastructure_registry::all_descriptors()
+            .into_iter()
+            .filter_map(|d| d.migrations)
+            .flat_map(|f| f())
+            .collect();
 
     #[cfg(feature = "embedded-ssh-agent")]
     plugin_migrations.extend(
@@ -429,6 +438,31 @@ grep -q "run_embedded_ssh_agent" crates/core/controller-runtime/src/service_host
 ```
 
 Expected: `FAIL: old call still present` (not updated yet).
+
+- [ ] **Step 1.5: Make generate_ecies_keypair pub(crate) with rootcause error type**
+
+In `crates/core/controller-runtime/src/ssh_agent/mod.rs`, replace:
+
+```rust
+fn generate_ecies_keypair() -> Result<(Option<Vec<u8>>, String), String> {
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|error| format!("P-256 key generation failed: {error}"))?;
+```
+
+with:
+
+```rust
+pub(crate) fn generate_ecies_keypair() -> rootcause::Result<(Option<Vec<u8>>, String)> {
+    use rootcause::prelude::*;
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|e| report!(std::io::Error::other(format!("P-256 key generation failed: {e}"))))?;
+```
+
+This mirrors the MQTT pattern in Task 6, Step 1. The `?` in `register_agent_ssh`
+(returns `rootcause::Result<()>`) now works.
+
+Also update the test for this function (line ~188) — change `.expect("keygen")` to
+`.unwrap()` (tests may use `unwrap`; the signature change is compatible).
 
 - [ ] **Step 2: Update register_agent_ssh()**
 
@@ -668,14 +702,26 @@ The file should retain only:
 - `generate_ecies_keypair()` function
 - Any imports needed by those two items
 
-- [ ] **Step 2: Delete run_embedded_mqtt loop from mqtt/mod.rs**
+- [ ] **Step 2: Port tests to mqtt-runtime before deleting from mqtt/mod.rs**
 
-In `crates/core/controller-runtime/src/mqtt/mod.rs`, delete:
+Before deleting, port these two `#[tokio::test]` functions from
+`crates/core/controller-runtime/src/mqtt/mod.rs` into
+`crates/core/mqtt-runtime/src/handler.rs` (or a new `tests` module there), updated to use
+`run_embedded_service(MqttHandler::new_embedded(identity), transport, drain, abort)` as the
+harness instead of `run_embedded_mqtt`:
+
+- `transport_close_still_runs_runtime_shutdown` — verifies that transport close sends
+  `Disconnecting(Shutdown)`.
+- `embedded_mqtt_registers_surface_with_default_tenant_binding` — verifies surface
+  registration carries the correct tenant binding from `ServiceSettings`.
+
+Then in `crates/core/controller-runtime/src/mqtt/mod.rs`, delete:
 
 - The entire `pub(crate) async fn run_embedded_mqtt(...)` function.
 - The local `async fn handle_controller_message(...)` helper (used only by
   `run_embedded_mqtt`).
-- All imports now made unused by this deletion.
+- The two original test functions and any now-unused imports in the `tests` module.
+- All imports now made unused by these deletions at the module level.
 
 The file should retain:
 
@@ -881,7 +927,6 @@ The controller calls it as a static method on the concrete handler type at start
 let migrations = AgentSshHandler::service_migrations();
 run_migrations_with_plugins(db, migrations).await?;
 ```
-````
 
 Services without a DB rely on the default `vec![]`.
 
@@ -897,14 +942,13 @@ run_embedded_service(handler, transport, tokens.drain, tokens.abort).await;
 ```
 
 The standalone binary does the same with `AgentSshMode::Binary` and `None` for the keypair.
-
-````text
+````
 
 - [ ] **Step 2: Lint and format**
 
 ```bash
 npx prettier --write docs/development/coding-standards.md
-````
+```
 
 - [ ] **Step 3: Verify markdown lint passes**
 
@@ -974,7 +1018,8 @@ Expected: no issues.
 - [ ] **Step 7: Commit formatting if needed**
 
 ```bash
-git add -u && git diff --cached --quiet || git commit -m "style: cargo fmt after WS5 unified embedded path"
+git diff --name-only -- 'crates/**/*.rs' | xargs -r git add
+git diff --cached --quiet || git commit -m "style: cargo fmt after unified embedded path"
 ```
 
 ---
