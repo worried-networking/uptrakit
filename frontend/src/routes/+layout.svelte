@@ -25,6 +25,7 @@
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
 	import { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } from '$lib/stores/software-updates.svelte';
+	import { UPDATES_AVAILABLE_HREF } from './software/constants';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -86,7 +87,7 @@
 		stableId: string;
 		badge?: string;
 		icon?: ComponentType<SvelteComponent>;
-	};
+	} & ({ badgeHref?: undefined; badgeAriaLabel?: undefined } | { badgeHref: string; badgeAriaLabel: string });
 
 	function formatBadge(count: number | null): string | undefined {
 		if (count === null || count === 0) return undefined;
@@ -251,25 +252,35 @@
 
 	// Merge built-in and surface nav items with deterministic canonical ordering:
 	// priority -> label -> origin (built-in first) -> stable ID.
-	const navItems = $derived(
-		[
+	const navItems = $derived.by(() => {
+		const softwareUpdateCount = getUpdatableSoftwareCount();
+		return [
 			...builtInNavItems
 				.filter((item) => {
 					if (!item.permission) return true;
 					const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
 					return perms.some((p) => getUser()?.permissions.includes(p));
 				})
-				.map(
-					(item): ShellNavItem => ({
+				.map((item): ShellNavItem => {
+					const isSoftware = item.href === '/software';
+					const base = {
 						href: item.href,
 						label: item.label,
 						priority: item.priority,
-						origin: 'built-in',
+						origin: 'built-in' as const,
 						stableId: item.href,
 						icon: item.icon,
-						badge: item.href === '/software' ? formatBadge(getUpdatableSoftwareCount()) : undefined
-					})
-				),
+						badge: isSoftware ? formatBadge(softwareUpdateCount) : undefined
+					};
+					if (isSoftware && softwareUpdateCount) {
+						return {
+							...base,
+							badgeHref: UPDATES_AVAILABLE_HREF,
+							badgeAriaLabel: 'View software updates available'
+						};
+					}
+					return base;
+				}),
 			...surfacePageNavItems.map(
 				(item): ShellNavItem => ({
 					href: item.href,
@@ -280,8 +291,8 @@
 					icon: resolveIcon(item.icon).component
 				})
 			)
-		].sort(compareShellNavItems)
-	);
+		].sort(compareShellNavItems);
+	});
 	const isTablet = $derived(viewportWidth >= TABLET_BREAKPOINT && viewportWidth < DESKTOP_BREAKPOINT);
 	const isMobile = $derived(viewportWidth < TABLET_BREAKPOINT);
 	const mobilePrimaryNavItems = $derived(navItems.slice(0, 4));
