@@ -295,7 +295,7 @@ describe('layout Button migration', () => {
 			expect(badgeLink).toBeNull();
 		});
 
-		describe('when URL matches badge href', () => {
+		describe('when URL matches badge href exactly', () => {
 			beforeEach(() => {
 				page.url = new URL(`http://localhost${UPDATES_AVAILABLE_HREF}`) as typeof page.url;
 			});
@@ -305,6 +305,28 @@ describe('layout Button migration', () => {
 			});
 
 			it('badge link has aria-current="page" and label link does not', () => {
+				render(Layout, {
+					children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+				});
+				const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
+				expect(badgeLink?.getAttribute('aria-current')).toBe('page');
+				const labelLink = document.querySelector(
+					'[data-ui="app-shell-nav-item"][href="/software"]'
+				) as HTMLAnchorElement | null;
+				expect(labelLink?.getAttribute('aria-current')).toBeNull();
+			});
+		});
+
+		describe('when URL is a superset of badge href (e.g. tab= added by software page)', () => {
+			beforeEach(() => {
+				page.url = new URL('http://localhost/software?tab=featured&updatable=true') as typeof page.url;
+			});
+
+			afterEach(() => {
+				page.url = new URL('http://localhost/hosts') as typeof page.url;
+			});
+
+			it('badge link has aria-current="page" when URL has additional params', () => {
 				render(Layout, {
 					children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
 				});
