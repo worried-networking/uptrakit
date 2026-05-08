@@ -190,3 +190,220 @@ fn map_runtime_outcome(outcome: MqttRuntimeLoopOutcome) -> LoopOutcome {
         MqttRuntimeLoopOutcome::Disconnected => LoopOutcome::Disconnected,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+    use uptrakit_wire::{
+        Capability, ControllerMessage, ServiceMessage, ServiceTransport, TransportError,
+        payloads::ServiceSettingsPayload,
+    };
+    use uuid::Uuid;
+
+    use crate::MqttRuntimeIdentity;
+
+    use super::MqttHandler;
+
+    // ---------------------------------------------------------------------------
+    // Test-local transport
+    // ---------------------------------------------------------------------------
+
+    /// Minimal in-process transport for handler integration tests.
+    ///
+    /// `ctrl_rx` carries messages from the test into the service (inbound).
+    /// `svc_tx` forwards messages from the service back to the test (outbound).
+    struct TestTransport {
+        ctrl_rx: mpsc::Receiver<ControllerMessage>,
+        svc_tx: mpsc::Sender<ServiceMessage>,
+    }
+
+    #[async_trait]
+    impl ServiceTransport for TestTransport {
+        async fn transport_send(&mut self, msg: ServiceMessage) -> Result<(), TransportError> {
+            // Swallow send errors — the test receiver may have been dropped by the
+            // time the service sends its last message (e.g. Disconnecting on shutdown).
+            let _ = self.svc_tx.send(msg).await;
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
+            let _ = self.svc_tx.try_send(msg);
+        }
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: ServiceMessage,
+        ) -> Result<(), TransportError> {
+            self.transport_send(msg).await
+        }
+
+        async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+            self.ctrl_rx.recv().await
+        }
+
+        fn close_policy(&self) -> uptrakit_wire::TransportClosePolicy {
+            uptrakit_wire::TransportClosePolicy::Shutdown
+        }
+
+        fn is_yielded(&self) -> bool {
+            false
+        }
+    }
+
+    /// Construct a linked `(TestTransport, ctrl_tx, svc_rx)` triple.
+    ///
+    /// * `ctrl_tx` — test side: enqueue `ControllerMessage`s into the service.
+    /// * `svc_rx`  — test side: drain `ServiceMessage`s sent by the service.
+    fn make_transport() -> (
+        TestTransport,
+        mpsc::Sender<ControllerMessage>,
+        mpsc::Receiver<ServiceMessage>,
+    ) {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(16);
+        let (svc_tx, svc_rx) = mpsc::channel::<ServiceMessage>(64);
+        (TestTransport { ctrl_rx, svc_tx }, ctrl_tx, svc_rx)
+    }
+
+    /// Build a minimal `ServiceSettingsPayload` that satisfies the embedded startup
+    /// sequence. `extra_caps` are merged into the capability set so tests can
+    /// control the agreed-capability negotiation outcome.
+    fn make_settings(
+        tenant_id: Option<Uuid>,
+        extra_caps: impl IntoIterator<Item = Capability>,
+    ) -> ServiceSettingsPayload {
+        let mut capabilities = BTreeSet::new();
+        capabilities.extend(extra_caps);
+        ServiceSettingsPayload {
+            capabilities,
+            tenant_id,
+            ping_interval: Duration::from_secs(60),
+            renewal_window_hours: 0,
+            ca_bundle_hash: String::new(),
+            report_page_limits: Default::default(),
+            shutdown_timeout: None,
+        }
+    }
+
+    /// Generate a minimal ECIES identity for `MqttHandler::new_embedded`.
+    fn make_identity() -> MqttRuntimeIdentity {
+        use base64::Engine as _;
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("P-256 key generation must succeed in tests");
+        let private_der = key_pair.serialize_der();
+        let public_b64 =
+            base64::engine::general_purpose::STANDARD.encode(key_pair.public_key_raw());
+        MqttRuntimeIdentity {
+            service_id: None,
+            private_key_der: Some(private_der),
+            encryption_public_key: Some(public_b64),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Test 1 – drain-triggered shutdown sends Disconnecting
+    // ---------------------------------------------------------------------------
+
+    /// Verify that a graceful drain causes the embedded MQTT handler to emit
+    /// `ServiceMessage::Disconnecting` with reason `Shutdown`.
+    ///
+    /// This mirrors the intent of the original `transport_close_still_runs_runtime_shutdown`
+    /// test from `controller-runtime`. In the new `run_embedded_service` harness, `on_shutdown`
+    /// is invoked on drain (not on transport close), so the trigger is the drain token.
+    #[tokio::test]
+    async fn drain_shutdown_sends_disconnecting() {
+        let identity = make_identity();
+        let handler = MqttHandler::new_embedded(identity);
+        let (transport, ctrl_tx, mut svc_rx) = make_transport();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        // Send ServiceSettings first (required by the embedded startup sequence),
+        // then immediately cancel the drain token.
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings(
+                None,
+                std::iter::empty(),
+            )))
+            .await
+            .expect("settings send must succeed");
+        drain.cancel();
+
+        uptrakit_service_sdk::run_embedded_service(handler, transport, drain, abort).await;
+
+        // Collect all outbound messages.
+        let mut messages = Vec::new();
+        svc_rx.close();
+        while let Some(msg) = svc_rx.recv().await {
+            messages.push(msg);
+        }
+
+        assert!(
+            messages.iter().any(|msg| matches!(
+                msg,
+                ServiceMessage::Disconnecting(payload)
+                    if payload.reason == uptrakit_wire::DisconnectReason::Shutdown
+            )),
+            "expected at least one Disconnecting(Shutdown) message; got: {messages:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Test 2 – ServiceSettings with UiSurfaces triggers SurfaceRegistration
+    // ---------------------------------------------------------------------------
+
+    /// Verify that when the embedded MQTT handler receives `ServiceSettings` with
+    /// `UiSurfaces` capability and a tenant ID, it emits a `SurfaceRegistration`
+    /// message whose `effective_tenant_binding.tenant_id` matches the tenant.
+    #[tokio::test]
+    async fn embedded_mqtt_registers_surface_with_default_tenant_binding() {
+        let identity = make_identity();
+        let handler = MqttHandler::new_embedded(identity);
+        let (transport, ctrl_tx, mut svc_rx) = make_transport();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        let default_tenant_id = Uuid::now_v7();
+
+        // Send settings that include UiSurfaces so the agreed set enables surface
+        // registration, and supply the tenant ID that must appear in the binding.
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings(
+                Some(default_tenant_id),
+                [Capability::UiSurfaces],
+            )))
+            .await
+            .expect("settings send must succeed");
+
+        // Drop the controller sender so the transport closes after settings are
+        // processed, causing the event loop to exit naturally.
+        drop(ctrl_tx);
+
+        uptrakit_service_sdk::run_embedded_service(handler, transport, drain, abort).await;
+
+        let mut registrations = Vec::new();
+        svc_rx.close();
+        while let Some(msg) = svc_rx.recv().await {
+            if let ServiceMessage::SurfaceRegistration(reg) = msg {
+                registrations.push(reg);
+            }
+        }
+
+        assert_eq!(
+            registrations.len(),
+            1,
+            "expected exactly one SurfaceRegistration; got {registrations:?}"
+        );
+        let registration = &registrations[0];
+        let expected_tenant = default_tenant_id.to_string();
+        assert_eq!(
+            registration.effective_tenant_binding.tenant_id.as_deref(),
+            Some(expected_tenant.as_str()),
+            "SurfaceRegistration tenant binding must match the configured default tenant"
+        );
+    }
+}
