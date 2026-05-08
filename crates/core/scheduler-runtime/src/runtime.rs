@@ -1,17 +1,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sea_orm::DatabaseConnection;
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-use uptrakit_scheduler_engine::executors::{
+use crate::executors::{
     auth_cleanup::AuthCleanupExecutor, detect_version::DetectVersionExecutor,
     discover_software::DiscoverSoftwareExecutor, fetch_releases::FetchReleasesExecutor,
     stale_lease_cleanup::StaleLeaseCleanupExecutor,
 };
-use uptrakit_scheduler_engine::{
-    Scheduler, SchedulerConfig, SchedulerNotifier, TASK_EXECUTION_TIMEOUT,
-};
+use crate::{Scheduler, SchedulerConfig, SchedulerNotifier, TASK_EXECUTION_TIMEOUT};
+use sea_orm::DatabaseConnection;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
 

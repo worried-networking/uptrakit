@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::SchedulerNotifier;
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database};
 use tokio::sync::mpsc;
 use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
-use uptrakit_scheduler_engine::SchedulerNotifier;
 use uptrakit_service_sdk::{
     LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause, Signal,
     default_resolve_shutdown,
@@ -143,7 +143,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
                         scheduler.register(
                             uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::AuditLogCleanup,
                             Box::new(
-                                uptrakit_scheduler_engine::executors::audit_log_cleanup::AuditLogCleanupExecutor::new(
+                                crate::executors::audit_log_cleanup::AuditLogCleanupExecutor::new(
                                     audit_log_db.clone(),
                                     audit_emitter.clone(),
                                 ),
