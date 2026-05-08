@@ -299,6 +299,22 @@ pub trait ServiceHandler: Send {
         cause: ShutdownCause,
         shutdown_timeout: Duration,
     ) -> LoopOutcome;
+
+    /// Schema migrations contributed by this Service.
+    ///
+    /// Called by the Controller at startup to collect embedded Service migrations
+    /// before running the combined migrator. Services without a local DB return
+    /// the default empty `vec![]`.
+    ///
+    /// `where Self: Sized` excludes this static method from the `dyn ServiceHandler` vtable,
+    /// preserving object safety.
+    #[cfg(feature = "service-migrations")]
+    fn service_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>
+    where
+        Self: Sized,
+    {
+        vec![]
+    }
 }
 
 #[cfg(test)]

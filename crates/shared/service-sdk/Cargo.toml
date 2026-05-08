@@ -16,6 +16,7 @@ test-support = []
 sensitive-params = ["dep:aws-lc-rs"]
 sea-orm = ["uptrakit-shared-types/sea-orm"]
 openapi = ["uptrakit-shared-types/openapi"]
+service-migrations = ["dep:sea-orm-migration"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -53,6 +54,7 @@ strum = { workspace = true }
 # Optional (sensitive-params feature only)
 aws-lc-rs = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
+sea-orm-migration = { workspace = true, optional = true }
 uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 
