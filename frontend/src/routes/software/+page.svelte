@@ -1114,6 +1114,7 @@
 							{totalItems}
 							{currentPage}
 							{totalPages}
+							{showUpdatableOnly}
 							onToggleGroup={toggleGroupCollapsed}
 							onToggleOverflow={toggleGroupOverflow}
 							onToggleBatch={toggleBatchSelect}

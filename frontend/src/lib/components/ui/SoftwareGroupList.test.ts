@@ -58,6 +58,7 @@ function makeProps(
 		itemDetailLoadingIds: SvelteSet<string>;
 		collapsedGroupIds: SvelteSet<string>;
 		expandedOverflowGroupIds: SvelteSet<string>;
+		showUpdatableOnly: boolean;
 	}> = {}
 ) {
 	return {
@@ -73,6 +74,7 @@ function makeProps(
 		totalItems: 0,
 		currentPage: 1,
 		totalPages: 1,
+		showUpdatableOnly: overrides.showUpdatableOnly ?? false,
 		onToggleGroup: vi.fn(),
 		onToggleOverflow: vi.fn(),
 		onToggleBatch: vi.fn(),
@@ -267,5 +269,84 @@ describe('SoftwareGroupList — zebra rows', () => {
 		expect(screen.getByTestId('software-host-row-row-h1')).toBeInTheDocument();
 		expect(screen.getByTestId('software-host-row-row-h2')).toBeInTheDocument();
 		expect(screen.queryByText('Loading hosts...')).not.toBeInTheDocument();
+	});
+});
+
+function makeUpdatableHost(rowId: string, hostId: string): SoftwareItemHostSummary {
+	return { ...makeHost(rowId, hostId), update_available: true, latest_version: '2.0.0' };
+}
+
+describe('SoftwareGroupList — showUpdatableOnly filter', () => {
+	it('collapses multi-host item to compact single-host render when only one host is updatable', () => {
+		const item = makeItem('b', 3);
+		const updHost = makeUpdatableHost('row-h1', 'hid1');
+		const upToDate1 = makeHost('row-h2', 'hid2');
+		const upToDate2 = makeHost('row-h3', 'hid3');
+		const detailsById = new SvelteMap([['b', makeDetail(item, [updHost, upToDate1, upToDate2])]]);
+
+		render(SoftwareGroupList, makeProps({ items: [item], itemDetailsById: detailsById, showUpdatableOnly: true }));
+
+		// Compact mode renders no body, no host sub-rows, no expand pill content (no "3 hosts" text).
+		expect(screen.queryByTestId('software-host-row-row-h1')).toBeNull();
+		expect(screen.queryByTestId('software-host-row-row-h2')).toBeNull();
+		expect(screen.queryByTestId('software-host-row-row-h3')).toBeNull();
+		// Compact header shows the single hostname inline.
+		expect(screen.getAllByText('host-hid1').length).toBeGreaterThan(0);
+	});
+
+	it('preserves multi-host render when filter is off (current behavior)', () => {
+		const item = makeItem('b', 3);
+		const updHost = makeUpdatableHost('row-h1', 'hid1');
+		const upToDate1 = makeHost('row-h2', 'hid2');
+		const upToDate2 = makeHost('row-h3', 'hid3');
+		const detailsById = new SvelteMap([['b', makeDetail(item, [updHost, upToDate1, upToDate2])]]);
+
+		render(SoftwareGroupList, makeProps({ items: [item], itemDetailsById: detailsById }));
+
+		expect(screen.getByTestId('software-host-row-row-h1')).toBeInTheDocument();
+		expect(screen.getByTestId('software-host-row-row-h2')).toBeInTheDocument();
+		expect(screen.getByTestId('software-host-row-row-h3')).toBeInTheDocument();
+	});
+
+	it('with 4 updatable of 5 hosts under filter: shows 3 visible + 1 in overflow, header reads "4 hosts"', () => {
+		const item = makeItem('b', 5);
+		const u1 = makeUpdatableHost('row-h1', 'hid1');
+		const u2 = makeUpdatableHost('row-h2', 'hid2');
+		const u3 = makeUpdatableHost('row-h3', 'hid3');
+		const u4 = makeUpdatableHost('row-h4', 'hid4');
+		const upToDate = makeHost('row-h5', 'hid5');
+		const detailsById = new SvelteMap([['b', makeDetail(item, [u1, u2, u3, u4, upToDate])]]);
+
+		render(SoftwareGroupList, makeProps({ items: [item], itemDetailsById: detailsById, showUpdatableOnly: true }));
+
+		// Up-to-date host hidden entirely.
+		expect(screen.queryByTestId('software-host-row-row-h5')).toBeNull();
+		// First 3 updatable visible; 4th is in overflow, hidden until expanded.
+		expect(screen.getByTestId('software-host-row-row-h1')).toBeInTheDocument();
+		expect(screen.getByTestId('software-host-row-row-h2')).toBeInTheDocument();
+		expect(screen.getByTestId('software-host-row-row-h3')).toBeInTheDocument();
+		expect(screen.queryByTestId('software-host-row-row-h4')).toBeNull();
+		// Header shows filtered count "4 hosts" (twice — desktop + mobile rendered together in jsdom).
+		expect(screen.getAllByText(/4 hosts/).length).toBeGreaterThan(0);
+		expect(screen.queryAllByText(/5 hosts/).length).toBe(0);
+	});
+
+	it('renders header only when all hosts are up-to-date under the filter (no body, no loading row)', () => {
+		const item = makeItem('b', 3);
+		const h1 = makeHost('row-h1', 'hid1');
+		const h2 = makeHost('row-h2', 'hid2');
+		const h3 = makeHost('row-h3', 'hid3');
+		const detailsById = new SvelteMap([['b', makeDetail(item, [h1, h2, h3])]]);
+
+		render(SoftwareGroupList, makeProps({ items: [item], itemDetailsById: detailsById, showUpdatableOnly: true }));
+
+		expect(screen.getByTestId('software-group-header-b')).toBeInTheDocument();
+		expect(screen.queryByTestId('software-host-row-row-h1')).toBeNull();
+		expect(screen.queryByTestId('software-host-row-row-h2')).toBeNull();
+		expect(screen.queryByTestId('software-host-row-row-h3')).toBeNull();
+		expect(screen.queryByText('Loading hosts...')).not.toBeInTheDocument();
+		// Header shows "0 hosts" filtered count, not the original "3 hosts".
+		expect(screen.getAllByText(/0 hosts/).length).toBeGreaterThan(0);
+		expect(screen.queryAllByText(/3 hosts/).length).toBe(0);
 	});
 });
