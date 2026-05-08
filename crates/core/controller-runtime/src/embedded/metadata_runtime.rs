@@ -1,10 +1,12 @@
 // crates/core/controller-runtime/src/embedded/metadata_runtime.rs
+#[cfg(feature = "embedded-agent")]
 use uptrakit_plugin_infrastructure_core::service_metadata::{
     DeploymentTopology, ServiceMetadata, ServiceMetadataProvider,
 };
 
 /// Implements [`ServiceMetadataProvider`] by reading the running binary path from
 /// [`std::env::current_exe()`].
+#[cfg(feature = "embedded-agent")]
 pub(crate) struct ControllerMetadataProvider {
     service_name: String,
     version: String,
@@ -12,11 +14,8 @@ pub(crate) struct ControllerMetadataProvider {
     pid_file: Option<std::path::PathBuf>,
 }
 
+#[cfg(feature = "embedded-agent")]
 impl ControllerMetadataProvider {
-    #[cfg_attr(
-        not(feature = "embedded-agent"),
-        expect(dead_code, reason = "only used when embedded-agent feature is enabled")
-    )]
     pub(crate) fn new(
         service_name: String,
         version: String,
@@ -32,6 +31,7 @@ impl ControllerMetadataProvider {
     }
 }
 
+#[cfg(feature = "embedded-agent")]
 impl ServiceMetadataProvider for ControllerMetadataProvider {
     fn get_metadata(&self) -> ServiceMetadata {
         let binary_path = std::env::current_exe().ok();
@@ -54,6 +54,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::{HostRuntime, MetadataAwareHostRuntime};
 
     #[test]
+    #[cfg(feature = "embedded-agent")]
     fn test_metadata_aware_host_runtime_returns_some_provider() {
         let inner = uptrakit_plugin_infrastructure_core::construct_host_runtime(
             Arc::new(NoopCommandExecutor),
