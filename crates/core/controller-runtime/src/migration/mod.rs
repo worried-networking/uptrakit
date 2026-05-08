@@ -3,11 +3,9 @@ use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::MigrationTrait;
 
-/// Run all pending migrations, including plugin-contributed controller migrations.
-///
-/// Collects migrations directly from compiled-in plugin descriptors rather than
-/// requiring a full `PluginCatalog` instance (which needs HTTP clients and
-/// cancellation tokens that are unavailable at migration time).
+#[cfg(feature = "embedded-ssh-agent")]
+use uptrakit_service_sdk::shared_types::ServiceHandler;
+
 pub(crate) async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     #[cfg_attr(
         not(feature = "embedded-ssh-agent"),
@@ -24,7 +22,7 @@ pub(crate) async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
             .collect();
 
     #[cfg(feature = "embedded-ssh-agent")]
-    plugin_migrations.extend(uptrakit_agent_ssh_runtime::service_migrations());
+    plugin_migrations.extend(uptrakit_agent_ssh_runtime::AgentSshHandler::service_migrations());
 
     uptrakit_shared_db::migration::run_migrations_with_plugins(db, plugin_migrations)
         .await
