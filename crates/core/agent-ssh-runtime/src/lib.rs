@@ -243,6 +243,7 @@ pub struct SshInFlightUpdate {
     pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
 }
 
+#[non_exhaustive]
 pub enum SshAgentEvent {
     Update(String, UpdateEvent),
     HostConfigChanged,
