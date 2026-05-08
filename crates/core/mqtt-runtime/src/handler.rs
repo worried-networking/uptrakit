@@ -227,12 +227,12 @@ mod tests {
         async fn transport_send(&mut self, msg: ServiceMessage) -> Result<(), TransportError> {
             // Swallow send errors — the test receiver may have been dropped by the
             // time the service sends its last message (e.g. Disconnecting on shutdown).
-            let _ = self.svc_tx.send(msg).await;
+            drop(self.svc_tx.send(msg).await);
             Ok(())
         }
 
         async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
-            let _ = self.svc_tx.try_send(msg);
+            drop(self.svc_tx.try_send(msg));
         }
 
         async fn transport_send_auto_paginate(
