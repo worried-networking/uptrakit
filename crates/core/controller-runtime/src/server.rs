@@ -89,6 +89,10 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
                 axum::routing::any(uptrakit_web_api::api_not_found),
             )
             .route("/api", axum::routing::any(uptrakit_web_api::api_not_found))
+            .route(
+                "/_app/{*path}",
+                axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND }),
+            )
             .fallback(serve_spa_fallback(index_for_fallback));
         router = router.fallback_service(ServeDir::new(dir).fallback(not_found));
     } else {
@@ -167,7 +171,10 @@ fn serve_spa_fallback(index_path: PathBuf) -> axum::routing::MethodRouter {
             match tokio::fs::read(&path).await {
                 Ok(bytes) => (
                     axum::http::StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    [
+                        (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (axum::http::header::CACHE_CONTROL, "no-cache"),
+                    ],
                     bytes,
                 )
                     .into_response(),
