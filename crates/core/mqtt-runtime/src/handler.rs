@@ -101,11 +101,11 @@ impl ServiceHandler for MqttHandler {
         conn: &mut dyn ServiceTransport,
         agreed_capabilities: &BTreeSet<Capability>,
     ) {
-        if let Some(identity) = self.embedded_identity.take() {
-            if let Err(e) = self.runtime.on_connected(conn, identity).await {
-                tracing::error!(error = %e, "embedded MQTT: failed to initialize runtime");
-                return;
-            }
+        if let Some(identity) = self.embedded_identity.take()
+            && let Err(e) = self.runtime.on_connected(conn, identity).await
+        {
+            tracing::error!(error = %e, "embedded MQTT: failed to initialize runtime");
+            return;
         }
         self.runtime
             .apply_settings(
