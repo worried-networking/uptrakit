@@ -396,8 +396,8 @@ mod tests {
             "crates/shared/agent-core/src/client.rs",
             "crates/shared/agent-core/src/update.rs",
             "crates/shared/agent-core/src/version_check.rs",
-            "crates/core/agent-ssh/src/runtime_support.rs",
-            "crates/core/agent-ssh/src/operations/bootstrap.rs",
+            "crates/core/agent-ssh-runtime/src/runtime_support.rs",
+            "crates/core/agent-ssh-runtime/src/operations/bootstrap.rs",
             "crates/core/scheduler-runtime/src/executors/fetch_releases.rs",
         ] {
             let contents = std::fs::read_to_string(workspace_root.join(rel_path))

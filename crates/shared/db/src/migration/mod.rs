@@ -248,8 +248,17 @@ impl CombinedMigrator {
 #[async_trait::async_trait]
 impl MigratorTrait for CombinedMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        let mut all = Migrator::migrations();
-        PLUGIN_MIGRATIONS.with(|m| all.extend(m.borrow_mut().drain(..)));
+        let core = Migrator::migrations();
+        let core_names: std::collections::HashSet<String> =
+            core.iter().map(|m| m.name().to_owned()).collect();
+        let mut all = core;
+        PLUGIN_MIGRATIONS.with(|pm| {
+            for m in pm.borrow_mut().drain(..) {
+                if !core_names.contains(m.name()) {
+                    all.push(m);
+                }
+            }
+        });
         all
     }
 }

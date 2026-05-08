@@ -1,6 +1,7 @@
 use crate::db::{DbError, Result};
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
+use sea_orm_migration::MigrationTrait;
 
 /// Run all pending migrations, including plugin-contributed controller migrations.
 ///
@@ -8,11 +9,24 @@ use sea_orm::DatabaseConnection;
 /// requiring a full `PluginCatalog` instance (which needs HTTP clients and
 /// cancellation tokens that are unavailable at migration time).
 pub(crate) async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
-    let plugin_migrations = uptrakit_plugin_infrastructure_registry::all_descriptors()
-        .into_iter()
-        .filter_map(|d| d.migrations)
-        .flat_map(|f| f())
-        .collect();
+    #[expect(
+        clippy::allow_attributes,
+        clippy::allow_attributes_without_reason,
+        reason = "feature-conditional: `mut` is needed when embedded-ssh-agent migrations are \
+                  appended; `#[expect]` would fail under feature variants where the binding is \
+                  never mutated"
+    )]
+    #[allow(unused_mut)]
+    let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> =
+        uptrakit_plugin_infrastructure_registry::all_descriptors()
+            .into_iter()
+            .filter_map(|d| d.migrations)
+            .flat_map(|f| f())
+            .collect();
+
+    #[cfg(feature = "embedded-ssh-agent")]
+    plugin_migrations.extend(uptrakit_agent_ssh_runtime::service_migrations());
+
     uptrakit_shared_db::migration::run_migrations_with_plugins(db, plugin_migrations)
         .await
         .context_to::<DbError>()

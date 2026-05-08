@@ -11,7 +11,7 @@ version = "0.0.1"
 default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embedded-mqtt", "embedded-frontend", "reset-data", "dashboard-icons", "mcp"]
 embedded-scheduler = ["dep:uptrakit-scheduler-runtime"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
-embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
+embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
 embedded-mqtt = ["dep:uptrakit-mqtt-runtime", "dep:base64"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-runtime?/oidc"]
@@ -19,7 +19,7 @@ swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "uptrakit-web-api/db-all"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite", "uptrakit-scheduler-runtime?/db-sqlite", "dep:sqlx"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres", "uptrakit-scheduler-runtime?/db-postgres"]
-interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-runtime?/interactive", "uptrakit-agent-ssh?/interactive"]
+interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-runtime?/interactive", "uptrakit-agent-ssh-runtime?/interactive"]
 nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
@@ -27,7 +27,7 @@ notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-
 embedded-frontend = ["dep:uptrakit-frontend"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
-reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
+reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh-runtime?/reset-data"]
 mcp = ["dep:uptrakit-mcp"]
 plugin-ops = ["uptrakit-web-api/plugin-ops", "uptrakit-plugin-infrastructure-registry/plugin-ops"]
 
@@ -64,6 +64,7 @@ time = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["trace", "fs"] }
 sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
 sqlx = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
@@ -77,7 +78,6 @@ uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-runtime = { workspace = true, optional = true }
 uptrakit-agent-core = { workspace = true, optional = true }
 uptrakit-agent-runtime = { workspace = true, optional = true }
-uptrakit-agent-ssh = { workspace = true, optional = true }
 uptrakit-agent-ssh-runtime = { workspace = true, optional = true }
 uptrakit-mqtt-runtime = { workspace = true, optional = true }
 uptrakit-service-platform = { workspace = true }
