@@ -11,10 +11,11 @@ use crate::db::entity::routeros_host_config;
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
+use crate::operations::bootstrap::CONNECT_TIMEOUT;
 use crate::routeros_executor::RouterOsSshExecutor;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_key;
-use crate::ssh_transport::SshSession;
+use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
 /// Temporary file path on the RouterOS device for the public key upload.
 const KEY_REMOTE_PATH: &str = "uptrakit-bootstrap.pub";
@@ -54,6 +55,11 @@ pub(crate) enum RouterOsPlannedAction {
     ImportSshKey { remote_path: String },
     /// Remove the temporary public-key file.
     DeletePublicKey { remote_path: String },
+    /// Verify that the freshly-created `uptrakit` user can SSH in with the
+    /// generated private key. Runs *before* `SaveHostEntry` so a botched key
+    /// import or a missing `ssh` policy fails the bootstrap loudly rather than
+    /// being discovered on the next operation.
+    VerifyTargetLogin,
     /// Persist the host entry and RouterOS-specific config to the local database.
     SaveHostEntry,
 }
@@ -61,12 +67,25 @@ pub(crate) enum RouterOsPlannedAction {
 /// Build the ordered plan for RouterOS bootstrap (pure, no I/O).
 ///
 /// Always includes: create-group → create-user → upload-key → import-key →
-/// delete-key → save-entry.  When `params.allow_reboot` is `true`, the group
-/// policy list additionally includes `"reboot"`.
+/// delete-key → verify-target-login → save-entry. When `params.allow_reboot` is
+/// `true`, the group policy list additionally includes `"reboot"`.
+///
+/// Policy list rationale:
+/// - `ssh` — required for the `uptrakit` user to SSH in at all.
+/// - `read` — query system state.
+/// - `write` — apply changes including `/system package update install`.
+/// - `test` — `ping`/`traceroute`/`bandwidth-test` used by health checks.
+/// - `reboot` (conditional) — required to complete `package update install`,
+///   which reboots to apply. Operator-controlled via `allow_reboot`.
 pub(crate) fn plan_bootstrap_routeros(
     params: &RouterOsBootstrapParams,
 ) -> Vec<RouterOsPlannedAction> {
-    let mut policies = vec!["read".to_string(), "test".to_string(), "update".to_string()];
+    let mut policies = vec![
+        "ssh".to_string(),
+        "read".to_string(),
+        "write".to_string(),
+        "test".to_string(),
+    ];
     if params.allow_reboot {
         policies.push("reboot".to_string());
     }
@@ -82,6 +101,7 @@ pub(crate) fn plan_bootstrap_routeros(
         RouterOsPlannedAction::DeletePublicKey {
             remote_path: KEY_REMOTE_PATH.to_string(),
         },
+        RouterOsPlannedAction::VerifyTargetLogin,
         RouterOsPlannedAction::SaveHostEntry,
     ]
 }
@@ -143,6 +163,9 @@ pub(crate) async fn execute_bootstrap_routeros(
                     );
                 }
             }
+            RouterOsPlannedAction::VerifyTargetLogin => {
+                verify_routeros_uptrakit_login(params, &private_key_pem).await?;
+            }
             RouterOsPlannedAction::SaveHostEntry => {
                 save_routeros_host_entry(params, &private_key_pem, db).await?;
             }
@@ -157,6 +180,67 @@ pub(crate) async fn execute_bootstrap_routeros(
         allow_reboot = params.allow_reboot,
         "RouterOS bootstrap complete"
     );
+
+    Ok(())
+}
+
+/// Verify that the freshly-created `uptrakit` user can SSH in with the
+/// generated private key. Opens a *separate* SSH session — RouterOS has a
+/// low concurrent-session limit, so we drop the verify session immediately
+/// after authentication succeeds.
+async fn verify_routeros_uptrakit_login(
+    params: &RouterOsBootstrapParams,
+    private_key_pem: &str,
+) -> Result<()> {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "TryFromIntError carries no contextual information beyond what the formatted error message conveys"
+    )]
+    let port = u16::try_from(params.port).map_err(|_| {
+        report!(Error::BootstrapVerification(format!(
+            "invalid port {} for verify connection",
+            params.port
+        )))
+    })?;
+
+    // The auth-user connect captured the host-key fingerprint and stored it
+    // on params (see `routeros_params_from_bootstrap_with_fp`). Verify pins
+    // the connection to that exact fingerprint so we cannot silently TOFU a
+    // different key.
+    let expected_fp = params.host_key_fingerprint.as_deref().ok_or_else(|| {
+        report!(Error::BootstrapVerification(
+            "missing host key fingerprint for verify; the auth-user connect did not record one"
+                .to_string()
+        ))
+    })?;
+
+    let config = SshConnectionConfig {
+        hostname: params.hostname.clone(),
+        port,
+        connect_timeout: CONNECT_TIMEOUT,
+    };
+
+    let (verify_session, _fp) = ssh_transport::connect_and_authenticate(
+        &config,
+        "uptrakit",
+        &AuthMethod::PrivateKey(private_key_pem),
+        Some(expected_fp),
+    )
+    .await
+    .map_err(|e| {
+        report!(Error::BootstrapVerification(format!(
+            "uptrakit user was created on '{}' but cannot SSH in: {e}. \
+             Likely causes: group policy missing `ssh`, the imported key did not register, \
+             or a previous bootstrap attempt left an `uptrakit` user/group behind with a \
+             different key. Clean up with `/user remove uptrakit; /user group remove uptrakit` \
+             on the router before retrying.",
+            params.hostname
+        )))
+    })?;
+
+    // RouterOS has a low concurrent-session limit. Disconnect the verify
+    // session now so subsequent operations don't trip "too many sessions".
+    verify_session.disconnect().await;
 
     Ok(())
 }
@@ -231,6 +315,42 @@ mod tests {
         }
     }
 
+    /// Canonical RouterOS 7 `/user group` policy enum (per
+    /// help.mikrotik.com/docs/spaces/ROS/pages/8978498/Console). Any policy
+    /// emitted by `plan_bootstrap_routeros` MUST appear in this list — the
+    /// router rejects the whole `policy=` argument as
+    /// "input does not match any value of policy" otherwise.
+    const VALID_ROUTEROS_7_POLICIES: &[&str] = &[
+        "local",
+        "telnet",
+        "ssh",
+        "ftp",
+        "reboot",
+        "read",
+        "write",
+        "policy",
+        "test",
+        "winbox",
+        "password",
+        "web",
+        "sniff",
+        "sensitive",
+        "api",
+        "romon",
+        "dude",
+        "tikapp",
+        "rest-api",
+    ];
+
+    fn extracted_policies(plan: &[RouterOsPlannedAction]) -> Vec<String> {
+        plan.iter()
+            .find_map(|a| match a {
+                RouterOsPlannedAction::CreateGroup { policies } => Some(policies.clone()),
+                _ => None,
+            })
+            .expect("plan must contain CreateGroup")
+    }
+
     #[test]
     fn plan_includes_reboot_policy_when_allowed() {
         let params = RouterOsBootstrapParams {
@@ -238,21 +358,16 @@ mod tests {
             ..stub_params()
         };
         let plan = plan_bootstrap_routeros(&params);
-        let policies = plan.iter().find_map(|a| match a {
-            RouterOsPlannedAction::CreateGroup { policies } => Some(policies),
-            _ => None,
-        });
-        assert!(policies.unwrap().iter().any(|p| p == "reboot"));
+        assert_eq!(
+            extracted_policies(&plan),
+            vec!["ssh", "read", "write", "test", "reboot"]
+        );
     }
 
     #[test]
     fn plan_excludes_reboot_policy_when_not_allowed() {
         let plan = plan_bootstrap_routeros(&stub_params());
-        let policies = plan.iter().find_map(|a| match a {
-            RouterOsPlannedAction::CreateGroup { policies } => Some(policies),
-            _ => None,
-        });
-        assert!(!policies.unwrap().iter().any(|p| p == "reboot"));
+        assert!(!extracted_policies(&plan).iter().any(|p| p == "reboot"));
     }
 
     #[test]
@@ -288,15 +403,54 @@ mod tests {
     }
 
     #[test]
-    fn plan_default_policies_are_read_test_update() {
+    fn plan_default_policies_are_ssh_read_write_test() {
         let plan = plan_bootstrap_routeros(&stub_params());
-        let policies = plan.iter().find_map(|a| match a {
-            RouterOsPlannedAction::CreateGroup { policies } => Some(policies.clone()),
-            _ => None,
-        });
-        let p = policies.unwrap();
-        assert!(p.iter().any(|s| s == "read"));
-        assert!(p.iter().any(|s| s == "test"));
-        assert!(p.iter().any(|s| s == "update"));
+        assert_eq!(
+            extracted_policies(&plan),
+            vec!["ssh", "read", "write", "test"],
+            "default policy list (allow_reboot=false) must be exactly the \
+             RouterOS 7 enum values needed for SSH login + read/write + test"
+        );
+    }
+
+    #[test]
+    fn plan_policies_are_all_valid_routeros_7_values() {
+        // Default and reboot variants both must use only canonical enum values.
+        for params in [
+            stub_params(),
+            RouterOsBootstrapParams {
+                allow_reboot: true,
+                ..stub_params()
+            },
+        ] {
+            let plan = plan_bootstrap_routeros(&params);
+            for policy in extracted_policies(&plan) {
+                assert!(
+                    VALID_ROUTEROS_7_POLICIES.contains(&policy.as_str()),
+                    "policy '{policy}' is not a valid RouterOS 7 enum value; \
+                     router will reject the whole `/user group add` command"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plan_verify_precedes_save_entry() {
+        use std::mem::discriminant;
+        let plan = plan_bootstrap_routeros(&stub_params());
+        let ds: Vec<_> = plan.iter().map(discriminant).collect();
+        let verify = ds
+            .iter()
+            .position(|&d| d == discriminant(&RouterOsPlannedAction::VerifyTargetLogin))
+            .expect("plan must contain VerifyTargetLogin");
+        let save = ds
+            .iter()
+            .position(|&d| d == discriminant(&RouterOsPlannedAction::SaveHostEntry))
+            .expect("plan must contain SaveHostEntry");
+        assert!(
+            verify < save,
+            "verify must run before save — saving a host that cannot be \
+             reached as 'uptrakit' would persist a broken entry"
+        );
     }
 }

@@ -1606,18 +1606,27 @@ fn parse_bootstrap_params(
         .and_then(|v| v.as_str())
         .unwrap_or("password");
 
-    let auth_password = sensitive.and_then(|s| s.auth_password.clone().map(SecretString::new));
-    let auth_private_key =
-        sensitive.and_then(|s| s.auth_private_key.clone().map(SecretString::new));
+    // Extract only the credential matching the chosen auth_method. Reading
+    // both unconditionally lets a stray `auth_password` (e.g. UI form
+    // persistence) win over the user's `private_key` selection because the
+    // downstream match in `prepare_bootstrap_connection` prefers password.
+    let (auth_password, auth_private_key) = match auth_method {
+        "password" => (
+            sensitive.and_then(|s| s.auth_password.clone().map(SecretString::new)),
+            None,
+        ),
+        "private_key" => (
+            None,
+            sensitive.and_then(|s| s.auth_private_key.clone().map(SecretString::new)),
+        ),
+        other => return Err(format!("unknown auth_method '{other}'")),
+    };
 
-    match auth_method {
-        "password" if auth_password.is_none() => {
-            return Err("auth_method is 'password' but no password provided".to_string());
-        }
-        "private_key" if auth_private_key.is_none() => {
-            return Err("auth_method is 'private_key' but no private key provided".to_string());
-        }
-        _ => {}
+    if auth_method == "password" && auth_password.is_none() {
+        return Err("auth_method is 'password' but no password provided".to_string());
+    }
+    if auth_method == "private_key" && auth_private_key.is_none() {
+        return Err("auth_method is 'private_key' but no private key provided".to_string());
     }
 
     let target_username = params
@@ -2293,6 +2302,71 @@ mod tests {
         let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
         uptrakit_plugin_infrastructure_registry::build_catalog(&config)
             .expect("plugin catalog must build for tests")
+    }
+
+    // ── parse_bootstrap_params: auth_method gating ──────────────────────
+
+    fn sensitive_with(password: Option<&str>, private_key: Option<&str>) -> SensitiveAuthParams {
+        SensitiveAuthParams {
+            auth_password: password.map(str::to_string),
+            auth_private_key: private_key.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn parse_bootstrap_params_private_key_drops_stale_password() {
+        // UI may carry a leftover password in sensitive params even when the
+        // operator selects private_key auth. Without method-gating the
+        // downstream match in prepare_bootstrap_connection routes through
+        // the password branch.
+        let params = json!({
+            "target": "root@example.com",
+            "auth_method": "private_key",
+        });
+        let sealed = sensitive_with(Some("stale-password"), Some("-----BEGIN PRIVATE KEY-----"));
+
+        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None)
+            .expect("private_key + stale password must parse");
+
+        assert!(
+            parsed.auth_password.is_none(),
+            "stale password must be dropped on private_key auth"
+        );
+        assert!(parsed.auth_private_key_pem.is_some());
+    }
+
+    #[test]
+    fn parse_bootstrap_params_password_drops_unused_private_key() {
+        let params = json!({
+            "target": "root@example.com",
+            "auth_method": "password",
+        });
+        let sealed = sensitive_with(Some("secret"), Some("-----BEGIN PRIVATE KEY-----"));
+
+        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None)
+            .expect("password + stale private key must parse");
+
+        assert!(parsed.auth_password.is_some());
+        assert!(
+            parsed.auth_private_key_pem.is_none(),
+            "stale private key must be dropped on password auth"
+        );
+    }
+
+    #[test]
+    fn parse_bootstrap_params_unknown_auth_method_errors() {
+        let params = json!({
+            "target": "root@example.com",
+            "auth_method": "kerberos",
+        });
+        let sealed = sensitive_with(Some("secret"), None);
+
+        let err = parse_bootstrap_params(&params, Some(&sealed), None, None)
+            .expect_err("unknown auth_method must reject");
+        assert!(
+            err.contains("unknown auth_method") && err.contains("kerberos"),
+            "error must name the unknown method, got: {err}"
+        );
     }
 
     #[test]
