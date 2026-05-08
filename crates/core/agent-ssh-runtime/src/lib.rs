@@ -1,3 +1,23 @@
+pub mod client;
+pub mod db;
+pub mod error;
+pub mod host_ops;
+pub mod operations;
+pub mod runtime_support;
+pub mod ssh_key;
+pub mod ssh_pool;
+pub mod surface_runtime;
+
+pub(crate) mod host_info;
+pub(crate) mod remote_exec;
+pub(crate) mod routeros_executor;
+pub(crate) mod ssh_executor;
+pub(crate) mod ssh_stdio_tunnel;
+pub(crate) mod ssh_target;
+pub(crate) mod ssh_transport;
+
+pub use uptrakit_service_sdk::ServiceSurfaceProxy;
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

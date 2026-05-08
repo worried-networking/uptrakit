@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::SshInFlightUpdate;
 use std::collections::{BTreeSet, HashSet};
 use tokio::task::JoinSet;
 use uptrakit_agent_core::ConnectionContext;
-use uptrakit_agent_ssh_runtime::SshInFlightUpdate;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 use uptrakit_plugin_infrastructure_registry::{HostCapabilities, HostRuntime};
 
