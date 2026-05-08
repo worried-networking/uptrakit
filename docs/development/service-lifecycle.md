@@ -10,6 +10,25 @@ Building a new Uptrakit service requires implementing a set of callbacks on the 
 resolution, identity management, CA bootstrap, enrollment with backoff, certificate renewal, ping/pong keepalive, signal handling, CA staleness
 checks, and reconnection with exponential backoff.
 
+## Standalone vs. Embedded Mode
+
+The same `ServiceHandler` impl can run in two modes; the SDK picks the right wiring for each.
+
+| Aspect                | Standalone (binary)                                                                               | Embedded (in-process)                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Entry point           | `run_lifecycle_and_handle_errors` (typical `main()`) or `run_service_lifecycle` for finer control | `run_embedded_service(handler, transport, drain, abort)` called by the controller                                             |
+| Transport             | WebSocket over mTLS (`ControllerConnection`)                                                      | In-process mpsc (`EmbeddedTransport`, controller-owned)                                                                       |
+| Identity & enrollment | Service does TOFU, enrollment, certificate renewal itself                                         | Controller seeds the ECIES keypair via `generate_p256_keypair_for_ecies` and constructs the handler in its `Embedded` mode    |
+| Database              | Service-owned local DB (e.g. SQLite at `state_dir/service.db`)                                    | Controller's shared DB; service migrations contributed via `service_migrations()` (gated by the `service-migrations` feature) |
+| Shutdown              | OS signals (SIGINT/SIGTERM)                                                                       | `drain` (graceful) and `abort` (immediate) `CancellationToken`s                                                               |
+
+Pick **Standalone** for any Service that ships independently or runs on a different host
+than the controller. Pick **Embedded** when the controller bundles the Service for
+single-tenant deployments (today: SSH agent, MQTT, scheduler, generic agent). A Service
+can support both — the same `AgentSshHandler` runs in either mode; only the constructor
+arguments differ. See [ADR-0005](../adr/0005-service-binary-runtime-boundary.md) for the
+binary/runtime crate split that makes the same handler reusable across modes.
+
 ## The `ServiceHandler` trait
 
 ```rust
@@ -57,10 +76,10 @@ pub trait ServiceHandler: Send {
 
 ### Associated constants
 
-| Constant | Purpose |
-| --- | --- |
-| `DIR_NAME` | Directory name for platform-specific resolution (e.g. `"agent"`, `"mqtt"`). |
-| `SERVICE_LABEL` | Human-readable label for log messages (e.g. `"uptrakit-agent service"`). |
+| Constant        | Purpose                                                                     |
+| --------------- | --------------------------------------------------------------------------- |
+| `DIR_NAME`      | Directory name for platform-specific resolution (e.g. `"agent"`, `"mqtt"`). |
+| `SERVICE_LABEL` | Human-readable label for log messages (e.g. `"uptrakit-agent service"`).    |
 
 ### `capabilities()` method
 
@@ -120,23 +139,23 @@ ADR-0037).
 
 ### `LoopOutcome`
 
-| Variant | Meaning | SDK behavior |
-| --- | --- | --- |
-| `Shutdown` | SIGINT/SIGTERM received | Exit the lifecycle cleanly |
-| `Reconnect` | Certificate rotated | Reconnect immediately (reset backoff) |
-| `Disconnected` | Connection closed | Reconnect with exponential backoff |
-| `Restart` | Graceful restart via SIGHUP | Exit the lifecycle |
+| Variant        | Meaning                     | SDK behavior                          |
+| -------------- | --------------------------- | ------------------------------------- |
+| `Shutdown`     | SIGINT/SIGTERM received     | Exit the lifecycle cleanly            |
+| `Reconnect`    | Certificate rotated         | Reconnect immediately (reset backoff) |
+| `Disconnected` | Connection closed           | Reconnect with exponential backoff    |
+| `Restart`      | Graceful restart via SIGHUP | Exit the lifecycle                    |
 
 ### `LoopError`
 
 `LoopError` is a `thiserror`-backed enum with four variants:
 
-| Variant | Meaning | SDK behavior |
-| --- | --- | --- |
-| `CertExpired` | TLS handshake rejected (certificate expired) | Re-enroll |
-| `ReceiveClosed` | WebSocket cleanly closed by controller | Reconnect with backoff |
+| Variant                    | Meaning                                                                            | SDK behavior           |
+| -------------------------- | ---------------------------------------------------------------------------------- | ---------------------- |
+| `CertExpired`              | TLS handshake rejected (certificate expired)                                       | Re-enroll              |
+| `ReceiveClosed`            | WebSocket cleanly closed by controller                                             | Reconnect with backoff |
 | `TransientNetwork(String)` | Transient network error (broken pipe, connection reset, DNS failure, send timeout) | Reconnect with backoff |
-| `Other(String)` | Any other event-loop error | Propagate |
+| `Other(String)`            | Any other event-loop error                                                         | Propagate              |
 
 Callbacks return `LoopResult<T>` (alias for `Result<T, Report<LoopError>>`), following the project-wide
 `Report<T>` convention. An `impl_report_conversion!(EnrollmentError => LoopError, ...)` closure-based
@@ -147,6 +166,30 @@ conversion enables `.context_to::<LoopError>()?` on SDK connection operations in
 All async trait methods use the `#[async_trait]` macro, which desugars `async fn` into `Pin<Box<dyn Future + Send + '_>>` return types. This matches the
 established pattern used across the codebase (Plugin, CommandExecutor, TaskExecutor, CertSigner, etc.) and eliminates the manual `Pin<Box<...>>` /
 `Box::pin(async move { ... })` boilerplate that was previously required in the trait definition and all implementations.
+
+## `ServiceTransport`: how the SDK abstracts the wire
+
+Callbacks like `on_message`, `on_settings`, and `on_connected` receive `&mut dyn ServiceTransport`
+(re-exported from `uptrakit-wire`) rather than a concrete connection type. The trait abstracts:
+
+- `transport_send(msg)` / `transport_send_best_effort(msg)` — push a `ServiceMessage` to the
+  controller (reliable vs. drop-on-overflow).
+- `transport_send_auto_paginate(msg)` — paginate large messages.
+- `transport_recv()` — pull the next `ControllerMessage`, returning `None` on close.
+- `close_policy()` — declares how the runtime should react when the transport closes
+  (e.g. `Reconnect` for WebSocket, `Shutdown` for in-process).
+- `is_yielded()` — surface controller-side coexistence state to the handler.
+
+Two implementations live in the workspace:
+
+- **WebSocket** (`uptrakit_service_sdk::ControllerConnection`) — used by standalone
+  binaries; sends/receives over the mTLS WebSocket connection.
+- **In-process** (`EmbeddedTransport` in `controller-runtime`, `pub(crate)`) — used by
+  embedded Services; uses tokio mpsc channels owned by the controller.
+
+Handlers must depend only on the trait, not on either concrete impl. That is what allows
+the same `AgentSshHandler` to run standalone and embedded without conditional logic. See
+[ADR-0004](../adr/0004-service-handler-transport-abstraction.md) for the design rationale.
 
 ## SDK-managed event loop
 
@@ -226,10 +269,10 @@ The mTLS connector is rebuilt on each reconnect iteration inside the loop, becau
 
 The SDK provides shared initialization and error-handling functions to reduce boilerplate in `main()`:
 
-| Function | Purpose |
-| --- | --- |
-| `init_crypto()` | Install the `aws-lc-rs` rustls crypto provider. |
-| `print_build_info(name, version, features)` | Print build metadata for `--version`. |
+| Function                                               | Purpose                                                |
+| ------------------------------------------------------ | ------------------------------------------------------ |
+| `init_crypto()`                                        | Install the `aws-lc-rs` rustls crypto provider.        |
+| `print_build_info(name, version, features)`            | Print build metadata for `--version`.                  |
 | `run_lifecycle_and_handle_errors(name, args, handler)` | Run the lifecycle and handle errors (log + exit code). |
 
 > **Note:** Tracing subscriber initialization (`tracing_subscriber::fmt().init()`) is intentionally **not** provided
@@ -362,12 +405,12 @@ do not need to handle these messages.
 
 The SDK provides shared helper functions for proactive certificate renewal timers:
 
-| Function | Purpose |
-| --- | --- |
-| `create_renewal_sleep()` | Creates a pinned `Sleep` initialized to `FAR_FUTURE` (30 days). |
+| Function                                                          | Purpose                                                          |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `create_renewal_sleep()`                                          | Creates a pinned `Sleep` initialized to `FAR_FUTURE` (30 days).  |
 | `update_renewal_schedule(sleep, cert_not_after_ts, window_hours)` | Resets the timer based on certificate expiry and renewal window. |
-| `compute_renewal_delay(cert_not_after_ts, window_hours)` | Computes the delay until the renewal window opens. |
-| `handle_renewal_timer(identity, conn, renewal_sleep)` | Initiates renewal, sends CSR, and resets timer. |
+| `compute_renewal_delay(cert_not_after_ts, window_hours)`          | Computes the delay until the renewal window opens.               |
+| `handle_renewal_timer(identity, conn, renewal_sleep)`             | Initiates renewal, sends CSR, and resets timer.                  |
 
 All services (agent, SSH agent, MQTT) use these helpers for consistent renewal behavior.
 
@@ -397,12 +440,12 @@ with backoff) rather than fatal exits.
 
 `EnrollmentError` is organized into domain sub-enums for clearer error categorization:
 
-| Sub-enum | Domain | Example variants |
-| --- | --- | --- |
-| `TlsError` | TLS/certificate errors | `Config`, `Rustls`, `NoCertificates`, `CertificateParse`, `Pem`, `InvalidDnsName` |
-| `IdentityError` | Identity/enrollment state | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`, `NotCertified` |
+| Sub-enum        | Domain                        | Example variants                                                                           |
+| --------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `TlsError`      | TLS/certificate errors        | `Config`, `Rustls`, `NoCertificates`, `CertificateParse`, `Pem`, `InvalidDnsName`          |
+| `IdentityError` | Identity/enrollment state     | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`, `NotCertified`                        |
 | `ProtocolError` | Wire protocol/enrollment flow | `Init`, `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`, timeouts |
-| `CaError` | CA certificate operations | `Fetch`, `CertFile` |
+| `CaError`       | CA certificate operations     | `Fetch`, `CertFile`                                                                        |
 
 Top-level variants (`Io`, `Json`, `WebSocket`, `HttpUri`, `Directory`) remain directly on `EnrollmentError`. Services can match on categories (e.g.,
 `EnrollmentError::Tls(_)`) instead of individual variants for coarse-grained error handling.
@@ -429,23 +472,23 @@ parameter. The previous type-specific methods (`register_agent()`, `register_mqt
 `ServiceProfile` is a controller-side enum that is **never persisted** in the database. It is always
 derived from the service's persisted capability set via `ServiceProfile::from_capabilities()`.
 
-| Profile | Key capability | Example services |
-| --- | --- | --- |
-| `UpdateTracker` | `Capability::UpdateTracking` | MQTT service |
-| `Scheduler` | `Capability::Scheduler` | External task scheduler |
-| `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
-| `Unknown` | (fallback) | Unrecognized combinations |
+| Profile         | Key capability                  | Example services          |
+| --------------- | ------------------------------- | ------------------------- |
+| `UpdateTracker` | `Capability::UpdateTracking`    | MQTT service              |
+| `Scheduler`     | `Capability::Scheduler`         | External task scheduler   |
+| `Agent`         | `Capability::SoftwareDiscovery` | Local agent, SSH agent    |
+| `Unknown`       | (fallback)                      | Unrecognized combinations |
 
 Precedence: `UpdateTracker` > `Scheduler` > `Agent` > `Unknown`. If multiple key capabilities are present, the highest-precedence profile wins.
 
 The profile drives behavioral defaults:
 
-| Default | UpdateTracker | Scheduler | Agent | Unknown |
-| --- | --- | --- | --- | --- |
-| `default_ping_interval_secs` | 15 | 60 | 300 | 300 |
-| `shutdown_timeout_secs` | None | Some(30) | Some(120) | Some(120) |
-| `service_label(false)` | "Update Tracker" | "Scheduler" | "Agent" | "Unknown" |
-| `service_label(true)` | "Update Tracker" | "Scheduler" | "SSH Agent" | "Unknown" |
+| Default                      | UpdateTracker    | Scheduler   | Agent       | Unknown   |
+| ---------------------------- | ---------------- | ----------- | ----------- | --------- |
+| `default_ping_interval_secs` | 15               | 60          | 300         | 300       |
+| `shutdown_timeout_secs`      | None             | Some(30)    | Some(120)   | Some(120) |
+| `service_label(false)`       | "Update Tracker" | "Scheduler" | "Agent"     | "Unknown" |
+| `service_label(true)`        | "Update Tracker" | "Scheduler" | "SSH Agent" | "Unknown" |
 
 The `service_label` column in API responses (`ServiceResponse.service_label`) is derived at query time
 from the profile and the presence of `Capability::SshRemote`. It is not stored in the database.
@@ -454,11 +497,11 @@ from the profile and the presence of `Capability::SshRemote`. It is not stored i
 
 `ServiceIdentityState` manages the `service.json` file in the state directory. The file contains:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `service_id` | UUID | Assigned by the controller during enrollment |
-| `enrollment_secret` | String | Bearer token for pre-certificate auth (cleared after certificate issuance) |
-| `tenant_id` | UUID (optional) | Received from the controller via `ServiceSettings`; persisted so CLI commands can use it offline |
+| Field               | Type            | Description                                                                                      |
+| ------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
+| `service_id`        | UUID            | Assigned by the controller during enrollment                                                     |
+| `enrollment_secret` | String          | Bearer token for pre-certificate auth (cleared after certificate issuance)                       |
+| `tenant_id`         | UUID (optional) | Received from the controller via `ServiceSettings`; persisted so CLI commands can use it offline |
 
 The `tenant_id` field uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for backward
 compatibility with existing `service.json` files that predate the field. Services persist the
@@ -476,9 +519,9 @@ the controller's 15-second write timeout to fire and drop the connection.
 The `uptrakit-agent-core` crate provides two helpers that implement the background-task pattern
 used by both the local agent and the SSH agent:
 
-| Helper | Purpose |
-| --- | --- |
-| `spawn_background(bg_tx, future)` | Clones the sender, spawns the future on Tokio, and sends the result through the channel. |
+| Helper                              | Purpose                                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `spawn_background(bg_tx, future)`   | Clones the sender, spawns the future on Tokio, and sends the result through the channel.                       |
 | `send_background_result(conn, msg)` | Forwards a completed `ServiceMessage` to the controller; returns `Some(LoopOutcome::Disconnected)` on failure. |
 
 ### Wiring
@@ -548,13 +591,13 @@ task owns the write half and drains a bounded MPSC channel
 
 ### Write operations
 
-| Method | Behavior |
-| --- | --- |
-| `send(msg)` | Serialize → push `OutboundFrame::Text` to channel. Checks `write_error` flag first. |
-| `send_best_effort(msg)` | Serialize → `try_send()` to channel. Non-blocking; drops message silently if channel is full. |
-| `send_paginated(msg, limits)` | Paginate → push all pages to channel. Serialization only, no I/O blocking. |
-| `recv()` | Read from the boxed controller stream. On WS Ping, pushes `Pong` to write channel. Checks `write_error` on each receive. |
-| `close()` | Push `Close` frame to channel, await writer task completion. |
+| Method                        | Behavior                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `send(msg)`                   | Serialize → push `OutboundFrame::Text` to channel. Checks `write_error` flag first.                                      |
+| `send_best_effort(msg)`       | Serialize → `try_send()` to channel. Non-blocking; drops message silently if channel is full.                            |
+| `send_paginated(msg, limits)` | Paginate → push all pages to channel. Serialization only, no I/O blocking.                                               |
+| `recv()`                      | Read from the boxed controller stream. On WS Ping, pushes `Pong` to write channel. Checks `write_error` on each receive. |
+| `close()`                     | Push `Close` frame to channel, await writer task completion.                                                             |
 
 ### Error signaling
 
@@ -575,10 +618,40 @@ enum OutboundFrame {
 The writer task applies `SEND_TIMEOUT` (30 seconds) per write and exits on `Close` or
 channel closure.
 
+## Public API at a glance
+
+The most-used `uptrakit-service-sdk` exports, organized by where they apply.
+
+| Symbol                                                       | Mode                       | Purpose                                                                                                           |
+| ------------------------------------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `ServiceHandler` (trait)                                     | Both                       | The contract Services implement (callbacks + constants + `service_migrations()`)                                  |
+| `ServiceTransport` (trait, re-exported from `uptrakit-wire`) | Both                       | Wire abstraction — see section above                                                                              |
+| `LoopOutcome`, `LoopError`, `LoopResult`                     | Both                       | Callback return types                                                                                             |
+| `ShutdownCause`, `default_resolve_shutdown`                  | Both                       | Shutdown classification + default mapping to (DisconnectReason, LoopOutcome)                                      |
+| `ServiceIdentityState`                                       | Both                       | Manages a Service's mTLS keypair, certificate, enrollment state                                                   |
+| `generate_p256_keypair_for_ecies`                            | Embedded (controller-side) | Generates the ECIES keypair the controller seeds into the embedded handler                                        |
+| `run_lifecycle_and_handle_errors`                            | Standalone                 | Top-level `main()` helper: bootstrap → enroll → connect → run loop → format errors                                |
+| `run_service_lifecycle`                                      | Standalone                 | Same flow without the error-formatting wrapper, for callers that want their own error path                        |
+| `run_embedded_service<H>`                                    | Embedded                   | Runs a constructed `ServiceHandler` against an `impl ServiceTransport` with `drain` + `abort` cancellation tokens |
+| `init_crypto`, `print_build_info`                            | Standalone                 | `main()` boilerplate (call once before `run_lifecycle_and_handle_errors`)                                         |
+| `EventLoopContext`                                           | Both                       | Metadata passed into the authenticated event loop (base URL, PKI addr, CA PEM)                                    |
+| `CertificateRenewalHandler`                                  | Standalone                 | Tracks and schedules certificate renewal during the lifecycle                                                     |
+| `ServiceConfigProxy`, `ServiceSurfaceProxy`                  | Both                       | Async batching for service-config and surface-action requests                                                     |
+| `init_cli_tracing`, `init_test_tracing`, `TracingBuilder`    | Both                       | Tracing setup helpers                                                                                             |
+| `Backoff`                                                    | Both                       | Configurable exponential backoff (no async)                                                                       |
+| `ShutdownSignal`, `SignalShutdown`, `TokenShutdown`          | Both                       | Shutdown signal abstractions                                                                                      |
+
+Embedded-only symbols are reachable only when the embedding controller pulls them in via
+the relevant `embedded-*` feature; everything else is unconditional.
+
 ## Related documentation
 
 - [Services and Operations](../api/services-operations.md) — shared startup flow and API operations
 - [Wire Protocol](../api/wire-protocol.md) — WebSocket message taxonomy
+- [Database Migrations — `service_migrations()`](database-migrations.md#service-owned-migrations-service_migrations)
+  — implementation guide for Services that own a local DB
 - [Coding Standards](coding-standards.md) — error handling conventions
 - [Security Architecture](../security/security-architecture.md) — mTLS and enrollment security model
 - [TOFU and TLS](../security/tofu-tls.md) — CA bootstrap and TLS hardening
+- [ADR-0004](../adr/0004-service-handler-transport-abstraction.md) — `ServiceTransport` abstraction
+- [ADR-0005](../adr/0005-service-binary-runtime-boundary.md) — Service binary/runtime boundary
