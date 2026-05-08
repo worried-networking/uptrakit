@@ -62,7 +62,7 @@ impl TaskExecutor for AuditLogCleanupExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, EntityTrait, Set};
     use serde_json::json;
@@ -75,18 +75,18 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingForwarder {
-        events: Mutex<Vec<RuntimeAuditEvent>>,
+        events: parking_lot::Mutex<Vec<RuntimeAuditEvent>>,
     }
 
     impl RecordingForwarder {
         fn events(&self) -> Vec<RuntimeAuditEvent> {
-            self.events.lock().expect("lock").clone()
+            self.events.lock().clone()
         }
     }
 
     impl RuntimeAuditForwarder for RecordingForwarder {
         fn forward(&self, event: &RuntimeAuditEvent) {
-            self.events.lock().expect("lock").push(event.clone());
+            self.events.lock().push(event.clone());
         }
     }
 

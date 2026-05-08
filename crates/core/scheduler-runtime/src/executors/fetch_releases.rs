@@ -397,8 +397,9 @@ impl FetchReleasesExecutor {
                 };
 
                 let latest_version_str = latest.version.to_string();
-                let release_metadata =
-                    serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
+                let release_metadata = serde_json::to_value(latest)
+                    .inspect_err(|e| tracing::warn!(error = %e, "failed to serialize latest release metadata"))
+                    .unwrap_or(serde_json::Value::Null);
                 let category_str = latest.category.clone().unwrap_or_default().to_string();
 
                 let Some(targets) = packages.get(&result.package_identifier) else {

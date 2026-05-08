@@ -16,6 +16,7 @@ use uuid::Uuid;
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const STOP_SCHEDULER_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[non_exhaustive]
 pub enum SchedulerStopMode {
     Drain,
     Abort,

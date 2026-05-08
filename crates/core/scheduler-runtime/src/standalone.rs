@@ -24,6 +24,7 @@ pub const STANDALONE_SCHEDULER_DIR_NAME: &str = "scheduler";
 pub const STANDALONE_SCHEDULER_LABEL: &str = "uptrakit-scheduler service";
 pub const STANDALONE_SCHEDULER_APP_NAME: &str = "uptrakit-scheduler";
 
+#[non_exhaustive]
 pub enum StandaloneSchedulerServiceEvent {
     Forward(ServiceMessage),
 }

@@ -18,6 +18,7 @@ const MAX_RENEWAL_WINDOW_DAYS: i64 = 14;
 /// The window is `min(MAX_RENEWAL_WINDOW_DAYS, cert_lifetime / 5)` where
 /// `cert_lifetime` is the duration between `not_before` and `not_after`.
 /// Returns [`time::Duration::ZERO`] for certs with zero or negative lifetime.
+#[must_use]
 pub fn cert_renewal_window(
     not_before: OffsetDateTime,
     not_after: OffsetDateTime,
@@ -211,25 +212,25 @@ mod tests {
 
     /// A spy notifier that records each `send_to_service` call.
     struct SpyNotifier {
-        sent: std::sync::Mutex<Vec<Uuid>>,
+        sent: parking_lot::Mutex<Vec<Uuid>>,
     }
 
     impl SpyNotifier {
         fn new() -> Arc<Self> {
             Arc::new(Self {
-                sent: std::sync::Mutex::new(Vec::new()),
+                sent: parking_lot::Mutex::new(Vec::new()),
             })
         }
 
         fn sent_count(&self) -> usize {
-            self.sent.lock().unwrap().len()
+            self.sent.lock().len()
         }
     }
 
     #[async_trait::async_trait]
     impl SchedulerNotifier for SpyNotifier {
         async fn send_to_service(&self, service_id: &Uuid, _msg: ControllerMessage) {
-            self.sent.lock().unwrap().push(*service_id);
+            self.sent.lock().push(*service_id);
         }
         async fn broadcast(&self, _msg: ControllerMessage) {}
         async fn send_by_capability(&self, _cap: &str, _msg: ControllerMessage) {}
@@ -328,7 +329,7 @@ mod tests {
             1,
             "expiring cert should trigger one renewal message"
         );
-        assert_eq!(notifier.sent.lock().unwrap()[0], service_id);
+        assert_eq!(notifier.sent.lock()[0], service_id);
     }
 
     #[tokio::test]

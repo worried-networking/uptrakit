@@ -68,9 +68,11 @@ impl AwaitingRestartExecutor {
             let Some(since) = record.awaiting_restart_since else {
                 continue;
             };
-            let timeout_secs = software
-                .and_then(|s| s.awaiting_restart_timeout)
-                .unwrap_or(600) as i64;
+            let timeout_secs = i64::from(
+                software
+                    .and_then(|s| s.awaiting_restart_timeout)
+                    .unwrap_or(600),
+            );
             let deadline = since + time::Duration::seconds(timeout_secs);
 
             if now <= deadline {
