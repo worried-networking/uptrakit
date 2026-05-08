@@ -2,11 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::{HostSnapshot, RuntimeSessionState, SshAgentRuntimeSupport, SshInFlightUpdate};
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
-use uptrakit_agent_ssh_runtime::{
-    HostSnapshot, RuntimeSessionState, SshAgentRuntimeSupport, SshInFlightUpdate,
-};
 use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
 use uptrakit_wire::{
     CheckVersionsPayload, DiscoverSoftwarePayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
