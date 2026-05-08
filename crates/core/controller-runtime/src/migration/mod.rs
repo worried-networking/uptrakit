@@ -9,14 +9,13 @@ use sea_orm_migration::MigrationTrait;
 /// requiring a full `PluginCatalog` instance (which needs HTTP clients and
 /// cancellation tokens that are unavailable at migration time).
 pub(crate) async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
-    #[expect(
-        clippy::allow_attributes,
-        clippy::allow_attributes_without_reason,
-        reason = "feature-conditional: `mut` is needed when embedded-ssh-agent migrations are \
-                  appended; `#[expect]` would fail under feature variants where the binding is \
-                  never mutated"
+    #[cfg_attr(
+        not(feature = "embedded-ssh-agent"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when embedded-ssh-agent extends the migration list"
+        )
     )]
-    #[allow(unused_mut)]
     let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> =
         uptrakit_plugin_infrastructure_registry::all_descriptors()
             .into_iter()
