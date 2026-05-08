@@ -684,25 +684,56 @@
 				<div class="mx-auto flex max-w-5xl items-stretch gap-1">
 					{#each mobilePrimaryNavItems as item (item.href)}
 						{@const NavIcon = item.icon}
-						<a
-							href={item.href}
-							class={`flex min-w-0 flex-1 flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
-								isNavItemActive(item)
-									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
-							}`}
-							aria-current={isNavItemActive(item) ? 'page' : undefined}
-							data-ui="app-shell-mobile-nav-item"
-							onclick={closeTransientNavigation}
-						>
-							{#if NavIcon}<NavIcon size={20} aria-hidden="true" />{/if}
-							<span class="truncate">{item.label}</span>
-							{#if item.badge}
-								<span class="mt-0.5 shrink-0 pl-1.5">
+						{#if item.badgeHref && item.badge}
+							<div class="flex min-w-0 flex-1 flex-col items-center">
+								<a
+									href={item.href}
+									class={`flex w-full min-h-[2rem] flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
+										isNavItemActive(item) && !(page.url.pathname + page.url.search === item.badgeHref)
+											? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+											: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+									}`}
+									aria-current={isNavItemActive(item) && !(page.url.pathname + page.url.search === item.badgeHref)
+										? 'page'
+										: undefined}
+									data-ui="app-shell-mobile-nav-item"
+									onclick={closeTransientNavigation}
+								>
+									{#if NavIcon}<NavIcon size={20} aria-hidden="true" />{/if}
+									<span class="truncate">{item.label}</span>
+								</a>
+								<a
+									href={item.badgeHref}
+									aria-label={item.badgeAriaLabel}
+									aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+									class="mt-0.5 shrink-0"
+									data-ui="app-shell-nav-badge"
+									onclick={closeTransientNavigation}
+								>
 									<StatusBadge tone="info" label={item.badge} />
-								</span>
-							{/if}
-						</a>
+								</a>
+							</div>
+						{:else}
+							<a
+								href={item.href}
+								class={`flex min-w-0 flex-1 flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
+									isNavItemActive(item)
+										? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+										: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+								}`}
+								aria-current={isNavItemActive(item) ? 'page' : undefined}
+								data-ui="app-shell-mobile-nav-item"
+								onclick={closeTransientNavigation}
+							>
+								{#if NavIcon}<NavIcon size={20} aria-hidden="true" />{/if}
+								<span class="truncate">{item.label}</span>
+								{#if item.badge}
+									<span class="mt-0.5 shrink-0 pl-1.5">
+										<StatusBadge tone="info" label={item.badge} />
+									</span>
+								{/if}
+							</a>
+						{/if}
 					{/each}
 					{#if mobileOverflowNavItems.length > 0}
 						<button
