@@ -4,6 +4,7 @@ use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SchedulerError {
     #[error("database error: {0}")]
     Database(sea_orm::DbErr),

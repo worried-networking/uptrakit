@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 pub const CA_ROTATION_WINDOW_DAYS: i64 = 183;
 
 /// Extract the `not_after` timestamp from a PEM-encoded certificate.
+#[must_use]
 pub fn cert_not_after(pem: &str) -> Option<OffsetDateTime> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
     let cert = pem_block.parse_x509().ok()?;
@@ -18,6 +19,7 @@ pub fn cert_not_after(pem: &str) -> Option<OffsetDateTime> {
 /// Returns `true` if the CA certificate expires within 183 days (6 months).
 ///
 /// Returns `true` for invalid PEM (fail-safe: trigger rotation if we can't parse).
+#[must_use]
 pub fn should_rotate_ca(cert_pem: &str) -> bool {
     let Some(not_after) = cert_not_after(cert_pem) else {
         return true;
