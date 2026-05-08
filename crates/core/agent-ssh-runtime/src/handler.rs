@@ -19,6 +19,7 @@ use crate::{
     SshAgentSettings, ssh_agent_capabilities,
 };
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentSshMode {
     Binary,
