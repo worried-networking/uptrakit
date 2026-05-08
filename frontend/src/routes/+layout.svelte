@@ -676,7 +676,7 @@
 			{/if}
 
 			<!-- Main content -->
-			<main bind:this={shellMainEl} id="main-content" class="flex-1 overflow-auto">
+			<main bind:this={shellMainEl} id="main-content" class="contain-layout flex-1 overflow-auto">
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div
