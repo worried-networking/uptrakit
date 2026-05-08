@@ -10,9 +10,7 @@ version = "0.0.2"
 [features]
 default = []
 standalone = [
-    "dep:uptrakit-audit-log",
     "dep:uptrakit-crypto",
-    "dep:uptrakit-wire",
     "dep:uptrakit-nats",
     "dep:uptrakit-service-sdk",
     "dep:zeroize",
@@ -20,28 +18,41 @@ standalone = [
 db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
-oidc = ["uptrakit-scheduler-engine/oidc"]
+oidc = []
 
 [dependencies]
 async-trait = { workspace = true }
+rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
+serde_json = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-uptrakit-audit-log = { workspace = true, optional = true }
-uptrakit-crypto = { workspace = true, optional = true }
-uptrakit-wire = { workspace = true, optional = true }
-uptrakit-nats = { workspace = true, optional = true }
-uptrakit-scheduler-engine = { workspace = true }
-uptrakit-service-sdk = { workspace = true, optional = true }
+uptrakit-audit-log = { workspace = true }
+uptrakit-command = { workspace = true }
+uptrakit-config-merge = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-shared-db = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+uptrakit-wire = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
+x509-parser = { workspace = true }
+uptrakit-crypto = { workspace = true, optional = true }
+uptrakit-nats = { workspace = true, optional = true }
+uptrakit-service-sdk = { workspace = true, optional = true }
 zeroize = { workspace = true, optional = true }
 
 [dev-dependencies]
+parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+uptrakit-crypto = { workspace = true, features = ["testing"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support"] }
+uptrakit-shared-db = { workspace = true, features = ["db-sqlite", "migration"] }
 
 [lints]
 workspace = true
