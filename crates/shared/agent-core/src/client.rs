@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_registry::{
-    BatchUpdateItem, HostCompatibility, HostRuntime, MetadataAwareHostRuntime, PluginCapability,
-    UpdateLifecycleContext, get_descriptor,
+    BatchUpdateItem, HostCompatibility, HostCompatibilityError, HostRuntime,
+    MetadataAwareHostRuntime, PluginCapability, UpdateLifecycleContext, get_descriptor,
 };
 use uptrakit_service_sdk::LoopOutcome;
 use uptrakit_wire::{
@@ -543,6 +543,30 @@ async fn batch_update_inner(
             msg
         })?;
 
+        // Static capability gate: bail before constructing the plugin if its
+        // declared host_requirements don't match this runtime's capabilities.
+        // Prevents POSIX update_executors from invoking runtime.executor()
+        // (and the now-DEBUG NoopCommandExecutor warning) when mis-assigned to
+        // a non-POSIX host like RouterOS. UnknownOsFamily falls through to
+        // preserve legacy-agent behavior.
+        if let Err(e) = slot
+            .host_requirements
+            .is_compatible_with(runtime.capabilities())
+            && !matches!(e.current_context(), HostCompatibilityError::UnknownOsFamily)
+        {
+            let msg = format!(
+                "plugin {} host_requirements not satisfied: {}",
+                payload.plugin_type,
+                e.current_context()
+            );
+            tracing::debug!(
+                plugin_type = %payload.plugin_type,
+                reason = %e.current_context(),
+                "plugin host_requirements not satisfied; refusing batch update",
+            );
+            return Err(msg);
+        }
+
         let updater = (slot.create)(&effective_config, Arc::clone(&runtime)).map_err(|e| {
             let msg = format!("Failed to create plugin: {e}");
             tracing::error!(error = %e, "failed to create plugin for batch update");
@@ -722,6 +746,33 @@ async fn discover_software_inner(
             Some(desc) => {
                 let slot = desc.roles.discoverer.as_ref();
                 if let Some(slot) = slot {
+                    // Static capability gate: skip plugins whose declared
+                    // host_requirements don't match this runtime's
+                    // capabilities. Cheaper than constructing the plugin and
+                    // running its `detect_host_compatibility()` probe (which
+                    // shells out via runtime.executor()).
+                    //
+                    // UnknownOsFamily falls through to the runtime probe so
+                    // legacy agents that haven't reported os_family don't
+                    // silently lose all discovery results.
+                    if let Err(e) = slot
+                        .host_requirements
+                        .is_compatible_with(runtime.capabilities())
+                        && !matches!(e.current_context(), HostCompatibilityError::UnknownOsFamily)
+                    {
+                        tracing::debug!(
+                            plugin_type = %assignment.plugin_type,
+                            reason = %e.current_context(),
+                            "plugin host_requirements not satisfied; skipping discovery",
+                        );
+                        results.push(DiscoveryPluginResult {
+                            plugin_config_id: assignment.plugin_config_id,
+                            plugin_type: assignment.plugin_type.clone(),
+                            discoveries: vec![],
+                            error: None,
+                        });
+                        continue;
+                    }
                     match (slot.create)(&effective_config, runtime) {
                         Err(e) => {
                             tracing::warn!(
@@ -965,5 +1016,180 @@ mod tests {
             }
             other => panic!("expected VersionCheckResults, got {other:?}"),
         }
+    }
+
+    // ── host_requirements static-gate tests ─────────────────────────────
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use uptrakit_command::CommandExecutor;
+    use uptrakit_shared_types::{HostCapabilities, OsFamily, host_features};
+    use uptrakit_wire::DiscoverSoftwarePayload;
+
+    /// Test helper that wraps an inner [`HostRuntime`] and counts every
+    /// `executor()` call. Used to assert the static `host_requirements`
+    /// gate skips plugin construction *before* runtime.executor() is hit.
+    struct CountingHostRuntime {
+        inner: Arc<dyn super::HostRuntime>,
+        executor_calls: Arc<AtomicUsize>,
+    }
+
+    impl CountingHostRuntime {
+        fn new(inner: Arc<dyn super::HostRuntime>) -> (Arc<Self>, Arc<AtomicUsize>) {
+            let counter = Arc::new(AtomicUsize::new(0));
+            let runtime = Arc::new(Self {
+                inner,
+                executor_calls: Arc::clone(&counter),
+            });
+            (runtime, counter)
+        }
+    }
+
+    impl super::HostRuntime for CountingHostRuntime {
+        fn capabilities(&self) -> &HostCapabilities {
+            self.inner.capabilities()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn executor(&self) -> Arc<dyn CommandExecutor> {
+            self.executor_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.executor()
+        }
+    }
+
+    fn runtime_with_caps(caps: HostCapabilities) -> Arc<dyn super::HostRuntime> {
+        use uptrakit_command::NoopCommandExecutor;
+        use uptrakit_plugin_infrastructure_core::StandardHostRuntime;
+        Arc::new(StandardHostRuntime::new(
+            Arc::new(NoopCommandExecutor),
+            caps,
+        ))
+    }
+
+    fn routeros_caps() -> HostCapabilities {
+        let mut caps = HostCapabilities {
+            os_family: Some(OsFamily::RouterOs),
+            os_version: None,
+            architecture: None,
+            features: Default::default(),
+        };
+        caps.features.insert(host_features::ROUTER_OS_CLI);
+        caps
+    }
+
+    fn linux_caps() -> HostCapabilities {
+        let mut caps = HostCapabilities {
+            os_family: Some(OsFamily::Linux),
+            os_version: None,
+            architecture: None,
+            features: Default::default(),
+        };
+        caps.features.insert(host_features::POSIX_SHELL);
+        caps.features.insert(host_features::PRIVILEGE_ESCALATION);
+        caps
+    }
+
+    fn legacy_caps_no_os_family() -> HostCapabilities {
+        HostCapabilities::default()
+    }
+
+    fn discover_payload(plugin_type: &str) -> DiscoverSoftwarePayload {
+        DiscoverSoftwarePayload {
+            host_machine_id: "test-host".to_string(),
+            plugins: vec![uptrakit_wire::DiscoveryPluginAssignment {
+                plugin_config_id: None,
+                plugin_type: PluginTypeId::new(plugin_type),
+                config: serde_json::Value::Object(Default::default()),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn discover_skips_posix_plugin_on_routeros_host() {
+        let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(routeros_caps()));
+        let response =
+            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+                .await;
+
+        match response {
+            ServiceMessage::DiscoveryResults(results) => {
+                assert_eq!(results.results.len(), 1);
+                assert!(results.results[0].discoveries.is_empty());
+                assert!(
+                    results.results[0].error.is_none(),
+                    "skip is non-fatal, got: {:?}",
+                    results.results[0].error
+                );
+            }
+            other => panic!("expected DiscoveryResults, got {other:?}"),
+        }
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "static gate must skip apt before runtime.executor() is called"
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_runs_compatible_plugin_on_linux_host() {
+        let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(linux_caps()));
+        let _ =
+            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+                .await;
+
+        assert!(
+            counter.load(Ordering::SeqCst) > 0,
+            "POSIX plugin on Linux must reach runtime.executor() during its compatibility probe"
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_falls_through_when_os_family_unknown() {
+        // Legacy agents may not report `os_family`. The static gate must
+        // NOT short-circuit them — runtime probe gets to decide.
+        let (runtime, counter) =
+            CountingHostRuntime::new(runtime_with_caps(legacy_caps_no_os_family()));
+        let _ =
+            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+                .await;
+
+        assert!(
+            counter.load(Ordering::SeqCst) > 0,
+            "legacy agent (unknown OS) must fall through to runtime probe, not silently skip"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_update_skips_posix_plugin_on_routeros_host() {
+        let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(routeros_caps()));
+        let payload = make_batch_payload(
+            PluginTypeId::new("package_manager_apt"),
+            std::time::Duration::from_secs(30),
+        );
+        let results = super::batch_update_inner(&payload, runtime, &ctx()).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].status,
+            UpdateFinalStatus::Failed,
+            "incompatible host must fail the batch"
+        );
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("host_requirements not satisfied"),
+            "error must mention host_requirements gate, got: {:?}",
+            results[0].error
+        );
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "static gate must skip apt before runtime.executor() is called"
+        );
     }
 }
