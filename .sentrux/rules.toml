@@ -61,7 +61,7 @@ order = 1
 name = "plugin_protocol_clients"
 paths = [
   "crates/shared/agent-core/**",
-  "crates/shared/scheduler-engine/**",
+  "crates/core/scheduler-runtime/**",
   "crates/core/agent-ssh/**",
 ]
 order = 2
@@ -150,7 +150,7 @@ reason = "Discovery plugins must not depend on notification plugins"
 # ── Rule 1: plugins/infrastructure/registry is the only external plugin entry point ──
 #
 # Explicit non-carve-out roots only:
-# - shared: all shared crates except agent-core and scheduler-engine
+# - shared: all shared crates except agent-core
 # - core: all core crates except agent-ssh
 
 [[boundaries]]
@@ -1409,42 +1409,42 @@ to = "crates/plugins/infrastructure/proxmox/**"
 reason = "Operational carve-out crates must not directly import the Proxmox infrastructure plugin; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/releases/**"
 reason = "Operational carve-out crates must not directly import release plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/package-managers/**"
 reason = "Operational carve-out crates must not directly import package manager plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/notifications/**"
 reason = "Operational carve-out crates must not directly import notification plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/discovery/**"
 reason = "Operational carve-out crates must not directly import discovery plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/generic/**"
 reason = "Operational carve-out crates must not directly import generic plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/hooks/**"
 reason = "Operational carve-out crates must not directly import hook plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/enhancements/**"
 reason = "Operational carve-out crates must not directly import enhancement plugin crates; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
-from = "crates/shared/scheduler-engine/**"
+from = "crates/core/scheduler-runtime/**"
 to = "crates/plugins/infrastructure/proxmox/**"
 reason = "Operational carve-out crates must not directly import the Proxmox infrastructure plugin; only infrastructure/core protocol usage is allowlisted"
 
