@@ -52,14 +52,32 @@ enum HostOs {
     Posix,
 }
 
-/// Probe the remote host to determine whether it is RouterOS or a POSIX system.
+/// Detect whether the remote host is RouterOS or a POSIX system.
 ///
-/// Sends `/system resource print` with a short timeout.  A response
-/// containing `"platform:"` or `"MikroTik"` identifies the host as RouterOS.
-/// A response that looks like a permission error (not a shell "not found")
-/// is treated as a RouterOS host with insufficient access.  All other
-/// outcomes (including SSH errors) fall back to POSIX.
-async fn detect_host_os(exec: &SshCommandExecutor) -> Result<HostOs> {
+/// Allow-list banner detection runs first: the SSH identification banner
+/// (peeked before authentication and surfaced via [`SshSession::server_software`])
+/// distinguishes RouterOS (`ROSSSH`), OpenSSH-based POSIX (`OpenSSH_*`), and
+/// Dropbear-based POSIX (`dropbear`) without round-trips. Unknown banners
+/// (Cisco IOS, Junos, FortiOS, BMCs, etc.) fall through to the legacy
+/// `/system resource print` shell probe — safer than guessing, since
+/// mis-classifying a network appliance as POSIX would let bootstrap write
+/// `~/.ssh/authorized_keys` and run `sudo` on a non-shell platform.
+async fn detect_host_os(session: &SshSession, exec: &SshCommandExecutor) -> Result<HostOs> {
+    if let Some(software) = session.server_software() {
+        if software.contains("ROSSSH") {
+            tracing::debug!(server_software = %software, "RouterOS detected from SSH banner");
+            return Ok(HostOs::RouterOs);
+        }
+        if software.starts_with("OpenSSH_") || software.contains("dropbear") {
+            tracing::debug!(server_software = %software, "POSIX host detected from SSH banner");
+            return Ok(HostOs::Posix);
+        }
+        tracing::debug!(
+            server_software = %software,
+            "ssh banner not in allow-list; falling back to shell probe",
+        );
+    }
+    // Banner peek failed or banner is not in the allow-list — run the shell probe.
     match exec
         .exec_raw("/system resource print", Some(PROBE_TIMEOUT))
         .await
@@ -217,7 +235,7 @@ pub(crate) async fn bootstrap_connect(
 
     // 3b. DETECT HOST OS — route to RouterOS plan when applicable.
     let base_exec = SshCommandExecutor::new(Arc::clone(&session));
-    if let HostOs::RouterOs = detect_host_os(&base_exec).await? {
+    if let HostOs::RouterOs = detect_host_os(&session, &base_exec).await? {
         drop(executor);
         SshSession::disconnect_shared(session).await;
 
@@ -548,7 +566,7 @@ pub(crate) async fn bootstrap_execute(
 
     // Detect host OS — route to RouterOS execute path when applicable.
     let base_exec = SshCommandExecutor::new(Arc::clone(&session));
-    if let HostOs::RouterOs = detect_host_os(&base_exec).await? {
+    if let HostOs::RouterOs = detect_host_os(&session, &base_exec).await? {
         drop(executor);
         let ros_params = routeros_params_from_bootstrap_with_fp(&params, observed_fp);
         execute_bootstrap_routeros(&ros_params, session, &db).await?;

@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use russh::client::{self, Handle};
+use russh::client::{self, AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::agent::client::AgentClient;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::ssh_key::Algorithm;
 use russh::keys::ssh_key::HashAlg;
 use russh::keys::{self};
-use russh::{ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect, MethodKind};
 use tokio::sync::{Mutex, mpsc};
 use uptrakit_command::UpdateOutputLine;
 use uptrakit_shared_types::OutputStreamType;
@@ -35,6 +35,11 @@ pub(crate) enum SshExecError {
 
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
+/// Timeout for the pre-connect SSH banner peek. Tight bound so a slow peek
+/// does not extend the bootstrap latency budget — fall through to the shell
+/// probe if the server is sluggish.
+const BANNER_PEEK_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ── Configuration types ──────────────────────────────────────────────
 
@@ -221,9 +226,17 @@ impl LineBuffer {
 pub(crate) struct SshSession {
     handle: Handle<BootstrapHandler>,
     pub(crate) hostname: String,
+    /// Server software string from the SSH identification banner
+    /// (the portion after `SSH-2.0-` / `SSH-1.99-`). `None` when the pre-connect
+    /// banner peek failed. Used for OS feature detection — never for security.
+    server_software: Option<String>,
 }
 
 impl SshSession {
+    /// Server software string captured from the SSH identification banner.
+    pub(crate) fn server_software(&self) -> Option<&str> {
+        self.server_software.as_deref()
+    }
     /// Open an SSH channel for the given command and return it before
     /// consuming any output.
     ///
@@ -775,6 +788,19 @@ pub(crate) async fn connect_and_authenticate(
     tracing::debug!(hostname = %config.hostname, port = config.port, "connecting to SSH host");
     let observed_fingerprint = Arc::new(Mutex::new(None));
 
+    // Best-effort peek of the SSH identification banner. Used downstream by
+    // `detect_host_os` for fast RouterOS detection. Failure is non-fatal —
+    // the post-auth shell probe handles unknown servers.
+    let server_software =
+        peek_ssh_server_id(&config.hostname, config.port, BANNER_PEEK_TIMEOUT).await;
+    if let Some(ref software) = server_software {
+        tracing::debug!(
+            hostname = %config.hostname,
+            server_software = %software,
+            "peeked SSH server identification banner",
+        );
+    }
+
     let handler = BootstrapHandler {
         expected_fingerprint: expected_fingerprint.map(String::from),
         observed_fingerprint: Arc::clone(&observed_fingerprint),
@@ -822,27 +848,13 @@ pub(crate) async fn connect_and_authenticate(
     // Authenticate.
     match auth {
         AuthMethod::Password(password) => {
-            let auth_result = handle
-                .authenticate_password(username.to_string(), password.to_string())
-                .await
-                .map_err(|e| {
-                    report!(Error::SshAuth(format!(
-                        "password authentication failed: {e}"
-                    )))
-                })?;
-            if !auth_result.success() {
-                bail!(Error::SshAuth(format!(
-                    "authentication failed for user '{username}'"
-                )));
-            }
+            authenticate_password_or_kbi(&mut handle, username, password).await?;
         }
         AuthMethod::PrivateKey(pem) => {
             let private_key = Arc::new(keys::decode_secret_key(pem, None).map_err(|e| {
                 report!(Error::SshAuth(format!("failed to decode private key: {e}")))
             })?);
-            // RSA keys need explicit hash algorithm negotiation. Modern servers
-            // (OpenSSH 8.8+) reject the legacy "ssh-rsa" (SHA-1) algorithm.
-            let hash_algs = rsa_hash_alg_candidates(private_key.algorithm());
+            let hash_algs = rsa_hash_alg_candidates_for(&handle, private_key.algorithm()).await;
             let mut success = false;
             for hash_alg in hash_algs {
                 let key_with_alg = PrivateKeyWithHashAlg::new(Arc::clone(&private_key), hash_alg);
@@ -857,6 +869,16 @@ pub(crate) async fn connect_and_authenticate(
                 if auth_result.success() {
                     success = true;
                     break;
+                }
+                if let AuthResult::Failure {
+                    ref remaining_methods,
+                    ..
+                } = auth_result
+                {
+                    tracing::debug!(
+                        ?remaining_methods,
+                        "public key probe rejected; trying next hash algorithm if any",
+                    );
                 }
             }
             if !success {
@@ -874,12 +896,162 @@ pub(crate) async fn connect_and_authenticate(
         SshSession {
             handle,
             hostname: config.hostname.clone(),
+            server_software,
         },
         fp,
     ))
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
+
+/// Authenticate using a username + password pair.
+///
+/// SSH defines two distinct auth methods that take a password:
+/// - `password` — single round, password-in-the-request
+/// - `keyboard-interactive` — challenge/response (the server may send any
+///   number of prompts)
+///
+/// Most servers accept both; some (notably MikroTik RouterOS) only accept
+/// `keyboard-interactive`. To avoid burning a server-side failed-auth counter
+/// on a method the server will reject anyway, we first call
+/// [`Handle::authenticate_none`] to discover the methods the server is willing
+/// to accept, then dispatch to the right one. Mirrors OpenSSH client behavior.
+async fn authenticate_password_or_kbi<H: client::Handler>(
+    handle: &mut Handle<H>,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    // `authenticate_none` does NOT consume a failed-auth counter on most
+    // servers — it is the standard method-discovery probe used by OpenSSH.
+    let none_result = handle
+        .authenticate_none(username.to_string())
+        .await
+        .map_err(|e| {
+            report!(Error::SshAuth(format!(
+                "ssh method-discovery probe failed: {e}"
+            )))
+        })?;
+
+    let methods = match none_result {
+        AuthResult::Success => {
+            // Server accepts auth without credentials — odd but legal.
+            return Ok(());
+        }
+        AuthResult::Failure {
+            remaining_methods, ..
+        } => remaining_methods,
+    };
+    tracing::debug!(
+        ?methods,
+        "ssh method-discovery probe complete; server-accepted methods",
+    );
+
+    let supports_password = methods.contains(&MethodKind::Password);
+    let supports_kbi = methods.contains(&MethodKind::KeyboardInteractive);
+
+    if !supports_password && !supports_kbi {
+        bail!(Error::SshAuth(format!(
+            "server does not accept password-based authentication for user '{username}' \
+             (advertised methods: {methods:?})"
+        )));
+    }
+
+    if supports_password {
+        let result = handle
+            .authenticate_password(username.to_string(), password.to_string())
+            .await
+            .map_err(|e| {
+                report!(Error::SshAuth(format!(
+                    "password authentication failed: {e}"
+                )))
+            })?;
+        if result.success() {
+            return Ok(());
+        }
+        if let AuthResult::Failure {
+            ref remaining_methods,
+            ..
+        } = result
+        {
+            tracing::debug!(
+                ?remaining_methods,
+                "password auth rejected; checking for keyboard-interactive fallback",
+            );
+            if !remaining_methods.contains(&MethodKind::KeyboardInteractive) {
+                bail!(Error::SshAuth(format!(
+                    "authentication failed for user '{username}'"
+                )));
+            }
+        }
+        // Fall through to keyboard-interactive below.
+    }
+
+    authenticate_keyboard_interactive(handle, username, password).await
+}
+
+/// Authenticate using the SSH `keyboard-interactive` method, responding to
+/// every server prompt with `password`.
+///
+/// Used as a fallback when the server (notably MikroTik RouterOS) rejects the
+/// raw `password` auth method but accepts `keyboard-interactive` for password
+/// logins, mirroring OpenSSH client behavior.
+///
+/// To avoid silently echoing the user's password into a "new password" or OTP
+/// prompt, the helper bails if any prompt does not match
+/// [`is_password_prompt`].
+async fn authenticate_keyboard_interactive<H: client::Handler>(
+    handle: &mut Handle<H>,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    let mut response = handle
+        .authenticate_keyboard_interactive_start(username.to_string(), None)
+        .await
+        .map_err(|e| {
+            report!(Error::SshAuth(format!(
+                "keyboard-interactive auth failed: {e}"
+            )))
+        })?;
+    loop {
+        match response {
+            KeyboardInteractiveAuthResponse::Success => return Ok(()),
+            KeyboardInteractiveAuthResponse::Failure { .. } => {
+                bail!(Error::SshAuth(format!(
+                    "authentication failed for user '{username}'"
+                )));
+            }
+            KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                if !prompts.iter().all(|p| is_password_prompt(&p.prompt)) {
+                    let raw: Vec<&String> = prompts.iter().map(|p| &p.prompt).collect();
+                    bail!(Error::SshAuth(format!(
+                        "keyboard-interactive server requested non-password prompt(s) ({raw:?}); \
+                         interactive bootstrap is not supported"
+                    )));
+                }
+                let responses: Vec<String> = prompts.iter().map(|_| password.to_string()).collect();
+                response = handle
+                    .authenticate_keyboard_interactive_respond(responses)
+                    .await
+                    .map_err(|e| {
+                        report!(Error::SshAuth(format!(
+                            "keyboard-interactive auth response failed: {e}"
+                        )))
+                    })?;
+            }
+        }
+    }
+}
+
+/// True for prompts that look like a current-password prompt.
+///
+/// Mirrors OpenSSH's heuristic: matches `password` (case-insensitive) with an
+/// optional trailing colon and surrounding whitespace. Rejects `new password`,
+/// `verify password`, OTP and security-question prompts so the caller does not
+/// silently send the user's existing password into an unrelated prompt.
+fn is_password_prompt(prompt: &str) -> bool {
+    let trimmed = prompt.trim().trim_end_matches(':').trim();
+    trimmed.eq_ignore_ascii_case("password")
+}
 
 /// Authenticate using keys from the local SSH agent.
 ///
@@ -906,11 +1078,8 @@ async fn authenticate_with_agent<H: client::Handler>(
     }
 
     for key in &identities {
-        // RSA keys need explicit hash algorithm negotiation. Modern servers
-        // (OpenSSH 8.8+) reject the legacy "ssh-rsa" (SHA-1) algorithm.
-        // Try SHA-512, then SHA-256, matching OpenSSH client behavior.
         let pub_key = key.public_key().into_owned();
-        let hash_algs = rsa_hash_alg_candidates(pub_key.algorithm());
+        let hash_algs = rsa_hash_alg_candidates_for(handle, pub_key.algorithm()).await;
 
         let mut accepted = false;
         for hash_alg in hash_algs {
@@ -928,6 +1097,16 @@ async fn authenticate_with_agent<H: client::Handler>(
                 accepted = true;
                 break;
             }
+            if let AuthResult::Failure {
+                ref remaining_methods,
+                ..
+            } = result
+            {
+                tracing::debug!(
+                    ?remaining_methods,
+                    "agent key probe rejected; trying next hash algorithm if any",
+                );
+            }
         }
 
         if accepted {
@@ -941,29 +1120,83 @@ async fn authenticate_with_agent<H: client::Handler>(
     )));
 }
 
-/// Return the hash algorithm candidates to try for a given key algorithm.
+/// Decide which RSA hash algorithms to try, preferring `server-sig-algs` when
+/// the server advertises it via `EXT_INFO`.
 ///
-/// For RSA keys, modern servers (OpenSSH 8.8+) reject `ssh-rsa` (SHA-1) and
-/// require `rsa-sha2-512` or `rsa-sha2-256`. We try SHA-512 first (strongest),
-/// then SHA-256, matching OpenSSH client negotiation order.
-///
-/// For non-RSA keys (Ed25519, ECDSA), hash algorithm selection is not
-/// applicable, so we return a single `None` entry.
-fn rsa_hash_alg_candidates(algorithm: Algorithm) -> Vec<Option<HashAlg>> {
-    if matches!(algorithm, Algorithm::Rsa { .. }) {
-        vec![
-            Some(HashAlg::Sha512),
-            Some(HashAlg::Sha256),
-            None, // legacy ssh-rsa fallback
-        ]
-    } else {
-        vec![None]
+/// - For non-RSA keys (Ed25519, ECDSA), hash algorithm selection is irrelevant
+///   so we return a single `None` entry without polling for the extension.
+/// - For RSA keys, we ask russh's [`Handle::best_supported_rsa_hash`] which
+///   returns the strongest hash algorithm the server advertised. We use only
+///   that algorithm — matching OpenSSH client behavior.
+/// - When the server does not advertise `server-sig-algs` (older or
+///   intentionally minimal servers), we fall back to a candidate list of
+///   `[Some(SHA-256), Some(SHA-512), None]`. SHA-256 is RFC 8332 mandatory
+///   and accepted by every modern server; SHA-512 is optional. Trying SHA-512
+///   first is what triggered the original RouterOS bug, so SHA-256 leads.
+async fn rsa_hash_alg_candidates_for<H: client::Handler>(
+    handle: &Handle<H>,
+    algorithm: Algorithm,
+) -> Vec<Option<HashAlg>> {
+    if !matches!(algorithm, Algorithm::Rsa { .. }) {
+        return vec![None];
+    }
+
+    match handle.best_supported_rsa_hash().await {
+        Ok(Some(alg)) => {
+            tracing::debug!(?alg, "using server-advertised RSA hash algorithm");
+            vec![alg]
+        }
+        Ok(None) => {
+            tracing::debug!(
+                "server advertised server-sig-algs without rsa-sha2-* — using legacy ssh-rsa",
+            );
+            vec![None]
+        }
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                "server did not provide server-sig-algs; falling back to candidate list",
+            );
+            vec![Some(HashAlg::Sha256), Some(HashAlg::Sha512), None]
+        }
     }
 }
 
 /// Compute the SHA-256 fingerprint of an SSH public key in `SHA256:...` format.
 fn compute_fingerprint(key: &russh::keys::ssh_key::PublicKey) -> String {
     format!("{}", key.fingerprint(russh::keys::ssh_key::HashAlg::Sha256))
+}
+
+/// Peek at the server's SSH identification string (e.g. `"ROSSSH"`,
+/// `"OpenSSH_10.0p2 Debian-7+deb13u2"`, `"dropbear"`).
+///
+/// Returns the software portion after the `SSH-2.0-` / `SSH-1.99-` prefix, or
+/// `None` if the peek fails (timeout, refused, malformed banner). Best-effort
+/// only — callers fall back to a post-auth shell probe.
+///
+/// This opens a SECOND TCP connection to the host (russh creates its own when
+/// `connect()` is called). Acceptable because bootstrap is rare and single-host.
+/// The banner is read over an unauthenticated channel and is therefore used
+/// only for feature detection, never security decisions.
+async fn peek_ssh_server_id(hostname: &str, port: u16, timeout: Duration) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+    let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect((hostname, port)))
+        .await
+        .ok()?
+        .ok()?;
+    // RFC 4253 §4.2 caps the SSH identification string at 255 bytes including CRLF.
+    let mut reader = BufReader::new(stream).take(255);
+    let mut line = String::new();
+    tokio::time::timeout(timeout, reader.read_line(&mut line))
+        .await
+        .ok()?
+        .ok()?;
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    trimmed
+        .strip_prefix("SSH-2.0-")
+        .or_else(|| trimmed.strip_prefix("SSH-1.99-"))
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -993,6 +1226,32 @@ mod tests {
             fp.as_ref().is_some_and(|f| f.starts_with("SHA256:")),
             "fingerprint should start with SHA256:"
         );
+    }
+
+    #[test]
+    fn is_password_prompt_accepts_canonical_forms() {
+        assert!(is_password_prompt("Password:"));
+        assert!(is_password_prompt("password:"));
+        assert!(is_password_prompt("PASSWORD:"));
+        assert!(is_password_prompt("Password: "));
+        assert!(is_password_prompt(" Password "));
+        assert!(is_password_prompt("password"));
+    }
+
+    #[test]
+    fn is_password_prompt_rejects_unrelated_or_compound_prompts() {
+        // Compound prompts that include "password" but mean something else.
+        assert!(!is_password_prompt("New password:"));
+        assert!(!is_password_prompt("Verify password:"));
+        assert!(!is_password_prompt("Enter new password:"));
+        assert!(!is_password_prompt("Re-enter new password:"));
+        // OTP / security challenges.
+        assert!(!is_password_prompt("OTP:"));
+        assert!(!is_password_prompt("Verification code:"));
+        assert!(!is_password_prompt("Answer:"));
+        // Empty / pathological.
+        assert!(!is_password_prompt(""));
+        assert!(!is_password_prompt(":"));
     }
 
     #[tokio::test]
