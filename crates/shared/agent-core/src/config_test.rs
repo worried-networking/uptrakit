@@ -398,7 +398,7 @@ mod tests {
             "crates/shared/agent-core/src/version_check.rs",
             "crates/core/agent-ssh/src/runtime_support.rs",
             "crates/core/agent-ssh/src/operations/bootstrap.rs",
-            "crates/shared/scheduler-engine/src/executors/fetch_releases.rs",
+            "crates/core/scheduler-runtime/src/executors/fetch_releases.rs",
         ] {
             let contents = std::fs::read_to_string(workspace_root.join(rel_path))
                 .unwrap_or_else(|err| panic!("failed to read {rel_path}: {err}"));
@@ -414,7 +414,7 @@ mod tests {
 
         for rel_path in [
             "crates/shared/agent-core/Cargo.toml",
-            "crates/shared/scheduler-engine/Cargo.toml",
+            "crates/core/scheduler-runtime/Cargo.toml",
             "crates/core/agent-ssh/Cargo.toml",
         ] {
             let contents = std::fs::read_to_string(workspace_root.join(rel_path))
