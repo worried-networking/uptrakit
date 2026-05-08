@@ -27,7 +27,8 @@
 		onOpenUpdateAllModal,
 		onOpenSingleHostUpdate,
 		onPageChange,
-		onToggleFeatured
+		onToggleFeatured,
+		showUpdatableOnly = false
 	}: {
 		items: SoftwareItemResponse[];
 		itemDetailsById: SvelteMap<string, SoftwareItemDetailResponse>;
@@ -49,34 +50,46 @@
 		onOpenSingleHostUpdate: (item: SoftwareItemResponse, host: SoftwareItemHostSummary) => void;
 		onPageChange: (page: number) => void;
 		onToggleFeatured: (item: SoftwareItemResponse) => void;
+		showUpdatableOnly?: boolean;
 	} = $props();
 
 	function detailHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
 		return itemDetailsById.get(item.id)?.hosts ?? [];
 	}
 
-	function visibleHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
+	function filteredHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
 		const hosts = detailHosts(item);
+		if (!showUpdatableOnly) return hosts;
+		return hosts.filter((h) => h.update_available && h.latest_version);
+	}
+
+	function displayedHostCount(item: SoftwareItemResponse): number {
+		if (showUpdatableOnly && itemDetailsById.has(item.id)) return filteredHosts(item).length;
+		return item.host_count;
+	}
+
+	function visibleHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
+		const hosts = filteredHosts(item);
 		if (collapsedGroupIds.has(item.id)) return [];
 		if (expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) return hosts;
 		return hosts.slice(0, 3);
 	}
 
 	function hiddenHostCount(item: SoftwareItemResponse): number {
-		const hosts = detailHosts(item);
+		const hosts = filteredHosts(item);
 		if (collapsedGroupIds.has(item.id) || expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) return 0;
 		return hosts.length - 3;
 	}
 
 	function hiddenHostsSummary(item: SoftwareItemResponse): string {
-		const hosts = detailHosts(item);
+		const hosts = filteredHosts(item);
 		if (collapsedGroupIds.has(item.id) || expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) return '';
 		const updateCount = hosts.slice(3).filter((h) => h.update_available && h.latest_version).length;
 		return updateCount === 0 ? 'all up to date' : `${updateCount} with update${updateCount === 1 ? '' : 's'}`;
 	}
 
 	function updateableHostCount(item: SoftwareItemResponse): number | null {
-		const hosts = detailHosts(item);
+		const hosts = filteredHosts(item);
 		if (hosts.length > 0) return hosts.filter((h) => h.update_available && h.latest_version).length;
 		return null;
 	}
@@ -104,12 +117,12 @@
 	}
 
 	function isSingleHostItem(item: SoftwareItemResponse): boolean {
-		const hosts = detailHosts(item);
+		const hosts = filteredHosts(item);
 		return hosts.length > 0 ? hosts.length === 1 : item.host_count === 1;
 	}
 
 	function singleHost(item: SoftwareItemResponse): SoftwareItemHostSummary | null {
-		const hosts = detailHosts(item);
+		const hosts = filteredHosts(item);
 		return hosts.length === 1 ? hosts[0] : null;
 	}
 
@@ -142,7 +155,7 @@
 			if (!isSingleHostItem(item)) {
 				if (shouldShowLoadingRow(item)) {
 					indices.set(`loading:${item.id}`, idx++);
-				} else if (!collapsedGroupIds.has(item.id) && detailHosts(item).length > 0) {
+				} else if (!collapsedGroupIds.has(item.id) && filteredHosts(item).length > 0) {
 					for (const host of visibleHosts(item)) {
 						indices.set(`host:${host.id}`, idx++);
 					}
@@ -251,7 +264,7 @@
 											: 'shrink-0 text-table-header leading-none'}
 										aria-hidden="true">{groupIsOpen(item.id) ? '▼' : '▶'}</span
 									>
-									<span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
+									<span>{displayedHostCount(item)} host{displayedHostCount(item) === 1 ? '' : 's'}</span>
 								</button>
 								<span class="text-nav-item text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
 							</div>
@@ -352,7 +365,7 @@
 						<span aria-hidden="true"></span>
 					{/if}
 				</div>
-			{:else if !isCompactSingleHost && detailHosts(item).length > 0}
+			{:else if !isCompactSingleHost && filteredHosts(item).length > 0}
 				<div id={'software-group-body-' + item.id}>
 					{#each visibleHosts(item) as host (host.id)}
 						{@const hostRowIdx = flatRowIndices.get(`host:${host.id}`) ?? -1}
@@ -579,7 +592,7 @@
 								: 'shrink-0 text-table-header leading-none'}
 							aria-hidden="true">{groupIsOpen(item.id) ? '▼' : '▶'}</span
 						>
-						<span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
+						<span>{displayedHostCount(item)} host{displayedHostCount(item) === 1 ? '' : 's'}</span>
 					</button>
 					<span class="text-nav-item text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
 				</div>
@@ -587,7 +600,7 @@
 				<!-- Host sub-cards (expanded) -->
 				{#if shouldShowLoadingRow(item) && groupIsOpen(item.id)}
 					<p class="mt-1 pl-3 text-sm text-[var(--text-secondary)]">Loading hosts...</p>
-				{:else if groupIsOpen(item.id) && detailHosts(item).length > 0}
+				{:else if groupIsOpen(item.id) && filteredHosts(item).length > 0}
 					<div
 						class="mt-2 space-y-2 border-l-2 border-[var(--border-subtle)] pl-3"
 						id={'software-group-mobile-body-' + item.id}
