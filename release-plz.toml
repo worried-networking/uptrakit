@@ -102,9 +102,6 @@ name = "uptrakit-web-api-types"
 name = "uptrakit-agent-core"
 
 [[package]]
-name = "uptrakit-scheduler-engine"
-
-[[package]]
 name = "uptrakit-web-api"
 
 [[package]]
@@ -268,7 +265,6 @@ changelog_include = [
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
-  "uptrakit-scheduler-engine",
   "uptrakit-notification-plugin-core",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
@@ -320,7 +316,6 @@ changelog_include = [
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
-  "uptrakit-scheduler-engine",
   "uptrakit-notification-plugin-core",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
@@ -398,7 +393,6 @@ git_tag_name = "uptrakit-scheduler-v{{ version }}"
 git_release_name = "uptrakit-scheduler v{{ version }}"
 changelog_update = true
 changelog_include = [
-  "uptrakit-scheduler-engine",
   "uptrakit-scheduler-runtime",
 ]
 
