@@ -38,7 +38,7 @@ use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 const MAX_USERNAME_LEN: usize = 32;
 
 /// Default SSH connect timeout.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Timeout for the OS detection probe command.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -46,7 +46,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 // ── Host OS detection ──────────────────────────────────────────────────────
 
 /// Detected operating system class of the remote host.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HostOs {
     RouterOs,
     Posix,
@@ -104,6 +104,10 @@ async fn detect_host_os(session: &SshSession, exec: &SshCommandExecutor) -> Resu
 // ── Bootstrap parameters ─────────────────────────────────────────────
 
 /// Parameters for the bootstrap workflow, mirroring CLI args.
+///
+/// `Debug` is safe because every secret-bearing field is wrapped in
+/// [`SecretString`], which has a redacted `Debug` impl.
+#[derive(Debug)]
 pub(crate) struct BootstrapParams {
     pub name: String,
     pub hostname: String,
@@ -230,12 +234,17 @@ pub(crate) async fn bootstrap_connect(
         )))
     })?;
 
-    let (session, observed_fp, executor, use_sudo) =
-        prepare_bootstrap_connection(params, port).await?;
+    let PreparedBootstrapConnection {
+        session,
+        observed_fingerprint: observed_fp,
+        executor,
+        use_sudo,
+        host_os,
+    } = prepare_bootstrap_connection(params, port).await?;
 
-    // 3b. DETECT HOST OS — route to RouterOS plan when applicable.
-    let base_exec = SshCommandExecutor::new(Arc::clone(&session));
-    if let HostOs::RouterOs = detect_host_os(&session, &base_exec).await? {
+    // 3b. Route to RouterOS plan when applicable. Host OS was detected inside
+    // prepare_bootstrap_connection so we can reuse the cached value.
+    if matches!(host_os, HostOs::RouterOs) {
         drop(executor);
         SshSession::disconnect_shared(session).await;
 
@@ -561,12 +570,17 @@ pub(crate) async fn bootstrap_execute(
         )))
     })?;
 
-    let (session, observed_fp, executor, use_sudo) =
-        prepare_bootstrap_connection(&params, port).await?;
+    let PreparedBootstrapConnection {
+        session,
+        observed_fingerprint: observed_fp,
+        executor,
+        use_sudo,
+        host_os,
+    } = prepare_bootstrap_connection(&params, port).await?;
 
-    // Detect host OS — route to RouterOS execute path when applicable.
-    let base_exec = SshCommandExecutor::new(Arc::clone(&session));
-    if let HostOs::RouterOs = detect_host_os(&session, &base_exec).await? {
+    // Route to RouterOS execute path when applicable. Host OS was detected
+    // inside prepare_bootstrap_connection so we can reuse the cached value.
+    if matches!(host_os, HostOs::RouterOs) {
         drop(executor);
         let ros_params = routeros_params_from_bootstrap_with_fp(&params, observed_fp);
         execute_bootstrap_routeros(&ros_params, session, &db).await?;
@@ -574,7 +588,6 @@ pub(crate) async fn bootstrap_execute(
             infra_results: Vec::new(),
         });
     }
-    drop(base_exec);
 
     // Execute non-skipped actions.
     let target_same_as_auth = params.target_username == params.auth_username;
@@ -825,6 +838,18 @@ fn routeros_plan_to_planned_actions(
                 skippable: true,
                 commands: vec![],
             },
+            RouterOsPlannedAction::VerifyTargetLogin => PlannedAction {
+                id: "routeros_verify_target_login".to_string(),
+                label: "Verify uptrakit user can log in".to_string(),
+                description:
+                    "Open a fresh SSH session as 'uptrakit' with the generated key to confirm \
+                     the bootstrap actually configured the router."
+                        .to_string(),
+                security_impact: uptrakit_shared_types::Severity::Low,
+                default_enabled: true,
+                skippable: false,
+                commands: vec![],
+            },
             RouterOsPlannedAction::SaveHostEntry => PlannedAction {
                 id: "routeros_save_host".to_string(),
                 label: "Save host entry".to_string(),
@@ -871,14 +896,25 @@ fn validate_bootstrap_inputs(params: &BootstrapParams) -> Result<()> {
 
 // ── Connection setup ─────────────────────────────────────────────────
 
-/// Establish the initial SSH connection, detect whether the auth user is
-/// root, and verify sudo access when needed.
+/// Successful output of [`prepare_bootstrap_connection`].
 ///
-/// Returns `(session, observed_fingerprint, executor, use_sudo)`.
+/// `use_sudo` is meaningful only when `host_os == HostOs::Posix`. On
+/// `HostOs::RouterOs` it is always `false` (RouterOS has neither `id` nor
+/// `sudo`) and must not be consulted by the caller.
+struct PreparedBootstrapConnection {
+    session: Arc<SshSession>,
+    observed_fingerprint: String,
+    executor: SshRemoteExecutor,
+    use_sudo: bool,
+    host_os: HostOs,
+}
+
+/// Establish the initial SSH connection, detect the remote host OS, and
+/// verify sudo access on POSIX hosts.
 async fn prepare_bootstrap_connection(
     params: &BootstrapParams,
     port: u16,
-) -> Result<(Arc<SshSession>, String, SshRemoteExecutor, bool)> {
+) -> Result<PreparedBootstrapConnection> {
     let auth = match (
         &params.auth_password,
         &params.auth_private_key_pem,
@@ -921,26 +957,56 @@ async fn prepare_bootstrap_connection(
         tracing::debug!(fingerprint = %observed_fp, "accepted host key via TOFU");
     }
 
-    // Build a RemoteExecutor for the sudoers/detection functions.
+    // Build a RemoteExecutor for the sudoers/detection functions. Build the
+    // SshCommandExecutor probe alongside it for OS detection — both wrap the
+    // same Arc<SshSession>, no exclusivity issue.
     let executor = SshRemoteExecutor::new(Arc::clone(&session));
+    let probe_exec = SshCommandExecutor::new(Arc::clone(&session));
+    let host_os = detect_host_os(&session, &probe_exec).await?;
+    drop(probe_exec);
 
-    // Detect if auth user is root.
-    let is_root = detect_is_root(&executor).await?;
-    let use_sudo = !is_root;
+    let use_sudo = evaluate_posix_sudo_gate(host_os, &executor, &params.auth_username).await?;
 
-    if use_sudo {
-        // Verify the auth user has at least one passwordless sudo entry.
-        let sudo_check = session.exec_command("sudo -n -l").await?;
-        if sudo_check.exit_code != 0 {
-            bail!(Error::SshCommand(format!(
-                "auth user '{}' does not have passwordless sudo access (exit code {}). \
-                 Bootstrap requires sudo privileges on the remote host.",
-                params.auth_username, sudo_check.exit_code
-            )));
+    Ok(PreparedBootstrapConnection {
+        session,
+        observed_fingerprint: observed_fp,
+        executor,
+        use_sudo,
+        host_os,
+    })
+}
+
+/// Decide whether bootstrap needs to prefix POSIX commands with `sudo`,
+/// gating the check on host OS. RouterOS short-circuits to `false` (no
+/// `id`/`sudo` exists). On POSIX, runs `id -u` and (if non-root) verifies
+/// the auth user has passwordless sudo via `sudo -n -l`, surfacing the exit
+/// code in any failure to aid sudoers debugging.
+async fn evaluate_posix_sudo_gate(
+    host_os: HostOs,
+    executor: &dyn uptrakit_command::RemoteExecutor,
+    auth_username: &str,
+) -> Result<bool> {
+    match host_os {
+        HostOs::RouterOs => Ok(false),
+        HostOs::Posix => {
+            let is_root = detect_is_root(executor).await?;
+            if is_root {
+                return Ok(false);
+            }
+            let sudo_check = executor
+                .exec_command("sudo -n -l")
+                .await
+                .context_to::<Error>()?;
+            if sudo_check.exit_code != 0 {
+                bail!(Error::SshCommand(format!(
+                    "auth user '{auth_username}' does not have passwordless sudo access \
+                     (exit code {}). Bootstrap requires sudo privileges on the remote host.",
+                    sudo_check.exit_code
+                )));
+            }
+            Ok(true)
         }
     }
-
-    Ok((session, observed_fp, executor, use_sudo))
 }
 
 // ── Authorized keys deployment ───────────────────────────────────────
@@ -1603,6 +1669,12 @@ pub(crate) fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorize
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+    use uptrakit_command::{RemoteCommandResult, RemoteExecutor};
+
     use super::*;
 
     // ── HostOs compile test ──────────────────────────────────────────
@@ -1611,6 +1683,124 @@ mod tests {
     fn host_os_enum_variants_exist() {
         let _ = HostOs::Posix;
         let _ = HostOs::RouterOs;
+    }
+
+    // ── POSIX sudo gate tests ────────────────────────────────────────
+
+    /// Scripted mock executor: returns pre-programmed
+    /// [`RemoteCommandResult`] values in FIFO order for each call to
+    /// `exec_command`. Mirrors the helper in `sudoers.rs::tests`.
+    struct ScriptedRemoteExecutor {
+        results: Mutex<VecDeque<RemoteCommandResult>>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl ScriptedRemoteExecutor {
+        fn new(results: impl IntoIterator<Item = RemoteCommandResult>) -> Self {
+            Self {
+                results: Mutex::new(results.into_iter().collect()),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn recorded_calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl RemoteExecutor for ScriptedRemoteExecutor {
+        async fn exec_command(
+            &self,
+            command: &str,
+        ) -> uptrakit_command::Result<RemoteCommandResult> {
+            self.calls.lock().unwrap().push(command.to_string());
+            let result =
+                self.results
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or_else(|| RemoteCommandResult {
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        exit_code: 0,
+                    });
+            Ok(result)
+        }
+    }
+
+    fn script_result(stdout: &str, exit_code: u32) -> RemoteCommandResult {
+        RemoteCommandResult {
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+            exit_code,
+        }
+    }
+
+    #[tokio::test]
+    async fn sudo_gate_router_os_skips_posix_checks() {
+        // Empty script: any exec call would panic by default behaviour
+        // returning a synthetic ok result, but recorded_calls will catch it.
+        let executor = ScriptedRemoteExecutor::new([]);
+        let use_sudo = evaluate_posix_sudo_gate(HostOs::RouterOs, &executor, "user1")
+            .await
+            .expect("RouterOS gate must succeed without invoking shell commands");
+        assert!(!use_sudo, "use_sudo must be false on RouterOS");
+        assert!(
+            executor.recorded_calls().is_empty(),
+            "no shell commands must run on RouterOS, recorded: {:?}",
+            executor.recorded_calls()
+        );
+    }
+
+    #[tokio::test]
+    async fn sudo_gate_posix_root_skips_sudo_check() {
+        let executor = ScriptedRemoteExecutor::new([script_result("0", 0)]);
+        let use_sudo = evaluate_posix_sudo_gate(HostOs::Posix, &executor, "root")
+            .await
+            .expect("POSIX root must succeed");
+        assert!(!use_sudo, "use_sudo must be false for root");
+        assert_eq!(
+            executor.recorded_calls(),
+            vec!["id -u".to_string()],
+            "only id -u must be issued for root"
+        );
+    }
+
+    #[tokio::test]
+    async fn sudo_gate_posix_with_sudo_passes() {
+        let executor =
+            ScriptedRemoteExecutor::new([script_result("1000", 0), script_result("", 0)]);
+        let use_sudo = evaluate_posix_sudo_gate(HostOs::Posix, &executor, "deploy")
+            .await
+            .expect("POSIX with passwordless sudo must succeed");
+        assert!(use_sudo, "use_sudo must be true for non-root POSIX");
+        assert_eq!(
+            executor.recorded_calls(),
+            vec!["id -u".to_string(), "sudo -n -l".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn sudo_gate_posix_without_sudo_bails_with_exit_code() {
+        let executor =
+            ScriptedRemoteExecutor::new([script_result("1000", 0), script_result("", 1)]);
+        let err = evaluate_posix_sudo_gate(HostOs::Posix, &executor, "user1")
+            .await
+            .expect_err("missing sudo must surface an error");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("'user1'"),
+            "error must name the auth user, got: {msg}"
+        );
+        assert!(
+            msg.contains("exit code 1"),
+            "error must surface the sudo check exit code, got: {msg}"
+        );
+        assert_eq!(
+            executor.recorded_calls(),
+            vec!["id -u".to_string(), "sudo -n -l".to_string()]
+        );
     }
 
     // ── Username validation tests ────────────────────────────────────

@@ -52,10 +52,12 @@ impl SshCommandExecutor {
     }
 
     /// Access the underlying [`SshSession`].
-    #[expect(
-        dead_code,
-        reason = "reserved for RouterOS bootstrap helpers that need direct session access"
-    )]
+    ///
+    /// Used by RouterOS bootstrap helpers that need the full
+    /// [`uptrakit_command::RemoteCommandResult`] (with `exit_code` and split
+    /// stdout/stderr) — `exec_raw` collapses both, which is unsafe for
+    /// destructive ROS commands where errors land in stdout/stderr while exit
+    /// code remains 0.
     pub(crate) fn session(&self) -> &Arc<SshSession> {
         &self.session
     }
