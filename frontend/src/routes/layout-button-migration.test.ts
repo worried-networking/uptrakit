@@ -6,6 +6,7 @@ import layoutSource from './+layout.svelte?raw';
 import Layout from './+layout.svelte';
 import * as auth from '$lib/auth.svelte';
 import { page } from '$app/state';
+import { UPDATES_AVAILABLE_HREF } from './software/constants';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -264,7 +265,7 @@ describe('layout Button migration', () => {
 			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
 			expect(badgeLink).not.toBeNull();
 			expect(badgeLink?.tagName.toLowerCase()).toBe('a');
-			expect(badgeLink?.getAttribute('href')).toBe('/software?updatable=true');
+			expect(badgeLink?.getAttribute('href')).toBe(UPDATES_AVAILABLE_HREF);
 			expect(badgeLink?.getAttribute('aria-label')).toBe('View software updates available');
 		});
 
@@ -294,19 +295,26 @@ describe('layout Button migration', () => {
 			expect(badgeLink).toBeNull();
 		});
 
-		it('badge link has aria-current="page" when current URL matches badgeHref', () => {
-			const origUrl = (page as { url: URL }).url;
-			(page as { url: URL }).url = new URL('http://localhost/software?updatable=true');
-			render(Layout, {
-				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+		describe('when URL matches badge href', () => {
+			beforeEach(() => {
+				page.url = new URL(`http://localhost${UPDATES_AVAILABLE_HREF}`) as typeof page.url;
 			});
-			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
-			expect(badgeLink?.getAttribute('aria-current')).toBe('page');
-			const labelLink = document.querySelector(
-				'[data-ui="app-shell-nav-item"][href="/software"]'
-			) as HTMLAnchorElement | null;
-			expect(labelLink?.getAttribute('aria-current')).toBeNull();
-			(page as { url: URL }).url = origUrl;
+
+			afterEach(() => {
+				page.url = new URL('http://localhost/hosts') as typeof page.url;
+			});
+
+			it('badge link has aria-current="page" and label link does not', () => {
+				render(Layout, {
+					children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+				});
+				const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
+				expect(badgeLink?.getAttribute('aria-current')).toBe('page');
+				const labelLink = document.querySelector(
+					'[data-ui="app-shell-nav-item"][href="/software"]'
+				) as HTMLAnchorElement | null;
+				expect(labelLink?.getAttribute('aria-current')).toBeNull();
+			});
 		});
 	});
 });
