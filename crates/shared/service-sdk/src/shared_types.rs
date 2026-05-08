@@ -41,6 +41,7 @@ use crate::signal::Signal;
 /// `is_transient_network()`, `WebSocket(Io(cert_expired))` could be
 /// misclassified as transient instead of `CertExpired`.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LoopError {
     /// TLS handshake rejected: server considers our client certificate expired.
     #[error("certificate expired")]
