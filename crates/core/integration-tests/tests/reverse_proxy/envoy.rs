@@ -32,7 +32,7 @@ async fn envoy_l7_forwards_client_cert() {
     let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr(
-            "all clusters initialized",
+            "all listeners initialized",
         )))
         .with_mount(
             Mount::bind_mount(
@@ -63,6 +63,8 @@ async fn envoy_l7_forwards_client_cert() {
 
     let client_no_cert = build_client(None, &pki);
     let client_with_cert = build_client(Some(&pki), &pki);
+
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
 
     // Health check: GET /healthz without client cert
     let resp = client_no_cert

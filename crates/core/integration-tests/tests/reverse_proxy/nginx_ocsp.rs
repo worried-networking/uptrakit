@@ -49,12 +49,11 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
 
-    // Give Nginx a moment to initialize OCSP
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     let client_no_cert = build_client(None, None, &pki);
     let client_valid_cert = build_client(Some(&pki.agent_cert_pem), Some(&pki.agent_key_pem), &pki);
     let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
+
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
 
     // No cert → healthz should succeed
     let resp = client_no_cert
@@ -194,11 +193,11 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
 
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     let client_no_cert = build_client(None, None, &pki);
     let client_valid_cert = build_client(Some(&valid_cert_pem), Some(&valid_key_pem), &pki);
     let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
+
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
 
     // No cert → healthz should succeed
     let resp = client_no_cert
@@ -356,11 +355,11 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
 
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     let client_no_cert = build_client(None, None, &pki);
     let client_valid_cert = build_client(Some(&valid_cert_pem), Some(&valid_key_pem), &pki);
     let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
+
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
 
     // No cert → healthz should still succeed (OCSP only affects client certs)
     let resp = client_no_cert

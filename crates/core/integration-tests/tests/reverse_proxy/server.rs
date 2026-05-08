@@ -301,6 +301,30 @@ fn build_rustls_config(pki: &TestPki) -> axum_server::tls_rustls::RustlsConfig {
     axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
 }
 
+/// Poll `GET https://localhost:{port}/healthz` until 2xx or 10 s elapses.
+///
+/// Absorbs the gap between a container's "ready" log message and its port
+/// mapping being fully usable from the host. All reverse-proxy tests call this
+/// after getting the mapped port and before making any assertions.
+pub(crate) async fn wait_for_proxy_ready(client: &reqwest::Client, port: u16) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match client
+            .get(format!("https://localhost:{port}/healthz"))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => return,
+            _ => {}
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "proxy on port {port} did not become ready within 10 s"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
 /// Decode a PEM-encoded block (any type) to raw DER bytes.
 fn pem_to_der(pem_str: &str) -> Vec<u8> {
     use base64::Engine;

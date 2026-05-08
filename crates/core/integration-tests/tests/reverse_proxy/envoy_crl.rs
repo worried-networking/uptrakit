@@ -34,7 +34,7 @@ async fn envoy_crl_rejects_revoked_cert() {
     let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr(
-            "all clusters initialized",
+            "all listeners initialized",
         )))
         .with_mount(
             Mount::bind_mount(
@@ -66,6 +66,8 @@ async fn envoy_crl_rejects_revoked_cert() {
     let client_no_cert = build_client(None, None, &pki);
     let client_valid_cert = build_client(Some(&pki.agent_cert_pem), Some(&pki.agent_key_pem), &pki);
     let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
+
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
 
     // Health check without cert should succeed
     let resp = client_no_cert
