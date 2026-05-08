@@ -13,7 +13,7 @@ zeroconf = ["uptrakit-service-sdk/zeroconf"]
 db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-scheduler-runtime/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-scheduler-runtime/db-postgres"]
-oidc = ["uptrakit-scheduler-engine/oidc", "uptrakit-scheduler-runtime/oidc"]
+oidc = ["uptrakit-scheduler-runtime/oidc"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -29,7 +29,6 @@ tracing-subscriber = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-wire = { workspace = true }
 uptrakit-nats = { workspace = true }
-uptrakit-scheduler-engine = { workspace = true }
 uptrakit-scheduler-runtime = { workspace = true, features = ["standalone"] }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-db = { workspace = true }

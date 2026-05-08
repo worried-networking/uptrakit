@@ -38,7 +38,6 @@ uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-config-merge = { workspace = true }
-uptrakit-scheduler-engine = { workspace = true }
 uptrakit-web-api-types = { workspace = true }
 
 [dev-dependencies]
