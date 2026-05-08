@@ -307,6 +307,15 @@
 		return !navItems.some((other) => other.href !== item.href && currentPath === other.href);
 	}
 
+	function isBadgeHrefActive(badgeHref: string): boolean {
+		const target = new URL(badgeHref, 'http://x');
+		if (page.url.pathname !== target.pathname) return false;
+		for (const [key, value] of target.searchParams) {
+			if (page.url.searchParams.get(key) !== value) return false;
+		}
+		return true;
+	}
+
 	function closeTransientNavigation() {
 		sidebarOverlayOpen = false;
 		mobileOverflowOpen = false;
@@ -557,13 +566,11 @@
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
-											isNavItemActive(item) &&
-											!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
-										aria-current={isNavItemActive(item) &&
-										!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
 											: undefined}
 										data-ui="app-shell-nav-item"
@@ -580,7 +587,7 @@
 										<a
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
-											aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 											class="pl-1.5 shrink-0"
 											data-ui="app-shell-nav-badge"
 										>
@@ -623,13 +630,11 @@
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
-											isNavItemActive(item) &&
-											!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
-										aria-current={isNavItemActive(item) &&
-										!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
 											: undefined}
 										data-ui="app-shell-nav-item"
@@ -647,7 +652,7 @@
 										<a
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
-											aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 											class="pl-1.5 shrink-0"
 											data-ui="app-shell-nav-badge"
 											onclick={() => (sidebarOverlayOpen = false)}
@@ -689,13 +694,11 @@
 								<a
 									href={item.href}
 									class={`flex w-full min-h-[2rem] flex-col items-center gap-0.5 justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
-										isNavItemActive(item) && !(page.url.pathname + page.url.search === item.badgeHref)
+										isNavItemActive(item) && !isBadgeHrefActive(item.badgeHref)
 											? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 											: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
 									}`}
-									aria-current={isNavItemActive(item) && !(page.url.pathname + page.url.search === item.badgeHref)
-										? 'page'
-										: undefined}
+									aria-current={isNavItemActive(item) && !isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 									data-ui="app-shell-mobile-nav-item"
 									onclick={closeTransientNavigation}
 								>
@@ -705,7 +708,7 @@
 								<a
 									href={item.badgeHref}
 									aria-label={item.badgeAriaLabel}
-									aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+									aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 									class="mt-0.5 shrink-0"
 									data-ui="app-shell-nav-badge"
 									onclick={closeTransientNavigation}
@@ -777,13 +780,11 @@
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
-											isNavItemActive(item) &&
-											!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+											isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
 										} ${item.badgeHref ? 'flex-1' : ''}`}
-										aria-current={isNavItemActive(item) &&
-										!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+										aria-current={isNavItemActive(item) && !(item.badgeHref && isBadgeHrefActive(item.badgeHref))
 											? 'page'
 											: undefined}
 										data-ui="app-shell-nav-item"
@@ -801,7 +802,7 @@
 										<a
 											href={item.badgeHref}
 											aria-label={item.badgeAriaLabel}
-											aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+											aria-current={isBadgeHrefActive(item.badgeHref) ? 'page' : undefined}
 											class="pl-1.5 shrink-0"
 											data-ui="app-shell-nav-badge"
 											onclick={() => (mobileOverflowOpen = false)}
