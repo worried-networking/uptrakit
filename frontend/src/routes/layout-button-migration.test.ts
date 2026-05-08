@@ -5,6 +5,7 @@ import * as softwareUpdates from '$lib/stores/software-updates.svelte';
 import layoutSource from './+layout.svelte?raw';
 import Layout from './+layout.svelte';
 import * as auth from '$lib/auth.svelte';
+import { page } from '$app/state';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -205,9 +206,9 @@ describe('layout Button migration', () => {
 			render(Layout, {
 				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
 			});
-			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
-			expect(softwareLink).not.toBeNull();
-			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]');
+			expect(badgeLink).not.toBeNull();
+			const badge = badgeLink?.querySelector('[data-ui="status-badge"]');
 			expect(badge).not.toBeNull();
 			expect(badge?.getAttribute('data-tone')).toBe('info');
 			expect(badge?.textContent?.trim()).toBe('5');
@@ -218,8 +219,8 @@ describe('layout Button migration', () => {
 			render(Layout, {
 				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
 			});
-			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
-			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]');
+			const badge = badgeLink?.querySelector('[data-ui="status-badge"]');
 			expect(badge?.textContent?.trim()).toBe('99+');
 		});
 
@@ -231,6 +232,7 @@ describe('layout Button migration', () => {
 			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
 			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
 			expect(badge).toBeNull();
+			expect(document.querySelector('[data-ui="app-shell-nav-badge"]')).toBeNull();
 		});
 
 		it('hides badge when count is null', () => {
@@ -241,6 +243,70 @@ describe('layout Button migration', () => {
 			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
 			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
 			expect(badge).toBeNull();
+			expect(document.querySelector('[data-ui="app-shell-nav-badge"]')).toBeNull();
+		});
+	});
+
+	describe('software nav badge navigation', () => {
+		beforeEach(() => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(5);
+		});
+
+		afterEach(() => {
+			cleanup();
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(null);
+		});
+
+		it('renders badge as a separate link when update count is non-zero', () => {
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
+			expect(badgeLink).not.toBeNull();
+			expect(badgeLink?.tagName.toLowerCase()).toBe('a');
+			expect(badgeLink?.getAttribute('href')).toBe('/software?updatable=true');
+			expect(badgeLink?.getAttribute('aria-label')).toBe('View software updates available');
+		});
+
+		it('badge link text shows formatted count', () => {
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLElement | null;
+			expect(badgeLink?.textContent?.trim()).toBe('5');
+		});
+
+		it('does not render badge link when update count is null', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(null);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]');
+			expect(badgeLink).toBeNull();
+		});
+
+		it('does not render badge link when update count is zero', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(0);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]');
+			expect(badgeLink).toBeNull();
+		});
+
+		it('badge link has aria-current="page" when current URL matches badgeHref', () => {
+			const origUrl = (page as { url: URL }).url;
+			(page as { url: URL }).url = new URL('http://localhost/software?updatable=true');
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const badgeLink = document.querySelector('[data-ui="app-shell-nav-badge"]') as HTMLAnchorElement | null;
+			expect(badgeLink?.getAttribute('aria-current')).toBe('page');
+			const labelLink = document.querySelector(
+				'[data-ui="app-shell-nav-item"][href="/software"]'
+			) as HTMLAnchorElement | null;
+			expect(labelLink?.getAttribute('aria-current')).toBeNull();
+			(page as { url: URL }).url = origUrl;
 		});
 	});
 });
