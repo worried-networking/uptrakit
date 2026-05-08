@@ -376,9 +376,9 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
 mod tests {
     use std::sync::Arc;
 
+    use crate::{RuntimeSessionState, SshAgentRuntimeSupport};
     use async_trait::async_trait;
     use sea_orm::Database;
-    use uptrakit_agent_ssh_runtime::{RuntimeSessionState, SshAgentRuntimeSupport};
     use uptrakit_wire::{
         ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
     };
