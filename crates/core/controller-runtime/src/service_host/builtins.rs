@@ -382,6 +382,9 @@ pub(crate) async fn register_mqtt(
     let mqtt_caps = crate::mqtt::mqtt_capabilities();
     let default_tenant_id = app_state.default_tenant_id;
 
+    let identity = crate::mqtt::generate_ecies_keypair()?;
+    let handler = uptrakit_mqtt_runtime::MqttHandler::new_embedded(identity);
+
     let add_result = host
         .add(
             &MQTT,
@@ -391,10 +394,11 @@ pub(crate) async fn register_mqtt(
             controller_installation_id,
             map_yield_policy(&MQTT, None),
             move |transport, tokens| {
-                Box::pin(crate::mqtt::run_embedded_mqtt(
+                Box::pin(uptrakit_service_sdk::run_embedded_service(
+                    handler,
                     transport,
-                    tokens,
-                    default_tenant_id,
+                    tokens.drain,
+                    tokens.abort,
                 ))
             },
             app_state,
