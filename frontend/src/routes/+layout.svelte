@@ -742,26 +742,42 @@
 						<ul class="space-y-0.5">
 							{#each mobileOverflowNavItems as item (item.href)}
 								{@const NavIcon = item.icon}
-								<li>
+								<li class={item.badgeHref ? 'flex items-center' : ''}>
 									<a
 										href={item.href}
 										class={`flex h-7 items-center gap-2 rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
-											isNavItemActive(item)
+											isNavItemActive(item) &&
+											!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
-										}`}
-										aria-current={isNavItemActive(item) ? 'page' : undefined}
+										} ${item.badgeHref ? 'flex-1' : ''}`}
+										aria-current={isNavItemActive(item) &&
+										!(item.badgeHref && page.url.pathname + page.url.search === item.badgeHref)
+											? 'page'
+											: undefined}
 										data-ui="app-shell-nav-item"
 										onclick={() => (mobileOverflowOpen = false)}
 									>
 										{#if NavIcon}<NavIcon size={16} aria-hidden="true" />{/if}
 										<span>{item.label}</span>
-										{#if item.badge}
+										{#if item.badge && !item.badgeHref}
 											<span class="ml-auto pl-1.5">
 												<StatusBadge tone="info" label={item.badge} />
 											</span>
 										{/if}
 									</a>
+									{#if item.badge && item.badgeHref}
+										<a
+											href={item.badgeHref}
+											aria-label={item.badgeAriaLabel}
+											aria-current={page.url.pathname + page.url.search === item.badgeHref ? 'page' : undefined}
+											class="pl-1.5 shrink-0"
+											data-ui="app-shell-nav-badge"
+											onclick={() => (mobileOverflowOpen = false)}
+										>
+											<StatusBadge tone="info" label={item.badge} />
+										</a>
+									{/if}
 								</li>
 							{/each}
 						</ul>
