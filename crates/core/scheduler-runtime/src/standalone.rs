@@ -51,7 +51,7 @@ impl RuntimeAuditForwarder for SchedulerAuditForwarder {
     }
 }
 
-pub struct StandaloneSchedulerHandler {
+pub struct SchedulerHandler {
     poll_interval: Duration,
     runtime: ManagedSchedulerRuntime,
     service_id: Option<Uuid>,
@@ -72,7 +72,7 @@ pub fn standalone_scheduler_capabilities() -> BTreeSet<Capability> {
     .collect()
 }
 
-impl StandaloneSchedulerHandler {
+impl SchedulerHandler {
     pub fn new(poll_interval_secs: u64) -> Self {
         let (service_event_tx, service_event_rx) = mpsc::unbounded_channel();
         let audit_emitter = RuntimeAuditEmitter::with_forwarder(Arc::new(
@@ -90,7 +90,7 @@ impl StandaloneSchedulerHandler {
 }
 
 #[async_trait::async_trait]
-impl ServiceHandler for StandaloneSchedulerHandler {
+impl ServiceHandler for SchedulerHandler {
     const DIR_NAME: &'static str = STANDALONE_SCHEDULER_DIR_NAME;
     const SERVICE_LABEL: &'static str = STANDALONE_SCHEDULER_LABEL;
     const SERVICE_APP_NAME: &'static str = STANDALONE_SCHEDULER_APP_NAME;
@@ -220,7 +220,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     }
 }
 
-impl StandaloneSchedulerHandler {
+impl SchedulerHandler {
     async fn drain_service_events(&mut self, conn: &mut dyn ServiceTransport) {
         while let Ok(StandaloneSchedulerServiceEvent::Forward(message)) =
             self.service_event_rx.try_recv()
@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn standalone_handler_capabilities_match_scheduler_contract() {
-        let handler = StandaloneSchedulerHandler::new(15);
+        let handler = SchedulerHandler::new(15);
         assert_eq!(handler.capabilities(), standalone_scheduler_capabilities());
     }
 
@@ -535,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn poll_service_event_drains_forwarded_runtime_audit_message() {
-        let mut handler = StandaloneSchedulerHandler::new(15);
+        let mut handler = SchedulerHandler::new(15);
 
         handler.audit_emitter.scheduler_audit_log_cleanup(5, 4, 90);
 
@@ -568,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn poll_service_event_does_not_drop_when_many_runtime_audit_events_are_buffered() {
-        let mut handler = StandaloneSchedulerHandler::new(15);
+        let mut handler = SchedulerHandler::new(15);
         let event_count = 256_u64;
 
         for index in 0..event_count {
