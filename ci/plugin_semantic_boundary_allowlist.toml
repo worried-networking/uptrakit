@@ -28,6 +28,19 @@ match_kind = "import_path"
 match_value = "uptrakit_plugin_infrastructure_core::ServiceMetadataProvider"
 reason = "agent-runtime uses ServiceMetadataProvider for plugin capability introspection; this is a stable, non-plugin-specific trait from plugin-infrastructure-core"
 
+# agent-runtime/src/lib.rs grouped import:
+#   use uptrakit_plugin_infrastructure_core::{HostCapabilities, HostRuntime, StandardHostRuntime};
+# The grouped form yields a bare-crate match_value from the boundary scanner. The three
+# imported items are stable, non-plugin-specific runtime abstractions used by
+# `make_standard_runtime()` to build the executor that agent-ssh later substitutes (e.g.
+# RouterOsHostRuntime). Same architectural exception class as ServiceMetadataProvider above.
+[[entries]]
+path = "crates/core/agent-runtime/src/lib.rs"
+rule_id = "plugin-core-import"
+match_kind = "import_path"
+match_value = "uptrakit_plugin_infrastructure_core"
+reason = "agent-runtime uses HostCapabilities/HostRuntime/StandardHostRuntime to build the host runtime; stable, non-plugin-specific abstractions; grouped import yields the bare crate name as match_value"
+
 # controller-runtime/Cargo.toml and metadata_runtime.rs: controller-runtime embeds plugin
 # service metadata for the embedded controller mode. Uses only service_metadata module, not
 # plugin-specific types.

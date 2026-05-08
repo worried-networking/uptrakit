@@ -81,6 +81,14 @@ name = "uptrakit-service-platform"
 release = false
 
 [[package]]
+name = "uptrakit-service-connections"
+release = false
+
+[[package]]
+name = "uptrakit-tenant-db"
+release = false
+
+[[package]]
 name = "uptrakit-tracing-init"
 release = false
 
@@ -113,6 +121,9 @@ name = "uptrakit-web-api-queries"
 [[package]]
 name = "uptrakit-mcp"
 
+[[package]]
+name = "uptrakit-surface-proxy"
+
 # ===== Plugin crates =====
 # Analyzed for commits. Per user direction, plugin commits roll up only
 # into the controller (lean + standalone) changelogs — not into agent,
@@ -120,6 +131,9 @@ name = "uptrakit-mcp"
 # transitively link a subset of plugins.
 [[package]]
 name = "uptrakit-notification-plugin-core"
+
+[[package]]
+name = "uptrakit-notification-delivery"
 
 [[package]]
 name = "uptrakit-notification-plugin-email"
@@ -132,6 +146,9 @@ name = "uptrakit-notification-plugin-webhook"
 
 [[package]]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+
+[[package]]
+name = "uptrakit-plugin-discovery-uptrakit-self-update"
 
 [[package]]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
@@ -180,6 +197,9 @@ name = "uptrakit-plugin-package-manager-pacman"
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pkg"
+
+[[package]]
+name = "uptrakit-package-manager-routeros"
 
 [[package]]
 name = "uptrakit-plugin-package-manager-snap"
@@ -260,16 +280,20 @@ changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
   "uptrakit-controller-core",
+  "uptrakit-service-connections",
   "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
+  "uptrakit-surface-proxy",
   "uptrakit-notification-plugin-core",
+  "uptrakit-notification-delivery",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
   "uptrakit-notification-plugin-webhook",
   "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-discovery-uptrakit-self-update",
   "uptrakit-plugin-enhancement-dashboard-icons",
   "uptrakit-plugin-generic-shell",
   "uptrakit-plugin-hook-shell",
@@ -286,6 +310,7 @@ changelog_include = [
   "uptrakit-plugin-package-manager-npm",
   "uptrakit-plugin-package-manager-pacman",
   "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
@@ -306,6 +331,7 @@ changelog_update = true
 changelog_include = [
   "uptrakit-controller-runtime",
   "uptrakit-controller-core",
+  "uptrakit-service-connections",
   "uptrakit-mcp",
   "uptrakit-frontend",
   "uptrakit-agent-runtime",
@@ -316,11 +342,14 @@ changelog_include = [
   "uptrakit-web-api",
   "uptrakit-web-api-auth",
   "uptrakit-web-api-queries",
+  "uptrakit-surface-proxy",
   "uptrakit-notification-plugin-core",
+  "uptrakit-notification-delivery",
   "uptrakit-notification-plugin-email",
   "uptrakit-notification-plugin-telegram",
   "uptrakit-notification-plugin-webhook",
   "uptrakit-plugin-discovery-proxmox-helper-scripts",
+  "uptrakit-plugin-discovery-uptrakit-self-update",
   "uptrakit-plugin-enhancement-dashboard-icons",
   "uptrakit-plugin-generic-shell",
   "uptrakit-plugin-hook-shell",
@@ -337,6 +366,7 @@ changelog_include = [
   "uptrakit-plugin-package-manager-npm",
   "uptrakit-plugin-package-manager-pacman",
   "uptrakit-plugin-package-manager-pkg",
+  "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
