@@ -61,6 +61,8 @@ async fn caddy_l7_forwards_client_cert() {
     let client_no_cert = build_client(None, &pki);
     let client_with_cert = build_client(Some(&pki), &pki);
 
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
+
     // Health check: GET /healthz without client cert
     let resp = client_no_cert
         .get(format!("https://localhost:{proxy_port}/healthz"))

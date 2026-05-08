@@ -55,6 +55,8 @@ async fn nginx_crl_rejects_revoked_cert() {
     let client_valid_cert = build_client(Some(&pki.agent_cert_pem), Some(&pki.agent_key_pem), &pki);
     let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
 
+    super::server::wait_for_proxy_ready(&client_no_cert, proxy_port).await;
+
     // Health check without cert should succeed
     let resp = client_no_cert
         .get(format!("https://localhost:{proxy_port}/healthz"))
