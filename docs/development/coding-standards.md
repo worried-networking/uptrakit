@@ -1893,3 +1893,44 @@ pub(crate) fn parse_semver_tag(tag: &str) -> Option<semver::Version> { … }
   `pub(crate)` for errors that never cross a crate boundary.
 - [Security](../../security/README.md) — avoid leaking internal types through `pub` that
   could expose security-sensitive implementation details.
+
+## Service Binary/Runtime Boundary
+
+Every Service binary crate (`agent-ssh`, `mqtt`, `scheduler`, …) is a **thin launch shell**.
+All business logic, DB entities, migrations, protocol handling, and crypto helpers live in the
+corresponding `-runtime` crate. See [ADR-0005](../adr/0005-service-binary-runtime-boundary.md).
+
+### What belongs where
+
+| Binary crate (`*`)       | Runtime crate (`*-runtime`)                         |
+| ------------------------ | --------------------------------------------------- |
+| `main.rs` — process init | `ServiceHandler` implementation                     |
+| `cli.rs` — clap structs  | DB entities and migrations (`service_migrations()`) |
+| Subcommand dispatch      | Business logic, surface handlers, crypto helpers    |
+| _Nothing else_           | Protocol implementation, transport adapters         |
+
+### service_migrations()
+
+Runtime crates that own a local DB override `ServiceHandler::service_migrations()`
+(feature-gated via `uptrakit-service-sdk/service-migrations`) to return their migration list.
+The controller calls it as a static method on the concrete handler type at startup:
+
+```rust
+let migrations = AgentSshHandler::service_migrations();
+run_migrations_with_plugins(db, migrations).await?;
+```
+
+Services without a DB rely on the default `vec![]`.
+
+### Embedded service construction
+
+The controller constructs the handler with controller-sourced deps (shared DB, state dir,
+pre-generated ECIES keypair), then passes it to `run_embedded_service::<H>`. The handler's
+constructor must not open its own DB connections or read paths from the environment.
+
+```rust
+let handler = AgentSshHandler::new(shared_db, state_dir, AgentSshMode::Embedded, Some(keypair));
+run_embedded_service(handler, transport, tokens.drain, tokens.abort).await;
+```
+
+The standalone binary does the same with `AgentSshMode::Binary` and `None` for the keypair.
