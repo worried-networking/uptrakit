@@ -14,6 +14,7 @@ interactive = [
     "uptrakit-agent-core/interactive",
 ]
 reset-data = []
+service-migrations = ["uptrakit-service-sdk/service-migrations"]
 
 [dependencies]
 async-trait = { workspace = true }

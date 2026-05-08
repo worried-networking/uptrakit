@@ -1249,15 +1249,6 @@ pub async fn rotate_ssh_master_key(
     );
 }
 
-/// Returns the agent-ssh schema migrations.
-///
-/// Called by `controller-runtime` until the `ServiceHandler` trait gains a
-/// `service_migrations()` method.
-pub fn service_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-    use sea_orm_migration::MigratorTrait as _;
-    crate::db::migration::Migrator::migrations()
-}
-
 pub use handler::{AgentSshHandler, AgentSshMode, EciesKeypair};
 
 #[cfg(test)]
