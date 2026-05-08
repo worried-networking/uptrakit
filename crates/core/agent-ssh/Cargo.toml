@@ -10,57 +10,30 @@ version = "0.0.2"
 [features]
 default = ["zeroconf", "interactive", "reset-data"]
 zeroconf = ["uptrakit-service-sdk/zeroconf"]
-interactive = [
-    "uptrakit-command/interactive",
-    "uptrakit-agent-core/interactive",
-    "uptrakit-agent-ssh-runtime/interactive",
-]
-reset-data = ["uptrakit-agent-ssh-runtime/reset-data"]
+interactive = ["uptrakit-agent-ssh-runtime/interactive"]
+reset-data  = ["uptrakit-agent-ssh-runtime/reset-data"]
 
 [dependencies]
-base64 = { workspace = true }
 clap = { workspace = true }
-futures-util = { workspace = true }
 rootcause = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-russh = { workspace = true }
-russh-sftp = { workspace = true }
-ssh-key = { workspace = true, features = ["ed25519", "rand_core", "std"] }
-strum = { workspace = true }
-uptrakit-shared-macros = { workspace = true }
-rustls = { workspace = true }
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time"] }
-tokio-rustls = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-url = { workspace = true }
-uptrakit-agent-core = { workspace = true }
 uptrakit-agent-ssh-runtime = { workspace = true }
-uptrakit-audit-log = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "agent-infra"] }
+uptrakit-crypto = { workspace = true }
 uptrakit-directories = { workspace = true }
-uptrakit-service-sdk = { workspace = true, features = ["sensitive-params"] }
+uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-types = { workspace = true }
-uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
-uptrakit-wire = { workspace = true }
-sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
-sqlx = { workspace = true }
-sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
-uuid = { workspace = true, features = ["v7", "serde"] }
-async-trait = { workspace = true }
-parking_lot = { workspace = true }
-sha2 = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
 zeroize = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-tokio-tungstenite = { workspace = true }
-rcgen = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

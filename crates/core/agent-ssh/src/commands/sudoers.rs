@@ -8,7 +8,7 @@ use rootcause::prelude::*;
 use uptrakit_command::{RemoteExecutor, shell_escape};
 use uptrakit_plugin_infrastructure_registry::SudoHelperScript;
 
-use crate::error::{Error, Result};
+use uptrakit_agent_ssh_runtime::error::{Error, Result};
 
 // ── Detection ──────────────────────────────────────────────────────────
 
@@ -515,7 +515,8 @@ mod tests {
             command_path:
                 "/usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
                     .to_string(),
-            explanation: "Upgrade packages using a pinned preferences file (batch update)".to_string(),
+            explanation: "Upgrade packages using a pinned preferences file (batch update)"
+                .to_string(),
             needs_setenv: true,
         }]);
         let text = generate_sudoers_content("uptrakit", &content);
