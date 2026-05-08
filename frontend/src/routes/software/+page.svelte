@@ -584,7 +584,13 @@
 		}
 	}
 
-	async function openUpdateModal(item: SoftwareItemResponse) {
+	function openSingleHostUpdate(item: SoftwareItemResponse, host: SoftwareItemHostSummary) {
+		closeMenu();
+		const toVersion = host.latest_version ?? item.latest_version ?? '';
+		singleHostUpdateModal = { host, toVersion, itemId: item.id, itemName: item.name };
+	}
+
+	async function openUpdateAllModal(item: SoftwareItemResponse) {
 		closeMenu();
 		updateModalItem = null;
 		updateModalDetail = null;
@@ -594,9 +600,7 @@
 			const detail = (await loadSoftwareItemDetail(item.id, { force: true })) ?? (await getSoftwareItem(item.id));
 			cacheItemDetail(detail);
 			if (detail.hosts.length === 1) {
-				const host = detail.hosts[0];
-				const toVersion = host.latest_version ?? item.latest_version ?? '';
-				singleHostUpdateModal = { host, toVersion, itemId: item.id, itemName: item.name };
+				openSingleHostUpdate(item, detail.hosts[0]);
 			} else {
 				updateModalItem = item;
 				updateModalDetail = detail;
@@ -635,7 +639,7 @@
 		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
 		triggeringUpdate = false;
 		updateModalItem = null;
-		loadAll(currentPage);
+		void loadAll(currentPage, true);
 	}
 
 	async function executeSingleHostUpdate() {
@@ -648,10 +652,11 @@
 			singleHostUpdateModal = null;
 			if (res.status === 'failed') {
 				showError(`Update failed before dispatch — history ID: ${res.update_history_id}`);
-				loadAll(currentPage);
+				void loadAll(currentPage, true);
 				return;
 			}
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
+			void loadAll(currentPage, true);
 			pendingLiveHistoryId = res.update_history_id;
 			pendingLiveHostName = hostName;
 			pendingLiveItemName = itemName;
@@ -1113,7 +1118,8 @@
 							onToggleOverflow={toggleGroupOverflow}
 							onToggleBatch={toggleBatchSelect}
 							onOpenMenu={toggleMenu}
-							onOpenUpdateModal={openUpdateModal}
+							onOpenUpdateAllModal={openUpdateAllModal}
+							onOpenSingleHostUpdate={openSingleHostUpdate}
 							onPageChange={loadAll}
 							onToggleFeatured={toggleFeatured}
 						/>
@@ -1192,7 +1198,7 @@
 							</li>
 							{#if item.update_available && canTriggerUpdates}
 								<li>
-									<ContextMenuItem label="Trigger Update" onclick={() => openUpdateModal(item)} />
+									<ContextMenuItem label="Trigger Update" onclick={() => openUpdateAllModal(item)} />
 								</li>
 							{/if}
 							{#if canMergeSoftware}

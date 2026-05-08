@@ -24,7 +24,8 @@
 		onToggleOverflow,
 		onToggleBatch,
 		onOpenMenu,
-		onOpenUpdateModal,
+		onOpenUpdateAllModal,
+		onOpenSingleHostUpdate,
 		onPageChange,
 		onToggleFeatured
 	}: {
@@ -44,7 +45,8 @@
 		onToggleOverflow: (id: string) => void;
 		onToggleBatch: (id: string) => void;
 		onOpenMenu: (id: string, button: HTMLElement) => void;
-		onOpenUpdateModal: (item: SoftwareItemResponse) => void;
+		onOpenUpdateAllModal: (item: SoftwareItemResponse) => void;
+		onOpenSingleHostUpdate: (item: SoftwareItemResponse, host: SoftwareItemHostSummary) => void;
 		onPageChange: (page: number) => void;
 		onToggleFeatured: (item: SoftwareItemResponse) => void;
 	} = $props();
@@ -128,13 +130,17 @@
 		return !collapsedGroupIds.has(itemId);
 	}
 
+	function shouldShowLoadingRow(item: SoftwareItemResponse): boolean {
+		return itemDetailLoadingIds.has(item.id) && detailHosts(item).length === 0;
+	}
+
 	const flatRowIndices = $derived.by(() => {
 		const indices = new SvelteMap<string, number>();
 		let idx = 0;
 		for (const item of items) {
 			indices.set(`header:${item.id}`, idx++);
 			if (!isSingleHostItem(item)) {
-				if (itemDetailLoadingIds.has(item.id)) {
+				if (shouldShowLoadingRow(item)) {
 					indices.set(`loading:${item.id}`, idx++);
 				} else if (!collapsedGroupIds.has(item.id) && detailHosts(item).length > 0) {
 					for (const host of visibleHosts(item)) {
@@ -288,13 +294,13 @@
 									idleLabel="Update"
 									hoverLabel="Update"
 									disabled={!(compactSingleHost?.update_available && compactSingleHost?.latest_version)}
-									onclick={() => onOpenUpdateModal(item)}
+									onclick={() => compactSingleHost && onOpenSingleHostUpdate(item, compactSingleHost)}
 								/>
 							{:else}
 								<UpdateAllButton
 									state={hasAnyUpdateableHosts(item) ? 'idle' : 'dim'}
 									ariaLabel={hasAnyUpdateableHosts(item) ? undefined : 'No updates available'}
-									onclick={() => onOpenUpdateModal(item)}
+									onclick={() => onOpenUpdateAllModal(item)}
 								/>
 							{/if}
 						{:else if isCompactSingleHost && compactSingleHost?.update_available}
@@ -326,7 +332,7 @@
 					</div>
 				{/if}
 			</div>
-			{#if !isCompactSingleHost && itemDetailLoadingIds.has(item.id)}
+			{#if !isCompactSingleHost && shouldShowLoadingRow(item)}
 				{@const loadingRowIdx = flatRowIndices.get(`loading:${item.id}`) ?? -1}
 				<div
 					class="grid items-center gap-x-2 border-t border-[var(--border-subtle)] {zebraClass(
@@ -401,7 +407,7 @@
 											tone="accent"
 											idleLabel="Update"
 											hoverLabel="Update"
-											onclick={() => onOpenUpdateModal(item)}
+											onclick={() => onOpenSingleHostUpdate(item, host)}
 										/>
 									{:else if host.update_available}
 										<StatusBadge tone="info" label="Update avail" />
@@ -547,7 +553,7 @@
 								idleLabel="Update"
 								hoverLabel="Update"
 								disabled={!(compactSingleHost.update_available && compactSingleHost.latest_version)}
-								onclick={() => onOpenUpdateModal(item)}
+								onclick={() => onOpenSingleHostUpdate(item, compactSingleHost)}
 							/>
 						{:else if compactSingleHost.update_available}
 							<StatusBadge tone="info" label="Update avail" />
@@ -579,7 +585,7 @@
 				</div>
 
 				<!-- Host sub-cards (expanded) -->
-				{#if itemDetailLoadingIds.has(item.id) && groupIsOpen(item.id)}
+				{#if shouldShowLoadingRow(item) && groupIsOpen(item.id)}
 					<p class="mt-1 pl-3 text-sm text-[var(--text-secondary)]">Loading hosts...</p>
 				{:else if groupIsOpen(item.id) && detailHosts(item).length > 0}
 					<div
@@ -619,7 +625,7 @@
 											tone="accent"
 											idleLabel="Update"
 											hoverLabel="Update"
-											onclick={() => onOpenUpdateModal(item)}
+											onclick={() => onOpenSingleHostUpdate(item, host)}
 										/>
 									{:else if host.update_available}
 										<StatusBadge tone="info" label="Update avail" />

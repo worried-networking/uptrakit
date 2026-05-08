@@ -147,6 +147,16 @@ function makeItemsPage(items: SoftwareItemResponse[]): PaginatedResponse<Softwar
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
 const emptyBatchResponse: BatchActionResponse = { succeeded: [], failed: [] };
 
 describe('Software Page Trigger Status Handling', () => {
@@ -191,6 +201,37 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
+	});
+
+	it('uses the single-host confirmation flow for host-row updates in multi-host groups', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+			update_history_id: 'uh-host-2',
+			status: 'pending'
+		});
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByText('host-two').length).toBeGreaterThan(0));
+
+		const hostRow = screen.getAllByTestId('software-host-row-row-host-2')[0];
+		await fireEvent.click(within(hostRow).getByRole('button', { name: 'Update' }));
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Confirm Update' })).toBeInTheDocument());
+		const dialog = screen.getByRole('dialog');
+		expect(
+			within(dialog).getByText((_, element) => element?.textContent === 'Update Demo App on host-two?')
+		).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Update 2 host(s)' })).not.toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+
+		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(1));
+		expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-2', { to_version: '1.1.0' });
 	});
 
 	it('folds all host rows when collapsing a software group and preserves that state through background refresh', async () => {
@@ -268,6 +309,39 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.getAllByRole('button', { name: 'Collapse Demo App' })[0]).toHaveAttribute('aria-expanded', 'true');
 		expect(screen.getAllByText('host-four').length).toBeGreaterThan(0);
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
+	});
+
+	it('keeps expanded host rows visible while update-all detail refresh is pending', async () => {
+		const item = {
+			...makeSoftwareItem('software-1', 'Demo App'),
+			host_count: 2
+		};
+		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
+		const pendingRefresh = deferred<SoftwareItemDetailResponse>();
+		let detailCalls = 0;
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockImplementation(async () => {
+			detailCalls += 1;
+			if (detailCalls === 1) {
+				return makeDetail(item, hosts);
+			}
+			return pendingRefresh.promise;
+		});
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getAllByText('host-one').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByRole('button', { name: 'Update all' }).length).toBeGreaterThan(0));
+
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Update all' })[0]);
+
+		await waitFor(() => expect(detailCalls).toBe(2));
+		expect(screen.getAllByText('host-one').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('host-two').length).toBeGreaterThan(0);
+		expect(screen.queryByText('Loading hosts...')).not.toBeInTheDocument();
+
+		pendingRefresh.resolve(makeDetail(item, hosts));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
 	});
 
 	it('keeps the group header version column empty and renders the version stack on host rows for multi-host items', async () => {
@@ -352,6 +426,42 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s) across 2 item(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
+	});
+
+	it('keeps the list rendered while refreshing in the background after update dispatch', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one')];
+		const pendingItemsRefresh = deferred<PaginatedResponse<SoftwareItemResponse>>();
+		let itemsCalls = 0;
+
+		vi.mocked(api.getSoftwareItems).mockImplementation(async () => {
+			itemsCalls += 1;
+			if (itemsCalls === 1) {
+				return makeItemsPage([item]);
+			}
+			return pendingItemsRefresh.promise;
+		});
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+			update_history_id: 'uh-host-1',
+			status: 'pending'
+		});
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		const headerRow = screen.getAllByTestId('software-group-header-software-1')[0];
+		await fireEvent.click(within(headerRow).getByRole('button', { name: 'Update' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Confirm Update' })).toBeInTheDocument());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+
+		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(itemsCalls).toBe(2));
+		expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0);
+		expect(screen.queryByText('Loading software items...')).not.toBeInTheDocument();
+
+		pendingItemsRefresh.resolve(makeItemsPage([item]));
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 	});
 
 	it('hides software update actions from view-only users', async () => {
