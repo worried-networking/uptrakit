@@ -77,7 +77,8 @@ function makeProps(
 		onToggleOverflow: vi.fn(),
 		onToggleBatch: vi.fn(),
 		onOpenMenu: vi.fn(),
-		onOpenUpdateModal: vi.fn(),
+		onOpenUpdateAllModal: vi.fn(),
+		onOpenSingleHostUpdate: vi.fn(),
 		onPageChange: vi.fn(),
 		onToggleFeatured: vi.fn()
 	};
@@ -246,5 +247,25 @@ describe('SoftwareGroupList — zebra rows', () => {
 		expect(cardB.className).toContain('bg-[var(--bg-raised)]');
 		expect(cardA.className).toContain('hover:bg-[var(--bg-hover)]');
 		expect(cardB.className).toContain('hover:bg-[var(--bg-hover)]');
+	});
+
+	it('keeps cached host rows visible while a group detail refresh is in flight', () => {
+		const item = makeItem('b', 2);
+		const host1 = makeHost('row-h1', 'hid1');
+		const host2 = makeHost('row-h2', 'hid2');
+		const detailsById = new SvelteMap([['b', makeDetail(item, [host1, host2])]]);
+
+		render(
+			SoftwareGroupList,
+			makeProps({
+				items: [item],
+				itemDetailsById: detailsById,
+				itemDetailLoadingIds: new SvelteSet(['b'])
+			})
+		);
+
+		expect(screen.getByTestId('software-host-row-row-h1')).toBeInTheDocument();
+		expect(screen.getByTestId('software-host-row-row-h2')).toBeInTheDocument();
+		expect(screen.queryByText('Loading hosts...')).not.toBeInTheDocument();
 	});
 });
