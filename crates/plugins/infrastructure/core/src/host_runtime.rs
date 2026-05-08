@@ -213,9 +213,13 @@ impl HostRuntime for RouterOsHostRuntime {
 
     fn executor(&self) -> Arc<dyn CommandExecutor> {
         // RouterOS does not use the generic CommandExecutor interface.
-        // Return a NoopCommandExecutor so misuse is visible in traces
-        // without crashing the process.
-        tracing::error!("RouterOsHostRuntime::executor() called — use routeros_executor() instead");
+        // Returning a NoopCommandExecutor lets cross-OS compatibility probes
+        // (e.g. POSIX plugins running `command -v apt-get` against a ROS
+        // host) naturally fail and get filtered out. The agent dispatch
+        // loops short-circuit by `host_requirements` before reaching here in
+        // most cases; DEBUG keeps a trail for genuine plugin-author misuse
+        // without alarming operators in production.
+        tracing::debug!("RouterOsHostRuntime::executor() called — returning NoopCommandExecutor");
         Arc::new(uptrakit_command::NoopCommandExecutor)
     }
 }

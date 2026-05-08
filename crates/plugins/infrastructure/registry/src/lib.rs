@@ -69,6 +69,7 @@ pub use uptrakit_plugin_infrastructure_core::{
     SurfaceActionDescriptor, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
     SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceWorkflowStep,
 };
+pub use uptrakit_plugin_infrastructure_core::{HostCompatibilityError, HostRequirements};
 
 /// Canonical plugin-result alias re-exported by the registry.
 ///
