@@ -13,6 +13,10 @@ pub(crate) struct ControllerMetadataProvider {
 }
 
 impl ControllerMetadataProvider {
+    #[cfg_attr(
+        not(feature = "embedded-agent"),
+        expect(dead_code, reason = "only used when embedded-agent feature is enabled")
+    )]
     pub(crate) fn new(
         service_name: String,
         version: String,

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use tokio::sync::Notify;
-use uptrakit_scheduler_engine::{SchedulerNotifier, TaskExecutor};
+use uptrakit_scheduler_runtime::{SchedulerNotifier, TaskExecutor};
 use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_wire::{ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload};
 use uuid::Uuid;
@@ -36,7 +36,7 @@ pub(crate) async fn run_embedded_scheduler(
     drain: tokio_util::sync::CancellationToken,
     abort: tokio_util::sync::CancellationToken,
 ) {
-    use uptrakit_scheduler_engine::executors::{
+    use uptrakit_scheduler_runtime::executors::{
         audit_log_cleanup, crl_renewal, service_cert_check,
     };
     use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
@@ -96,7 +96,7 @@ pub(crate) async fn run_embedded_scheduler(
                 )),
             );
             scheduler.register_tick_executor(Box::new(
-                uptrakit_scheduler_engine::executors::awaiting_restart::AwaitingRestartExecutor::new(
+                uptrakit_scheduler_runtime::executors::awaiting_restart::AwaitingRestartExecutor::new(
                     Arc::clone(&notifier_for_extras),
                 ),
             ));
@@ -136,7 +136,7 @@ impl TaskExecutor for CaRotationCheckExecutor {
     async fn execute(
         &self,
         _task: &scheduled_task::Model,
-    ) -> uptrakit_scheduler_engine::error::Result<()> {
+    ) -> uptrakit_scheduler_runtime::error::Result<()> {
         let snapshot = self.ca_snapshot.borrow().clone();
         if pki::should_rotate_ca(&snapshot.active_cert_pem) {
             tracing::info!("CA certificate is within rotation window, triggering rotation");
