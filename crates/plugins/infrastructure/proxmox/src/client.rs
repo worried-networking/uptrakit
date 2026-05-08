@@ -12,6 +12,13 @@ use crate::api_types::*;
 use crate::config::ProxmoxConfig;
 use crate::error::{ProxmoxError, Result};
 
+/// PVE returns `{"n": 1, "t": "no content"}` as a placeholder when the task log file
+/// exists but hasn't been written to yet. The entry disappears once real lines appear,
+/// so advancing `next_n` past it would skip the first real log lines.
+fn is_pve_placeholder(entry: &PveTaskLogEntry) -> bool {
+    entry.t == "no content"
+}
+
 /// HTTP client for communicating with the Proxmox VE API.
 pub struct ProxmoxClient {
     client: reqwest::Client,
@@ -582,7 +589,7 @@ impl ProxmoxClient {
                 // Single drain: fetch all lines since the last poll.
                 match self.task_log(node, upid, next_n).await {
                     Ok(entries) => {
-                        for entry in &entries {
+                        for entry in entries.iter().filter(|e| !is_pve_placeholder(e)) {
                             #[expect(
                                 clippy::let_underscore_must_use,
                                 reason = "fire-and-forget log forwarding; receiver may be gone"
@@ -611,20 +618,21 @@ impl ProxmoxClient {
             }
 
             // Task still running — fetch new log lines and advance cursor.
-            // `n` is a 0-based sequential index guaranteed by the Proxmox API;
-            // `last.n + 1` is the correct next page start. If no lines are returned
-            // (task started but has not written output yet), `next_n` is unchanged
-            // and the next poll re-fetches from the same offset.
+            // `last.n + 1` is the correct next page start. If no real lines are returned
+            // (task started but has not written output yet), `next_n` is unchanged and the
+            // next poll re-fetches from the same offset. `"no content"` placeholder entries
+            // emitted by PVE on empty logs are ignored for both output and cursor advancement;
+            // they disappear once real lines appear, so advancing past them would skip lines.
             match self.task_log(node, upid, next_n).await {
                 Ok(entries) => {
-                    for entry in &entries {
+                    for entry in entries.iter().filter(|e| !is_pve_placeholder(e)) {
                         #[expect(
                             clippy::let_underscore_must_use,
                             reason = "fire-and-forget log forwarding; receiver may be gone"
                         )]
                         let _ = output_tx.send(format!("{}\n", entry.t).into_bytes());
                     }
-                    if let Some(last) = entries.last() {
+                    if let Some(last) = entries.iter().rev().find(|e| !is_pve_placeholder(e)) {
                         next_n = last.n + 1;
                     }
                 }
@@ -708,6 +716,67 @@ mod resource_scaling_method_tests {
         // Verify the method exists by directly calling the method pointer
         let method = ProxmoxClient::set_lxc_config_resources;
         let _ = method;
+    }
+}
+
+#[cfg(test)]
+mod pve_placeholder_tests {
+    use super::*;
+
+    fn entry(n: u64, t: &str) -> PveTaskLogEntry {
+        PveTaskLogEntry {
+            n,
+            t: t.to_string(),
+        }
+    }
+
+    #[test]
+    fn no_content_entry_is_placeholder() {
+        assert!(is_pve_placeholder(&entry(1, "no content")));
+    }
+
+    #[test]
+    fn real_entry_is_not_placeholder() {
+        assert!(!is_pve_placeholder(&entry(1, "INFO: Backup started")));
+        assert!(!is_pve_placeholder(&entry(0, "")));
+        assert!(!is_pve_placeholder(&entry(2, "No Content")));
+    }
+
+    #[test]
+    fn next_n_does_not_advance_on_placeholder_only_response() {
+        let entries = [entry(1, "no content")];
+        let last_real = entries.iter().rev().find(|e| !is_pve_placeholder(e));
+        assert!(
+            last_real.is_none(),
+            "cursor must not advance past placeholder"
+        );
+    }
+
+    #[test]
+    fn next_n_advances_past_real_entries_ignoring_placeholder() {
+        let entries = [
+            entry(1, "no content"),
+            entry(2, "INFO: starting"),
+            entry(3, "INFO: done"),
+        ];
+        let last_real = entries
+            .iter()
+            .rev()
+            .find(|e| !is_pve_placeholder(e))
+            .unwrap();
+        assert_eq!(last_real.n + 1, 4);
+    }
+
+    #[test]
+    fn placeholder_filtered_from_output_iterator() {
+        let entries = [
+            entry(1, "no content"),
+            entry(2, "INFO: real"),
+            entry(3, "INFO: also real"),
+        ];
+        let output: Vec<_> = entries.iter().filter(|e| !is_pve_placeholder(e)).collect();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0].t, "INFO: real");
     }
 }
 
