@@ -36,6 +36,9 @@ macro_rules! publish_best_effort {
     };
 }
 
+mod handler;
+pub use handler::MqttHandler;
+
 mod client_manager;
 pub mod ha_discovery;
 mod mqtt_client;
