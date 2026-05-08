@@ -590,14 +590,14 @@ workaround is the **table recreation** pattern.
 
 #### When to use table recreation
 
-| Operation | Approach |
-| --- | --- |
-| Add a new column (no constraints referencing it) | `ALTER TABLE ADD COLUMN` — no recreation needed |
-| Drop a column referenced by an index or FK | Table recreation |
-| Change a column's type or nullability | Table recreation |
-| Add a `GENERATED ALWAYS AS` stored column | Table recreation |
-| Add a foreign key to an existing table | Table recreation (SQLite has no `ALTER TABLE ADD CONSTRAINT`) |
-| Restructure a table's schema | Table recreation |
+| Operation                                        | Approach                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| Add a new column (no constraints referencing it) | `ALTER TABLE ADD COLUMN` — no recreation needed               |
+| Drop a column referenced by an index or FK       | Table recreation                                              |
+| Change a column's type or nullability            | Table recreation                                              |
+| Add a `GENERATED ALWAYS AS` stored column        | Table recreation                                              |
+| Add a foreign key to an existing table           | Table recreation (SQLite has no `ALTER TABLE ADD CONSTRAINT`) |
+| Restructure a table's schema                     | Table recreation                                              |
 
 For PostgreSQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` and `ALTER TABLE ADD CONSTRAINT`
 work directly. Migrations that need table recreation on SQLite should branch on the backend
@@ -614,24 +614,24 @@ cannot express (e.g., `CASE` expressions or SQLite-specific functions like `strf
 Reusable helpers live in `crates/shared/db/src/migration/helpers.rs` (imported as
 `super::helpers` from migration modules):
 
-| Helper | Purpose |
-| --- | --- |
-| `set_foreign_keys(manager, enabled)` | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL) |
+| Helper                                       | Purpose                                                                |
+| -------------------------------------------- | ---------------------------------------------------------------------- |
+| `set_foreign_keys(manager, enabled)`         | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL)          |
 | `check_crash_recovery(manager, table, temp)` | Detect partial previous runs and return the appropriate recovery state |
-| `drop_original(manager, table)` | Drop the original table after data has been copied to the temp table |
-| `rename_temp(manager, temp, canonical)` | Rename the temp table to the canonical name |
-| `is_sqlite(manager)` | Check whether the current backend is SQLite |
+| `drop_original(manager, table)`              | Drop the original table after data has been copied to the temp table   |
+| `rename_temp(manager, temp, canonical)`      | Rename the temp table to the canonical name                            |
+| `is_sqlite(manager)`                         | Check whether the current backend is SQLite                            |
 
 #### Crash recovery (three-state model)
 
 A table recreation can crash at any point. The migration must handle three possible
 states on re-entry:
 
-| State | Original table | Temp table | Action |
-| --- | --- | --- | --- |
-| **A** (normal) | Exists | Does not exist | Full recreation: create → copy → drop → rename |
-| **B** (partial) | Exists | Exists | Discard temp (original data intact), restart as State A |
-| **C** (rename pending) | Does not exist | Exists | Skip to rename (data already copied) |
+| State                  | Original table | Temp table     | Action                                                  |
+| ---------------------- | -------------- | -------------- | ------------------------------------------------------- |
+| **A** (normal)         | Exists         | Does not exist | Full recreation: create → copy → drop → rename          |
+| **B** (partial)        | Exists         | Exists         | Discard temp (original data intact), restart as State A |
+| **C** (rename pending) | Does not exist | Exists         | Skip to rename (data already copied)                    |
 
 `check_crash_recovery()` detects the current state automatically. In State B it drops the
 partial temp table and returns `Normal`. In State C it returns `RenameOnly`.
@@ -745,17 +745,17 @@ db.execute(&drop).await?;
 
 ### When `execute_unprepared()` or raw statements are still allowed
 
-Raw SQL is accepted **only** for constructs that have no sea_query equivalent.  Every such call
+Raw SQL is accepted **only** for constructs that have no sea_query equivalent. Every such call
 **must** include an inline comment naming the specific limitation.
 
-| Construct | Reason sea_query cannot express it |
-| --- | --- |
-| `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent |
-| `INSERT INTO … SELECT strftime(…)` | `strftime` is a SQLite-specific function |
-| `SELECT typeof(col) FROM …` | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
-| `PRAGMA foreign_keys` | SQLite-specific pragma; no sea_query equivalent |
-| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching |
-| `CASE WHEN` in `ON CONFLICT DO UPDATE` | SeaORM's `on_conflict` builder limitation |
+| Construct                                            | Reason sea_query cannot express it                                   |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                     |
+| `INSERT INTO … SELECT strftime(…)`                   | `strftime` is a SQLite-specific function                             |
+| `SELECT typeof(col) FROM …`                          | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
+| `PRAGMA foreign_keys`                                | SQLite-specific pragma; no sea_query equivalent                      |
+| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                           |
+| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation                            |
 
 **Inline comment requirement:**
 
@@ -823,6 +823,98 @@ have run; reordering breaks existing databases.
 
 ---
 
+## Service-owned migrations (`service_migrations()`)
+
+Some Services own a local DB whose schema travels with the runtime crate, e.g.
+`uptrakit-agent-ssh-runtime` owns the `ssh_hosts` table. When the controller embeds the
+Service in-process, the Service's migrations must run against the controller's shared DB
+alongside the controller's own migrations. The mechanism is a static method on the
+`ServiceHandler` trait, gated by the `service-migrations` feature in
+`uptrakit-service-sdk`.
+
+### When to override
+
+Override `service_migrations()` only on `ServiceHandler` impls whose Service owns a local
+DB (its own tables). Services without local persistence rely on the default empty
+implementation.
+
+### Cargo wiring
+
+The runtime crate that contains the `ServiceHandler` impl must propagate the feature:
+
+```toml
+# crates/core/<service>-runtime/Cargo.toml
+[features]
+service-migrations = ["uptrakit-service-sdk/service-migrations"]
+```
+
+The embedding controller's per-service feature pulls it in:
+
+```toml
+# crates/core/controller-runtime/Cargo.toml
+embedded-<service> = [
+    "dep:uptrakit-<service>-runtime",
+    "uptrakit-<service>-runtime/service-migrations",
+    # ...
+]
+```
+
+### Implementing the override
+
+Inside `impl ServiceHandler for <YourHandler>`:
+
+```rust
+#[cfg(feature = "service-migrations")]
+fn service_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>
+where
+    Self: Sized,
+{
+    use sea_orm_migration::MigratorTrait as _;
+    crate::db::migration::Migrator::migrations()
+}
+```
+
+`where Self: Sized` keeps the static method out of the `dyn ServiceHandler` vtable so the
+trait remains object-safe. Call it as `<YourHandler>::service_migrations()` (never through
+a `dyn ServiceHandler`).
+
+### How the controller wires it
+
+The controller collects every embedded Service's migrations at startup and merges them
+with plugin-contributed ones into the combined migrator:
+
+```rust
+// crates/core/controller-runtime/src/migration/mod.rs
+let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> = /* plugin-supplied */;
+
+#[cfg(feature = "embedded-ssh-agent")]
+plugin_migrations.extend(
+    uptrakit_agent_ssh_runtime::AgentSshHandler::service_migrations(),
+);
+
+uptrakit_shared_db::migration::run_migrations_with_plugins(db, plugin_migrations).await?;
+```
+
+### Existing deployments and the frozen-list constraint
+
+For Services whose schema previously lived in `shared-db` as a one-shot migration, swap
+that one-shot for a **repair migration** that inserts the individual `seaql_migrations`
+rows for the runtime crate's migration list (with `ON CONFLICT DO NOTHING`) and deletes
+the old one-shot row. On fresh installs the runtime migrations run normally; on existing
+deployments they are recorded as already-run by the repair, then the Migrator finds them
+in `seaql_migrations` and skips re-running them.
+
+The repair migration's INSERT list is a **frozen** snapshot of the runtime crate's
+migration filenames at repair-write time. New runtime migrations landing in the same
+release as the repair must be appended to the INSERT list before cutting the release;
+otherwise existing deployments will silently re-run those migrations against the live
+table.
+
+See [ADR-0005](../adr/0005-service-binary-runtime-boundary.md) for the full B+B1 strategy
+and rationale.
+
+---
+
 ## Running migrations in tests
 
 **Never create tables manually in test setup.** Use `run_migrations` on a fresh in-memory
@@ -866,7 +958,7 @@ tenant::ActiveModel {
 ### Repair migrations that touch both sides of a FK relationship
 
 `PRAGMA foreign_keys = OFF` is **silently ignored inside an active transaction** (SQLite
-requirement: the pragma can only be changed outside a transaction).  sea-orm-migration v2
+requirement: the pragma can only be changed outside a transaction). sea-orm-migration v2
 wraps every `up()` call in a transaction, so setting the PRAGMA inside `up()` is a no-op
 and FK enforcement remains ON.
 
@@ -990,10 +1082,10 @@ The `db-sqlite` and `db-postgres` features of `uptrakit-shared-db` propagate to
 `sea-orm-migration` only when the `migration` feature is also enabled (weak dependency). The
 controller activates the correct backend via its own feature flags:
 
-| Controller feature | Shared-db features enabled |
-| --- | --- |
-| `db-sqlite` (default) | `db-sqlite`, `migration` |
-| `db-postgres` | `db-postgres`, `migration` |
+| Controller feature    | Shared-db features enabled |
+| --------------------- | -------------------------- |
+| `db-sqlite` (default) | `db-sqlite`, `migration`   |
+| `db-postgres`         | `db-postgres`, `migration` |
 
 In-memory SQLite tests in web-api use `features = ["migration", "db-sqlite"]` as a
 dev-dependency.
@@ -1023,12 +1115,12 @@ uptrakit-controller \
 
 ### Where the data migration code lives
 
-| Path | Purpose |
-| --- | --- |
-| `crates/core/controller/src/db_migrate/mod.rs` | Top-level `run()` function, orchestration |
-| `crates/core/controller/src/db_migrate/error.rs` | `DbMigrateError` and `Result<T>` type alias |
+| Path                                              | Purpose                                                           |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| `crates/core/controller/src/db_migrate/mod.rs`    | Top-level `run()` function, orchestration                         |
+| `crates/core/controller/src/db_migrate/error.rs`  | `DbMigrateError` and `Result<T>` type alias                       |
 | `crates/core/controller/src/db_migrate/tables.rs` | Generic `migrate_table<E>`, `copy_all`, `clean_all`, `verify_all` |
-| `crates/core/controller/src/cli.rs` | `ControllerCommand::DbMigrate`, `DbMigrateArgs` |
+| `crates/core/controller/src/cli.rs`               | `ControllerCommand::DbMigrate`, `DbMigrateArgs`                   |
 
 ### Algorithm
 

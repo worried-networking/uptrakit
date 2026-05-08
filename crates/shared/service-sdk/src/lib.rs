@@ -1,3 +1,50 @@
+//! Shared SDK for uptrakit Services.
+//!
+//! Provides the lifecycle, transport, identity, and shutdown plumbing that
+//! every Service relies on. Designed to be published independently of the
+//! workspace: no internal-crate dependencies; all required wire types are
+//! generated locally via xtask.
+//!
+//! ## Run modes
+//!
+//! A Service can run in one of two modes; both go through the same
+//! [`ServiceHandler`] trait.
+//!
+//! - **Standalone (binary)** — the Service connects to the controller over
+//!   WebSocket, does enrollment, manages its own certificate lifecycle, and
+//!   handles OS signals. Drive it with [`run_lifecycle_and_handle_errors`]
+//!   (the typical `main()` entry point) or [`run_service_lifecycle`] for
+//!   finer control.
+//! - **Embedded (in-process)** — the controller constructs the handler
+//!   itself, hands it controller-side dependencies (DB, state dir, identity
+//!   keypair), and runs it on an in-process transport. Drive it with
+//!   [`run_embedded_service`]. Embedded services skip enrollment, certificate
+//!   management, and signal handling; shutdown is driven by two
+//!   `CancellationToken`s.
+//!
+//! See ADR-0004 (`docs/adr/0004-service-handler-transport-abstraction.md`)
+//! for the transport abstraction rationale and ADR-0005
+//! (`docs/adr/0005-service-binary-runtime-boundary.md`) for the
+//! binary-vs-runtime crate split.
+//!
+//! ## Service-owned migrations
+//!
+//! Services that own a local DB override
+//! [`ServiceHandler::service_migrations`] (gated by the `service-migrations`
+//! feature). The embedding controller calls this static method at startup and
+//! merges the migrations with its own. See
+//! `docs/development/database-migrations.md` for the implementation guide.
+//!
+//! ## Most-used re-exports
+//!
+//! - Entry points: [`run_lifecycle_and_handle_errors`],
+//!   [`run_service_lifecycle`], [`run_embedded_service`].
+//! - Trait: [`ServiceHandler`] (impl this on your Service).
+//! - Identity helpers: [`ServiceIdentityState`],
+//!   [`generate_p256_keypair_for_ecies`].
+//! - Shutdown: [`ShutdownCause`], [`default_resolve_shutdown`].
+//! - Errors: [`LoopError`], [`LoopOutcome`], [`LoopResult`].
+
 #[macro_use]
 mod macros;
 mod embedded;
