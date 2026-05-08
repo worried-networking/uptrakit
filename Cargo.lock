@@ -7238,7 +7238,6 @@ dependencies = [
  "uptrakit-mqtt-runtime",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
- "uptrakit-scheduler-engine",
  "uptrakit-scheduler-runtime",
  "uptrakit-service-platform",
  "uptrakit-shared-db",
@@ -8074,7 +8073,6 @@ dependencies = [
  "uptrakit-build-info",
  "uptrakit-crypto",
  "uptrakit-nats",
- "uptrakit-scheduler-engine",
  "uptrakit-scheduler-runtime",
  "uptrakit-service-sdk",
  "uptrakit-shared-db",
@@ -8085,8 +8083,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-scheduler-engine"
-version = "0.0.1"
+name = "uptrakit-scheduler-runtime"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8104,34 +8102,15 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-config-merge",
  "uptrakit-crypto",
+ "uptrakit-nats",
  "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-service-sdk",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-wire",
  "uuid",
  "x509-parser",
-]
-
-[[package]]
-name = "uptrakit-scheduler-runtime"
-version = "0.0.2"
-dependencies = [
- "async-trait",
- "rootcause",
- "sea-orm",
- "tokio",
- "tokio-util",
- "tracing",
- "uptrakit-audit-log",
- "uptrakit-crypto",
- "uptrakit-nats",
- "uptrakit-scheduler-engine",
- "uptrakit-service-sdk",
- "uptrakit-shared-db",
- "uptrakit-shared-types",
- "uptrakit-wire",
- "uuid",
  "zeroize",
 ]
 
@@ -8448,7 +8427,6 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-infrastructure-registry",
- "uptrakit-scheduler-engine",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
