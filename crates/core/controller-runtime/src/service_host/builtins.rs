@@ -321,6 +321,18 @@ pub(crate) async fn register_agent_ssh(
     let default_tenant_id = app_state.default_tenant_id;
     let db_for_ssh = app_state.db().clone();
 
+    let (private_key_der, encryption_public_key) = crate::ssh_agent::generate_ecies_keypair()?;
+    let keypair = uptrakit_agent_ssh_runtime::EciesKeypair {
+        private_key_der,
+        encryption_public_key,
+    };
+    let handler = uptrakit_agent_ssh_runtime::AgentSshHandler::new(
+        db_for_ssh,
+        state_dir,
+        uptrakit_agent_ssh_runtime::AgentSshMode::Embedded,
+        Some(keypair),
+    );
+
     let add_result = host
         .add(
             &AGENT_SSH,
@@ -330,12 +342,11 @@ pub(crate) async fn register_agent_ssh(
             controller_installation_id,
             map_yield_policy(&AGENT_SSH, None),
             move |transport, tokens| {
-                Box::pin(crate::ssh_agent::run_embedded_ssh_agent(
+                Box::pin(uptrakit_service_sdk::run_embedded_service(
+                    handler,
                     transport,
-                    tokens,
-                    state_dir,
-                    db_for_ssh,
-                    default_tenant_id,
+                    tokens.drain,
+                    tokens.abort,
                 ))
             },
             app_state,
