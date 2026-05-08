@@ -69,7 +69,7 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     }
 }
 
-/// Compute the next run time inline (same logic as `uptrakit_scheduler_engine::interval`
+/// Compute the next run time inline (same logic as `uptrakit_scheduler_runtime::interval`
 /// but avoids a crate dependency for a single addition).
 fn compute_next_run_at(
     now: OffsetDateTime,
