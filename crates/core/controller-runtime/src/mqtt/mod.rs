@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use base64::Engine as _;
 use uptrakit_mqtt_runtime::{MqttRuntimeIdentity, mqtt_capabilities as runtime_capabilities};
 use uptrakit_wire::{Capability, ControllerMessage};
 
@@ -55,16 +54,12 @@ pub(crate) async fn send_initial_service_config(
 
 pub(crate) fn generate_ecies_keypair() -> rootcause::Result<MqttRuntimeIdentity> {
     use rootcause::prelude::*;
-    let key_pair =
-        rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|error| {
+    let (private_der, public_b64) = uptrakit_service_sdk::generate_p256_keypair_for_ecies()
+        .map_err(|e| {
             report!(std::io::Error::other(format!(
-                "P-256 key generation failed: {error}"
+                "embedded MQTT: ECIES keygen failed: {e}"
             )))
         })?;
-    let private_der = key_pair.serialize_der();
-    let public_raw = key_pair.public_key_raw().to_vec();
-    let public_b64 = base64::engine::general_purpose::STANDARD.encode(&public_raw);
-
     Ok(MqttRuntimeIdentity {
         service_id: None,
         private_key_der: Some(private_der),
@@ -84,21 +79,5 @@ mod tests {
         assert!(caps.contains(&Capability::GracefulShutdown));
         assert!(caps.contains(&Capability::UiSurfaces));
         assert!(caps.contains(&Capability::WorkloadClaims));
-    }
-
-    #[test]
-    fn generate_ecies_keypair_produces_valid_pair() {
-        let identity = generate_ecies_keypair().unwrap();
-        let private_key = identity.private_key_der.expect("private key");
-        let public_key = identity.encryption_public_key.expect("public key");
-
-        assert!(!private_key.is_empty());
-        assert!(!public_key.is_empty());
-
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(&public_key)
-            .expect("valid base64");
-        assert_eq!(decoded.len(), 65);
-        assert_eq!(decoded[0], 0x04);
     }
 }

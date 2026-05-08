@@ -600,6 +600,36 @@ pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
     Ok((key_pair.serialize_pem(), csr_pem))
 }
 
+/// Generate a fresh P-256 keypair for embedded-service ECIES sealed-box
+/// identity.
+///
+/// Returns `(private_key_pkcs8_der, public_key_uncompressed_b64)`. The public
+/// key is the 65-byte SEC1 uncompressed encoding (`0x04 || X || Y`),
+/// base64-encoded with the standard alphabet.
+///
+/// Used by the controller when embedding a Service in-process: the
+/// controller generates the Service's identity keypair on its behalf, then
+/// passes both halves into the handler constructor. Standalone Services do
+/// not call this directly; their keypair is managed by
+/// [`ServiceIdentityState`].
+///
+/// # Errors
+///
+/// Returns [`IdentityError::KeypairGeneration`] (wrapped in
+/// [`EnrollmentError::Identity`]) if `rcgen` keygen fails.
+pub fn generate_p256_keypair_for_ecies() -> Result<(Vec<u8>, String)> {
+    use base64::Engine as _;
+
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+        report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(
+            format!("P-256 key generation failed: {e}")
+        )))
+    })?;
+    let private_der = key_pair.serialize_der();
+    let public_b64 = base64::engine::general_purpose::STANDARD.encode(key_pair.public_key_raw());
+    Ok((private_der, public_b64))
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /// Decode the first PEM block into DER bytes.
@@ -1119,5 +1149,27 @@ mod tests {
 
             assert_eq!(key_mode, 0o600, "key file should have 600 permissions");
         }
+    }
+
+    #[test]
+    fn generate_p256_keypair_for_ecies_produces_valid_pair() {
+        use base64::Engine as _;
+
+        let (private_der, public_b64) = generate_p256_keypair_for_ecies().expect("keygen");
+
+        assert!(!private_der.is_empty(), "private DER must be non-empty");
+
+        let public_raw = base64::engine::general_purpose::STANDARD
+            .decode(&public_b64)
+            .expect("public key must be valid base64");
+        assert_eq!(
+            public_raw.len(),
+            65,
+            "uncompressed P-256 public key must be 65 bytes"
+        );
+        assert_eq!(
+            public_raw[0], 0x04,
+            "uncompressed P-256 public key must start with 0x04"
+        );
     }
 }
