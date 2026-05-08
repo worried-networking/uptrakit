@@ -18,12 +18,21 @@ use uptrakit_wire::{
 
 pub struct MqttHandler {
     runtime: MqttRuntime,
+    embedded_identity: Option<MqttRuntimeIdentity>,
 }
 
 impl MqttHandler {
     pub fn new() -> Self {
         Self {
             runtime: MqttRuntime::new(),
+            embedded_identity: None,
+        }
+    }
+
+    pub fn new_embedded(identity: MqttRuntimeIdentity) -> Self {
+        Self {
+            runtime: MqttRuntime::new(),
+            embedded_identity: Some(identity),
         }
     }
 }
@@ -92,6 +101,12 @@ impl ServiceHandler for MqttHandler {
         conn: &mut dyn ServiceTransport,
         agreed_capabilities: &BTreeSet<Capability>,
     ) {
+        if let Some(identity) = self.embedded_identity.take() {
+            if let Err(e) = self.runtime.on_connected(conn, identity).await {
+                tracing::error!(error = %e, "embedded MQTT: failed to initialize runtime");
+                return;
+            }
+        }
         self.runtime
             .apply_settings(
                 MqttRuntimeSettings {
