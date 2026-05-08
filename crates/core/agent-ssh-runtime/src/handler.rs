@@ -188,4 +188,13 @@ impl ServiceHandler for AgentSshHandler {
             .shutdown(conn, shutdown_timeout, disconnect_reason, outcome)
             .await
     }
+
+    #[cfg(feature = "service-migrations")]
+    fn service_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>
+    where
+        Self: Sized,
+    {
+        use sea_orm_migration::MigratorTrait as _;
+        crate::db::migration::Migrator::migrations()
+    }
 }
