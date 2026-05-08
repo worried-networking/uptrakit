@@ -56,7 +56,7 @@ mod m20260326_000001_hsip_role_ordinal_index;
 mod m20260328_000001_mqtt_states_pagination_indexes;
 mod m20260329_000001_drop_mqtt_and_add_service_config;
 mod m20260330_000001_embedded_service_visibility;
-mod m20260331_000001_ssh_agent_tables;
+mod m20260331_000002_agent_ssh_migration_history_repair;
 mod m20260401_000001_host_features;
 mod m20260410_000001_oidc_private_network_issuers;
 mod m20260414_000001_update_execution_ownership;
@@ -127,7 +127,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260328_000001_mqtt_states_pagination_indexes::Migration),
             Box::new(m20260329_000001_drop_mqtt_and_add_service_config::Migration),
             Box::new(m20260330_000001_embedded_service_visibility::Migration),
-            Box::new(m20260331_000001_ssh_agent_tables::Migration),
+            Box::new(m20260331_000002_agent_ssh_migration_history_repair::Migration),
             Box::new(m20260317_000002_test_plugin_configs_permission::Migration),
             Box::new(m20260401_000001_host_features::Migration),
             Box::new(m20260410_000001_oidc_private_network_issuers::Migration),
@@ -996,6 +996,89 @@ mod tests {
         assert_eq!(
             count, 0,
             "viewer role must NOT have manage_commands permission"
+        );
+    }
+}
+
+#[cfg(test)]
+mod repair_migration_tests {
+    use sea_orm::{ConnectionTrait, Database, DatabaseConnection};
+
+    use super::*;
+
+    async fn open_test_db() -> DatabaseConnection {
+        Database::connect("sqlite::memory:").await.expect("db")
+    }
+
+    #[tokio::test]
+    async fn repair_migration_converts_monolithic_row_to_individual_rows() {
+        let db = open_test_db().await;
+
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS seaql_migrations \
+             (version TEXT NOT NULL PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .await
+        .expect("create table");
+
+        db.execute_unprepared(
+            "INSERT INTO seaql_migrations (version, applied_at) \
+             VALUES ('m20260331_000001_ssh_agent_tables', 1711929600)",
+        )
+        .await
+        .expect("insert old row");
+
+        let migration = m20260331_000002_agent_ssh_migration_history_repair::Migration;
+        let schema_manager = sea_orm_migration::SchemaManager::new(&db);
+        migration.up(&schema_manager).await.expect("repair up");
+
+        let old_row = db
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT 1 FROM seaql_migrations \
+                 WHERE version = 'm20260331_000001_ssh_agent_tables'",
+            ))
+            .await
+            .expect("query");
+        assert!(old_row.is_none(), "old monolithic row must be deleted");
+
+        let rows: Vec<sea_orm::QueryResult> = db
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT version FROM seaql_migrations ORDER BY version",
+            ))
+            .await
+            .expect("query all");
+        assert_eq!(rows.len(), 13, "must have exactly 13 individual rows");
+    }
+
+    #[tokio::test]
+    async fn repair_migration_is_noop_on_fresh_install() {
+        let db = open_test_db().await;
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS seaql_migrations \
+             (version TEXT NOT NULL PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .await
+        .expect("create table");
+
+        let migration = m20260331_000002_agent_ssh_migration_history_repair::Migration;
+        let schema_manager = sea_orm_migration::SchemaManager::new(&db);
+        migration
+            .up(&schema_manager)
+            .await
+            .expect("repair up no-op");
+
+        let rows: Vec<sea_orm::QueryResult> = db
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT 1 FROM seaql_migrations",
+            ))
+            .await
+            .expect("query");
+        assert!(
+            rows.is_empty(),
+            "no-op on fresh install must leave table empty"
         );
     }
 }
