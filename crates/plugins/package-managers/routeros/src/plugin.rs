@@ -115,7 +115,8 @@ impl Discoverer for RouterOsPlugin {
     /// Self-report the RouterOS install as a single featured software item.
     ///
     /// Reuses `RouterOsExecutor::resource_print()` + the
-    /// `parse_resource_version_with_display` parser. Returns `Ok(vec![])`
+    /// `parse_resource_version_with_display` parser to derive both the bare
+    /// semver-like version and the channel suffix. Returns `Ok(vec![])`
     /// when the version cannot be parsed (matches the trait contract:
     /// omit items with unknown versions).
     ///
@@ -123,6 +124,16 @@ impl Discoverer for RouterOsPlugin {
     /// the controller's `process_targets_discovery` honors the
     /// package-manager branch and binds the roles to the host without
     /// auto-creating a `plugin_configs` row.
+    ///
+    /// When a channel suffix was parsed, `target.config_override` carries
+    /// `{"channel": <kebab>}` so the per-host `host_software_item_plugins.config`
+    /// row gets the channel pre-populated. Only the `channel` key is seeded —
+    /// `reboot` is intentionally omitted because
+    /// `uptrakit_config_merge::resolve_effective_config` is a top-level
+    /// shallow merge (assignment_config keys replace type_settings keys),
+    /// and seeding `reboot=false` here would silently pin every RouterOS host
+    /// to no-reboot regardless of a tenant-level `plugin_type_settings.reboot`
+    /// setting.
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         let ros_rt = self
@@ -135,7 +146,7 @@ impl Discoverer for RouterOsPlugin {
             .await
             .map_err(|e| report!(e))?;
 
-        let Some((version, display)) = parse_resource_version_with_display(&output) else {
+        let Some((version, raw)) = parse_resource_version_with_display(&output) else {
             tracing::debug!(
                 "routeros discovery: `version` field absent from /system resource print output; \
                  omitting RouterOS software item"
@@ -144,13 +155,16 @@ impl Discoverer for RouterOsPlugin {
         };
 
         // Auto-fill `channel` from the parsed `(stable)` / `(long-term)` /
-        // `(testing)` suffix when present, so the host's plugin config
-        // matches the router's actual channel without operator action.
-        // `reboot: false` by default — discovery is non-destructive; the
-        // operator opts into auto-reboot via the form. Combined with the
-        // runtime's `allow_reboot` policy gate, freshly-discovered routers
-        // default to download-only behavior.
-        let channel = RouterOsChannel::from_resource_suffix(&display);
+        // `(testing)` suffix when present. Only the channel key is written
+        // to the per-host plugin config — see method-level docs for why
+        // `reboot` is intentionally not seeded.
+        let channel = RouterOsChannel::from_resource_suffix(&raw);
+        let config_override = channel.map(|c| serde_json::json!({ "channel": c.as_str() }));
+
+        // Kept for the non-package-manager flow that runs through
+        // `find_or_create_default_plugin_config`. Package managers ignore this
+        // field, but populating it preserves consistency if the routing ever
+        // changes.
         let plugin_config = serde_json::to_value(RouterOsConfig {
             channel,
             reboot: false,
@@ -163,11 +177,6 @@ impl Discoverer for RouterOsPlugin {
 
         let target = DiscoveryTarget {
             plugin_type: plugin_ids::PACKAGE_MANAGER_ROUTEROS.clone(),
-            // Package-manager plugins use type_settings, so the controller's
-            // `is_package_manager_plugin` branch skips `plugin_configs`
-            // find-or-create. The JSON still flows through to
-            // `host_software_item_plugin.config` for default per-host
-            // behavior.
             plugin_config,
             plugin_config_name: ROUTEROS_DISPLAY_NAME.to_string(),
             roles: vec![
@@ -176,7 +185,7 @@ impl Discoverer for RouterOsPlugin {
                 PluginRole::ExecuteUpdate,
             ],
             package_identifier: None,
-            config_override: None,
+            config_override,
             execution_site: None,
         };
 
@@ -189,7 +198,9 @@ impl Discoverer for RouterOsPlugin {
             qualifier: None,
             plugin_package_identifier: None,
             featured: true,
-            installed_display_version: Some(display),
+            // Bare semver is in `installed_version`; the channel lives in
+            // `config_override` (per-host plugin config). No second copy needed.
+            installed_display_version: None,
         }])
     }
 }
@@ -596,9 +607,10 @@ mod tests {
         assert_eq!(item.package_identifier, ROUTEROS_PACKAGE_IDENTIFIER);
         assert_eq!(item.name, ROUTEROS_DISPLAY_NAME);
         assert_eq!(item.installed_version, "7.14.2");
-        assert_eq!(
-            item.installed_display_version.as_deref(),
-            Some("7.14.2 (stable)"),
+        assert!(
+            item.installed_display_version.is_none(),
+            "channel suffix must not be carried in installed_display_version; \
+             channel info lives in target.config_override instead"
         );
         assert!(item.featured);
         assert_eq!(item.targets.len(), 1);
@@ -627,7 +639,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_target_plugin_config_has_reboot_false_and_parsed_channel() {
+    async fn discover_target_config_override_carries_parsed_channel_only() {
         let plugin = make_plugin(
             "                   version: 7.14.2 (stable)\n",
             "",
@@ -635,28 +647,33 @@ mod tests {
             false,
         );
         let items = plugin.discover_software().await.expect("discover ok");
-        let target_config: RouterOsConfig =
-            serde_json::from_value(items[0].targets[0].plugin_config.clone())
-                .expect("target plugin_config must deserialize as RouterOsConfig");
-        assert_eq!(target_config.channel, Some(RouterOsChannel::Stable));
+        let override_value = items[0].targets[0]
+            .config_override
+            .as_ref()
+            .expect("config_override must carry the parsed channel");
+        assert_eq!(
+            override_value,
+            &serde_json::json!({ "channel": "stable" }),
+            "only the channel key should be seeded into the per-host plugin config"
+        );
+        let override_obj = override_value
+            .as_object()
+            .expect("config_override must be a JSON object");
         assert!(
-            !target_config.reboot,
-            "discovery defaults reboot to false (operator opts in via the form)"
+            !override_obj.contains_key("reboot"),
+            "config_override must NOT carry `reboot` — resolve_effective_config is a top-level \
+             shallow merge, so seeding `reboot` here would override tenant-level type_settings"
         );
     }
 
     #[tokio::test]
-    async fn discover_target_plugin_config_omits_channel_when_suffix_absent() {
+    async fn discover_target_config_override_is_none_when_suffix_absent() {
         let plugin = make_plugin("                   version: 7.14.2\n", "", false, false);
         let items = plugin.discover_software().await.expect("discover ok");
-        let target_config: RouterOsConfig =
-            serde_json::from_value(items[0].targets[0].plugin_config.clone())
-                .expect("target plugin_config must deserialize as RouterOsConfig");
-        assert_eq!(
-            target_config.channel, None,
-            "discovery does not fabricate a default channel when the router doesn't report one"
+        assert!(
+            items[0].targets[0].config_override.is_none(),
+            "no channel parsed → don't write an override; let type_settings flow through"
         );
-        assert!(!target_config.reboot);
     }
 
     #[tokio::test]
