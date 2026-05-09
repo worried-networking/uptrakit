@@ -298,6 +298,11 @@ pub(crate) async fn collect_remote_host_info_routeros(exec: &RouterOsSshExecutor
         os_type: Some("routeros".to_string()),
         os_version,
         architecture,
+        // Hostname is intentionally None: the SSH agent already carries the
+        // user-typed SSH target in `ip_address` (see client.rs:229,384), and
+        // the controller derives the host's display name from that. Reading
+        // the remote `/system identity` would override what the operator
+        // typed, which is not what we want.
         hostname: None,
         ip_address: None,
         agent_host_id: None,
