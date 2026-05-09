@@ -567,37 +567,58 @@ styling automatically.
 }
 ```
 
-`ContextMenuShell` (re-exported from `ContextMenu.svelte`) is positioned absolutely via `top`/`left`
-coordinates supplied by the caller. It manages keyboard navigation, viewport overflow adjustment,
+`ContextMenuShell` (re-exported from `ContextMenu.svelte`) is anchored to the trigger element's
+bounding rect supplied by the caller. It manages keyboard navigation, viewport overflow placement,
 and click-outside dismiss.
+
+The shell DOM is portaled to `document.body` via the shared `use:portal` action so its
+`position: fixed` resolves against the viewport regardless of any ancestor containing block
+(e.g. `contain: layout` on the app shell `<main>`).
+
+**Constraint:** do not open `ContextMenuShell` from inside a `Modal`/`ModalShell`. Per the pinned
+z-index scale (`tokens.md`), the menu shell sits at `z-index: 100` while the modal backdrop sits at
+`900` and the modal shell at `910`; once both are body-portaled siblings, the menu would render
+behind the modal. The component emits a `console.warn` in this case to surface the violation early.
+Adding "menu inside modal" requires a new tier in the scale, updates to `app.css`,
+`css-contract.test.ts`, and this document.
 
 ```typescript
 // frontend/src/lib/components/ContextMenu.svelte
 {
-  top: number;       // px offset from viewport top
-  left: number;      // px offset from viewport left
+  anchorRect: DOMRect;    // trigger element's bounding rect (call `button.getBoundingClientRect()`)
   onclose?: () => void;
   children: Snippet;
 }
 ```
 
+Placement rules (anchor-based):
+
+- Default: menu's top-left corner sits 2px down-right of the trigger's bottom-right corner — menu
+  sits to the right of and below the trigger, with a 2px gap on both axes.
+- Horizontal flip: when the right side would overflow the viewport, menu's top-right corner sits
+  2px down-left of the trigger's bottom-left corner — menu sits to the left of and below the
+  trigger.
+- Vertical clamp: when below would overflow, the menu's bottom edge is shifted to
+  `viewport.bottom - 8px`. Horizontal placement is unchanged; the menu does not flip above the
+  trigger. Trigger overlap is acceptable.
+- Viewport edge clearance is 8px (`pad`); trigger gap is 2px (`gap`) on both axes.
+- The menu closes on `window` resize because the anchor rect is a snapshot from the open moment.
+
 Usage:
 
 ```svelte
 <script lang="ts">
-  let menuTop = $state(0);
-  let menuLeft = $state(0);
+  let menuAnchor = $state<DOMRect | null>(null);
   let showMenu = $state(false);
 
   function openMenu(e: MouseEvent) {
-    menuTop = e.clientY;
-    menuLeft = e.clientX;
+    menuAnchor = (e.currentTarget as HTMLElement).getBoundingClientRect();
     showMenu = true;
   }
 </script>
 
-{#if showMenu}
-  <ContextMenuShell top={menuTop} left={menuLeft} onclose={() => { showMenu = false; }}>
+{#if showMenu && menuAnchor}
+  <ContextMenuShell anchorRect={menuAnchor} onclose={() => { showMenu = false; }}>
     <ContextMenuItem label="View details" onclick={handleView} />
     <ContextMenuItem label="Delete" destructive onclick={handleDelete} />
   </ContextMenuShell>
@@ -776,6 +797,11 @@ Rules:
 - Close on `Escape` or backdrop click via `ModalBackdrop`.
 - Footer is always right-aligned with `gap-2`.
 - `aria-modal="true"`, `role="dialog"`, `aria-labelledby` wired when `title` is provided.
+- `ModalBackdrop` is portaled to `document.body` via the shared `use:portal` action so the
+  backdrop covers the full viewport regardless of any ancestor containing block (e.g.
+  `contain: layout` on the app shell `<main>`). Stacked modals (e.g. a `ConfirmDialog` opened
+  from inside a `ModalShell`) become body-children siblings; DOM order resolves stacking when
+  the backdrop z-index ties.
 
 ---
 

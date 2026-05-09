@@ -65,4 +65,16 @@ describe('BatchActionBar', () => {
 		const btn = screen.getByRole('button', { name: 'Deselect all' });
 		expect(btn.className).toContain('border');
 	});
+
+	it('portals the bar to document.body so it stays viewport-pinned regardless of ancestor scroll', () => {
+		render(BatchActionBar, {
+			selectedCount: 2,
+			actions: [{ id: 'x', label: 'X' }],
+			onaction: vi.fn(),
+			oncancel: vi.fn()
+		});
+		const bar = document.body.querySelector('[data-ui="batch-action-bar"]');
+		expect(bar).not.toBeNull();
+		expect(bar?.parentElement).toBe(document.body);
+	});
 });

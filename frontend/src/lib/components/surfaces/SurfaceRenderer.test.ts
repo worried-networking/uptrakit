@@ -153,7 +153,7 @@ describe('SurfaceRenderer', () => {
 			transport: { mode: 'controller_local' }
 		};
 
-		const { container } = render(SurfaceRenderer, {
+		render(SurfaceRenderer, {
 			surfaceId: 'surface.page',
 			node,
 			interactions: [interaction]
@@ -168,7 +168,8 @@ describe('SurfaceRenderer', () => {
 
 		expect(screen.getByRole('heading', { name: 'Open modal' })).toBeInTheDocument();
 		expect(screen.getByText('Modal details')).toBeInTheDocument();
-		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
+		// Modal portals to <body>; query the document, not the test container.
+		expect(document.body.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 	});
 
 	it('modal-trigger button is secondary variant — no preset-tonal-surface class', () => {

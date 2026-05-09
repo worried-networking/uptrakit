@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe('SurfaceModal', () => {
 	it('reuses the shared modal shell when open', () => {
-		const { container } = render(SurfaceModal, {
+		render(SurfaceModal, {
 			open: true,
 			title: 'Surface details',
 			onclose: vi.fn(),
@@ -28,7 +28,8 @@ describe('SurfaceModal', () => {
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Surface details' })).toBeInTheDocument();
 		expect(screen.getByText('Modal content')).toBeInTheDocument();
-		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
+		// Modal portals to <body>; query the document.
+		expect(document.body.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 	});
 
 	it('does not render modal chrome when closed', () => {

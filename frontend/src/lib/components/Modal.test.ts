@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import Modal from './Modal.svelte';
+import ModalWithFormFieldFixture from '$lib/test-mocks/modal-with-form-field-fixture.svelte';
 
 function makeChildren(html = '<p>Modal content</p>') {
 	return createRawSnippet(() => ({
@@ -33,7 +34,10 @@ describe('Modal', () => {
 		expect(dialog.className).toContain('max-w-2xl');
 		expect(dialog.className).toContain('z-[910]');
 		expect(dialog).toHaveAttribute('data-ui', 'modal-shell');
-		expect(container.querySelector('[data-ui="modal-shell"]')).toBe(dialog);
+		expect(document.body.querySelector('[data-ui="modal-shell"]')).toBe(dialog);
+		// Portal contract: backdrop and shell live directly under <body>, not inside the test wrapper.
+		expect(container.querySelector('[data-ui="modal-shell"]')).toBeNull();
+		expect(container.querySelector('[data-ui="modal-backdrop"]')).toBeNull();
 	});
 
 	it('renders the title as <h3> when provided', () => {
@@ -58,16 +62,49 @@ describe('Modal', () => {
 	});
 
 	it('omits footer wrapper when footer snippet is not provided', () => {
-		const { container } = render(Modal, { onclose: vi.fn(), children: makeChildren() });
-		const dialog = container.querySelector('[role="dialog"]')!;
+		render(Modal, { onclose: vi.fn(), children: makeChildren() });
+		const dialog = document.body.querySelector('[role="dialog"]')!;
 		expect(dialog.querySelector('.justify-end')).not.toBeInTheDocument();
 	});
 
 	it('calls onclose when Escape key is pressed', () => {
 		const onclose = vi.fn();
-		const { container } = render(Modal, { onclose, children: makeChildren() });
-		const backdrop = container.firstElementChild as HTMLElement;
+		render(Modal, { onclose, children: makeChildren() });
+		const backdrop = document.body.querySelector('[data-ui="modal-backdrop"]') as HTMLElement;
 		fireEvent.keyDown(backdrop, { key: 'Escape' });
 		expect(onclose).toHaveBeenCalledOnce();
+	});
+
+	it('portals the backdrop to document.body so it covers the viewport from any ancestor containing block', () => {
+		render(Modal, { onclose: vi.fn(), children: makeChildren() });
+		const backdrop = document.body.querySelector('[data-ui="modal-backdrop"]');
+		expect(backdrop).not.toBeNull();
+		expect(backdrop?.parentElement).toBe(document.body);
+	});
+
+	it('stacks a second modal above the first by DOM order under <body>', () => {
+		// Real call sites (e.g. ConfirmDialog opened from inside Modal in
+		// PluginConfigsTab, EditHostAssignmentModal, SoftwareMergeWizard) rely on
+		// "render order = paint order" once both backdrops live under <body>.
+		render(Modal, { onclose: vi.fn(), title: 'First', children: makeChildren('<p>first</p>') });
+		render(Modal, { onclose: vi.fn(), title: 'Second', children: makeChildren('<p>second</p>') });
+
+		const backdrops = Array.from(document.body.querySelectorAll('[data-ui="modal-backdrop"]'));
+		expect(backdrops).toHaveLength(2);
+
+		const firstIndex = Array.from(document.body.children).indexOf(backdrops[0] as Element);
+		const secondIndex = Array.from(document.body.children).indexOf(backdrops[1] as Element);
+		expect(secondIndex).toBeGreaterThan(firstIndex);
+	});
+
+	it('preserves Svelte form-layout context across portaling so FormFieldRow uses modal grid', () => {
+		render(ModalWithFormFieldFixture, { onclose: vi.fn() });
+		const fieldRow = document.body.querySelector('[data-ui="form-field-row"]');
+		expect(fieldRow).not.toBeNull();
+		// FormFieldRow reads getFormLayout() from Svelte context. Modal sets
+		// FormLayout.Modal which maps to the narrow-label grid. If portaling
+		// disrupted context propagation (it shouldn't — context is component-tree,
+		// not DOM-tree) the wide page-layout grid would appear instead.
+		expect(fieldRow?.className).toContain('md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
 	});
 });

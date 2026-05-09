@@ -45,8 +45,8 @@ describe('ToastNotifications', () => {
 			}
 		];
 
-		const { container } = render(ToastNotifications, { alerts, onDismiss: vi.fn() });
-		const toastCards = Array.from(container.querySelectorAll<HTMLElement>('[data-ui="toast-notification"]'));
+		render(ToastNotifications, { alerts, onDismiss: vi.fn() });
+		const toastCards = Array.from(document.body.querySelectorAll<HTMLElement>('[data-ui="toast-notification"]'));
 
 		expect(toastCards).toHaveLength(3);
 
@@ -77,8 +77,8 @@ describe('ToastNotifications', () => {
 			}
 		];
 
-		const { container } = render(ToastNotifications, { alerts, onDismiss: vi.fn() });
-		const toastCards = Array.from(container.querySelectorAll<HTMLElement>('[data-ui="toast-notification"]'));
+		render(ToastNotifications, { alerts, onDismiss: vi.fn() });
+		const toastCards = Array.from(document.body.querySelectorAll<HTMLElement>('[data-ui="toast-notification"]'));
 
 		expect(toastCards).toHaveLength(2);
 
@@ -101,7 +101,7 @@ describe('ToastNotifications', () => {
 	it('auto-dismisses success toasts after 4 seconds and exposes a countdown progress bar', async () => {
 		notificationState.successMessage = 'Saved changes';
 
-		const { container } = render(ToastNotifications, { alerts: [], onDismiss: vi.fn() });
+		render(ToastNotifications, { alerts: [], onDismiss: vi.fn() });
 
 		const toast = screen.getByText('Saved changes').closest('[data-ui="toast-notification"]');
 		expect(toast).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('ToastNotifications', () => {
 
 		await vi.advanceTimersByTimeAsync(1);
 		await Promise.resolve();
-		expect(container.querySelector('[data-ui="toast-notification"]')).toBeNull();
+		expect(document.body.querySelector('[data-ui="toast-notification"]')).toBeNull();
 	});
 
 	it('pauses success toast auto-dismiss on hover and resumes on mouse leave', async () => {
@@ -171,9 +171,18 @@ describe('ToastNotifications', () => {
 				action: 'renew_server_certificate'
 			}
 		];
-		const { container } = render(ToastNotifications, { alerts, onDismiss: vi.fn() });
-		const cta = container.querySelector('a[href="/settings/global"]') as HTMLElement;
+		render(ToastNotifications, { alerts, onDismiss: vi.fn() });
+		const cta = document.body.querySelector('a[href="/settings/global"]') as HTMLElement;
 		expect(cta).not.toBeNull();
 		expect(cta.tagName.toLowerCase()).toBe('a');
+	});
+
+	it('portals the toast container to document.body so toasts stay viewport-pinned regardless of ancestor scrolls', () => {
+		notificationState.successMessage = 'Hello';
+		render(ToastNotifications, { alerts: [], onDismiss: vi.fn() });
+
+		const wrapper = document.body.querySelector('[data-ui="toast-notifications"]');
+		expect(wrapper).not.toBeNull();
+		expect(wrapper?.parentElement).toBe(document.body);
 	});
 });

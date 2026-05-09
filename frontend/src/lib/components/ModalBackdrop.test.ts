@@ -11,6 +11,12 @@ function makeContent(innerHtml = '<button>Action</button>') {
 	}));
 }
 
+function getBackdrop(): HTMLElement {
+	const backdrop = document.body.querySelector('[data-ui="modal-backdrop"]');
+	if (!backdrop) throw new Error('Modal backdrop not found in document.body');
+	return backdrop as HTMLElement;
+}
+
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
@@ -18,27 +24,26 @@ afterEach(() => {
 
 describe('ModalBackdrop', () => {
 	it('renders the child content inside the backdrop', () => {
-		const { container } = render(ModalBackdrop, { onclose: vi.fn(), children: makeContent() });
+		render(ModalBackdrop, { onclose: vi.fn(), children: makeContent() });
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
-		const backdrop = container.firstElementChild as HTMLElement;
+		const backdrop = getBackdrop();
 		expect(backdrop).toHaveAttribute('data-ui', 'modal-backdrop');
 		expect(backdrop.className).toContain('z-[900]');
 	});
 
 	it('calls onclose when the Escape key is pressed', () => {
 		const onclose = vi.fn();
-		const { container } = render(ModalBackdrop, { onclose, children: makeContent() });
-		const backdrop = container.firstElementChild as HTMLElement;
-		fireEvent.keyDown(backdrop, { key: 'Escape' });
+		render(ModalBackdrop, { onclose, children: makeContent() });
+		fireEvent.keyDown(getBackdrop(), { key: 'Escape' });
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 
 	it('calls onclose when the backdrop overlay is clicked directly', () => {
 		const onclose = vi.fn();
-		const { container } = render(ModalBackdrop, { onclose, children: makeContent() });
+		render(ModalBackdrop, { onclose, children: makeContent() });
 		// The inner flex-wrapper fills the viewport and holds the onclick handler.
 		// Clicking it directly (not a child element) simulates a click on the dark backdrop area.
-		const innerWrapper = container.firstElementChild!.firstElementChild as HTMLElement;
+		const innerWrapper = getBackdrop().firstElementChild as HTMLElement;
 		fireEvent.click(innerWrapper);
 		expect(onclose).toHaveBeenCalledOnce();
 	});
@@ -61,12 +66,11 @@ describe('ModalBackdrop', () => {
 				</div>`;
 			}
 		}));
-		const { container } = render(ModalBackdrop, { onclose: vi.fn(), children });
-		const backdrop = container.firstElementChild as HTMLElement;
+		render(ModalBackdrop, { onclose: vi.fn(), children });
 		const last = screen.getByRole('button', { name: 'Last' });
 		// Simulate Tab pressed while the last element is focused → wraps to first
 		last.focus();
-		fireEvent.keyDown(backdrop, { key: 'Tab', shiftKey: false });
+		fireEvent.keyDown(getBackdrop(), { key: 'Tab', shiftKey: false });
 		expect(screen.getByRole('button', { name: 'First' })).toHaveFocus();
 	});
 
@@ -79,12 +83,16 @@ describe('ModalBackdrop', () => {
 				</div>`;
 			}
 		}));
-		const { container } = render(ModalBackdrop, { onclose: vi.fn(), children });
-		const backdrop = container.firstElementChild as HTMLElement;
+		render(ModalBackdrop, { onclose: vi.fn(), children });
 		const first = screen.getByRole('button', { name: 'First' });
 		// Simulate Shift+Tab pressed while the first element is focused → wraps to last
 		first.focus();
-		fireEvent.keyDown(backdrop, { key: 'Tab', shiftKey: true });
+		fireEvent.keyDown(getBackdrop(), { key: 'Tab', shiftKey: true });
 		expect(screen.getByRole('button', { name: 'Last' })).toHaveFocus();
+	});
+
+	it('portals the backdrop to document.body', () => {
+		render(ModalBackdrop, { onclose: vi.fn(), children: makeContent() });
+		expect(getBackdrop().parentElement).toBe(document.body);
 	});
 });
