@@ -7137,7 +7137,6 @@ name = "uptrakit-command"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "libc",
  "rootcause",
  "rustix",
  "tempfile",

@@ -1,17 +1,19 @@
 //! Interactive command execution with PTY allocation.
 //!
 //! This module provides PTY-backed command execution for interactive update
-//! sessions. The child process gets a real terminal (via `posix_openpt`/
+//! sessions. The child process gets a real terminal (via `rustix::pty::openpt`/
 //! `grantpt`/`unlockpt`/`ptsname`), enabling package managers and other tools
 //! that require stdin to function correctly.
 //!
 //! This entire module is gated on the `interactive` feature.
 
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 
 use rootcause::prelude::*;
+use rustix::fs::{Mode, OFlags};
+use rustix::pty::OpenptFlags;
 use tokio::sync::mpsc;
 
 use crate::command::send_output;
@@ -86,58 +88,37 @@ pub async fn run_command_interactive(
 
 /// Allocate a PTY master/slave pair.
 fn allocate_pty() -> crate::Result<(OwnedFd, OwnedFd)> {
-    // SAFETY: posix_openpt is a standard POSIX call; flags are valid constants.
-    // Return value is checked before use.
-    let master_raw = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
-    if master_raw < 0 {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: master_raw is a valid, non-negative fd returned by posix_openpt above.
-    // OwnedFd takes ownership and will close it on drop.
-    let master_fd = unsafe { OwnedFd::from_raw_fd(master_raw) };
+    let master_fd = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(io::Error::from(e))))?;
 
-    // SAFETY: master_fd is a valid PTY master fd; grantpt sets slave ownership.
-    if unsafe { libc::grantpt(master_fd.as_raw_fd()) } != 0 {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: master_fd is a valid PTY master fd; unlockpt unlocks the slave side.
-    if unsafe { libc::unlockpt(master_fd.as_raw_fd()) } != 0 {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
+    rustix::pty::grantpt(&master_fd)
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(io::Error::from(e))))?;
+    rustix::pty::unlockpt(&master_fd)
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(io::Error::from(e))))?;
 
-    // SAFETY: master_fd is a valid, unlocked PTY master fd; ptsname returns a
-    // pointer to a static buffer valid until the next ptsname call on this thread.
-    // Null check follows immediately.
-    let slave_path_ptr = unsafe { libc::ptsname(master_fd.as_raw_fd()) };
-    if slave_path_ptr.is_null() {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: slave_path_ptr is non-null and points to a valid, NUL-terminated
-    // C string returned by ptsname. Lifetime is bounded to before the next
-    // ptsname call on this thread; we copy out the path before any further calls.
-    let slave_path = unsafe { std::ffi::CStr::from_ptr(slave_path_ptr) };
+    let slave_path = rustix::pty::ptsname(&master_fd, Vec::new())
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(io::Error::from(e))))?;
 
-    // SAFETY: slave_path is a valid NUL-terminated path string from ptsname;
-    // flags are valid constants. Return value is checked before use.
-    let slave_raw = unsafe { libc::open(slave_path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
-    if slave_raw < 0 {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: slave_raw is a valid, non-negative fd returned by open above.
-    // OwnedFd takes ownership and will close it on drop.
-    let slave_fd = unsafe { OwnedFd::from_raw_fd(slave_raw) };
+    let slave_fd = rustix::fs::open(&slave_path, OFlags::RDWR | OFlags::NOCTTY, Mode::empty())
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(io::Error::from(e))))?;
 
     Ok((master_fd, slave_fd))
+}
+
+/// Post-fork, pre-exec callback for PTY children.
+///
+/// Runs in the forked child after [`std::process::Command`] has dup2'd the slave PTY into
+/// fd 0/1/2 and before `execvp`. Must be async-signal-safe; only setsid and
+/// ioctl(TIOCSCTTY) are invoked.
+fn pty_pre_exec() -> io::Result<()> {
+    rustix::process::setsid().map_err(|e| io::Error::from_raw_os_error(e.raw_os_error()))?;
+    // SAFETY: post-dup2 in child, fd 0 is the PTY slave (owned by Command's stdio
+    // plumbing for the lifetime of the callback). TIOCSCTTY must follow setsid so
+    // the child has no prior controlling terminal.
+    let ctty = unsafe { BorrowedFd::borrow_raw(0) };
+    rustix::process::ioctl_tiocsctty(ctty)
+        .map_err(|e| io::Error::from_raw_os_error(e.raw_os_error()))?;
+    Ok(())
 }
 
 /// Spawn a child process with the slave PTY as stdin/stdout/stderr.
@@ -150,10 +131,19 @@ fn spawn_child_with_pty(
 ) -> crate::Result<tokio::process::Child> {
     use std::process::Stdio;
 
-    let slave_raw = slave_fd.as_raw_fd();
+    let slave_in = slave_fd
+        .try_clone()
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(e)))?;
+    let slave_out = slave_fd
+        .try_clone()
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(e)))?;
+    let slave_err = slave_fd; // last assignment consumes the original
 
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
+    cmd.stdin(Stdio::from(slave_in));
+    cmd.stdout(Stdio::from(slave_out));
+    cmd.stderr(Stdio::from(slave_err));
 
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
@@ -162,43 +152,19 @@ fn spawn_child_with_pty(
         cmd.env(name, value);
     }
 
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "pre_exec closure requires all libc calls in one unsafe block; splitting is not possible as the closure body is a single expression"
-    )]
-    // SAFETY: pre_exec runs in the forked child process after fork, before exec.
-    // All libc calls here are async-signal-safe as required by POSIX: setsid(2),
-    // ioctl(2), dup2(2), and close(2) are all on the approved list. slave_raw is
-    // a captured raw fd that is valid in the child (fds survive fork). The closure
-    // is `move` so slave_raw is not a dangling reference.
+    // SAFETY: Command::pre_exec is unsafe by language contract; the callback must be
+    // async-signal-safe. `pty_pre_exec` only invokes setsid and ioctl(TIOCSCTTY), both
+    // POSIX async-signal-safe syscalls; rustix wrappers add no allocation or locking.
     unsafe {
-        cmd.pre_exec(move || {
-            libc::setsid();
-            libc::ioctl(slave_raw, libc::TIOCSCTTY as _, 0); // Ioctl is c_int on musl, c_ulong on glibc/macOS
-            libc::dup2(slave_raw, 0);
-            libc::dup2(slave_raw, 1);
-            libc::dup2(slave_raw, 2);
-            if slave_raw > 2 {
-                libc::close(slave_raw);
-            }
-            Ok(())
-        });
+        cmd.pre_exec(pty_pre_exec);
     }
-
-    cmd.stdin(Stdio::inherit());
-    cmd.stdout(Stdio::inherit());
-    cmd.stderr(Stdio::inherit());
 
     let mut tokio_cmd = tokio::process::Command::from(cmd);
     tokio_cmd.kill_on_drop(true);
 
-    let child = tokio_cmd
+    tokio_cmd
         .spawn()
-        .map_err(|e| report!(CommandError::CommandSpawn(e)))?;
-
-    drop(slave_fd);
-
-    Ok(child)
+        .map_err(|e| report!(CommandError::CommandSpawn(e)))
 }
 
 /// Drive the interactive session.
@@ -218,17 +184,11 @@ async fn drive_interactive_session(
         attention_tx,
         output_tx,
     } = channels;
-    // Duplicate the master fd for the reader thread
-    // SAFETY: master_fd is a valid open file descriptor; dup returns a new fd or -1.
-    let dup_raw = unsafe { libc::dup(master_fd.as_raw_fd()) };
-    if dup_raw < 0 {
-        return Err(report!(CommandError::PtyAllocationFailed(
-            io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: dup_raw is a valid, non-negative fd returned by libc::dup above.
-    // File takes ownership and will close it on drop.
-    let reader_file = unsafe { std::fs::File::from_raw_fd(dup_raw) };
+    // Duplicate the master fd for the reader thread.
+    let reader_fd = master_fd
+        .try_clone()
+        .map_err(|e| report!(CommandError::PtyAllocationFailed(e)))?;
+    let reader_file = std::fs::File::from(reader_fd);
     let writer_file = std::fs::File::from(master_fd);
 
     // Channel for output chunks from the blocking reader thread
@@ -254,7 +214,7 @@ async fn drive_interactive_session(
                 }
                 Err(e) => {
                     // EIO is expected when the slave side closes
-                    if e.raw_os_error() != Some(libc::EIO) {
+                    if e.raw_os_error() != Some(rustix::io::Errno::IO.raw_os_error()) {
                         #[expect(
                             clippy::let_underscore_must_use,
                             reason = "blocking_send error means receiver dropped; we're already breaking out of the loop"
@@ -389,13 +349,15 @@ fn send_signal(pid: i32, signal: i32) {
         tracing::warn!(pid, signal, "cannot send signal to invalid pid");
         return;
     }
-    // Send to the process group (negative pid targets the group)
-    // SAFETY: pid > 0 (checked above), so -pid is a valid process group id.
-    // signal is a caller-supplied signal number; invalid values cause kill to return EINVAL,
-    // which we handle by logging the error below.
-    let result = unsafe { libc::kill(-pid, signal) };
-    if result != 0 {
-        let err = io::Error::last_os_error();
+    let Some(pid_typed) = rustix::process::Pid::from_raw(pid) else {
+        tracing::warn!(pid, signal, "cannot send signal to invalid pid");
+        return;
+    };
+    let Some(sig) = rustix::process::Signal::from_named_raw(signal) else {
+        tracing::warn!(pid, signal, "cannot send signal: not a named signal number");
+        return;
+    };
+    if let Err(err) = rustix::process::kill_process_group(pid_typed, sig) {
         tracing::warn!(pid, signal, error = %err, "failed to send signal to process group");
     }
 }
@@ -405,10 +367,12 @@ fn kill_process_group(pid: i32) {
     if pid <= 0 {
         return;
     }
-    // SAFETY: pid > 0 (checked above), so -pid is a valid process group id.
-    // SIGKILL is a well-known constant; kill with SIGKILL cannot be caught or ignored.
-    unsafe {
-        libc::kill(-pid, libc::SIGKILL);
+    let Some(pid_typed) = rustix::process::Pid::from_raw(pid) else {
+        return;
+    };
+    if let Err(err) = rustix::process::kill_process_group(pid_typed, rustix::process::Signal::KILL)
+    {
+        tracing::warn!(pid, error = %err, "failed to deliver SIGKILL to process group");
     }
 }
 
