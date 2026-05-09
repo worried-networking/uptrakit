@@ -234,10 +234,15 @@ fn validate_path_name(name: &str) -> Result<()> {
 /// Uses `std::path::Component`-based matching to avoid lossy string
 /// conversion, preserving non-UTF-8 path components on Unix.
 pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
+    let home = home_dir();
+    expand_tilde_with_home(path, home.as_deref())
+}
+
+fn expand_tilde_with_home(path: &Path, home: Option<&Path>) -> Result<PathBuf> {
     let mut components = path.components();
     match components.next() {
         Some(std::path::Component::Normal(first)) if first == "~" => {
-            let home = home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
+            let home = home.ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
             let rest: PathBuf = components.collect();
             Ok(home.join(rest))
         }
@@ -843,22 +848,28 @@ mod tests {
     }
 
     #[test]
-    fn expand_tilde_works_without_home_env() {
-        // With `directories::BaseDirs`, home_dir() resolves via the system
-        // password database (getpwuid_r on Unix) even when $HOME is unset.
-        let original = std::env::var_os("HOME");
-        // SAFETY: single-threaded test; no other threads access `HOME` concurrently.
-        unsafe { std::env::remove_var("HOME") };
+    fn expand_tilde_with_home_none_errors_on_tilde() {
+        // When no home directory can be resolved, expand_tilde_with_home must
+        // surface NoHomeDir for tilde-prefixed paths instead of silently
+        // succeeding. Tests the inner function directly to avoid env mutation.
+        let err = expand_tilde_with_home(Path::new("~"), None).unwrap_err();
+        assert!(matches!(err.current_context(), DirectoryError::NoHomeDir));
+    }
 
-        let result = expand_tilde(Path::new("~"));
-        // BaseDirs falls back to passwd on Unix — should still succeed.
-        assert!(result.is_ok(), "BaseDirs should resolve home without $HOME");
+    #[test]
+    fn expand_tilde_with_home_passes_through_non_tilde_when_home_missing() {
+        // Non-tilde paths must succeed even when no home is available.
+        let path = Path::new("/etc/uptrakit");
+        let result = expand_tilde_with_home(path, None).expect("non-tilde path");
+        assert_eq!(result, path);
+    }
 
-        // Restore HOME.
-        if let Some(val) = original {
-            // SAFETY: single-threaded test; restoring `HOME` to its original value.
-            unsafe { std::env::set_var("HOME", val) };
-        }
+    #[test]
+    fn expand_tilde_with_home_uses_supplied_home() {
+        // Injected home is used as the prefix; no env lookup involved.
+        let home = Path::new("/custom/home");
+        let result = expand_tilde_with_home(Path::new("~/foo"), Some(home)).expect("should expand");
+        assert_eq!(result, Path::new("/custom/home/foo"));
     }
 
     #[tokio::test]

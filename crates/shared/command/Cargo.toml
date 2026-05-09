@@ -9,7 +9,7 @@ version = "0.0.1"
 
 [features]
 default = []
-interactive = ["libc"]
+interactive = ["rustix"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -18,14 +18,12 @@ rootcause = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros", "time"] }
 uptrakit-shared-types = { workspace = true }
-rustix = { workspace = true, features = ["pty", "process", "termios", "stdio"], optional = true }
-libc = { workspace = true, optional = true }
+rustix = { workspace = true, features = ["pty", "process", "termios", "stdio", "alloc", "std"], optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-rustix = { workspace = true, features = ["pty", "process", "termios", "stdio"] }
-libc = { workspace = true }
+rustix = { workspace = true, features = ["pty", "process", "termios", "stdio", "alloc", "std"] }
 
 [lints]
 workspace = true
