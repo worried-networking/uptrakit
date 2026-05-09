@@ -42,14 +42,30 @@ pub(crate) fn parse_ros_field<'a>(output: &'a str, key: &str) -> Option<&'a str>
 ///
 /// Returns `None` when the `version` field is absent from the output.
 pub(crate) fn parse_resource_version(output: &str) -> Option<String> {
+    parse_resource_version_with_display(output).map(|(stripped, _)| stripped)
+}
+
+/// Extract both the bare and channel-suffixed forms of the installed
+/// RouterOS version from `/system resource print` output.
+///
+/// Returns `(stripped, display)` where `stripped` is the bare semver-like
+/// version (e.g. `"7.14.2"`) and `display` is the raw value as RouterOS
+/// reported it including the channel suffix (e.g. `"7.14.2 (stable)"`).
+/// Returns `None` when the `version` field is absent or blank.
+///
+/// The `Discoverer` impl uses this to populate
+/// `DiscoveredSoftware.installed_display_version` so the channel info
+/// stays visible in the dashboard despite `installed_version` being a bare
+/// semver string for downstream comparison.
+pub(crate) fn parse_resource_version_with_display(output: &str) -> Option<(String, String)> {
     let raw = parse_ros_field(output, "version")?;
     // Strip optional ` (channel)` suffix by splitting before the first `(`.
     // `split_once` is safe for char boundaries on ASCII `(`.
-    let version = raw.split_once('(').map_or(raw, |(before, _)| before).trim();
-    if version.is_empty() {
+    let stripped = raw.split_once('(').map_or(raw, |(before, _)| before).trim();
+    if stripped.is_empty() {
         None
     } else {
-        Some(version.to_owned())
+        Some((stripped.to_owned(), raw.to_owned()))
     }
 }
 
