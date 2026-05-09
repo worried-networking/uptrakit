@@ -46,7 +46,7 @@ impl ServiceMetadataProvider for ControllerMetadataProvider {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "embedded-agent"))]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -54,7 +54,6 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::{HostRuntime, MetadataAwareHostRuntime};
 
     #[test]
-    #[cfg(feature = "embedded-agent")]
     fn test_metadata_aware_host_runtime_returns_some_provider() {
         let inner = uptrakit_plugin_infrastructure_core::construct_host_runtime(
             Arc::new(NoopCommandExecutor),
