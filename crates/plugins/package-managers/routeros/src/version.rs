@@ -48,15 +48,16 @@ pub(crate) fn parse_resource_version(output: &str) -> Option<String> {
 /// Extract both the bare and channel-suffixed forms of the installed
 /// RouterOS version from `/system resource print` output.
 ///
-/// Returns `(stripped, display)` where `stripped` is the bare semver-like
-/// version (e.g. `"7.14.2"`) and `display` is the raw value as RouterOS
-/// reported it including the channel suffix (e.g. `"7.14.2 (stable)"`).
-/// Returns `None` when the `version` field is absent or blank.
+/// Returns `(stripped, raw)` where `stripped` is the bare semver-like
+/// version (e.g. `"7.14.2"`) and `raw` is the value as RouterOS reported it
+/// including the channel suffix (e.g. `"7.14.2 (stable)"`). Returns `None`
+/// when the `version` field is absent or blank.
 ///
-/// The `Discoverer` impl uses this to populate
-/// `DiscoveredSoftware.installed_display_version` so the channel info
-/// stays visible in the dashboard despite `installed_version` being a bare
-/// semver string for downstream comparison.
+/// The `Discoverer` impl consumes the `raw` form for channel parsing only
+/// (`RouterOsChannel::from_resource_suffix`); the bare `stripped` form is
+/// the sole installed-version representation written downstream. The channel
+/// itself flows into `host_software_item_plugins.config` via
+/// `DiscoveryTarget.config_override`, not into `installed_display_version`.
 pub(crate) fn parse_resource_version_with_display(output: &str) -> Option<(String, String)> {
     let raw = parse_ros_field(output, "version")?;
     // Strip optional ` (channel)` suffix by splitting before the first `(`.
