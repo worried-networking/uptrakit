@@ -34,7 +34,7 @@ async fn envoy_crl_rejects_revoked_cert() {
     let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr(
-            "all listeners initialized",
+            "starting main dispatch loop",
         )))
         .with_mount(
             Mount::bind_mount(
