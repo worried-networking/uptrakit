@@ -8,7 +8,7 @@ mod version_check_dispatch;
 
 use crate::AppState;
 use crate::actions::software_items as item_actions;
-use crate::api_error::{ApiError, format_report_summary};
+use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -1189,61 +1189,7 @@ pub async fn trigger_update(
             release_info,
             interactive,
         ))
-        .await
-        .map_err(|err| {
-            use uptrakit_controller_core::update::UpdateDispatchError;
-            match err.current_context() {
-                UpdateDispatchError::HostNotFound => ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "Host not found.",
-                    "trigger_update.host_not_found",
-                    None,
-                ),
-                UpdateDispatchError::SoftwareItemNotFound => ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "Software item not found.",
-                    "trigger_update.software_item_not_found",
-                    None,
-                ),
-                UpdateDispatchError::UpdateAlreadyActive => ApiError::new(
-                    StatusCode::CONFLICT,
-                    "An update is already active for this host.",
-                    "trigger_update.update_already_active",
-                    None,
-                ),
-                UpdateDispatchError::NotConfigured => ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Host is not configured for updates.",
-                    "trigger_update.not_configured",
-                    None,
-                ),
-                UpdateDispatchError::AgentUnavailable => ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "No approved agent is linked to this host.",
-                    "trigger_update.agent_unavailable",
-                    None,
-                ),
-                UpdateDispatchError::Internal => ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "An internal error occurred.",
-                    "trigger_update.internal_error",
-                    Some(format_report_summary(&err)),
-                ),
-                _ => {
-                    tracing::warn!(
-                        host_id = %host_id,
-                        item_id = %item_id,
-                        "unhandled UpdateDispatchError variant; mapping to 500"
-                    );
-                    ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "An internal error occurred.",
-                        "trigger_update.internal_error",
-                        Some(format_report_summary(&err)),
-                    )
-                }
-            }
-        })?;
+        .await?;
 
     let status = match result.outcome {
         uptrakit_controller_core::update::DispatchOutcome::Sent => TriggerUpdateStatus::Pending,

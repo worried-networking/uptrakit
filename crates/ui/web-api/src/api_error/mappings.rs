@@ -31,6 +31,8 @@ use uptrakit_web_api_queries::queries::{
     update_dispatch::TriggerUpdateError,
 };
 
+use uptrakit_controller_core::update::UpdateDispatchError;
+
 use crate::auth::{
     device_flow::DeviceFlowError, error::AuthError, registration::RegistrationValidationError,
 };
@@ -913,6 +915,68 @@ impl From<Report<AuthError>> for ApiError {
                 "auth.internal",
                 Some(format_report_summary(&report)),
             ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UpdateDispatchError
+// ---------------------------------------------------------------------------
+
+impl From<Report<UpdateDispatchError>> for ApiError {
+    fn from(report: Report<UpdateDispatchError>) -> Self {
+        use UpdateDispatchError::*;
+        // Source enum is `#[non_exhaustive]`; wildcard arm required for new
+        // variants and falls back to a 500 with the report attached.
+        match report.current_context() {
+            HostNotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "Host not found.",
+                "trigger_update.host_not_found",
+                None,
+            ),
+            SoftwareItemNotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "Software item not found.",
+                "trigger_update.software_item_not_found",
+                None,
+            ),
+            UpdateAlreadyActive => ApiError::new(
+                StatusCode::CONFLICT,
+                "An update is already active for this host.",
+                "trigger_update.update_already_active",
+                None,
+            ),
+            NotConfigured => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Host is not configured for updates.",
+                "trigger_update.not_configured",
+                None,
+            ),
+            AgentUnavailable => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "No approved agent is linked to this host.",
+                "trigger_update.agent_unavailable",
+                None,
+            ),
+            Internal => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "trigger_update.internal_error",
+                Some(format_report_summary(&report)),
+            ),
+            other => {
+                tracing::warn!(
+                    ?other,
+                    "unhandled UpdateDispatchError variant; mapping to 500"
+                );
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.",
+                    "trigger_update.internal_error",
+                    Some(format_report_summary(&report)),
+                )
+            }
         }
     }
 }
