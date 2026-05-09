@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator as _;
 use uptrakit_plugin_infrastructure_core::form_schema::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
 };
@@ -6,8 +7,7 @@ use uptrakit_plugin_infrastructure_core::{
     PluginConfig, PluginConfigValidationError, TypeSettings,
 };
 
-/// Valid RouterOS update channels.
-const VALID_CHANNELS: &[&str] = &["stable", "long-term", "testing"];
+use crate::channel::RouterOsChannel;
 
 /// Configuration for the RouterOS package manager plugin.
 ///
@@ -16,7 +16,9 @@ const VALID_CHANNELS: &[&str] = &["stable", "long-term", "testing"];
 ///
 /// The `channel` field selects the RouterOS upgrade channel (`stable`,
 /// `long-term`, or `testing`). When `None`, the channel configured on the
-/// router is left unchanged.
+/// router is left unchanged. Validation of the channel is enforced at
+/// deserialization time by the [`RouterOsChannel`] enum — invalid values
+/// fail with a clear serde error before reaching `validate()`.
 ///
 /// The `reboot` field determines whether the plugin should issue
 /// `/system package update install` (which downloads **and** reboots) or
@@ -29,7 +31,7 @@ const VALID_CHANNELS: &[&str] = &["stable", "long-term", "testing"];
 pub struct RouterOsConfig {
     /// RouterOS update channel. `None` leaves the on-device channel unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channel: Option<String>,
+    pub channel: Option<RouterOsChannel>,
     /// When `true` (and `allow_reboot` is granted by the host runtime),
     /// the plugin will issue `package install` (download + reboot) instead
     /// of `package download` (download only).
@@ -39,26 +41,27 @@ pub struct RouterOsConfig {
 
 impl PluginConfig for RouterOsConfig {
     fn validate(&self) -> std::result::Result<(), PluginConfigValidationError> {
-        if let Some(ref ch) = self.channel
-            && !VALID_CHANNELS.contains(&ch.as_str())
-        {
-            return Err(PluginConfigValidationError::invalid_field(
-                "channel",
-                format!("must be one of {VALID_CHANNELS:?}; got {ch:?}"),
-            ));
-        }
+        // The `channel` field is enum-typed; any value reaching this point
+        // already deserialized to a valid variant. No runtime validation
+        // needed here.
         Ok(())
     }
 
     fn form_schema() -> Vec<FormFieldDescriptor> {
+        let options: Vec<FormSelectOptionDescriptor> = RouterOsChannel::iter()
+            .map(|c| {
+                let label = match c {
+                    RouterOsChannel::Stable => "Stable",
+                    RouterOsChannel::LongTerm => "Long-Term",
+                    RouterOsChannel::Testing => "Testing",
+                };
+                FormSelectOptionDescriptor::new(c.as_str(), label)
+            })
+            .collect();
         vec![
             FormFieldDescriptor::new("channel", "Update Channel")
                 .with_type(FormFieldType::Select)
-                .with_options(vec![
-                    FormSelectOptionDescriptor::new("stable", "Stable"),
-                    FormSelectOptionDescriptor::new("long-term", "Long-Term"),
-                    FormSelectOptionDescriptor::new("testing", "Testing"),
-                ])
+                .with_options(options)
                 .with_help_text("RouterOS update channel (leave empty to keep device setting)"),
             FormFieldDescriptor::new("reboot", "Auto-Reboot")
                 .with_type(FormFieldType::Toggle)
@@ -103,7 +106,7 @@ mod tests {
     #[test]
     fn validate_accepts_stable_channel() {
         let config = RouterOsConfig {
-            channel: Some("stable".to_string()),
+            channel: Some(RouterOsChannel::Stable),
             reboot: false,
         };
         assert!(config.validate().is_ok());
@@ -112,7 +115,7 @@ mod tests {
     #[test]
     fn validate_accepts_long_term_channel() {
         let config = RouterOsConfig {
-            channel: Some("long-term".to_string()),
+            channel: Some(RouterOsChannel::LongTerm),
             reboot: false,
         };
         assert!(config.validate().is_ok());
@@ -121,35 +124,37 @@ mod tests {
     #[test]
     fn validate_accepts_testing_channel() {
         let config = RouterOsConfig {
-            channel: Some("testing".to_string()),
+            channel: Some(RouterOsChannel::Testing),
             reboot: true,
         };
         assert!(config.validate().is_ok());
     }
 
+    // ── deserialization (channel validation enforced at the serde boundary) ───
+
     #[test]
-    fn validate_rejects_invalid_channel() {
-        let config = RouterOsConfig {
-            channel: Some("nightly".to_string()),
-            reboot: false,
-        };
-        let err = config
-            .validate()
-            .expect_err("invalid channel should be rejected");
-        assert_eq!(err.field(), Some("channel"));
-        assert!(err.to_string().contains("nightly"));
+    fn deserialize_rejects_invalid_channel() {
+        // Invalid channel values now fail at deserialization, not at
+        // RouterOsConfig::validate(). The enum's serde rename_all rejects
+        // unknown variants.
+        let result: std::result::Result<RouterOsConfig, _> =
+            serde_json::from_str(r#"{"channel": "nightly"}"#);
+        let err = result.expect_err("invalid channel must reject at deserialize time");
+        assert!(
+            err.to_string().contains("nightly") || err.to_string().contains("unknown variant"),
+            "error must reference the unknown variant, got: {err}"
+        );
     }
 
     #[test]
-    fn validate_rejects_empty_string_channel() {
-        let config = RouterOsConfig {
-            channel: Some(String::new()),
-            reboot: false,
-        };
-        assert!(config.validate().is_err());
+    fn deserialize_rejects_empty_string_channel() {
+        let result: std::result::Result<RouterOsConfig, _> =
+            serde_json::from_str(r#"{"channel": ""}"#);
+        assert!(
+            result.is_err(),
+            "empty-string channel must fail at deserialize time"
+        );
     }
-
-    // ── deserialization ───────────────────────────────────────────────────────
 
     #[test]
     fn deserialize_empty_object_gives_default() {
@@ -162,7 +167,7 @@ mod tests {
     fn deserialize_with_channel_and_reboot() {
         let config: RouterOsConfig =
             serde_json::from_str(r#"{"channel": "stable", "reboot": true}"#).expect("deserialize");
-        assert_eq!(config.channel, Some("stable".to_string()));
+        assert_eq!(config.channel, Some(RouterOsChannel::Stable));
         assert!(config.reboot);
     }
 
@@ -178,8 +183,11 @@ mod tests {
 
     #[test]
     fn serialization_roundtrip_with_channel() {
+        // Wire compatibility: long-term still serializes as the kebab-case
+        // string `"long-term"` after the enum migration, so existing DB
+        // plugin_config rows continue to deserialize.
         let config = RouterOsConfig {
-            channel: Some("long-term".to_string()),
+            channel: Some(RouterOsChannel::LongTerm),
             reboot: true,
         };
         let json = serde_json::to_value(&config).expect("serialize");
