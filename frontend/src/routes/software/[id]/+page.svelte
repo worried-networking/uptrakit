@@ -725,18 +725,29 @@
 		releaseNotesModal = { softwareName: item?.name ?? '', hostName: host.hostname, meta };
 	}
 
+	function effectiveLatestVersion(host: SoftwareItemHostSummary): string | null {
+		return host.latest_version ?? item?.latest_version ?? null;
+	}
+
 	function versionStatusLabel(host: SoftwareItemHostSummary): string {
 		if (host.active_update_history_id) return 'In Progress';
 		if (!host.installed_version) return 'Unknown';
-		if (!host.latest_version) return 'Unknown latest';
+		const latest = effectiveLatestVersion(host);
+		if (!latest) return 'Unknown latest';
 		if (host.update_available) return 'Update Available';
+		if (host.latest_version == null && host.installed_version !== latest) {
+			return 'Update may be available';
+		}
 		return 'Up-to-date';
 	}
 
 	function versionStatusTone(host: SoftwareItemHostSummary): 'info' | 'neutral' | 'warning' | 'success' {
 		if (host.active_update_history_id) return 'info';
 		if (!host.installed_version) return 'neutral';
+		const latest = effectiveLatestVersion(host);
+		if (!latest) return 'neutral';
 		if (host.update_available) return 'warning';
+		if (host.latest_version == null && host.installed_version !== latest) return 'warning';
 		return 'success';
 	}
 
