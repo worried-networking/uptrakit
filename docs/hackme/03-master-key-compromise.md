@@ -4,14 +4,12 @@
 | --- | --- |
 | Severity | Critical |
 | Attack surface | Cryptography (AES-256-GCM master key) |
-| Prerequisites | Access to the `UPTRAKIT_MASTER_KEY` env var, `--master-key-file`, or controller process memory |
+| Prerequisites | Access to the `--master-key-file`, or controller process memory |
 | STRIDE | Information Disclosure |
 
 ## Attack description
 
 1. The attacker obtains the 256-bit master key through one of:
-   - Reading the `UPTRAKIT_MASTER_KEY` environment variable from the process
-     environment, container manifest, or orchestration config.
    - Reading the `--master-key-file` from disk (requires filesystem access to the
      controller host).
    - Dumping the controller process memory (the key is stored in a global `OnceLock`
@@ -71,14 +69,10 @@ With the JWT signing key, the attacker can:
   (DEK wraps data) and per-field AAD strings. A ciphertext produced for one column
   cannot be used as a valid ciphertext for another, even if an attacker obtains the
   master key and attempts to relocate ciphertexts.
-- **Startup warning for env-var key source.** *(Implemented)* When the master key is
-  loaded from `UPTRAKIT_MASTER_KEY` env var (without `--master-key-file`), a `WARN`-
-  level log message is emitted at startup marking env-var delivery as **deprecated**,
-  nudging operators toward the more secure file-based delivery method.
-- **Environment variable cleared after reading.** *(Implemented)* Both the controller
-  and SSH agent clear `UPTRAKIT_MASTER_KEY` from the process environment immediately
-  after reading it during single-threaded startup. This reduces the window during
-  which the key is visible via `/proc/pid/environ` or `ps eww`.
+- **Env-var delivery removed.** *(Implemented)* The legacy `UPTRAKIT_MASTER_KEY`
+  environment variable is no longer accepted. The master key must be supplied via
+  `--master-key-file <path>`, eliminating exposure through `/proc/pid/environ`,
+  container manifests, and orchestration tooling.
 - **Intermediate hex string zeroization.** *(Implemented)* The
   `read_master_key_hex()` helper returns `Zeroizing<String>` so that the raw hex
   representation of the master key is scrubbed from heap memory on drop. This closes
@@ -96,10 +90,6 @@ With the JWT signing key, the attacker can:
   key material (KEK and unwrapped DEKs) is present in process memory for the entire
   lifetime of the controller. A memory dump, core dump, or `/proc/pid/mem` read
   exposes the keys.
-- **Environment variable visibility.** `UPTRAKIT_MASTER_KEY` is still accepted; it is
-  now warned about at startup (deprecated) and cleared from the process environment
-  after reading, but operators may still use it in automation without adopting
-  `--master-key-file`.
 - **SSH agent uses independent key.** The SSH agent's master key is separate from the
   controller's. Compromise of one does not expose the other — but operators may
   reuse the same key for convenience, negating this isolation.

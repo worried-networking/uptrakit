@@ -8,6 +8,8 @@ frontend/test-results/
 
 # Docker Compose
 .env
+master.key
+*.key
 
 # Claude Code
 .claude/settings.local.json

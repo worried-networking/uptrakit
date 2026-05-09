@@ -8,7 +8,9 @@
 #   docker compose --profile scheduler up   — controller + scheduler + NATS
 #   docker compose --profile full up        — all services
 #
-# Copy .env.example to .env and set at least UPTRAKIT_MASTER_KEY before starting.
+# Generate the master key file before `compose up`:
+#   openssl rand -hex 32 > master.key && chmod 600 master.key
+# The key is mounted into the controller as a Docker secret.
 
 x-common-service: &common-service
   restart: unless-stopped
@@ -32,8 +34,16 @@ services:
     volumes:
       - controller-config:/data/config
       - controller-state:/data/state
+      # Fallback for managed Compose hosts that don't support `secrets: file:`:
+      # comment out the `secrets:` block below and uncomment this bind-mount,
+      # then change `--master-key-file=/run/secrets/master_key` in `command:`
+      # to `--master-key-file=/etc/uptrakit/master.key`.
+      # - ./master.key:/etc/uptrakit/master.key:ro
+    secrets:
+      - master_key
+    command:
+      - --master-key-file=/run/secrets/master_key
     environment:
-      UPTRAKIT_MASTER_KEY: ${UPTRAKIT_MASTER_KEY:?Set UPTRAKIT_MASTER_KEY in .env}
       UPTRAKIT_DB_URL: ${DB_URL:-}
       UPTRAKIT_NATS_URL: ${NATS_URL:-}
       UPTRAKIT_HTTPS_ADDR: "[::]:8443"
@@ -178,6 +188,10 @@ volumes:
   mqtt-config:
   agent-ssh-state:
   agent-ssh-config:
+
+secrets:
+  master_key:
+    file: ./master.key
 
 networks:
   uptrakit:

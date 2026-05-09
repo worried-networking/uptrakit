@@ -28,12 +28,6 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 
 ## Quick-start commands
 
-### Key environment variables
-
-| Variable              | Required  | Purpose                                                                                     |
-| --------------------- | --------- | ------------------------------------------------------------------------------------------- |
-| `UPTRAKIT_MASTER_KEY` | Yes (dev) | 64-hex-char AES-256-GCM master key for at-rest encryption — see `docs/development/setup.md` |
-
 ### Rust / backend
 
 ```sh

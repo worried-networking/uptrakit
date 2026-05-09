@@ -47,10 +47,9 @@ $STD chown uptrakit:uptrakit /opt/uptrakit/{config,state}
 msg_ok "Created service user"
 
 msg_info "Generating master key"
-MASTER_KEY=$(openssl rand -hex 32)
-printf 'UPTRAKIT_MASTER_KEY=%s\n' "$MASTER_KEY" >/opt/uptrakit/.env
-chmod 600 /opt/uptrakit/.env
-chown root:root /opt/uptrakit/.env
+openssl rand -hex 32 >/opt/uptrakit/master.key
+chmod 600 /opt/uptrakit/master.key
+chown uptrakit:uptrakit /opt/uptrakit/master.key
 msg_ok "Generated master key"
 
 msg_info "Creating systemd service"
@@ -63,10 +62,10 @@ After=network.target
 Type=simple
 User=uptrakit
 Group=uptrakit
-EnvironmentFile=/opt/uptrakit/.env
 ExecStart=/usr/local/bin/uptrakit-controller-standalone \
   --config-dir /opt/uptrakit/config \
   --state-dir /opt/uptrakit/state \
+  --master-key-file /opt/uptrakit/master.key \
   --https-addr [::]:8443
 Restart=on-failure
 RestartSec=5
@@ -109,4 +108,4 @@ cleanup_lxc
 msg_ok "Completed Successfully!\n"
 echo -e "${GN}${APP} is running at https://${IP}:8443${CL}"
 echo -e "${YW}Registration token:${CL} ${REGISTRATION_TOKEN}"
-echo -e "${YW}Master key:${CL} /opt/uptrakit/.env — back this up!"
+echo -e "${YW}Master key:${CL} /opt/uptrakit/master.key — back this up!"

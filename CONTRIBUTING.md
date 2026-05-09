@@ -19,7 +19,7 @@ Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewe
 
 ## Before you code
 
-- Clone the repo, install Rust + Node.js, and export your master key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`).
+- Clone the repo, install Rust + Node.js, and provide your master key via `--master-key-file <path>`.
 - Run the backend commands, linting, and frontend build listed in [docs/development/setup.md](docs/development/setup.md).
 - Pre-commit and pre-push git hooks auto-install on the first `cargo build` or `cargo test` run
   (via [`husky-rs`](https://crates.io/crates/husky-rs)) — no manual setup required. See

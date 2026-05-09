@@ -142,11 +142,7 @@ fn init_master_key(
     master_key_file: &Option<std::path::PathBuf>,
     allow_plaintext_secrets: bool,
 ) -> InitResult<()> {
-    let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
-    // SAFETY: called early in `main` before any other thread is spawned, so no concurrent
-    // reads or writes to the process environment can race with this removal.
-    unsafe { std::env::remove_var("UPTRAKIT_MASTER_KEY") };
-    let key_hex = read_master_key_hex(master_key_file.as_deref(), env_val.as_deref())?;
+    let key_hex = read_master_key_hex(master_key_file.as_deref())?;
 
     match key_hex {
         Some(key_hex) => {
@@ -175,10 +171,9 @@ fn init_master_key(
                 uptrakit_crypto::enable_plaintext_mode();
             } else {
                 bail!(InitError::MasterKey(
-                    "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
-                     (64-char hex string) or pass --master-key-file <path>. \
-                     For development only, pass --allow-plaintext-secrets to run without \
-                     encryption at rest."
+                    "master encryption key is required: pass --master-key-file <path> \
+                     (64-char hex). For development only, pass --allow-plaintext-secrets \
+                     to run without encryption at rest."
                         .into(),
                 ));
             }
@@ -187,18 +182,11 @@ fn init_master_key(
     Ok(())
 }
 
-fn read_master_key_hex(
-    master_key_file: Option<&std::path::Path>,
-    env_val: Option<&str>,
-) -> InitResult<Option<String>> {
+fn read_master_key_hex(master_key_file: Option<&std::path::Path>) -> InitResult<Option<String>> {
     if let Some(key_file) = master_key_file {
         let contents =
             std::fs::read_to_string(key_file).map_err(|error| report!(InitError::Io(error)))?;
         return Ok(Some(contents.trim().to_string()));
-    }
-
-    if let Some(env_val) = env_val {
-        return Ok(Some(env_val.trim().to_string()));
     }
 
     Ok(None)
@@ -226,19 +214,13 @@ mod tests {
         reason = "test code: `assert!(r.is_err())` is idiomatic in tests where the error variant is not inspected"
     )]
 
-    use super::{parse_master_key_hex, read_master_key_hex};
+    use super::{init_master_key, parse_master_key_hex, read_master_key_hex};
     use std::io::Write;
 
     #[test]
     fn missing_key_returns_none() {
-        let result = read_master_key_hex(None, None);
+        let result = read_master_key_hex(None);
         assert!(matches!(result, Ok(None)));
-    }
-
-    #[test]
-    fn env_key_is_trimmed() {
-        let result = read_master_key_hex(None, Some("  deadbeef  "));
-        assert!(matches!(result, Ok(Some(ref value)) if value == "deadbeef"));
     }
 
     #[test]
@@ -248,8 +230,24 @@ mod tests {
             Err(_) => return,
         };
         assert!(file.write_all(b"  0123  ").is_ok());
-        let result = read_master_key_hex(Some(file.path()), None);
+        let result = read_master_key_hex(Some(file.path()));
         assert!(matches!(result, Ok(Some(ref value)) if value == "0123"));
+    }
+
+    #[test]
+    fn missing_key_bail_message_does_not_mention_env_var() {
+        // Regression guard: the error message must point at --master-key-file
+        // and must not resurrect any UPTRAKIT_MASTER_KEY mention.
+        let err = init_master_key(&None, false).expect_err("missing key must error");
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("--master-key-file"),
+            "error must mention --master-key-file, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("UPTRAKIT_MASTER_KEY"),
+            "error must not mention the legacy env var, got: {rendered}"
+        );
     }
 
     #[test]

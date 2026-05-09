@@ -13,7 +13,6 @@ pub(crate) struct Args {
 
     /// Path to a file containing the master encryption key (64-char hex string).
     /// The key is used for AES-256-GCM encryption of SSH private keys at rest.
-    /// Alternative: set UPTRAKIT_MASTER_KEY environment variable.
     #[arg(long)]
     pub master_key_file: Option<PathBuf>,
 

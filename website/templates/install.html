@@ -38,9 +38,9 @@ cd uptrakit</code></pre>
 <div class="install-step">
   <span class="install-step__num">2</span>
   <div class="install-step__body">
-    <p>Create the environment file and a master encryption key:</p>
+    <p>Create the environment file and generate the master encryption key:</p>
 <pre><code>cp .env.example .env
-echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" &gt;&gt; .env</code></pre>
+openssl rand -hex 32 &gt; master.key &amp;&amp; chmod 600 master.key</code></pre>
   </div>
 </div>
 

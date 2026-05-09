@@ -74,10 +74,10 @@ functions work identically over WebSocket or in-process channels.
 
 The SSH agent manages its own encryption key independently from the controller:
 
-| Component  | Master Key                                      | Encrypts                              |
-| ---------- | ----------------------------------------------- | ------------------------------------- |
-| Controller | Controller's master key (`UPTRAKIT_MASTER_KEY`) | CA keys, OIDC secrets, MQTT passwords |
-| SSH Agent  | SSH agent's master key (`UPTRAKIT_MASTER_KEY`)  | SSH private keys in local SQLite      |
+| Component  | Master Key                                    | Encrypts                              |
+| ---------- | --------------------------------------------- | ------------------------------------- |
+| Controller | Controller's master key (`--master-key-file`) | CA keys, OIDC secrets, MQTT passwords |
+| SSH Agent  | SSH agent's master key (`--master-key-file`)  | SSH private keys in local SQLite      |
 
 Both use the same `init_master_key()` function from `uptrakit-crypto` and the same `EncryptedString` type (AES-256-GCM), but with
 independent keys. The controller has no knowledge of the SSH agent's master key.
@@ -87,7 +87,6 @@ independent keys. The controller has no knowledge of the SSH agent's master key.
 The SSH agent supports the same master key configuration as the controller:
 
 - `--master-key-file <path>` — path to a file containing a 64-character hex string
-- `UPTRAKIT_MASTER_KEY` environment variable — 64-character hex string
 - `--allow-plaintext-secrets` — development mode (disables encryption, logs a warning)
 
 ## Local Database Schema
@@ -185,9 +184,8 @@ The detected key type is stored in the `key_type` column and displayed in host l
 ### Master Key Requirement
 
 Host subcommands require the same master key configuration as daemon mode
-(`--master-key-file` or `UPTRAKIT_MASTER_KEY`) because private keys are
-encrypted at rest. Pass `--allow-plaintext-secrets` for development without
-encryption.
+(`--master-key-file`) because private keys are encrypted at rest. Pass
+`--allow-plaintext-secrets` for development without encryption.
 
 For detailed usage instructions, see [SSH Agent Host Management](../end-user/ssh-agent-host-management.md).
 
