@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Button from './Button.svelte';
+	import { portal } from '$lib/actions/portal';
 
 	let {
 		selectedCount,
@@ -28,6 +29,7 @@
 		data-ui="batch-action-bar"
 		role="toolbar"
 		aria-label="Batch actions"
+		use:portal
 	>
 		{#if selectAllPages}
 			<div class="mb-2 text-center text-sm text-[var(--text-muted)]">

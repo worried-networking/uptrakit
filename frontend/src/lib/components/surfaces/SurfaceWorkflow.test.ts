@@ -99,7 +99,7 @@ describe('SurfaceWorkflow', () => {
 			}
 		];
 
-		const { container } = render(SurfaceWorkflow, {
+		render(SurfaceWorkflow, {
 			surfaceId: 'ssh-agent.hosts',
 			interaction,
 			interactions,
@@ -114,7 +114,8 @@ describe('SurfaceWorkflow', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
 		expect(document.querySelectorAll('[data-ui="form-field-row"]')).toHaveLength(2);
-		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
+		// Modal portals to <body>; query the document, not the test container.
+		expect(document.body.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 		await fireEvent.input(screen.getByRole('textbox', { name: /SSH Target/i }), {
 			target: { value: 'root@example:22' }
 		});
@@ -385,7 +386,7 @@ describe('SurfaceWorkflow', () => {
 			}
 		];
 
-		const { container } = render(SurfaceWorkflow, {
+		render(SurfaceWorkflow, {
 			surfaceId: 'ssh-agent.hosts',
 			interaction,
 			interactions
@@ -396,7 +397,8 @@ describe('SurfaceWorkflow', () => {
 
 		await fireEvent.click(trigger);
 
-		const modalShell = container.querySelector('[data-ui="modal-shell"]');
+		// Modal portals to <body>; query the document, not the test container.
+		const modalShell = document.body.querySelector('[data-ui="modal-shell"]');
 		expect(modalShell).toBeInTheDocument();
 		const indicator = modalShell?.querySelector('[data-ui="workflow-step-indicator"]');
 		expect(indicator).toBeInTheDocument();
@@ -474,7 +476,7 @@ describe('SurfaceWorkflow', () => {
 			}
 		];
 
-		const { container } = render(SurfaceWorkflow, {
+		render(SurfaceWorkflow, {
 			surfaceId: 'ssh-agent.hosts',
 			interaction,
 			interactions
@@ -490,7 +492,8 @@ describe('SurfaceWorkflow', () => {
 			expect(screen.getByText('Planned Actions')).toBeInTheDocument();
 		});
 
-		const modalShell = container.querySelector('[data-ui="modal-shell"]');
+		// Modal portals to <body>; query the document, not the test container.
+		const modalShell = document.body.querySelector('[data-ui="modal-shell"]');
 		expect(modalShell?.querySelector('[data-ui="workflow-review-state"]')).toBeInTheDocument();
 		expect(modalShell?.querySelector('[data-ui="workflow-security-impact"]')).toBeInTheDocument();
 	});

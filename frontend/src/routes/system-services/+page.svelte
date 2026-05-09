@@ -42,7 +42,7 @@
 	let services: SystemServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
-	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
+	let menuAnchor: DOMRect | null = $state(null);
 	let confirmAction: {
 		serviceId: string;
 		action: 'approve' | 'reject' | 'delete';
@@ -176,8 +176,7 @@
 			openMenuId = null;
 			return;
 		}
-		const rect = button.getBoundingClientRect();
-		menuPos = { top: rect.bottom + 4, left: rect.right - 160 };
+		menuAnchor = button.getBoundingClientRect();
 		openMenuId = id;
 	}
 
@@ -369,7 +368,7 @@
 	}
 
 	function handleWindowClick(event: MouseEvent) {
-		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
+		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu, [data-ui="context-menu-shell"]')) {
 			closeMenu();
 		}
 	}
@@ -603,10 +602,10 @@
 		<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
 	{/if}
 
-	{#if openMenuId}
+	{#if openMenuId && menuAnchor}
 		{@const service = services.find((s) => s.id === openMenuId)}
 		{#if service}
-			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			<ContextMenuShell anchorRect={menuAnchor} onclose={closeMenu}>
 				{#if service.status === 'pending'}
 					<li>
 						<ContextMenuItem

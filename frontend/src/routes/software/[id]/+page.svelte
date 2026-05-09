@@ -75,7 +75,7 @@
 
 	// Context menu state (per host row)
 	let openMenuHostId: string | null = $state(null);
-	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
+	let menuAnchor: DOMRect | null = $state(null);
 
 	// Edit software item state
 	let editItem: boolean = $state(false);
@@ -388,8 +388,7 @@
 			openMenuHostId = null;
 			return;
 		}
-		const rect = button.getBoundingClientRect();
-		menuPos = { top: rect.bottom + 4, left: rect.right - 180 };
+		menuAnchor = button.getBoundingClientRect();
 		openMenuHostId = hostId;
 	}
 
@@ -398,7 +397,7 @@
 	}
 
 	function handleWindowClick(event: MouseEvent) {
-		if (openMenuHostId && !(event.target as HTMLElement).closest('.actions-menu')) {
+		if (openMenuHostId && !(event.target as HTMLElement).closest('.actions-menu, [data-ui="context-menu-shell"]')) {
 			closeMenu();
 		}
 	}
@@ -1102,10 +1101,10 @@
 	</PageShell>
 {/if}
 
-{#if openMenuHostId && item}
+{#if openMenuHostId && menuAnchor && item}
 	{@const host = item.hosts.find((h) => h.id === openMenuHostId)}
 	{#if host}
-		<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+		<ContextMenuShell anchorRect={menuAnchor} onclose={closeMenu}>
 			{#if canTriggerUpdates && (host.update_available || item.latest_version)}
 				{@const updateToVer = host.latest_version ?? item.latest_version ?? null}
 				<li>

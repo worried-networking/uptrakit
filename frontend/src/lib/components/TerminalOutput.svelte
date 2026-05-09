@@ -6,6 +6,7 @@
 	import { StatusBadge } from '$lib/components/ui';
 	import type { StatusBadgeTone } from '$lib/components/ui/StatusBadge.svelte';
 	import { TERMINAL_THEME } from '../../theme/terminal-palette';
+	import { portal } from '$lib/actions/portal';
 	import '@xterm/xterm/css/xterm.css';
 
 	type TerminalBanner = {
@@ -212,6 +213,7 @@
 		class="terminal-backdrop"
 		data-ui="terminal-backdrop"
 		role="presentation"
+		use:portal
 		onclick={(event) => {
 			if (event.target === event.currentTarget) requestClose();
 		}}

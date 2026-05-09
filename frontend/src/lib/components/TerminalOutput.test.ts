@@ -73,6 +73,24 @@ afterEach(() => {
 });
 
 describe('TerminalOutput', () => {
+	it('portals the terminal backdrop to document.body so it covers the viewport from any ancestor containing block', () => {
+		render(
+			TerminalOutput as never,
+			{
+				open: true,
+				title: 'Probe',
+				statusLabel: 'Live',
+				statusTone: 'info',
+				metadata: 'probe · started just now',
+				output: '',
+				onclose: vi.fn()
+			} as never
+		);
+		const backdrop = document.body.querySelector('[data-ui="terminal-backdrop"]');
+		expect(backdrop).not.toBeNull();
+		expect(backdrop?.parentElement).toBe(document.body);
+	});
+
 	it('renders canonical terminal modal chrome with traffic lights and status bar metadata', async () => {
 		const sendSigint = vi.fn();
 		render(

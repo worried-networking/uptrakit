@@ -6,6 +6,7 @@
 	import Button from './Button.svelte';
 	import { X } from 'lucide-svelte';
 	import type { SystemAlert } from '$lib/types';
+	import { portal } from '$lib/actions/portal';
 
 	let { alerts, onDismiss }: { alerts: SystemAlert[]; onDismiss: (id: string) => void } = $props();
 
@@ -378,6 +379,7 @@
 	class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 flex w-[min(20rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-col gap-1.5 sm:bottom-auto sm:left-auto sm:right-4 sm:top-4 sm:w-[300px] sm:max-w-[calc(100vw-2rem)] sm:translate-x-0"
 	aria-label="Notifications"
 	data-ui="toast-notifications"
+	use:portal
 >
 	{#each toastItems as item (item.id)}
 		{@const progress = progressById[item.id] ?? { scale: 1, durationMs: 0, paused: false }}

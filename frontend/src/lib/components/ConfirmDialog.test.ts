@@ -18,11 +18,12 @@ const defaultProps = {
 
 describe('ConfirmDialog', () => {
 	it('renders the dialog title', () => {
-		const { container } = render(ConfirmDialog, defaultProps);
+		render(ConfirmDialog, defaultProps);
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
 		expect(screen.getByText('Delete Item')).toBeInTheDocument();
-		expect(container.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
-		expect(container.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
+		// ConfirmDialog wraps Modal, which portals to <body> — query the document, not the test container.
+		expect(document.body.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
+		expect(document.body.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
 	});
 
 	it('renders the message with the entity name', () => {
@@ -61,12 +62,12 @@ describe('ConfirmDialog', () => {
 	});
 
 	it('renders warnings using the shared callout primitive', () => {
-		const { container } = render(ConfirmDialog, {
+		render(ConfirmDialog, {
 			...defaultProps,
 			warnings: ['This action cannot be undone']
 		});
 		expect(screen.getByText('This action cannot be undone')).toBeInTheDocument();
-		expect(container.querySelector('[data-ui="callout"][data-tone="warning"]')).toBeInTheDocument();
+		expect(document.body.querySelector('[data-ui="callout"][data-tone="warning"]')).toBeInTheDocument();
 	});
 
 	it('confirm button renders variant="danger" by default', () => {

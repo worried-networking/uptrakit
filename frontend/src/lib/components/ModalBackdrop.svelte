@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { portal } from '$lib/actions/portal';
 
 	let { onclose, children }: { onclose: () => void; children: Snippet } = $props();
 
@@ -54,6 +55,7 @@
 	role="presentation"
 	data-ui="modal-backdrop"
 	bind:this={backdrop}
+	use:portal
 	onkeydown={handleKeydown}
 >
 	<div
