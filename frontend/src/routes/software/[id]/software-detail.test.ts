@@ -330,3 +330,82 @@ describe('Software Detail shared-surface slots', () => {
 		);
 	});
 });
+
+describe('Software Detail host status badge', () => {
+	beforeEach(() => {
+		page.params.id = 'software-1';
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockReturnValue([]);
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('falls back to item-level latest with softened wording when host.latest_version is null', async () => {
+		// router.286.su scenario: host.latest_version not yet populated by per-host
+		// fetch_releases, item.latest_version is the cross-host max. Status must
+		// match what the LATEST VERSION column displays — no contradiction.
+		const host: SoftwareItemHostSummary = {
+			...makeHost(),
+			installed_version: '7.22.1',
+			latest_version: null,
+			update_available: false
+		};
+		const item = makeSoftwareItem([host]);
+		item.latest_version = '7.22.2';
+		item.update_available = false;
+
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		const badge = await screen.findByText('Update may be available');
+		expect(badge).toHaveAttribute('data-ui', 'status-badge');
+		expect(badge).toHaveAttribute('data-tone', 'warning');
+		expect(screen.queryByText('Unknown latest')).not.toBeInTheDocument();
+	});
+
+	it('shows Up-to-date when host.latest_version is null but installed matches item-level fallback', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost(),
+			installed_version: '7.22.2',
+			latest_version: null,
+			update_available: false
+		};
+		const item = makeSoftwareItem([host]);
+		item.latest_version = '7.22.2';
+		item.update_available = false;
+
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		const badge = await screen.findByText('Up-to-date');
+		expect(badge).toHaveAttribute('data-ui', 'status-badge');
+		expect(badge).toHaveAttribute('data-tone', 'success');
+	});
+
+	it('shows Unknown latest when neither host nor item has latest_version', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost(),
+			installed_version: '1.0.0',
+			latest_version: null,
+			update_available: false
+		};
+		const item = makeSoftwareItem([host]);
+		item.latest_version = null;
+		item.update_available = false;
+
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		const badge = await screen.findByText('Unknown latest');
+		expect(badge).toHaveAttribute('data-ui', 'status-badge');
+		expect(badge).toHaveAttribute('data-tone', 'neutral');
+	});
+});
