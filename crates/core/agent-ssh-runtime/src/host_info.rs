@@ -242,14 +242,62 @@ pub(crate) fn extract_machine_id_license(output: &str) -> Option<String> {
     }
 }
 
+/// Parse `architecture-name` from `/system resource print` output.
+///
+/// RouterOS exposes board architecture via this field; common values:
+/// `arm`, `arm64`, `mipsbe`, `mipsle`, `mmips`, `tile`, `ppc`, `x86`,
+/// `x86_64`. The string is forwarded as-is so the dashboard surfaces the
+/// router's own naming.
+pub(crate) fn extract_routeros_architecture(output: &str) -> Option<String> {
+    let val = parse_routeros_field(output, "architecture-name")?;
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    }
+}
+
+/// Parse the `version` field from `/system resource print` output, including
+/// the `(channel)` suffix when present (e.g. `"7.14.2 (stable)"`).
+///
+/// Returned verbatim for use as `HostInfo::os_version`. The bare semver
+/// form (e.g. `"7.14.2"`) is parsed separately by the routeros plugin's
+/// `VersionDetector` for upstream comparison.
+pub(crate) fn extract_routeros_os_version(output: &str) -> Option<String> {
+    let val = parse_routeros_field(output, "version")?;
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    }
+}
+
 /// Collect host information from a RouterOS device.
+///
+/// `architecture` and `os_version` come from `/system resource print`;
+/// failures to retrieve or parse the output are non-fatal — the field
+/// stays `None` and the dashboard renders the host without that detail.
 pub(crate) async fn collect_remote_host_info_routeros(exec: &RouterOsSshExecutor) -> HostInfo {
     let machine_id = collect_routeros_machine_id(exec).await;
+    let (architecture, os_version) = match exec.resource_print().await {
+        Ok(output) => (
+            extract_routeros_architecture(&output),
+            extract_routeros_os_version(&output),
+        ),
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                "failed to read /system resource print for RouterOS host info; \
+                 architecture and os_version will be reported as None"
+            );
+            (None, None)
+        }
+    };
     HostInfo {
         machine_id,
         os_type: Some("routeros".to_string()),
-        os_version: None,
-        architecture: None,
+        os_version,
+        architecture,
         hostname: None,
         ip_address: None,
         agent_host_id: None,
@@ -467,5 +515,44 @@ mod tests {
             extract_machine_id_license(output),
             Some("ABCD-EFGH".to_string())
         );
+    }
+
+    // ── RouterOS architecture + os_version extraction ───────────────────────
+
+    #[test]
+    fn routeros_architecture_extracts_correctly() {
+        let output = "                   uptime: 3d2h\n\
+                       version: 7.14.2 (stable)\n\
+            architecture-name: arm64\n\
+                          cpu: ARM\n";
+        assert_eq!(
+            extract_routeros_architecture(output),
+            Some("arm64".to_string())
+        );
+    }
+
+    #[test]
+    fn routeros_architecture_missing_returns_none() {
+        let output = "version: 7.14.2 (stable)\nuptime: 3d\n";
+        assert_eq!(extract_routeros_architecture(output), None);
+    }
+
+    #[test]
+    fn routeros_os_version_keeps_channel_suffix() {
+        // HostInfo::os_version is for display; preserve the channel so
+        // the dashboard surfaces "7.14.2 (stable)" / "(long-term)" /
+        // "(testing)". The bare-semver form is parsed separately by the
+        // routeros plugin's VersionDetector.
+        let output = "version: 7.14.2 (stable)\nuptime: 3d\n";
+        assert_eq!(
+            extract_routeros_os_version(output),
+            Some("7.14.2 (stable)".to_string())
+        );
+    }
+
+    #[test]
+    fn routeros_os_version_missing_returns_none() {
+        let output = "uptime: 3d\n";
+        assert_eq!(extract_routeros_os_version(output), None);
     }
 }
