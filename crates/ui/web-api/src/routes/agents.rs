@@ -253,6 +253,12 @@ pub(crate) async fn do_enroll(
 /// Returns `Ok(None)` when `machine_id == "unknown"` (skipped silently).
 /// Returns `Ok(Some((host_id, is_new)))` where `is_new` is `true` when a new
 /// host row was inserted and `false` when an existing host was updated.
+///
+/// The `hostname` parameter is the resolved name (see
+/// `service_ws::handler::messages::resolve_host_hostname`) and is written
+/// into both `hostname` and `friendly_name` on CREATE, and into `hostname`
+/// on UPDATE. `friendly_name` is preserved across updates so operator
+/// renames stick.
 pub(crate) async fn find_or_create_host_and_link(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
@@ -276,7 +282,11 @@ pub(crate) async fn find_or_create_host_and_link(
         .context_to::<AgentRouteError>()?;
 
     let (host_id, is_new) = if let Some(existing_host) = existing {
-        // Update mutable fields
+        // Update mutable fields. The resolved `hostname` arg is the same
+        // on the SSH agent's fast-path (DB-cached `host.hostname`) and
+        // slow-path (live SSH `collect_remote_host_info`) reloads — both
+        // resolve to `ip_address` (the SSH target) — so overwriting on
+        // every report is a no-op when no real change happened.
         let mut active: host::ActiveModel = existing_host.clone().into();
         active.hostname = Set(hostname.to_string());
         if let Some(ip) = ip_address {

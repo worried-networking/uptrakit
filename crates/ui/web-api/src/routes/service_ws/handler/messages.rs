@@ -449,6 +449,34 @@ pub(super) async fn handle_renew_certificate(
 // handle_report_hosts
 // ---------------------------------------------------------------------------
 
+/// Resolve the user-visible name for a reported host.
+///
+/// Prefers `host_info.ip_address` (the SSH-target string the operator typed
+/// at bootstrap, populated by the SSH agent — see
+/// `agent-ssh-runtime/src/client.rs:229,384`) over `host_info.hostname`
+/// (what the remote machine reports for itself). For SSH-bootstrapped
+/// hosts the operator-typed target is the canonical name; the remote-read
+/// hostname (RouterOS identity, `hostname -f`, etc.) is not allowed to
+/// override it.
+///
+/// Falls back to `host_info.hostname` only when no SSH target is present
+/// (standalone agents do not populate `ip_address`).
+///
+/// Never reaches into `service_model.hostname`: on the embedded SSH agent
+/// that is the controller's own hostname and would leak into every newly
+/// created host row otherwise.
+///
+/// Returns `None` when the agent reported neither field — the caller skips
+/// the host. Unreachable for real agents (standalone always sets `hostname`,
+/// SSH always sets `ip_address`) so we do not synthesise a name.
+fn resolve_host_hostname(host_info: &uptrakit_wire::HostInfo) -> Option<String> {
+    host_info
+        .ip_address
+        .as_deref()
+        .or(host_info.hostname.as_deref())
+        .map(str::to_string)
+}
+
 /// Iterate reported hosts and find-or-create their DB entries, triggering
 /// autodiscovery for any newly-seen hosts.
 async fn link_reported_hosts(
@@ -475,10 +503,17 @@ async fn link_reported_hosts(
             notifier.on_machine_id_reported(&service_id, &host_info.machine_id);
         }
 
-        let host_hostname = host_info
-            .hostname
-            .as_deref()
-            .unwrap_or(&service_model.hostname);
+        let Some(host_hostname) = resolve_host_hostname(host_info) else {
+            tracing::warn!(
+                %service_id,
+                machine_id = %host_info.machine_id,
+                "host reported with neither hostname nor ip_address; skipping. \
+                 This indicates an agent bug — every real agent populates at least \
+                 one of the two."
+            );
+            summary.failed_hosts = summary.failed_hosts.saturating_add(1);
+            continue;
+        };
         let host_ip = host_info
             .ip_address
             .as_deref()
@@ -488,7 +523,7 @@ async fn link_reported_hosts(
             service_model.tenant_id,
             service_id,
             host_info,
-            host_hostname,
+            &host_hostname,
             host_ip,
         )
         .await
@@ -3424,6 +3459,277 @@ mod tests {
         let details = row.details_json.expect("host.update details");
         assert_eq!(details["created_hosts"].as_u64(), Some(1));
         assert_eq!(details["failed_hosts"].as_u64(), Some(1));
+    }
+
+    /// Insert a service with a recognisable sentinel `hostname` so that any
+    /// leak of `service.hostname` into a downstream `host` row is detectable.
+    async fn insert_service_with_hostname(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        hostname: &str,
+    ) -> service::Model {
+        let id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(hostname.to_string()),
+            friendly_name: Set(format!("Service {}", &id.to_string()[..8])),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert service with sentinel hostname")
+    }
+
+    /// Regression: when `host_info.ip_address` is present (SSH agent path),
+    /// both `hostname` and `friendly_name` on the new host row come from
+    /// the SSH target. The remote-reported hostname does NOT override the
+    /// operator-typed SSH target. Never from `service.hostname` either.
+    #[tokio::test]
+    async fn report_hosts_uses_ssh_target_over_remote_hostname() {
+        const SERVICE_SENTINEL: &str = "controller-host-sentinel";
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+
+        // SSH agent reports both: ip_address = user-typed SSH target host
+        // (bare hostname, parsed out of `user@host:port` by SshTarget at
+        // bootstrap time — see `agent-ssh-runtime/src/ssh_target.rs`),
+        // hostname = whatever the remote calls itself. SSH target wins.
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-remote".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: None,
+                architecture: None,
+                hostname: Some("remote-self-name".to_string()),
+                ip_address: Some("mikrotik.uk-home.example".to_string()),
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = host::Entity::find()
+            .filter(host::Column::MachineId.eq("machine-remote"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("host row created");
+        assert_eq!(row.hostname, "mikrotik.uk-home.example");
+        assert_eq!(row.friendly_name, "mikrotik.uk-home.example");
+        assert_ne!(row.hostname, SERVICE_SENTINEL);
+    }
+
+    /// Standalone-agent path: no SSH target, so the agent-reported
+    /// `hostname` is used.
+    #[tokio::test]
+    async fn report_hosts_uses_hostname_when_no_ssh_target() {
+        const SERVICE_SENTINEL: &str = "controller-host-sentinel";
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-standalone".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: None,
+                architecture: None,
+                hostname: Some("standalone.example".to_string()),
+                ip_address: None,
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = host::Entity::find()
+            .filter(host::Column::MachineId.eq("machine-standalone"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("host row created");
+        assert_eq!(row.hostname, "standalone.example");
+        assert_eq!(row.friendly_name, "standalone.example");
+        assert_ne!(row.hostname, SERVICE_SENTINEL);
+    }
+
+    /// Regression for the reported bug: when the agent reports
+    /// `hostname: None` (e.g. RouterOS before the identity fix), the
+    /// controller falls back to `host_info.ip_address` — the user-typed
+    /// SSH target — and never to `service.hostname` (the controller's own
+    /// hostname for an embedded SSH agent).
+    #[tokio::test]
+    async fn report_hosts_falls_back_to_ip_address_not_service_hostname() {
+        const SERVICE_SENTINEL: &str = "MacBook-Pro---Andrey.local";
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-routeros".to_string(),
+                os_type: Some("routeros".to_string()),
+                os_version: None,
+                architecture: None,
+                hostname: None,
+                ip_address: Some("mikrotik.uk-home.example".to_string()),
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = host::Entity::find()
+            .filter(host::Column::MachineId.eq("machine-routeros"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("host row created");
+        assert_eq!(row.hostname, "mikrotik.uk-home.example");
+        assert_eq!(row.friendly_name, "mikrotik.uk-home.example");
+        assert_ne!(
+            row.hostname, SERVICE_SENTINEL,
+            "must not leak controller's hostname into remote host record"
+        );
+    }
+
+    /// Regression: when neither `hostname` nor `ip_address` is supplied, the
+    /// host is skipped (counted as failed) rather than getting the service
+    /// hostname or a synthetic name. This is unreachable for real agents.
+    #[tokio::test]
+    async fn report_hosts_skips_when_neither_hostname_nor_ip_provided() {
+        const SERVICE_SENTINEL: &str = "controller-sentinel";
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-no-name".to_string(),
+                os_type: None,
+                os_version: None,
+                architecture: None,
+                hostname: None,
+                ip_address: None,
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = host::Entity::find()
+            .filter(host::Column::MachineId.eq("machine-no-name"))
+            .one(&db)
+            .await
+            .expect("query");
+        assert!(
+            row.is_none(),
+            "host with neither hostname nor ip_address must not be persisted"
+        );
+    }
+
+    /// Fast-path stability: re-reporting a known SSH host on the fast path
+    /// (where `host_info.hostname` is None and only `ip_address` is carried)
+    /// resolves to the same name as the slow path, so the DB row's
+    /// `hostname` does not oscillate across reload ticks.
+    #[tokio::test]
+    async fn report_hosts_does_not_oscillate_hostname_on_fast_path_reload() {
+        // Bare hostname — SshTarget strips `user@` and `:port` at bootstrap
+        // time before the SSH agent stores it locally and reports it as
+        // `ip_address`.
+        const SSH_TARGET: &str = "mikrotik.uk-home.example";
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service_with_hostname(&db, tenant_id, "controller-sentinel").await;
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+
+        // Slow path (initial bootstrap report): SSH agent set both fields.
+        let initial = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-stable".to_string(),
+                os_type: Some("routeros".to_string()),
+                os_version: None,
+                architecture: None,
+                hostname: Some("remote-self-name".to_string()),
+                ip_address: Some(SSH_TARGET.to_string()),
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        handle_report_hosts(&state, svc.id, &initial, &linked_host_ids).await;
+
+        let row = host::Entity::find()
+            .filter(host::Column::MachineId.eq("machine-stable"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("host row created");
+        assert_eq!(row.hostname, SSH_TARGET);
+        let host_id = row.id;
+
+        // Fast-path reload: hostname = None, only ip_address is carried.
+        let reload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-stable".to_string(),
+                os_type: None,
+                os_version: None,
+                architecture: None,
+                hostname: None,
+                ip_address: Some(SSH_TARGET.to_string()),
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.0.0".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        handle_report_hosts(&state, svc.id, &reload, &linked_host_ids).await;
+
+        let row_after = host::Entity::find_by_id(host_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("host row still exists");
+        assert_eq!(
+            row_after.hostname, SSH_TARGET,
+            "fast-path reload must resolve to the same SSH target as the \
+             initial slow-path report — no oscillation"
+        );
     }
 
     #[tokio::test]
