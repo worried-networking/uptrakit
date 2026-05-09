@@ -45,13 +45,9 @@ and must never be used in production.
 
 ### Providing the Master Key
 
-The master key can be provided via:
-
-1. **File**: `--master-key-file /path/to/key` — a file containing a 64-character hex string
-1. **Environment**: `UPTRAKIT_MASTER_KEY=<64-char-hex>`
-
-The key must be exactly 32 bytes (64 hex characters). The SSH agent refuses to start without a master key unless `--allow-plaintext-secrets` is
-passed.
+The master key is provided via `--master-key-file /path/to/key` — a file containing a
+64-character hex string (32 bytes, mode `0600`). The SSH agent refuses to start without a
+master key unless `--allow-plaintext-secrets` is passed.
 
 ### Key Independence
 

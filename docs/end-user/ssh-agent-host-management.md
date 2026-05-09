@@ -15,7 +15,6 @@ controller and do not require a WebSocket connection.
 Host subcommands require a master encryption key for encrypting SSH private keys at rest. Provide one of:
 
 - `--master-key-file /path/to/key` -- file containing a 64-character hex string
-- `UPTRAKIT_MASTER_KEY` environment variable -- 64-character hex string
 - `--allow-plaintext-secrets` -- development mode only (stores keys unencrypted)
 
 For details on encryption and threat model, see [SSH Agent Secrets](../security/ssh-agent-secrets.md).

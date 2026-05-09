@@ -31,7 +31,7 @@ pub(crate) async fn verify_master_key(db: &sea_orm::DatabaseConnection) -> crate
                 let verified =
                     uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
                         report!(AppError::Config(
-                            "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
+                            "master key mismatch: the current --master-key-file cannot \
                                  decrypt data encrypted by a previous instance. Ensure all \
                                  controller instances use the same master key."
                                 .into()
@@ -73,7 +73,7 @@ pub(crate) async fn verify_master_key(db: &sea_orm::DatabaseConnection) -> crate
                         .map_err(|_| {
                             report!(AppError::Config(
                                 "master key mismatch: another controller instance stored a \
-                                     verification token first, and the current UPTRAKIT_MASTER_KEY \
+                                     verification token first, and the current --master-key-file \
                                      cannot decrypt it. Ensure all controller instances use the \
                                      same master key."
                                     .into()

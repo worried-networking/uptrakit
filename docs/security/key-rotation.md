@@ -44,7 +44,7 @@ uptrakit-controller \
 systemctl stop uptrakit-controller
 
 # 5. Update configuration to use only the new key.
-#    Set --master-key-file or UPTRAKIT_MASTER_KEY to the new key.
+#    Set --master-key-file to the new key.
 
 # 6. Restart.
 systemctl start uptrakit-controller
@@ -95,8 +95,8 @@ After the rotation log message, restart the agent with only the new key.
 
 The `--rotate-master-key-file` flag triggers the following sequence:
 
-1. The current master key (`--master-key-file` / `UPTRAKIT_MASTER_KEY`) is used
-   to unwrap all DEKs from the `data_encryption_keys` table.
+1. The current master key (`--master-key-file`) is used to unwrap all DEKs from
+   the `data_encryption_keys` table.
 2. A database transaction begins.
 3. Each DEK is re-wrapped using the new KEK (from the rotation file).
 4. The `wrapped_key` and `kek_fingerprint` columns are updated for each DEK.
@@ -137,8 +137,6 @@ taken before the rotation.
 
 - **Old key file**: After all controllers and agents have been restarted with the
   new key, securely delete the old key file (`shred -u old-master.key`).
-- **Environment variable**: If using `UPTRAKIT_MASTER_KEY`, update the value in
-  all deployment configurations before restarting services.
 - **External scheduler**: The scheduler receives the master key from the
   controller via `ServiceCredentials`. After the controller restarts with the new
   key, the scheduler automatically receives the new key on its next connection.

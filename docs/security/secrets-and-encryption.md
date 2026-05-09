@@ -219,7 +219,7 @@ encryption.
 
 ## Master Key Management
 
-- A 256-bit master key (KEK) is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
+- A 256-bit master key (KEK) is required in production via `--master-key-file <path>` (file containing a 64-character hex string, mode `0600`).
 - `init_master_key()` loads the key once at startup and caches it in a global `OnceLock`. It accepts
   `Zeroizing<[u8; 32]>` so the key bytes are scrubbed from memory when intermediate copies are dropped
   (defense-in-depth — the `OnceLock` static has `'static` lifetime). It returns `Report<CryptoError>` — see the
@@ -241,8 +241,7 @@ instructions.
 
 | Method | Details |
 | --- | --- |
-| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes). **Deprecated — not recommended for production.** Env vars are visible in `/proc/pid/environ`, container inspection output, and orchestration manifests. The variable is cleared from the process environment after reading. A `WARN`-level deprecation message is emitted at startup when this method is used without `--master-key-file`. |
-| `--master-key-file` CLI arg | Path to a file containing the 64-character hex key. Use `chmod 0600` to restrict to the service user. **Recommended method.** |
+| `--master-key-file` CLI arg | Path to a file containing the 64-character hex key (32 bytes). Use `chmod 0600` to restrict to the service user. This is the only supported delivery method. |
 
 ### Master Key Verification (HA Safety)
 

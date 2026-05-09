@@ -24,8 +24,8 @@ cd uptrakit
 # Create environment file
 cp .env.example .env
 
-# Generate and set the master key
-echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+# Generate the master key file (mounted into the controller as a Docker secret)
+openssl rand -hex 32 > master.key && chmod 600 master.key
 
 # Start the controller (SQLite, embedded scheduler)
 docker compose up -d

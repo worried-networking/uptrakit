@@ -102,11 +102,7 @@ must therefore be used with the same master key as the source.
 Provide the master key the same way you do for normal server operation:
 
 ```sh
-# Via file
 uptrakit-controller --master-key-file /path/to/master.key db-migrate ...
-
-# Via environment variable
-UPTRAKIT_MASTER_KEY=<64-char-hex> uptrakit-controller db-migrate ...
 ```
 
 If you want to rotate the master key at the same time as migrating backends,

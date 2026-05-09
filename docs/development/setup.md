@@ -54,14 +54,15 @@ See [Quality Gates](quality-gates.md) for the full list of checks enforced at ea
 
 ## Master Encryption Key
 
-The controller requires a 256-bit master key (64 hex characters) for encrypting sensitive DB fields. Provide it via:
+The controller requires a 256-bit master key (64 hex characters) for encrypting sensitive DB fields. Provide it via `--master-key-file <path>`:
 
 ```bash
-export UPTRAKIT_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+openssl rand -hex 32 > /tmp/uptrakit-master.key && chmod 600 /tmp/uptrakit-master.key
+cargo run -p uptrakit-controller -- --master-key-file /tmp/uptrakit-master.key ...
 ```
 
-Alternatively use `--master-key-file <path>`. For development only, `--allow-plaintext-secrets` disables encryption at rest (and logs a warning), but
-do not use the example key in production. Generate a production key with `openssl rand -hex 32`.
+For development only, `--allow-plaintext-secrets` disables encryption at rest (and logs a warning).
+Generate a production key with `openssl rand -hex 32`.
 
 ## Backend Commands
 
