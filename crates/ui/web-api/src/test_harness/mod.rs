@@ -296,6 +296,9 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         #[cfg(feature = "interactive")]
         interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         update_dispatcher: update_dispatcher_for_test,
+        instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
+        )),
     });
 
     (state, jwt)

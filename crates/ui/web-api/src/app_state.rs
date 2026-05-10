@@ -282,6 +282,15 @@ pub struct AppState {
     /// Defaults to [`ControllerUpdateDispatcher`] wired from the state's own fields.
     /// Override via [`AppStateBuilder::update_dispatcher`] to inject a test double.
     pub update_dispatcher: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>,
+    /// Snapshot of instance-scoped plugin enable state and configuration.
+    ///
+    /// Loaded once at boot from `instance_plugin_setting` and updated atomically
+    /// on every upsert. Uses `ArcSwap` for lock-free reads on the hot path.
+    pub instance_plugin_snapshot: Arc<
+        arc_swap::ArcSwap<
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot,
+        >,
+    >,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -346,6 +355,13 @@ pub struct AppStateBuilder {
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
     update_dispatcher: Option<Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>>,
+    instance_plugin_snapshot: Option<
+        Arc<
+            arc_swap::ArcSwap<
+                uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot,
+            >,
+        >,
+    >,
 }
 
 impl AppStateBuilder {
@@ -396,6 +412,7 @@ impl AppStateBuilder {
             workload_claim_registry: None,
             reject_dangerous_commands: false,
             update_dispatcher: None,
+            instance_plugin_snapshot: None,
         }
     }
 
@@ -673,6 +690,23 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the instance-scoped plugin snapshot.
+    ///
+    /// Optional — defaults to an empty snapshot (all plugins disabled / unconfigured).
+    /// The controller wires the real snapshot loaded from the DB at boot; tests may
+    /// pass a pre-populated snapshot to exercise instance-gated routes.
+    pub fn instance_plugin_snapshot(
+        mut self,
+        v: Arc<
+            arc_swap::ArcSwap<
+                uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot,
+            >,
+        >,
+    ) -> Self {
+        self.instance_plugin_snapshot = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -829,6 +863,11 @@ impl AppStateBuilder {
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
             update_dispatcher,
+            instance_plugin_snapshot: self.instance_plugin_snapshot.unwrap_or_else(|| {
+                Arc::new(arc_swap::ArcSwap::from_pointee(
+                    uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
+                ))
+            }),
         })
     }
 }
