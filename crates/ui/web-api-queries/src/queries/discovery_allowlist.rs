@@ -413,6 +413,10 @@ mod tests {
             vec![]
         }
 
+        fn instance_enabled(&self, _id: &PluginTypeId) -> bool {
+            true
+        }
+
         fn capabilities(&self, id: &PluginTypeId) -> Vec<PluginCapability> {
             let discovery = [
                 "package_manager_homebrew",

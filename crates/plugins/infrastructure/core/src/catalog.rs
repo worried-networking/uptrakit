@@ -352,6 +352,16 @@ impl PluginMetadataOps for PluginCatalog {
     fn all(&self) -> Vec<&PluginDescriptor> {
         self.descriptors.values().copied().collect()
     }
+
+    fn instance_enabled(&self, id: &PluginTypeId) -> bool {
+        match self.get(id) {
+            Some(desc) if desc.scope == PluginScope::Instance => {
+                self.instance_states.enabled(id.as_str())
+            }
+            Some(_) => true, // Tenant-scoped: always "instance-enabled"
+            None => false,   // Unknown: don't expose
+        }
+    }
 }
 
 impl PluginConfigOps for PluginCatalog {} // all defaults via PluginMetadataOps

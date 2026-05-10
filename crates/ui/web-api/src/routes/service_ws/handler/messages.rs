@@ -1914,6 +1914,9 @@ mod tests {
         fn all(&self) -> Vec<&PluginDescriptor> {
             vec![]
         }
+        fn instance_enabled(&self, _id: &PluginTypeId) -> bool {
+            true
+        }
     }
 
     impl PluginConfigOps for TestPluginOps {}
