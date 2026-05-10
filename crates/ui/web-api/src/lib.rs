@@ -46,6 +46,7 @@ pub use uptrakit_web_api_auth::settings_store;
 pub mod interactive_sessions;
 pub mod tenant_db;
 pub mod update_output_broadcaster;
+pub mod visibility;
 pub mod workload_claims;
 
 #[cfg(feature = "oidc")]
