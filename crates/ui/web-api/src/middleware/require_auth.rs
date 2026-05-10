@@ -475,6 +475,9 @@ mod tests {
             update_dispatcher: std::sync::Arc::new(
                 uptrakit_controller_core::update::NoopUpdateDispatcher,
             ),
+            instance_plugin_snapshot: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+                uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
+            )),
         })
     }
 
