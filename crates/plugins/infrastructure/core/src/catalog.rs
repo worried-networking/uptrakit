@@ -11,7 +11,8 @@ use std::sync::Arc;
 use uptrakit_shared_types::PluginTypeId;
 
 use crate::descriptor::{
-    CatalogConfig, PluginDescriptor, SurfaceActionContext, SurfaceActionError, SurfaceActionHandler,
+    CatalogConfig, PluginDescriptor, PluginScope, SurfaceActionContext, SurfaceActionError,
+    SurfaceActionHandler,
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
@@ -93,6 +94,20 @@ impl PluginCatalog {
         let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
         let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
+
+        // Validate scope/instance_config invariant: tenant-scoped plugins must
+        // not declare instance_config (only meaningful for scope=Instance).
+        for desc in &descriptors {
+            if desc.scope == PluginScope::Tenant && desc.instance_config.is_some() {
+                return Err(rootcause::report!(PluginError::UnsupportedOperation(
+                    format!(
+                        "plugin '{}' has scope=Tenant but declares instance_config; \
+                         instance_config is only valid for scope=Instance",
+                        desc.type_id
+                    )
+                )));
+            }
+        }
 
         for desc in descriptors {
             // ── Uniqueness: type_id ──
