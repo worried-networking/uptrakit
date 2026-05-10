@@ -3,8 +3,8 @@
 //! surface registry, and any future filter call into one helper.
 
 use uptrakit_plugin_infrastructure_registry::{PluginDescriptor, PluginScope};
-use uptrakit_web_api_types::permissions::Permission;
 use uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot;
+use uptrakit_web_api_types::permissions::Permission;
 
 use crate::middleware::require_auth::AuthenticatedUser;
 
@@ -46,13 +46,15 @@ pub fn is_plugin_visible_to_user(
 mod tests {
     use super::*;
     use std::sync::OnceLock;
+    use uptrakit_controller_core::auth::AuthMethod;
     use uptrakit_plugin_infrastructure_registry::{
         ConfigModel, ConfigOps, PluginFamily, RoleCreators,
     };
-    use uptrakit_controller_core::auth::AuthMethod;
 
     /// Noop functions for test descriptor.
-    fn noop_validate(_: &serde_json::Value) -> Result<(), uptrakit_plugin_infrastructure_registry::PluginConfigValidationError> {
+    fn noop_validate(
+        _: &serde_json::Value,
+    ) -> Result<(), uptrakit_plugin_infrastructure_registry::PluginConfigValidationError> {
         Ok(())
     }
     fn noop_mask(v: &serde_json::Value) -> serde_json::Value {
@@ -65,7 +67,9 @@ mod tests {
     fn noop_form_schema() -> Vec<uptrakit_plugin_infrastructure_registry::FormFieldDescriptor> {
         vec![]
     }
-    fn noop_validate_identifier(_: &str) -> Result<(), uptrakit_plugin_infrastructure_registry::PluginConfigValidationError> {
+    fn noop_validate_identifier(
+        _: &str,
+    ) -> Result<(), uptrakit_plugin_infrastructure_registry::PluginConfigValidationError> {
         Ok(())
     }
 
