@@ -341,11 +341,24 @@ impl ServiceConnectionRegistry {
             "scheduling scattered ServerRestarting notifications"
         );
 
-        for service_id in service_ids {
+        // Pick one slot uniformly at random whose delay is pinned to 0 so at least
+        // one service receives the notification immediately. HashMap iteration order
+        // is stable within a process, so pinning idx 0 would bias the same service
+        // every shutdown — randomising the slot rotates the lucky service fairly.
+        let zero_slot = if count > 0 {
+            rand::rng().random_range(0..count)
+        } else {
+            0
+        };
+
+        for (idx, service_id) in service_ids.into_iter().enumerate() {
             // Assign a random delay within the scatter window so that reconnects
             // from all services are spread out over time rather than hitting the
-            // controller simultaneously (thundering herd prevention).
-            let delay_ms = if scatter_ms > 0 {
+            // controller simultaneously (thundering herd prevention). The pinned
+            // `zero_slot` always gets 0 so first-dispatch latency is bounded.
+            let delay_ms = if idx == zero_slot {
+                0
+            } else if scatter_ms > 0 {
                 rand::rng().random_range(0..scatter_ms)
             } else {
                 0
@@ -506,7 +519,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(start_paused = true)]
-    async fn scattered_broadcast_is_non_blocking() {
+    async fn scattered_broadcast_returns_immediately_and_first_send_is_zero_delay() {
         let registry = ServiceConnectionRegistry::new();
         let svc_a = Uuid::now_v7();
         let svc_b = Uuid::now_v7();
@@ -521,28 +534,54 @@ mod tests {
             reason: "test".to_string(),
         };
 
+        // Use a deliberately large scatter window so the non-pinned service's random
+        // delay is virtually never zero — eliminating the "by chance two services drew 0"
+        // flake. Probability of collision: < 1 / 3_600_000 per draw.
+        let scatter = Duration::from_secs(3600);
+
         // Virtual time is paused: no sleep can complete without explicit `advance()`.
         // The old `join_all` implementation would block here indefinitely.
         let start = tokio::time::Instant::now();
         registry
-            .broadcast_server_restarting_scattered(payload, Duration::from_secs(5))
+            .broadcast_server_restarting_scattered(payload, scatter)
             .await;
         assert!(
             start.elapsed() < Duration::from_millis(10),
             "broadcast_server_restarting_scattered must return immediately, not await scatter delays"
         );
 
-        // Advance virtual time past the scatter window so the spawned tasks wake up and send.
-        tokio::time::advance(Duration::from_secs(6)).await;
+        // Advance virtual time by 1 ms so the spawned task whose sleep(0) is due can
+        // wake. `advance` alone does not guarantee the spawned task is polled to
+        // completion before the test task continues — yield repeatedly so the scheduler
+        // drains the zero-delay send (poll spawn → poll sleep wake → poll mpsc send).
+        tokio::time::advance(Duration::from_millis(1)).await;
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
 
-        // Both receivers should now have a message enqueued.
-        assert!(
-            rx_a.recv().await.is_some(),
-            "service A should receive the ServerRestarting notification"
+        // Exactly one of the two receivers must have a message after the zero-delay slot
+        // fires; the other is still scheduled for a random delay deep in the scatter window.
+        let early_a = rx_a.try_recv().is_ok();
+        let early_b = rx_b.try_recv().is_ok();
+        assert_eq!(
+            usize::from(early_a) + usize::from(early_b),
+            1,
+            "exactly one service should be dispatched immediately at shutdown"
         );
+
+        // Advance past the scatter window so the remaining spawned task fires.
+        tokio::time::advance(scatter + Duration::from_secs(1)).await;
+
+        // The receiver that didn't get the immediate dispatch must now receive its
+        // notification — recv()ing on the already-drained one would hang.
+        let remaining = if early_a {
+            rx_b.recv().await
+        } else {
+            rx_a.recv().await
+        };
         assert!(
-            rx_b.recv().await.is_some(),
-            "service B should receive the ServerRestarting notification"
+            remaining.is_some(),
+            "remaining service should receive the ServerRestarting notification after scatter"
         );
     }
 
