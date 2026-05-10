@@ -245,7 +245,11 @@ async fn connect_and_create_executors(
         Arc::new(SshRemoteExecutor::new(Arc::clone(&session)));
 
     let catalog_config = CatalogConfig::default();
-    let catalog = build_catalog(&catalog_config).map_err(|e| {
+    let catalog = build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .map_err(|e| {
         report!(Error::InvalidInput(format!(
             "failed to build plugin catalog: {e}"
         )))
@@ -684,7 +688,11 @@ pub(crate) async fn proxmox_bootstrap_execute(
 
     // 5. GET GUEST IP
     let catalog_config = CatalogConfig::default();
-    let catalog = build_catalog(&catalog_config).map_err(|e| {
+    let catalog = build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .map_err(|e| {
         report!(Error::InvalidInput(format!(
             "failed to build plugin catalog: {e}"
         )))

@@ -85,6 +85,7 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -153,6 +154,7 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -297,6 +299,7 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -362,6 +365,7 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );

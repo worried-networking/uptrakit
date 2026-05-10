@@ -2252,7 +2252,11 @@ mod tests {
         tenant_id: Uuid,
     ) -> Arc<AppState> {
         let base_plugin_ops: Arc<dyn PluginOps> = Arc::new(
-            build_catalog(&CatalogConfig::default()).expect("catalog should build in tests"),
+            build_catalog(
+                &CatalogConfig::default(),
+                uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+            )
+            .expect("catalog should build in tests"),
         );
         let plugin_ops: Arc<dyn PluginOps> = Arc::new(ProtectionOverridePluginOps {
             inner: base_plugin_ops,

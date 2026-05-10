@@ -23,11 +23,11 @@ pub use registry::{
 pub use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
     ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
-    GlobalProviderLookup, HostRuntime, MetadataAwareHostRuntime, NotificationTransport,
-    PluginCapability, PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginMeta,
-    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
-    SurfaceActionController, SurfaceActionError, UpdateProtectionController,
+    GlobalProviderLookup, HostRuntime, InstancePluginStates, MetadataAwareHostRuntime,
+    NotificationTransport, PluginCapability, PluginCatalog, PluginConfigValidationError,
+    PluginDescriptor, PluginMeta, PostUpdateOutcome, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
+    SudoHelperScript, SurfaceActionController, SurfaceActionError, UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
@@ -97,10 +97,15 @@ pub use uptrakit_notification_plugin_core::{
 ///
 /// This is the primary entry point for controller startup. The `config`
 /// carries deployment-level settings (SSRF policy, shared HTTP client, etc.).
+///
+/// `instance_states` is snapshotted from the `instance_plugin_setting` table at
+/// boot. Pass [`InstancePluginStates::all_disabled`] for any context where the
+/// snapshot is not yet available (tests, CLI paths, pre-A15 wiring).
 pub fn build_catalog(
     config: &CatalogConfig,
+    instance_states: uptrakit_plugin_infrastructure_core::InstancePluginStates,
 ) -> uptrakit_plugin_infrastructure_core::Result<PluginCatalog> {
-    PluginCatalog::new(all_descriptors(), config)
+    PluginCatalog::new(all_descriptors(), config, instance_states)
 }
 
 /// Call all registered plugin `reset_tenant_data` callbacks within the given transaction.

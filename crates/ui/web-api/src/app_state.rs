@@ -709,12 +709,16 @@ impl AppStateBuilder {
                         ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
                     };
                     Arc::new(
-                        uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                            .map_err(|e| {
-                                tracing::error!(error = %e, "failed to build plugin catalog");
-                                AppStateBuildError("plugin_catalog")
-                            })?,
+                    uptrakit_plugin_infrastructure_registry::build_catalog(
+                        &catalog_config,
+                        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(
+                        ),
                     )
+                    .map_err(|e| {
+                        tracing::error!(error = %e, "failed to build plugin catalog");
+                        AppStateBuildError("plugin_catalog")
+                    })?,
+                )
                 }
             };
         let update_output_broadcaster = self.update_output_broadcaster.unwrap_or_default();

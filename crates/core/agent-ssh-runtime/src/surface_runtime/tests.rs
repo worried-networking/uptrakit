@@ -15,8 +15,11 @@ use uptrakit_wire::{
 
 fn test_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
     let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
-    uptrakit_plugin_infrastructure_registry::build_catalog(&config)
-        .expect("plugin catalog must build for tests")
+    uptrakit_plugin_infrastructure_registry::build_catalog(
+        &config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .expect("plugin catalog must build for tests")
 }
 
 #[test]

@@ -125,6 +125,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -209,6 +210,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -287,6 +289,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -367,6 +370,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );

@@ -165,6 +165,7 @@ async fn build_test_state(
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("plugin catalog should build in tests"),
     );
