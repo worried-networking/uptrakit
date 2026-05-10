@@ -106,8 +106,8 @@ pub use descriptor::PluginTableDescriptor;
 pub use descriptor::{
     ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
     CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
-    GlobalProviderConsumerDecl, GlobalProviderLookup, PluginDescriptor, PluginFamily, RoleCreators,
-    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError,
+    GlobalProviderConsumerDecl, GlobalProviderLookup, PluginDescriptor, PluginFamily, PluginScope,
+    RoleCreators, RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError,
     SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
     SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition,
     SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
