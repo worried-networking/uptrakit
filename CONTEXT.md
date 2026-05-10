@@ -55,8 +55,24 @@ _Avoid_: standalone (ambiguous), monolith
 **Plugin**:
 An alternative implementation of a common extension point in the Controller, Agent, or
 Agent-SSH (discovery, release fetching, package management, notifications, etc.).
-Plugins are not compatible with MQTT or Scheduler Services.
+Plugins are not compatible with MQTT or Scheduler Services. Every Plugin has a **Plugin
+Scope** (see below) that determines who manages it.
 _Avoid_: integration, adapter, extension
+
+**Plugin Scope**:
+Either **Tenant-Scoped** (the default — configured by Operators with tenant-level permissions
+through `plugin_configs`/`plugin_type_settings`) or **Instance-Scoped** (configured only by
+Operators with `ManageGlobalSettings`; settings live in `global_settings`; if disabled, the
+Plugin is invisible and inert for tenant Operators). Distinct from `GlobalProviderConsumer`,
+which is an unrelated cross-plugin shared-resource mechanism.
+_Avoid_: "global plugin" in code/spec (term collision with `global_settings` and
+`GlobalProviderConsumer`); UI label may still read "Global Plugins".
+
+**Instance-Scoped Plugin**:
+A Plugin whose enable/disable state and configuration are managed exclusively at the instance
+level via `global_settings`, gated by `ManageGlobalSettings`. When disabled, no API surface,
+Surface, or runtime hook exposes its existence to tenant Operators.
+_Avoid_: global plugin (in code), system plugin, root plugin
 
 **Enrollment**:
 The process by which a Service registers with and gets approved by the Controller.
