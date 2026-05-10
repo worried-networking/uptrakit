@@ -17,6 +17,37 @@ use crate::plugin_config::PluginConfigValidationError;
 use crate::roles;
 use crate::traits::SudoCommandEntry;
 
+/// Who manages a plugin's enable state and instance-wide configuration.
+///
+/// Default is [`Self::Tenant`] for every existing plugin. Plugins promoted to
+/// [`Self::Instance`] are managed exclusively by Operators with the
+/// `ManageGlobalSettings` permission, and are invisible to tenant Operators
+/// when disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PluginScope {
+    /// Default — managed per tenant via plugin_configs / plugin_type_settings.
+    Tenant,
+    /// Managed by instance owners (`ManageGlobalSettings`); when disabled,
+    /// tenant Operators see no evidence the plugin exists.
+    Instance,
+}
+
+impl Default for PluginScope {
+    fn default() -> Self {
+        Self::Tenant
+    }
+}
+
+impl std::fmt::Display for PluginScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tenant => write!(f, "tenant"),
+            Self::Instance => write!(f, "instance"),
+        }
+    }
+}
+
 /// Which family a plugin belongs to. Determines UI grouping and catalog queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -510,6 +541,22 @@ impl PluginDescriptor {
                 self.type_id, role_name
             )))
         })
+    }
+}
+
+#[cfg(test)]
+mod plugin_scope_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_scope_default_is_tenant() {
+        assert_eq!(PluginScope::default(), PluginScope::Tenant);
+    }
+
+    #[test]
+    fn plugin_scope_display_lowercase() {
+        assert_eq!(PluginScope::Tenant.to_string(), "tenant");
+        assert_eq!(PluginScope::Instance.to_string(), "instance");
     }
 }
 
