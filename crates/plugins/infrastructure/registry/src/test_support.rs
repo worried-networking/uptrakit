@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
     PluginCapability, PluginConfigValidationError, PluginDescriptor, PluginError, PluginFamily,
-    PluginMeta, ReleaseFetcher, Result, RoleCreators, RoleSlot, UpstreamRelease,
+    PluginMeta, PluginScope, ReleaseFetcher, Result, RoleCreators, RoleSlot, UpstreamRelease,
     form_schema::FormFieldDescriptor,
 };
 use uptrakit_shared_types::PluginTypeId;
@@ -98,6 +98,8 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
     capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
+    scope: PluginScope::Tenant,
+    instance_config: None,
     config: ConfigOps {
         validate,
         mask_secrets,
@@ -140,6 +142,8 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
     capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
+    scope: PluginScope::Tenant,
+    instance_config: None,
     config: ConfigOps {
         validate,
         mask_secrets,
