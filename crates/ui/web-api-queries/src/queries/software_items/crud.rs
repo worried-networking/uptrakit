@@ -960,6 +960,10 @@ mod tests {
         fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
             vec![]
         }
+
+        fn instance_enabled(&self, _id: &uptrakit_shared_types::PluginTypeId) -> bool {
+            true
+        }
     }
 
     impl uptrakit_plugin_infrastructure_registry::PluginConfigOps for MockPluginOps {

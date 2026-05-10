@@ -146,6 +146,17 @@ pub trait PluginMetadataOps: Send + Sync + 'static {
             .is_some_and(|d| d.family == PluginFamily::Software)
     }
 
+    /// Returns `true` if the plugin is "instance-enabled" at the catalog
+    /// snapshot taken at controller boot.
+    ///
+    /// Semantics:
+    /// - For `scope == Tenant` plugins: always `true` (no instance-level kill switch exists).
+    /// - For `scope == Instance` plugins: the snapshot value loaded at boot.
+    /// - For unknown plugin ids: `false`.
+    ///
+    /// This reflects the *running* catalog state, not the live DB row.
+    fn instance_enabled(&self, id: &PluginTypeId) -> bool;
+
     /// Look up host requirements for a specific role of a plugin.
     fn host_requirements_for_role(
         &self,

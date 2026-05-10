@@ -411,6 +411,10 @@ mod tests {
         fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
             self.inner.all()
         }
+
+        fn instance_enabled(&self, id: &uptrakit_shared_types::PluginTypeId) -> bool {
+            self.inner.instance_enabled(id)
+        }
     }
 
     impl PluginConfigOps for ProtectionOverridePluginOps {}
