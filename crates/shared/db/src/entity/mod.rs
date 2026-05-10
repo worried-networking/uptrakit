@@ -15,6 +15,7 @@ pub mod host_software_item;
 pub mod host_software_item_plugin;
 pub mod host_tag;
 pub mod host_tag_assignment;
+pub mod instance_plugin_setting;
 pub mod notification_channel;
 pub mod notification_log;
 pub mod notification_rule;
