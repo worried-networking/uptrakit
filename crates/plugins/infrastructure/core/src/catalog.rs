@@ -752,6 +752,8 @@ mod tests {
         family: PluginFamily::Software,
         config_model: ConfigModel::None,
         capabilities: &[],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: None,
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -791,6 +793,8 @@ mod tests {
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
         capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: None,
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -831,6 +835,8 @@ mod tests {
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
         capabilities: &[],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: None,
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -871,6 +877,8 @@ mod tests {
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
         capabilities: &[],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: None,
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -911,6 +919,8 @@ mod tests {
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
         capabilities: &[],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: None,
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,

@@ -36,6 +36,8 @@ macro_rules! declare_plugin {
             $( host_requirements: $default_hr:expr, )?
             $( config_test: [ $($ct_kind:expr),+ $(,)? ], )?
             $( type_settings: $ts_marker:tt, )?
+            $( scope: $scope:expr, )?
+            $( instance_config: $instance_cfg:expr, )?
             roles: [ $( $role:ident $( { host_requirements: $role_hr:expr } )? ),* $(,)? ]
             $(, extra_capabilities: [ $( $extra_cap:expr ),+ $(,)? ] )?
             $(, notification_transport: $transport_fn:expr )?
@@ -183,6 +185,8 @@ macro_rules! declare_plugin {
                 $(, extra: [ $($extra_cap),+ ] )?
                 $(, config_test: [ $($ct_kind),+ ] )?
             ),
+            scope: $crate::__scope_value!( $( $scope )? ),
+            instance_config: $crate::__instance_config_value!( $( $instance_cfg )? ),
             config: $crate::ConfigOps {
                 validate: __descriptor_impl::validate,
                 mask_secrets: __descriptor_impl::mask_secrets,
@@ -522,6 +526,30 @@ macro_rules! __set_role_field {
     // Singleton roles — handled separately via dedicated macro keys.
     ($rc:ident, NotificationTransport, $hr:expr) => {};
     ($rc:ident, SoftwareItemLifecycle, $hr:expr) => {};
+}
+
+/// Resolve the plugin scope: use the provided value, or default to `Tenant`.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __scope_value {
+    () => {
+        $crate::PluginScope::Tenant
+    };
+    ($s:expr) => {
+        $s
+    };
+}
+
+/// Wrap an `InstanceConfigOps` reference in `Some`, or produce `None` if absent.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __instance_config_value {
+    () => {
+        None
+    };
+    ($v:expr) => {
+        Some($v)
+    };
 }
 
 /// Resolve the descriptor-level default host requirements.

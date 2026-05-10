@@ -23,20 +23,15 @@ use crate::traits::SudoCommandEntry;
 /// [`Self::Instance`] are managed exclusively by Operators with the
 /// `ManageGlobalSettings` permission, and are invisible to tenant Operators
 /// when disabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginScope {
     /// Default — managed per tenant via plugin_configs / plugin_type_settings.
+    #[default]
     Tenant,
     /// Managed by instance owners (`ManageGlobalSettings`); when disabled,
     /// tenant Operators see no evidence the plugin exists.
     Instance,
-}
-
-impl Default for PluginScope {
-    fn default() -> Self {
-        Self::Tenant
-    }
 }
 
 impl std::fmt::Display for PluginScope {
@@ -101,6 +96,23 @@ pub struct ConfigOps {
 pub struct TypeSettingsOps {
     pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub sample: fn() -> serde_json::Value,
+}
+
+// ── Instance config operations ──────────────────────────────────────────────
+
+/// Operations for the instance-wide configuration blob owned by an
+/// Instance-Scoped Plugin (see [`PluginScope::Instance`]). Optional —
+/// instance-scoped plugins may have no configurable knobs beyond the
+/// enable toggle.
+///
+/// Follows the same layout convention as [`ConfigOps`] and [`TypeSettingsOps`]:
+/// a plain function-pointer struct that plugin crates construct as a `static`
+/// literal. Not marked `#[non_exhaustive]` so that plugin crates can write
+/// struct literals directly (as required for `static` items).
+pub struct InstanceConfigOps {
+    pub form_schema: fn() -> Vec<FormFieldDescriptor>,
+    pub sample: fn() -> serde_json::Value,
+    pub validate: fn(&serde_json::Value) -> Result<(), PluginConfigValidationError>,
 }
 
 // ── Config test metadata ────────────────────────────────────────────────────
@@ -494,6 +506,12 @@ pub struct PluginDescriptor {
     pub family: PluginFamily,
     pub config_model: ConfigModel,
     pub capabilities: &'static [PluginCapability],
+    /// Scope that controls who manages this plugin's enable state and config.
+    /// Defaults to [`PluginScope::Tenant`] for all existing plugins.
+    pub scope: PluginScope,
+    /// Instance-wide config operations for [`PluginScope::Instance`] plugins.
+    /// `None` for tenant-scoped plugins and instance plugins with no config knobs.
+    pub instance_config: Option<&'static InstanceConfigOps>,
 
     // ── Config operations (every plugin) ──
     pub config: ConfigOps,
