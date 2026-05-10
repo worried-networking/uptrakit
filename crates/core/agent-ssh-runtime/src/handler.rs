@@ -49,8 +49,11 @@ impl AgentSshHandler {
             reason = "infallible at startup: catalog construction failures are static \
                       configuration errors that must abort process initialization"
         )]
-        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-            .expect("plugin catalog must build successfully");
+        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+            &catalog_config,
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        )
+        .expect("plugin catalog must build successfully");
         let infra_bundles = Arc::new(catalog.create_infra_bundles(&catalog_config));
         let surface_proxy = Arc::new(ServiceSurfaceProxy::new());
         let is_standalone = matches!(mode, AgentSshMode::Binary);

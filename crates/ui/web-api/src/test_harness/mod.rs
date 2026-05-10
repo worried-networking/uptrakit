@@ -194,8 +194,11 @@ pub(crate) async fn build_test_state_with_plugin_ops(
                 ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
             };
             Arc::new(
-                uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-                    .expect("catalog should build in tests"),
+                uptrakit_plugin_infrastructure_registry::build_catalog(
+                    &catalog_config,
+                    uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+                )
+                .expect("catalog should build in tests"),
             )
         });
 

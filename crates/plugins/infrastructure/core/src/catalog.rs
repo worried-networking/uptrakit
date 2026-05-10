@@ -98,16 +98,27 @@ pub struct PluginCatalog {
     controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>>,
     controller_update_hook: ControllerUpdateHookValue,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
+    instance_states: InstancePluginStates,
 }
 
 impl PluginCatalog {
-    /// Construct a new catalog from descriptors and shared config.
+    /// Construct a new catalog from descriptors, shared config, and instance plugin states.
     ///
     /// Validates uniqueness of type IDs and surface action prefixes.
     /// Creates singleton transports and lifecycle plugins.
+    ///
+    /// Instance-scoped plugins with `enabled = false` in `instance_states` are inserted
+    /// into the descriptor index (so visibility predicates can find them) but skip all
+    /// singleton role construction at boot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any descriptor declares a duplicate type ID, a Tenant-scoped
+    /// plugin declares `instance_config`, or singleton construction fails.
     pub fn new(
         descriptors: Vec<&'static PluginDescriptor>,
         config: &CatalogConfig,
+        instance_states: InstancePluginStates,
     ) -> crate::Result<Self> {
         let mut map = BTreeMap::new();
         let mut transports = BTreeMap::new();
@@ -143,6 +154,19 @@ impl PluginCatalog {
                 return Err(rootcause::report!(PluginError::UnsupportedOperation(
                     format!("duplicate plugin type_id: {}", desc.type_id)
                 )));
+            }
+
+            // Gate: instance-scoped + disabled → insert into index but skip all
+            // singleton role construction. Instance owners must still see the plugin
+            // in the descriptor index (for visibility predicate) even when disabled.
+            if desc.scope == PluginScope::Instance && !instance_states.enabled(desc.type_id) {
+                tracing::info!(
+                    plugin = desc.type_id,
+                    scope = "instance",
+                    enabled = false,
+                    "skipping instance-scoped plugin construction (disabled at boot)",
+                );
+                continue;
             }
 
             // ── Singleton: notification transport ──
@@ -274,7 +298,16 @@ impl PluginCatalog {
             controller_update_protection,
             controller_update_hook,
             surface_action_routes,
+            instance_states,
         })
+    }
+
+    /// Returns `true` if the instance-scoped plugin identified by `type_id` is
+    /// enabled in the boot snapshot. Always returns `false` for plugins not in
+    /// the snapshot (no row ⇒ disabled). Tenant-scoped plugins are not tracked
+    /// here; callers must check the scope first if that distinction matters.
+    pub fn instance_plugin_enabled(&self, type_id: &str) -> bool {
+        self.instance_states.enabled(type_id)
     }
 
     /// Route a surface action to the correct handler by prefix match.
@@ -1003,7 +1036,12 @@ mod tests {
     /// Empty catalog builds successfully.
     #[test]
     fn empty_catalog() {
-        let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
+        let catalog = PluginCatalog::new(
+            vec![],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .unwrap();
         assert!(catalog.all().is_empty());
         assert!(catalog.known_type_ids().is_empty());
     }
@@ -1016,14 +1054,23 @@ mod tests {
 
     #[test]
     fn empty_catalog_has_no_surface_registrations() {
-        let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
+        let catalog = PluginCatalog::new(
+            vec![],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .unwrap();
         assert!(catalog.surface_registrations().is_empty());
     }
 
     #[test]
     fn catalog_collects_descriptor_surface_registrations() {
-        let catalog =
-            PluginCatalog::new(vec![&TEST_DESCRIPTOR], &CatalogConfig::default()).unwrap();
+        let catalog = PluginCatalog::new(
+            vec![&TEST_DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .unwrap();
         let registrations = catalog.surface_registrations();
         assert_eq!(registrations.len(), 1);
         assert_eq!(
@@ -1070,9 +1117,12 @@ mod tests {
             .lock()
             .expect("recorded context lock poisoned") = None;
 
-        let catalog =
-            PluginCatalog::new(vec![&TEST_LIFECYCLE_DESCRIPTOR], &CatalogConfig::default())
-                .expect("catalog should build");
+        let catalog = PluginCatalog::new(
+            vec![&TEST_LIFECYCLE_DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build");
 
         let event = SoftwareItemCreatedEvent::new(
             uuid::Uuid::new_v4(),
@@ -1110,6 +1160,7 @@ mod tests {
                 &TEST_CONTROLLER_PROTECTION_DESCRIPTOR_B,
             ],
             &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
         );
         let err = result
             .err()
@@ -1127,6 +1178,7 @@ mod tests {
         let catalog = PluginCatalog::new(
             vec![&TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A],
             &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build");
 
@@ -1161,6 +1213,166 @@ mod tests {
                 .capabilities
                 .is_empty(),
             "fixture should not claim unrelated capabilities"
+        );
+    }
+
+    // ── A6 invariant test (deferred; now runnable) ─────────────────────────
+
+    static INSTANCE_CONFIG_OPS_FOR_BAD: crate::descriptor::InstanceConfigOps =
+        crate::descriptor::InstanceConfigOps {
+            form_schema: noop_form_schema,
+            sample: noop_sample,
+            validate: noop_validate,
+        };
+
+    static BAD_TENANT_WITH_INSTANCE_CONFIG: PluginDescriptor = PluginDescriptor {
+        type_id: "bad_test_invariant_tenant_with_instance_config",
+        display_name: "Bad: Tenant scope with instance_config",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[],
+        scope: crate::descriptor::PluginScope::Tenant,
+        instance_config: Some(&INSTANCE_CONFIG_OPS_FOR_BAD),
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            controller_update_protection: None,
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook: None,
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        global_provider_consumers: &[],
+        migrations: None,
+        reset_tenant_data: None,
+        db_migrate_tables: None,
+    };
+
+    #[test]
+    fn tenant_scope_with_instance_config_fails_catalog_build() {
+        let result = PluginCatalog::new(
+            vec![&BAD_TENANT_WITH_INSTANCE_CONFIG],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        );
+        let err = result
+            .err()
+            .expect("expected build failure for Tenant+instance_config invariant");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("scope=Tenant") && msg.contains("instance_config"),
+            "error message should name the invariant; got: {msg}"
+        );
+    }
+
+    // ── A8 gating tests ────────────────────────────────────────────────────
+
+    const TEST_INSTANCE_LIFECYCLE_TYPE_ID: &str = "test.instance.lifecycle.gating";
+
+    static TEST_INSTANCE_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: TEST_INSTANCE_LIFECYCLE_TYPE_ID,
+        display_name: "Test Instance Lifecycle Gating",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        scope: crate::descriptor::PluginScope::Instance,
+        instance_config: None,
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: Some(create_recording_lifecycle),
+            controller_update_protection: None,
+            #[cfg(feature = "plugin-ops")]
+            controller_update_hook: None,
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        global_provider_consumers: &[],
+        migrations: None,
+        reset_tenant_data: None,
+        db_migrate_tables: None,
+    };
+
+    #[test]
+    fn instance_disabled_skips_singleton_construction() {
+        // all_disabled() means the instance lifecycle plugin is disabled at boot.
+        let catalog = PluginCatalog::new(
+            vec![&TEST_INSTANCE_LIFECYCLE_DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build");
+
+        // No lifecycle singletons constructed (plugin was gated).
+        assert!(
+            catalog.software_item_lifecycle_plugins().is_empty(),
+            "disabled instance-scoped plugin must not construct lifecycle singleton"
+        );
+
+        // But the descriptor is still indexed (visibility predicate must work).
+        assert!(
+            catalog
+                .get(&uptrakit_shared_types::PluginTypeId::from_static(
+                    TEST_INSTANCE_LIFECYCLE_TYPE_ID
+                ))
+                .is_some(),
+            "disabled instance-scoped plugin must remain in descriptor index"
+        );
+    }
+
+    #[test]
+    fn instance_enabled_constructs_singleton() {
+        // Explicitly enable the instance-scoped lifecycle plugin.
+        let states = InstancePluginStates::from_pairs([(TEST_INSTANCE_LIFECYCLE_TYPE_ID, true)]);
+        let catalog = PluginCatalog::new(
+            vec![&TEST_INSTANCE_LIFECYCLE_DESCRIPTOR],
+            &CatalogConfig::default(),
+            states,
+        )
+        .expect("catalog should build");
+
+        // Singleton constructed because plugin is enabled.
+        assert_eq!(
+            catalog.software_item_lifecycle_plugins().len(),
+            1,
+            "enabled instance-scoped plugin must construct lifecycle singleton"
         );
     }
 }

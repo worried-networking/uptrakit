@@ -383,7 +383,10 @@ async fn detect_infra_plugins(
     db: &DatabaseConnection,
 ) -> bool {
     let catalog_config = CatalogConfig::default();
-    let Ok(catalog) = build_catalog(&catalog_config) else {
+    let Ok(catalog) = build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    ) else {
         return false;
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);
@@ -1224,7 +1227,10 @@ async fn collect_infra_results(
     state_dir: &std::path::Path,
 ) -> Vec<BootstrapInfraResult> {
     let catalog_config = CatalogConfig::default();
-    let Ok(catalog) = build_catalog(&catalog_config) else {
+    let Ok(catalog) = build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    ) else {
         return Vec::new();
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);

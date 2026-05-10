@@ -248,7 +248,10 @@ async fn active_infra_plugins(
     host_id: uuid::Uuid,
 ) -> Vec<(String, Vec<String>, uptrakit_shared_types::Severity)> {
     let catalog_config = CatalogConfig::default();
-    let Ok(catalog) = build_catalog(&catalog_config) else {
+    let Ok(catalog) = build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    ) else {
         return vec![];
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);
@@ -533,7 +536,10 @@ pub(crate) async fn sync_execute(
     // ── Infra plugins ────────────────────────────────────────────────
     if !skip_actions.contains(ACTION_INFRA_SYNC) {
         let catalog_config = CatalogConfig::default();
-        if let Ok(catalog) = build_catalog(&catalog_config) {
+        if let Ok(catalog) = build_catalog(
+            &catalog_config,
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        ) {
             let infra_bundles = catalog.create_infra_bundles(&catalog_config);
             let noop_invoker = NoopInfraActionInvoker;
             let noop_bootstrap = NoopGuestBootstrap;

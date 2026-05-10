@@ -189,6 +189,7 @@ mod tests {
                     global_provider_lookup: Some(global_providers.clone()),
                     ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
                 },
+                uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
             )
             .expect("catalog should build in tests"),
         );

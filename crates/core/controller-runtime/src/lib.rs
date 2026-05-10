@@ -373,8 +373,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
         cancellation_token: Some(shutdown_token.clone()),
         global_provider_lookup: Some(global_providers.clone()),
     };
-    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
-        .context_transform(|_| AppError::Config("failed to build plugin catalog".to_string()))?;
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+        &catalog_config,
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .context_transform(|_| AppError::Config("failed to build plugin catalog".to_string()))?;
 
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(catalog);
 

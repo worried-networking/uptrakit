@@ -1377,7 +1377,11 @@ mod tests {
     };
 
     fn catalog() -> impl PluginConfigOps {
-        build_catalog(&CatalogConfig::default()).expect("default catalog should build")
+        build_catalog(
+            &CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        )
+        .expect("default catalog should build")
     }
 
     /// Sentinel value used to indicate a masked secret in API responses.

@@ -78,6 +78,7 @@ async fn invoke_proxmox_add_config_executes_controller_owned_create_path() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -154,6 +155,7 @@ async fn invoke_proxmox_add_config_accepts_legacy_string_verify_tls_values() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -214,6 +216,7 @@ async fn invoke_proxmox_add_config_rejects_invalid_verify_tls_type() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -276,6 +279,7 @@ async fn invoke_proxmox_add_config_rejects_invalid_node_filter_type() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -339,6 +343,7 @@ async fn invoke_proxmox_add_config_preserves_duplicate_name_conflict() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -423,6 +428,7 @@ async fn invoke_proxmox_add_config_emits_audit_row_when_emitter_is_configured() 
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -496,6 +502,7 @@ async fn invoke_proxmox_add_config_validation_failure_emits_validation_failed_au
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
@@ -567,6 +574,7 @@ async fn invoke_proxmox_add_config_duplicate_conflict_emits_failed_audit_row() {
     let plugin_ops: Arc<dyn PluginOps> = Arc::new(
         uptrakit_plugin_infrastructure_registry::build_catalog(
             &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
         )
         .expect("catalog should build"),
     );
