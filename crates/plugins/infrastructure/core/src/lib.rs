@@ -61,7 +61,7 @@ pub use plugin_ops::{
 
 // Catalog (feature-gated)
 #[cfg(feature = "catalog")]
-pub use catalog::PluginCatalog;
+pub use catalog::{InstancePluginStates, PluginCatalog};
 
 // Re-export the shared command-capture helper so plugin crates access it through this crate
 pub use command::execute_and_capture;

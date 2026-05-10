@@ -10,6 +10,34 @@ use std::sync::Arc;
 
 use uptrakit_shared_types::PluginTypeId;
 
+/// Per-plugin enable state for `PluginScope::Instance` plugins, snapshotted at
+/// controller boot from the `instance_plugin_setting` table. Tenant-scoped
+/// plugins are not represented here — they are always considered "instance-
+/// enabled" by the catalog.
+#[derive(Default, Debug, Clone)]
+pub struct InstancePluginStates(BTreeMap<&'static str, bool>);
+
+impl InstancePluginStates {
+    /// Build from an iterator of `(type_id, enabled)` pairs.
+    pub fn from_pairs<I>(pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (&'static str, bool)>,
+    {
+        Self(pairs.into_iter().collect())
+    }
+
+    /// Returns `true` if the plugin's row says enabled. Returns `false` for
+    /// any plugin not present in the snapshot (no row ⇒ disabled).
+    pub fn enabled(&self, type_id: &str) -> bool {
+        self.0.get(type_id).copied().unwrap_or(false)
+    }
+
+    /// Test/default constructor — every instance-scoped plugin disabled.
+    pub fn all_disabled() -> Self {
+        Self::default()
+    }
+}
+
 use crate::descriptor::{
     CatalogConfig, PluginDescriptor, PluginScope, SurfaceActionContext, SurfaceActionError,
     SurfaceActionHandler,
