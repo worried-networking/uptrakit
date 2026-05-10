@@ -358,6 +358,37 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // also signals open SSE streams in the web API to terminate cleanly.
     let shutdown_token = CancellationToken::new();
 
+    // Load instance-scoped plugin state from DB before catalog construction so
+    // that instance-gated plugins reflect their persisted enabled/disabled state
+    // from first request rather than requiring a restart after toggling.
+    let instance_plugin_snapshot =
+        uptrakit_web_api_queries::instance_plugin_settings::load_at_boot(&db_conn)
+            .await
+            .map_err(|e| {
+                report!(AppError::Config(format!(
+                    "failed to load instance plugin snapshot: {e}"
+                )))
+            })?;
+    tracing::info!(
+        plugin_count = instance_plugin_snapshot.iter().count(),
+        "instance plugin snapshot loaded"
+    );
+
+    // Build InstancePluginStates by intersecting the snapshot with all
+    // compiled-in instance-scoped descriptors.
+    let all_descriptors = uptrakit_plugin_infrastructure_registry::all_descriptors();
+    let instance_states = uptrakit_plugin_infrastructure_registry::InstancePluginStates::from_pairs(
+        all_descriptors
+            .iter()
+            .filter(|d| d.scope == uptrakit_plugin_infrastructure_registry::PluginScope::Instance)
+            .map(|d| (d.type_id, instance_plugin_snapshot.enabled(d.type_id))),
+    );
+
+    // Wrap the snapshot in Arc<ArcSwap<>> so AppState can serve lock-free reads
+    // on the hot path and routes can atomically publish upserts.
+    let instance_plugin_snapshot_handle =
+        std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(instance_plugin_snapshot));
+
     // Build the plugin catalog from all compiled-in descriptors.
     // The catalog replaces the old PluginRegistry and provides PluginOps.
     let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
@@ -373,11 +404,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
         cancellation_token: Some(shutdown_token.clone()),
         global_provider_lookup: Some(global_providers.clone()),
     };
-    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
-        &catalog_config,
-        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-    )
-    .context_transform(|_| AppError::Config("failed to build plugin catalog".to_string()))?;
+    let catalog =
+        uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config, instance_states)
+            .context_transform(|_| {
+                AppError::Config("failed to build plugin catalog".to_string())
+            })?;
 
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(catalog);
 
@@ -479,6 +510,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .surface_registry(surface_registry)
         .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)
+        .instance_plugin_snapshot(std::sync::Arc::clone(&instance_plugin_snapshot_handle))
         .reject_dangerous_commands(!args.allow_dangerous_commands);
 
     #[cfg(feature = "oidc")]

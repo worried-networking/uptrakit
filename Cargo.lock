@@ -7194,6 +7194,7 @@ dependencies = [
 name = "uptrakit-controller-runtime"
 version = "0.0.1"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "axum",
  "axum-server",
@@ -7246,6 +7247,7 @@ dependencies = [
  "uptrakit-shared-types",
  "uptrakit-tracing-init",
  "uptrakit-web-api",
+ "uptrakit-web-api-queries",
  "uptrakit-wire",
  "url",
  "uuid",

@@ -36,6 +36,7 @@ uptrakit-wire = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-migrate"] }
 uptrakit-web-api = { workspace = true }
+uptrakit-web-api-queries = { workspace = true }
 uptrakit-controller-core = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-shared-types = { workspace = true }
@@ -73,6 +74,7 @@ url = { workspace = true }
 nix = { workspace = true, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
+arc-swap = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-runtime = { workspace = true, optional = true }
