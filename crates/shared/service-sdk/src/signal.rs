@@ -173,6 +173,16 @@ impl SignalWatcher {
     }
 }
 
+/// Mutex shared by every test in this crate that sends a UNIX signal to its
+/// own process. Tokio's `signal::unix::Signal` is backed by a process-global
+/// handler that broadcasts to every registered stream, so concurrent tests
+/// would see each other's signals. Hold this guard for the entire critical
+/// section — from creating the `SignalWatcher` through draining the expected
+/// signal — so the next test starts with a clean stream.
+#[cfg(all(test, unix))]
+pub(crate) static UNIX_SIGNAL_TEST_MUTEX: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -189,8 +199,6 @@ mod tests {
     use std::future::poll_fn;
     #[cfg(unix)]
     use std::time::Duration;
-    #[cfg(unix)]
-    static UNIX_SIGNAL_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[test]
     fn signal_display() {
