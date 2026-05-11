@@ -4,7 +4,7 @@ pub(super) struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m20260510_000001_create_instance_plugin_setting"
+        "m20260510_000001_instance_plugin_setting"
     }
 }
 

@@ -198,8 +198,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_enabled_visible_to_tenant_user() {
-        let mut snapshot = InstancePluginSnapshot::empty();
-        snapshot.upsert(
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
                 enabled: true,
@@ -217,8 +216,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_disabled_hidden_from_tenant_user() {
-        let mut snapshot = InstancePluginSnapshot::empty();
-        snapshot.upsert(
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
                 enabled: false,
@@ -236,8 +234,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_disabled_visible_to_admin_user() {
-        let mut snapshot = InstancePluginSnapshot::empty();
-        snapshot.upsert(
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
                 enabled: false,
@@ -255,8 +252,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_enabled_visible_to_admin_user() {
-        let mut snapshot = InstancePluginSnapshot::empty();
-        snapshot.upsert(
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
                 enabled: true,

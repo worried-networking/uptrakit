@@ -45,11 +45,13 @@ pub struct InstancePluginRow {
 
 impl InstancePluginSnapshot {
     /// Construct an empty snapshot (no plugins enabled).
+    #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
     /// Returns `true` if `plugin_type_id` is enabled; `false` if absent or disabled.
+    #[must_use]
     pub fn enabled(&self, plugin_type_id: &str) -> bool {
         self.rows
             .get(plugin_type_id)
@@ -67,10 +69,16 @@ impl InstancePluginSnapshot {
         self.rows.iter().map(|(k, v)| (k.as_str(), v))
     }
 
-    /// Insert or replace a single row in the in-memory snapshot. Used after a
-    /// successful upsert so that the returning request reads the new value.
-    pub fn upsert(&mut self, plugin_type_id: String, row: InstancePluginRow) {
-        self.rows.insert(plugin_type_id, row);
+    /// Returns a NEW snapshot with the given row inserted/replaced. The
+    /// original is untouched (callers must `arc_swap.store(Arc::new(new))`
+    /// to publish). Designed for the `Arc<ArcSwap<InstancePluginSnapshot>>`
+    /// pattern in `AppState` where in-place mutation would silently mutate a
+    /// discarded clone.
+    #[must_use]
+    pub fn with_upserted(&self, plugin_type_id: String, row: InstancePluginRow) -> Self {
+        let mut new = self.clone();
+        new.rows.insert(plugin_type_id, row);
+        new
     }
 }
 
@@ -283,8 +291,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_upsert_updates_in_memory() {
-        let mut snapshot = InstancePluginSnapshot::empty();
+    async fn snapshot_with_upserted_updates_in_memory() {
+        let snapshot = InstancePluginSnapshot::empty();
         assert!(!snapshot.enabled("my.plugin"));
 
         let row = InstancePluginRow {
@@ -292,7 +300,7 @@ mod tests {
             config: serde_json::json!({}),
             updated_at: OffsetDateTime::now_utc(),
         };
-        snapshot.upsert("my.plugin".to_string(), row);
+        let snapshot = snapshot.with_upserted("my.plugin".to_string(), row);
         assert!(snapshot.enabled("my.plugin"));
     }
 }

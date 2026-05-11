@@ -302,14 +302,6 @@ impl PluginCatalog {
         })
     }
 
-    /// Returns `true` if the instance-scoped plugin identified by `type_id` is
-    /// enabled in the boot snapshot. Always returns `false` for plugins not in
-    /// the snapshot (no row ⇒ disabled). Tenant-scoped plugins are not tracked
-    /// here; callers must check the scope first if that distinction matters.
-    pub fn instance_plugin_enabled(&self, type_id: &str) -> bool {
-        self.instance_states.enabled(type_id)
-    }
-
     /// Route a surface action to the correct handler by prefix match.
     pub fn route_surface_action(&self, surface_id: &str) -> Option<SurfaceActionHandler> {
         self.surface_action_routes
