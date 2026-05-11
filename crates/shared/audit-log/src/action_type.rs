@@ -77,6 +77,10 @@ impl AuditActionType {
         RegisteredAuditAction::new("plugin_type_settings.upsert");
     pub const PLUGIN_TYPE_SETTINGS_DELETE: RegisteredAuditAction =
         RegisteredAuditAction::new("plugin_type_settings.delete");
+    pub const INSTANCE_PLUGIN_TOGGLED: RegisteredAuditAction =
+        RegisteredAuditAction::new("instance_plugin.toggled");
+    pub const INSTANCE_PLUGIN_CONFIG_UPSERTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("instance_plugin.config_upserted");
     pub const NOTIFICATION_CHANNEL_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("notification_channel.create");
     pub const NOTIFICATION_CHANNEL_UPDATE: RegisteredAuditAction =
@@ -262,6 +266,8 @@ impl AuditActionType {
             AuditActionType::PLUGIN_CONFIG_DELETE,
             AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
             AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE,
+            AuditActionType::INSTANCE_PLUGIN_TOGGLED,
+            AuditActionType::INSTANCE_PLUGIN_CONFIG_UPSERTED,
             AuditActionType::NOTIFICATION_CHANNEL_CREATE,
             AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
             AuditActionType::NOTIFICATION_CHANNEL_DELETE,
