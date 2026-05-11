@@ -354,9 +354,7 @@ pub async fn upsert_instance_plugin_config(
     let config_field_count = req.config.as_object().map(|o| o.len()).unwrap_or(0);
 
     let model =
-        match instance_plugin_settings::upsert_config(state.db(), &plugin_type, req.config.clone())
-            .await
-        {
+        match instance_plugin_settings::upsert_config(state.db(), &plugin_type, req.config).await {
             Ok(m) => m,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to upsert instance plugin config");

@@ -12,12 +12,6 @@
 //! test matrix where the predicate would return `false` for upsert/delete —
 //! those tests would be vacuous duplicates of the existing permission-gate tests.
 
-#![allow(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "test code: panics on failure are acceptable"
-)]
-
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_user;
 
@@ -132,5 +126,40 @@ async fn admin_get_plugin_type_settings_for_disabled_instance_plugin_returns_200
     assert_eq!(
         body["plugin_type"], "enhancement_dashboard_icons",
         "response must identify the correct plugin type"
+    );
+}
+
+/// `GET /api/v1/plugin-type-settings` (list) must include settings for disabled
+/// Instance-scoped plugins when accessed by an admin. Tenant users get those
+/// rows filtered out by the predicate (proved via the existing tests in
+/// `plugin_configs.rs` and the disabled-plugin GET test above); this test
+/// proves admins still see them in the list.
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn admin_list_plugin_type_settings_includes_disabled_instance_plugin_after_seed() {
+    let app = TestApp::new().await;
+    let (admin_token, _tenant_token) = register_admin_and_tenant_user(&app).await;
+
+    uptrakit_web_api_queries::queries::plugin_type_settings::upsert_type_settings(
+        app.state.db(),
+        app.tenant_id,
+        "enhancement_dashboard_icons",
+        serde_json::json!({ "enabled": false }),
+    )
+    .await
+    .expect("seed plugin type settings row");
+
+    let (status, body): (_, Vec<serde_json::Value>) = app
+        .client()
+        .get("/api/v1/plugin-type-settings")
+        .bearer(&admin_token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK, "admin list must return 200");
+    assert!(
+        body.iter()
+            .any(|row| row["plugin_type"] == "enhancement_dashboard_icons"),
+        "admin list must include the disabled instance-scoped plugin's settings row"
     );
 }
