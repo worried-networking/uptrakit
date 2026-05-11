@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
 	getPluginConfigs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
@@ -146,5 +146,14 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 		// Wait for the plugin row to render before asserting absence.
 		await screen.findByText('Dashboard Icons');
 		expect(screen.queryByText('Edit Settings')).toBeNull();
+	});
+
+	it('toggle button opens confirm dialog with restart-required copy', async () => {
+		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		render(PluginConfigsTab);
+		const enableButton = await screen.findByRole('button', { name: 'Enable' });
+		await fireEvent.click(enableButton);
+		expect(await screen.findByText('Restart the controller to apply this change.')).toBeTruthy();
+		expect(await screen.findByText(/Enable Dashboard Icons/)).toBeTruthy();
 	});
 });
