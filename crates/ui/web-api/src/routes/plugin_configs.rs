@@ -260,11 +260,22 @@ pub async fn list_plugin_types(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
+    let snapshot = state.instance_plugin_snapshot.load_full();
     let types: Vec<PluginTypeInfo> = state
         .plugin
         .plugin_ops
         .known_type_ids()
         .into_iter()
+        .filter(|id| {
+            state
+                .plugin
+                .plugin_ops
+                .get(id)
+                .map(|d| {
+                    crate::visibility::is_plugin_visible_to_user(d, snapshot.as_ref(), &auth_user)
+                })
+                .unwrap_or(false)
+        })
         .map(|id| {
             let capabilities = state.plugin.plugin_ops.capabilities(&id);
             let config_form_fields = state
