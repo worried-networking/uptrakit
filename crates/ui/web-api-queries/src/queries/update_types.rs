@@ -34,7 +34,8 @@ pub enum ActorType {
 
 impl ActorType {
     /// Returns the canonical snake_case string stored in the database.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
             Self::ApiToken => "api_token",
@@ -53,6 +54,7 @@ impl ActorType {
     /// agent-ssh binary `"uptrakit-agent-ssh"` — maps to [`ActorType::Service`]. The granular Service
     /// identity is carried separately in the row's `actor_id` (the Service UUID), so collapsing here
     /// loses no information that wasn't already available via a JOIN to `service.service_app_name`.
+    #[must_use]
     pub fn from_service_app_name(service_app_name: &str) -> Self {
         match service_app_name {
             "uptrakit-mqtt" => Self::Mqtt,
@@ -80,6 +82,13 @@ pub enum ParseActorTypeError {
 impl FromStr for ActorType {
     type Err = ParseActorTypeError;
 
+    /// Parse the canonical on-disk string into a typed `ActorType`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseActorTypeError::Invalid`] if the input does not match any known variant.
+    /// `ActorType` is a closed internal enum — unknown strings are treated as caller bugs, not
+    /// forward-compat cases.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "user" => Ok(Self::User),

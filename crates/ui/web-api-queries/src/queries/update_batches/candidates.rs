@@ -665,4 +665,54 @@ mod tests {
                 .unwrap();
         assert!(candidates.is_empty());
     }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_filters_by_matching_category() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await; // fixture HSI has update_category = "security"
+        let cats = [UpdateCategory::Security, UpdateCategory::Bugfix];
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, Some(&cats), None)
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].host_id, f.host_id);
+    }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_excludes_non_matching_category() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await; // fixture HSI has update_category = "security"
+        let cats = [UpdateCategory::Feature, UpdateCategory::Bugfix];
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, Some(&cats), None)
+                .await
+                .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_plugin_type_ids_matches() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let ptids = [PluginTypeId::from_static("releases_github")];
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, Some(&ptids))
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].host_id, f.host_id);
+    }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_plugin_type_ids_excludes_unmatched() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let ptids = [PluginTypeId::from_static("releases_gitlab")];
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, Some(&ptids))
+                .await
+                .unwrap();
+        assert!(candidates.is_empty());
+    }
 }
