@@ -19,6 +19,7 @@ pub struct InstancePluginStates(BTreeMap<&'static str, bool>);
 
 impl InstancePluginStates {
     /// Build from an iterator of `(type_id, enabled)` pairs.
+    #[must_use]
     pub fn from_pairs<I>(pairs: I) -> Self
     where
         I: IntoIterator<Item = (&'static str, bool)>,
@@ -28,11 +29,13 @@ impl InstancePluginStates {
 
     /// Returns `true` if the plugin's row says enabled. Returns `false` for
     /// any plugin not present in the snapshot (no row ⇒ disabled).
+    #[must_use]
     pub fn enabled(&self, type_id: &str) -> bool {
         self.0.get(type_id).copied().unwrap_or(false)
     }
 
     /// Test/default constructor — every instance-scoped plugin disabled.
+    #[must_use]
     pub fn all_disabled() -> Self {
         Self::default()
     }
