@@ -503,6 +503,17 @@ These enums are **internal** (not wire-protocol types) and therefore:
 - do **not** need `Other(String)` (they are never deserialised from untrusted input),
 - **do** implement `Copy` (no heap allocation).
 
+### Legacy on-disk spellings
+
+`ActorType::Mqtt` returns `"uptrakit-mqtt"` (not `"mqtt"`) from `as_str()` for backwards
+compatibility with rows written by the MQTT Service before the typed enum landed.
+
+New code paths that classify Service-originated writes use
+`ActorType::from_service_app_name(...)`, which collapses every non-MQTT Service binary
+(including `"uptrakit-agent-ssh"` and the registration fallback `"unknown"`) to
+`ActorType::Service` (`"service"`). The granular Service identity is recoverable via the row's
+`actor_id` (the Service UUID) joined to `service.service_app_name`.
+
 ## Credential-Holding Types and Debug
 
 Any internal struct that contains a credential (password, token, secret key, etc.) **must** store
