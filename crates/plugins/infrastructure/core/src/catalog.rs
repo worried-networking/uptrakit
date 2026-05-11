@@ -96,6 +96,10 @@ pub struct PluginCatalog {
     transports: BTreeMap<&'static str, Arc<dyn NotificationTransport>>,
     lifecycle_plugins: Vec<Arc<dyn SoftwareItemLifecycle>>,
     controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    #[cfg_attr(
+        not(feature = "plugin-ops"),
+        expect(dead_code, reason = "field is read only in the plugin-ops impl block")
+    )]
     controller_update_hook: ControllerUpdateHookValue,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
     instance_states: InstancePluginStates,

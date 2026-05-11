@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use rootcause::report;
 use uptrakit_global_github_provider::{GitHubProviderClient, GitHubProviderHandle};
 use uptrakit_plugin_infrastructure_core::{
-    CatalogConfig, ConfigModel, PluginFamily, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch, declare_plugin, error::PluginError,
-    plugin_ids,
+    CatalogConfig, ConfigModel, PluginFamily, PluginScope, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, declare_plugin,
+    error::PluginError, plugin_ids,
 };
 
 fn lookup_github_provider(
@@ -101,6 +101,7 @@ declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboa
     family: PluginFamily::Enhancement,
     config_model: ConfigModel::None,
     type_settings: true,
+    scope: PluginScope::Instance,
     roles: [SoftwareItemLifecycle],
     software_item_lifecycle: create_dashboard_icons_lifecycle,
     global_provider_consumers: ["github"],
@@ -185,8 +186,15 @@ mod tests {
         assert_eq!(DESCRIPTOR.display_name, "Dashboard Icons");
         assert_eq!(DESCRIPTOR.family, PluginFamily::Enhancement);
         assert_eq!(DESCRIPTOR.config_model, ConfigModel::None);
+        assert_eq!(DESCRIPTOR.scope, PluginScope::Instance);
+        assert!(DESCRIPTOR.instance_config.is_none());
         assert_eq!(DESCRIPTOR.global_provider_consumers.len(), 1);
         assert_eq!(DESCRIPTOR.global_provider_consumers[0].as_str(), "github");
+    }
+
+    #[test]
+    fn descriptor_keeps_type_settings_for_tenant_opt_out() {
+        assert!(DESCRIPTOR.type_settings.is_some());
     }
 
     #[tokio::test]
