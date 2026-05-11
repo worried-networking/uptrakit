@@ -49,7 +49,9 @@ pub use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
 
-fn plugin_field_to_api_field<T>(field: T) -> uptrakit_web_api_types::plugin_configs::FormField
+pub(crate) fn plugin_field_to_api_field<T>(
+    field: T,
+) -> uptrakit_web_api_types::plugin_configs::FormField
 where
     T: serde::Serialize,
 {

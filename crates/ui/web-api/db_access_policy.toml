@@ -101,6 +101,12 @@ deactivate_host = "full-state"
 discover_host = "full-state"
 batch_hosts = "full-state"
 
+[routes."instance_plugins.rs"]
+list_instance_plugins = "full-state"
+get_instance_plugin = "full-state"
+set_instance_plugin_enabled = "full-state"
+upsert_instance_plugin_config = "full-state"
+
 [routes."interactive_ws.rs"]
 interactive_ws = "full-state"
 handle_interactive_session = "ignore"

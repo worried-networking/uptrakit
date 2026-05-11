@@ -13,6 +13,7 @@ pub mod events;
 pub mod health;
 pub mod host_tags;
 pub mod hosts;
+pub mod instance_plugins;
 #[cfg(feature = "interactive")]
 pub mod interactive_ws;
 pub mod notifications;
