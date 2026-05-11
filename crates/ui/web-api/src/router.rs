@@ -94,6 +94,11 @@ use crate::AppState;
         crate::routes::plugin_configs::delete_plugin_config,
         crate::routes::plugin_configs::batch_plugin_configs,
         crate::routes::plugin_configs::test_plugin_config,
+        // Instance plugins
+        crate::routes::instance_plugins::list_instance_plugins,
+        crate::routes::instance_plugins::get_instance_plugin,
+        crate::routes::instance_plugins::set_instance_plugin_enabled,
+        crate::routes::instance_plugins::upsert_instance_plugin_config,
         crate::routes::software_items::create_software_item,
         crate::routes::software_items::list_software_items,
         crate::routes::software_items::preview_software_item_merge,
@@ -237,6 +242,11 @@ use crate::AppState;
             uptrakit_web_api_types::plugin_config_test::TestPluginConfigResponse,
             uptrakit_web_api_types::plugin_type_settings::PluginTypeSettingsResponse,
             uptrakit_web_api_types::plugin_type_settings::UpsertPluginTypeSettingsRequest,
+            // Instance plugins
+            uptrakit_web_api_types::instance_plugins::InstancePluginSummary,
+            uptrakit_web_api_types::instance_plugins::InstancePluginDetail,
+            uptrakit_web_api_types::instance_plugins::SetInstancePluginEnabledRequest,
+            uptrakit_web_api_types::instance_plugins::UpsertInstancePluginConfigRequest,
             crate::routes::software_items::CreateSoftwareItemRequest,
             crate::routes::software_items::UpdateSoftwareItemRequest,
             crate::routes::software_items::AssignHostsRequest,
@@ -567,6 +577,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(
             crate::routes::plugin_type_settings::delete_plugin_type_settings
+        ))
+        // Instance plugins
+        .routes(routes!(
+            crate::routes::instance_plugins::list_instance_plugins
+        ))
+        .routes(routes!(
+            crate::routes::instance_plugins::get_instance_plugin
+        ))
+        .routes(routes!(
+            crate::routes::instance_plugins::set_instance_plugin_enabled
+        ))
+        .routes(routes!(
+            crate::routes::instance_plugins::upsert_instance_plugin_config
         ))
         .routes(routes!(
             crate::routes::software_items::create_software_item,
