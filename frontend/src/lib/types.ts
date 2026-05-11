@@ -419,6 +419,25 @@ export interface PluginTypeInfo {
 	type_settings_sample?: Record<string, unknown>;
 }
 
+/** Per-plugin row returned by GET /api/v1/instance-plugins (instance-owner only). */
+export interface InstancePluginSummary {
+	plugin_type: string;
+	display_name: string;
+	/** Stored desired state from instance_plugin_setting. */
+	enabled: boolean;
+	/**
+	 * Catalog snapshot from controller boot. When `enabled !== running_enabled`,
+	 * the UI shows a "Pending restart" badge.
+	 */
+	running_enabled: boolean;
+	/** True when the plugin declares an `instance_config_ops` descriptor — Edit Settings button renders only when true. */
+	has_instance_config: boolean;
+	instance_config_form_fields?: FormField[];
+	type_settings_form_fields?: FormField[];
+	current_config: Record<string, unknown>;
+	updated_at: string | null;
+}
+
 export interface PluginTypeSettingsResponse {
 	plugin_type: string;
 	config: Record<string, unknown>;
