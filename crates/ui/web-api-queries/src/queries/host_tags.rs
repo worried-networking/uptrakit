@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{host_tag, host_tag_assignment};
+use uptrakit_shared_db::entity::{host, host_tag, host_tag_assignment};
 use uptrakit_web_api_types::host_tags::{
     CreateHostTagRequest, HostTagResponse, HostTagSummary, ListHostTagsQuery, UpdateHostTagRequest,
 };
@@ -66,6 +66,50 @@ async fn count_hosts_for_tag(db: &impl sea_orm::ConnectionTrait, tag_id: Uuid) -
 }
 
 // ── Public query functions ───────────────────────────────────────────────────
+
+/// Find every active Host that carries at least one of the given tags ("any-of" semantics).
+///
+/// Tenant isolation: this function relies on `TenantDb::find::<host::Entity>()` as the primary
+/// filter (which injects `host.tenant_id = ?`). A secondary filter on
+/// `host_tag.tenant_id = tenant_db.tenant_id()` is added as belt-and-suspenders, so a stray
+/// `tag_id` from another tenant cannot match. Deactivated hosts (`host.deactivated_at IS NOT
+/// NULL`) are excluded.
+///
+/// Empty `tag_ids` returns `Ok(vec![])` — never "all hosts in tenant". This is intentional:
+/// the policy executor that will consume this helper must opt in to a specific tag set.
+///
+/// **N+1 advisory:** callers that intend to enumerate outdated items per host should consider
+/// `find_outdated_hosts_for_item` when the item axis is known, to avoid running one candidate
+/// query per host.
+///
+/// # Errors
+///
+/// Returns `sea_orm::DbErr` if the underlying query fails. Tenant-isolation errors do not
+/// surface — they manifest as empty results.
+pub async fn find_hosts_with_any_tag(
+    tenant_db: &TenantDb,
+    tag_ids: &[Uuid],
+) -> Result<Vec<host::Model>, sea_orm::DbErr> {
+    use sea_orm::{JoinType, RelationTrait};
+
+    if tag_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    tenant_db
+        .find::<host::Entity>()
+        .join(JoinType::InnerJoin, host::Relation::HostTagAssignment.def())
+        .join(
+            JoinType::InnerJoin,
+            host_tag_assignment::Relation::HostTag.def(),
+        )
+        .filter(host_tag::Column::TenantId.eq(tenant_db.tenant_id()))
+        .filter(host_tag_assignment::Column::HostTagId.is_in(tag_ids.iter().copied()))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .distinct()
+        .all(tenant_db.db())
+        .await
+}
 
 /// List active host tags for a tenant.
 #[tracing::instrument(skip_all)]
@@ -702,5 +746,211 @@ mod tests {
         .unwrap();
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].name, "production");
+    }
+}
+
+#[cfg(test)]
+mod find_hosts_with_any_tag_tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{host, tenant};
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    async fn insert_tenant(db: &DatabaseConnection, name: &str) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set(name.to_string()),
+            slug: Set(format!("slug-{id}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn insert_host(db: &DatabaseConnection, tenant_id: Uuid, hostname: &str) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{id}")),
+            hostname: Set(hostname.to_string()),
+            friendly_name: Set(hostname.to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn insert_tag(db: &DatabaseConnection, tenant_id: Uuid, name: &str) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        host_tag::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_string()),
+            color: Set("#000000".to_string()),
+            description: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn assign_tag(db: &DatabaseConnection, host_id: Uuid, tag_id: Uuid) {
+        host_tag_assignment::ActiveModel {
+            host_tag_id: Set(tag_id),
+            host_id: Set(host_id),
+            assigned_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn empty_tag_ids_returns_empty() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db, "t").await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let result = find_hosts_with_any_tag(&tenant_db, &[]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn single_tag_returns_assigned_hosts_only() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db, "t").await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let h1 = insert_host(&db, tenant_id, "h1").await;
+        let _h2 = insert_host(&db, tenant_id, "h2").await; // unassigned
+        let tag = insert_tag(&db, tenant_id, "prod").await;
+        assign_tag(&db, h1, tag).await;
+
+        let result = find_hosts_with_any_tag(&tenant_db, &[tag]).await.unwrap();
+        let ids: Vec<Uuid> = result.iter().map(|h| h.id).collect();
+        assert_eq!(ids, vec![h1]);
+    }
+
+    #[tokio::test]
+    async fn multi_tag_any_of_unions_hosts() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db, "t").await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let h1 = insert_host(&db, tenant_id, "h1").await;
+        let h2 = insert_host(&db, tenant_id, "h2").await;
+        let _h3 = insert_host(&db, tenant_id, "h3").await; // no tags
+        let t_a = insert_tag(&db, tenant_id, "a").await;
+        let t_b = insert_tag(&db, tenant_id, "b").await;
+        assign_tag(&db, h1, t_a).await;
+        assign_tag(&db, h2, t_b).await;
+
+        let result = find_hosts_with_any_tag(&tenant_db, &[t_a, t_b])
+            .await
+            .unwrap();
+        let mut ids: Vec<Uuid> = result.iter().map(|h| h.id).collect();
+        ids.sort();
+        let mut expected = vec![h1, h2];
+        expected.sort();
+        assert_eq!(ids, expected);
+    }
+
+    #[tokio::test]
+    async fn host_with_multiple_matching_tags_appears_once() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db, "t").await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let h1 = insert_host(&db, tenant_id, "h1").await;
+        let t_a = insert_tag(&db, tenant_id, "a").await;
+        let t_b = insert_tag(&db, tenant_id, "b").await;
+        assign_tag(&db, h1, t_a).await;
+        assign_tag(&db, h1, t_b).await;
+
+        let result = find_hosts_with_any_tag(&tenant_db, &[t_a, t_b])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, h1);
+    }
+
+    #[tokio::test]
+    async fn other_tenant_tag_excluded() {
+        let db = setup_db().await;
+        let tenant_a = insert_tenant(&db, "a").await;
+        let tenant_b = insert_tenant(&db, "b").await;
+
+        let host_a = insert_host(&db, tenant_a, "a-host").await;
+        let tag_a = insert_tag(&db, tenant_a, "shared").await;
+        assign_tag(&db, host_a, tag_a).await;
+
+        let host_b = insert_host(&db, tenant_b, "b-host").await;
+        let tag_b = insert_tag(&db, tenant_b, "shared").await;
+        assign_tag(&db, host_b, tag_b).await;
+
+        let tenant_db_b = TenantDb::new(db.clone(), tenant_b);
+        // Pass tag_a (owned by tenant_a) while scoped to tenant_b — expect zero.
+        let result = find_hosts_with_any_tag(&tenant_db_b, &[tag_a])
+            .await
+            .unwrap();
+        assert!(
+            result.is_empty(),
+            "other-tenant tag must not match any host"
+        );
+    }
+
+    #[tokio::test]
+    async fn deactivated_host_excluded() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db, "t").await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let h1 = insert_host(&db, tenant_id, "h1").await;
+        let tag = insert_tag(&db, tenant_id, "x").await;
+        assign_tag(&db, h1, tag).await;
+
+        // Soft-delete h1.
+        let model = host::Entity::find_by_id(h1)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host::ActiveModel = model.into();
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+
+        let result = find_hosts_with_any_tag(&tenant_db, &[tag]).await.unwrap();
+        assert!(result.is_empty(), "deactivated host must not appear");
     }
 }
