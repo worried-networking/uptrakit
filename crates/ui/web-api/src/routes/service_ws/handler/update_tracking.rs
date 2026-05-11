@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use uptrakit_shared_types::UpdateCategory;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_wire::{
     ControllerMessage, ErrorCode, ErrorPayload, ServiceHostBatchUpdateTriggerPayload,
@@ -204,8 +205,8 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     service_app_name: &str,
     payload: &ServiceHostBatchUpdateTriggerPayload,
 ) -> ProcessorResponse {
-    let category_filter = if payload.security_only {
-        Some("security")
+    let categories: Option<Vec<UpdateCategory>> = if payload.security_only {
+        Some(vec![UpdateCategory::Security])
     } else {
         None
     };
@@ -213,8 +214,9 @@ pub(super) async fn handle_service_trigger_host_batch_update(
         state.db(),
         payload.tenant_id,
         payload.host_id,
-        category_filter,
-        None,
+        categories.as_deref(),
+        None, // plugin_type_ids
+        None, // exclude_item_ids
     )
     .await
     {

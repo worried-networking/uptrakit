@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection;
+use uptrakit_shared_types::UpdateCategory;
 use uuid::Uuid;
 
 use crate::actions::MutationContext;
@@ -37,14 +38,15 @@ pub(crate) async fn trigger_host_batch(
     host_id: Uuid,
     actor_type: ActorType,
     actor_id: &str,
-    category_filter: Option<&str>,
+    categories: Option<&[UpdateCategory]>,
     exclude_item_ids: Option<&[Uuid]>,
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
     let candidates = batch_queries::find_outdated_items_for_host(
         bctx.tenant_db.db(),
         bctx.tenant_db.tenant_id(),
         host_id,
-        category_filter,
+        categories,
+        None, // plugin_type_ids — exposed in a later HTTP surface
         exclude_item_ids,
     )
     .await?;
@@ -292,6 +294,8 @@ pub(crate) async fn trigger_item_batch(
         bctx.tenant_db.tenant_id(),
         item_id,
         host_ids,
+        None, // categories — not exposed on item-rollout surface
+        None, // plugin_type_ids — exposed in a later HTTP surface
     )
     .await?;
 
