@@ -87,7 +87,8 @@ import type {
 	MergeSoftwareItemsExecuteRequest,
 	MergeSoftwareItemsExecuteResponse,
 	MergeSoftwareItemsPreviewRequest,
-	MergeSoftwareItemsPreviewResponse
+	MergeSoftwareItemsPreviewResponse,
+	InstancePluginSummary
 } from './types';
 import type {
 	InvokeSurfaceInteractionRequest,
@@ -693,6 +694,29 @@ export function upsertPluginTypeSettings(
 
 export function deletePluginTypeSettings(pluginType: string): Promise<void> {
 	return requestVoid(`/plugin-type-settings/${encodeURIComponent(pluginType)}`, { method: 'DELETE' });
+}
+
+// --- Instance-Scoped Plugins ---
+
+export function listInstancePlugins(): Promise<InstancePluginSummary[]> {
+	return request<InstancePluginSummary[]>('/instance-plugins');
+}
+
+export function setInstancePluginEnabled(pluginType: string, enabled: boolean): Promise<InstancePluginSummary> {
+	return request<InstancePluginSummary>(`/instance-plugins/${encodeURIComponent(pluginType)}/enabled`, {
+		method: 'PUT',
+		body: JSON.stringify({ enabled })
+	});
+}
+
+export function upsertInstancePluginConfig(
+	pluginType: string,
+	config: Record<string, unknown>
+): Promise<InstancePluginSummary> {
+	return request<InstancePluginSummary>(`/instance-plugins/${encodeURIComponent(pluginType)}/config`, {
+		method: 'PUT',
+		body: JSON.stringify({ config })
+	});
 }
 
 export function getPluginConfigs(page?: number, perPage?: number): Promise<PaginatedResponse<PluginConfigResponse>> {
