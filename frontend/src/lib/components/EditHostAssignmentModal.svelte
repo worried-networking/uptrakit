@@ -696,6 +696,7 @@
 	}
 </script>
 
+<!-- This modal uses hand-rolled grid-cols-[7rem_1fr] / [9rem_1fr] rows. Do NOT add FormFieldRow here without migrating ALL rows to it — FormLayout.Modal defaults to 11rem and would diverge from the hand-rolled widths. -->
 <Modal title="Configure Plugins" {onclose} maxWidth="max-w-2xl max-h-[90vh] flex flex-col">
 	<div class="space-y-1 text-sm text-[var(--text-muted)]">
 		<p>

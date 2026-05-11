@@ -19,7 +19,7 @@
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
-	import { FormFieldRow, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
+	import { FormFieldRow, FormFieldReadOnly, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
@@ -374,40 +374,38 @@
 	<!-- Section 2: NATS Configuration -->
 	{#if natsAvailable}
 		<SectionCard title="NATS Configuration">
-			<p class="mb-4 text-sm text-[var(--text-secondary)]">
-				Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g. <code
-					>nats://user:password@host:4222</code
-				>).
-			</p>
+			<div class="space-y-4">
+				<p class="text-sm text-[var(--text-secondary)]">
+					Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g.
+					<code>nats://user:password@host:4222</code>).
+				</p>
 
-			<Callout
-				tone="info"
-				title="Requires restart"
-				message="Changes to the NATS URL take effect after the controller is restarted."
-			/>
-
-			<div class="grid gap-1 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-				<p class="text-sm font-medium text-[var(--text-secondary)]">Current URL</p>
-				<p class="font-mono text-sm text-[var(--text-primary)]">{natsCurrentUrl ?? '— not configured —'}</p>
-			</div>
-
-			<FormFieldRow label="New NATS URL" inputId="global-nats-url">
-				<Input
-					id="global-nats-url"
-					type="text"
-					class="font-mono"
-					placeholder="nats://host:4222"
-					bind:value={natsUrlInput}
+				<Callout
+					tone="info"
+					title="Requires restart"
+					message="Changes to the NATS URL take effect after the controller is restarted."
 				/>
-			</FormFieldRow>
 
-			<div class="flex gap-2">
-				<Button variant="primary" loading={natsSaving} disabled={!natsUrlInput.trim()} onclick={saveNatsUrl}>
-					Save
-				</Button>
-				{#if natsCurrentUrl}
-					<Button variant="danger" loading={natsClearing} onclick={clearNatsUrl}>Clear</Button>
-				{/if}
+				<FormFieldReadOnly label="Current URL" mono value={natsCurrentUrl ?? '— not configured —'} />
+
+				<FormFieldRow label="New NATS URL" inputId="global-nats-url">
+					<Input
+						id="global-nats-url"
+						type="text"
+						class="font-mono"
+						placeholder="nats://host:4222"
+						bind:value={natsUrlInput}
+					/>
+				</FormFieldRow>
+
+				<div class="flex gap-2">
+					<Button variant="primary" loading={natsSaving} disabled={!natsUrlInput.trim()} onclick={saveNatsUrl}>
+						Save
+					</Button>
+					{#if natsCurrentUrl}
+						<Button variant="danger" loading={natsClearing} onclick={clearNatsUrl}>Clear</Button>
+					{/if}
+				</div>
 			</div>
 		</SectionCard>
 	{/if}
@@ -415,53 +413,52 @@
 	<!-- Section 3: Zero-Configuration Discovery -->
 	{#if zeroconfAvailable}
 		<SectionCard title="Zero-Configuration Discovery">
-			<p class="mb-4 text-sm text-[var(--text-secondary)]">
-				When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents to
-				discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
-				split-network deployments where the advertised addresses differ from the controller's local addresses.
-			</p>
+			<div class="space-y-4">
+				<p class="text-sm text-[var(--text-secondary)]">
+					When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents
+					to discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
+					split-network deployments where the advertised addresses differ from the controller's local addresses.
+				</p>
 
-			<Callout
-				tone="info"
-				title="Requires restart"
-				message="Changes to these settings take effect after the controller is restarted."
-			/>
-
-			<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled" hint="Enable mDNS advertising">
-				<div class="flex items-center gap-2">
-					<Checkbox id="global-zeroconf-enabled" bind:checked={zeroconfEnabled} />
-					<StatusBadge tone="warning" label="Requires restart" />
-				</div>
-			</FormFieldRow>
-
-			{#if zeroconfCaFingerprint}
-				<div class="grid gap-1 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-					<p class="text-sm font-medium text-[var(--text-secondary)]">CA Fingerprint</p>
-					<p class="font-mono text-sm text-[var(--text-primary)]">{zeroconfCaFingerprint}</p>
-				</div>
-			{/if}
-
-			<FormFieldRow label="URL Override" inputId="global-zeroconf-url-override">
-				<Input
-					id="global-zeroconf-url-override"
-					type="text"
-					class="font-mono"
-					placeholder="https://proxy.example.com:443"
-					bind:value={zeroconfUrlOverride}
+				<Callout
+					tone="info"
+					title="Requires restart"
+					message="Changes to these settings take effect after the controller is restarted."
 				/>
-			</FormFieldRow>
 
-			<FormFieldRow label="PKI Address Override" inputId="global-zeroconf-pki-addr-override">
-				<Input
-					id="global-zeroconf-pki-addr-override"
-					type="text"
-					class="font-mono"
-					placeholder="http://pki.local:8080"
-					bind:value={zeroconfPkiAddrOverride}
-				/>
-			</FormFieldRow>
+				<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled" hint="Enable mDNS advertising">
+					<div class="flex items-center gap-2">
+						<Checkbox id="global-zeroconf-enabled" bind:checked={zeroconfEnabled} />
+						<StatusBadge tone="warning" label="Requires restart" />
+					</div>
+				</FormFieldRow>
 
-			<Button variant="primary" loading={zeroconfSaving} onclick={saveZeroconfSettings}>Save</Button>
+				{#if zeroconfCaFingerprint}
+					<FormFieldReadOnly label="CA Fingerprint" mono value={zeroconfCaFingerprint} />
+				{/if}
+
+				<FormFieldRow label="URL Override" inputId="global-zeroconf-url-override">
+					<Input
+						id="global-zeroconf-url-override"
+						type="text"
+						class="font-mono"
+						placeholder="https://proxy.example.com:443"
+						bind:value={zeroconfUrlOverride}
+					/>
+				</FormFieldRow>
+
+				<FormFieldRow label="PKI Address Override" inputId="global-zeroconf-pki-addr-override">
+					<Input
+						id="global-zeroconf-pki-addr-override"
+						type="text"
+						class="font-mono"
+						placeholder="http://pki.local:8080"
+						bind:value={zeroconfPkiAddrOverride}
+					/>
+				</FormFieldRow>
+
+				<Button variant="primary" loading={zeroconfSaving} onclick={saveZeroconfSettings}>Save</Button>
+			</div>
 		</SectionCard>
 	{/if}
 
