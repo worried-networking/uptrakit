@@ -176,10 +176,10 @@ batch_plugin_configs = "tenant-scoped"
 test_plugin_config = "full-state"
 
 [routes."plugin_type_settings.rs"]
-list_plugin_type_settings = "tenant-scoped"
-get_plugin_type_settings = "tenant-scoped"
-upsert_plugin_type_settings = "tenant-scoped"
-delete_plugin_type_settings = "tenant-scoped"
+list_plugin_type_settings = "full-state"
+get_plugin_type_settings = "full-state"
+upsert_plugin_type_settings = "full-state"
+delete_plugin_type_settings = "full-state"
 
 [routes."roles.rs"]
 build_role_response = "ignore"
