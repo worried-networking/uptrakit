@@ -225,6 +225,39 @@ pub(crate) async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &
     }
 }
 
+/// Upsert a row into `instance_plugin_setting` AND publish the new snapshot
+/// to the in-memory `state.instance_plugin_snapshot` ArcSwap so that the
+/// next request reads the seeded value. The catalog snapshot (frozen at
+/// `TestApp::new()` boot) is intentionally NOT touched; `running_enabled`
+/// reflects boot state and is independent of the ArcSwap snapshot.
+pub(crate) async fn upsert_instance_plugin_setting(
+    app: &super::TestApp,
+    plugin_type_id: &str,
+    enabled: bool,
+) -> uptrakit_shared_db::entity::instance_plugin_setting::Model {
+    let (_previous, model) = uptrakit_web_api_queries::instance_plugin_settings::set_enabled(
+        app.state.db(),
+        plugin_type_id,
+        enabled,
+    )
+    .await
+    .expect("set_enabled fixture");
+    // Publish updated snapshot.
+    let current = app.state.instance_plugin_snapshot.load();
+    let next = current.with_upserted(
+        model.plugin_type_id.clone(),
+        uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
+            enabled: model.enabled,
+            config: model.config.clone(),
+            updated_at: model.updated_at,
+        },
+    );
+    app.state
+        .instance_plugin_snapshot
+        .store(std::sync::Arc::new(next));
+    model
+}
+
 /// Link a service to a host via the join table.
 pub(crate) async fn link_service_host(
     db: &DatabaseConnection,

@@ -2,6 +2,7 @@ mod auth_flow;
 mod enrollment_tokens;
 mod error_cases;
 mod hosts;
+mod instance_plugins;
 mod notifications;
 mod oidc_callback;
 mod plugin_configs;
