@@ -184,7 +184,7 @@ pub async fn list_plugin_type_settings(
             (StatusCode::OK, Json(responses)).into_response()
         }
         Err(e) => {
-            tracing::error!("Failed to list plugin type settings: {e}");
+            tracing::error!(error = %e, "Failed to list plugin type settings");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -239,7 +239,7 @@ pub async fn get_plugin_type_settings(
             "No settings found for this plugin type",
         ),
         Err(e) => {
-            tracing::error!("Failed to get plugin type settings: {e}");
+            tracing::error!(error = %e, "Failed to get plugin type settings");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -328,7 +328,7 @@ pub async fn upsert_plugin_type_settings(
             (StatusCode::OK, Json(model_to_response(model))).into_response()
         }
         Err(e) => {
-            tracing::error!("Failed to upsert plugin type settings: {e}");
+            tracing::error!(error = %e, "Failed to upsert plugin type settings");
             emit_plugin_type_settings_audit(
                 &audit_ctx,
                 &plugin_type,
@@ -417,7 +417,7 @@ pub async fn delete_plugin_type_settings(
             )
         }
         Err(e) => {
-            tracing::error!("Failed to delete plugin type settings: {e}");
+            tracing::error!(error = %e, "Failed to delete plugin type settings");
             emit_plugin_type_settings_audit(
                 &audit_ctx,
                 &plugin_type,
