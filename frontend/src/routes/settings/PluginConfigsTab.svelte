@@ -15,7 +15,10 @@
 		listPluginTypeSettings,
 		upsertPluginTypeSettings,
 		deletePluginTypeSettings,
-		testPluginConfig
+		testPluginConfig,
+		listInstancePlugins,
+		setInstancePluginEnabled,
+		upsertInstancePluginConfig
 	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -43,7 +46,8 @@
 		FormField,
 		SelectOption,
 		BatchActionResponse,
-		TestPluginConfigResponse
+		TestPluginConfigResponse,
+		InstancePluginSummary
 	} from '$lib/types';
 
 	const canViewConfigs = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
@@ -53,7 +57,7 @@
 	const canViewTypeSettings = $derived(
 		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
 	);
-	const canManageTypeSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 	const canTest = $derived(getUser()?.permissions.includes(Permission.TestPluginConfigs) ?? false);
 
 	// Plugin types
@@ -106,6 +110,20 @@
 
 	const typeSettingsPluginTypes = $derived(pluginTypes.filter((t) => (t.type_settings_form_fields ?? []).length > 0));
 
+	// Instance plugins state
+	let instancePlugins: InstancePluginSummary[] = $state([]);
+	let instancePluginsLoading: boolean = $state(true);
+	let instancePluginsError: string | null = $state(null);
+	let instancePluginToggleConfirm: {
+		plugin_type: string;
+		display_name: string;
+		next_enabled: boolean;
+	} | null = $state(null);
+	let editingInstancePluginType: string | null = $state(null);
+	let showInstancePluginConfigModal: boolean = $state(false);
+	let instancePluginFormValues: Record<string, string> = $state({});
+	let instancePluginFieldErrors: Record<string, string> = $state({});
+
 	// Batch state — plugin configs
 	let configSelectedIds = new SvelteSet<string>();
 	let configBatchConfirmAction: string | null = $state(null);
@@ -127,7 +145,23 @@
 		if (canViewTypeSettings) {
 			loadTypeSettings();
 		}
+		if (canManageGlobalSettings) {
+			void loadInstancePlugins();
+		}
 	});
+
+	async function loadInstancePlugins() {
+		instancePluginsLoading = true;
+		instancePluginsError = null;
+		try {
+			instancePlugins = await listInstancePlugins();
+		} catch (e) {
+			instancePluginsError = e instanceof Error ? e.message : 'Failed to load instance plugins';
+			showError(instancePluginsError);
+		} finally {
+			instancePluginsLoading = false;
+		}
+	}
 
 	async function loadPluginTypes() {
 		try {
@@ -287,6 +321,13 @@
 		const next = { ...typeSettingsFieldErrors };
 		delete next[fieldKey];
 		typeSettingsFieldErrors = next;
+	}
+
+	function clearInstancePluginFieldError(fieldKey: string) {
+		if (!(fieldKey in instancePluginFieldErrors)) return;
+		const next = { ...instancePluginFieldErrors };
+		delete next[fieldKey];
+		instancePluginFieldErrors = next;
 	}
 
 	function clearConfigValidation() {
@@ -599,6 +640,52 @@
 		}
 	}
 
+	async function executeInstancePluginToggle() {
+		if (!instancePluginToggleConfirm) return;
+		const { plugin_type, display_name, next_enabled } = instancePluginToggleConfirm;
+		instancePluginToggleConfirm = null;
+		try {
+			const updated = await setInstancePluginEnabled(plugin_type, next_enabled);
+			instancePlugins = instancePlugins.map((p) => (p.plugin_type === plugin_type ? updated : p));
+			showSuccess(`${display_name} ${next_enabled ? 'enabled' : 'disabled'}. Restart the controller to apply.`);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to toggle instance plugin');
+		}
+	}
+
+	function openEditInstancePluginConfig(pluginType: string) {
+		editingInstancePluginType = pluginType;
+		const summary = instancePlugins.find((p) => p.plugin_type === pluginType);
+		if (!summary) return;
+		instancePluginFormValues = flattenConfig(summary.current_config, summary.instance_config_form_fields ?? []);
+		instancePluginFieldErrors = {};
+		showInstancePluginConfigModal = true;
+	}
+
+	function closeInstancePluginConfigModal() {
+		showInstancePluginConfigModal = false;
+		editingInstancePluginType = null;
+		instancePluginFieldErrors = {};
+	}
+
+	async function saveInstancePluginConfig() {
+		if (!editingInstancePluginType) return;
+		const summary = instancePlugins.find((p) => p.plugin_type === editingInstancePluginType);
+		if (!summary) return;
+		const fields = summary.instance_config_form_fields ?? [];
+		instancePluginFieldErrors = requiredFieldErrors(fields, instancePluginFormValues);
+		if (Object.keys(instancePluginFieldErrors).length > 0) return;
+		const config = unflattenConfig(instancePluginFormValues, fields);
+		try {
+			const updated = await upsertInstancePluginConfig(editingInstancePluginType, config);
+			instancePlugins = instancePlugins.map((p) => (p.plugin_type === editingInstancePluginType ? updated : p));
+			showSuccess('Instance plugin configuration saved.');
+			closeInstancePluginConfigModal();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save instance plugin config');
+		}
+	}
+
 	function openAddAllowlistEntry() {
 		allowlistForm = { plugin_type: discoveryPluginTypes[0]?.plugin_type ?? '' };
 		allowlistPluginTypeError = '';
@@ -664,6 +751,181 @@
 
 	const loadingSkeletonRows = [0, 1, 2, 3, 4];
 </script>
+
+{#if canManageGlobalSettings}
+	<!-- Instance Plugins -->
+	<SectionCard
+		title="Instance Plugins"
+		description="Plugins managed at the instance level. Disabled plugins are invisible to tenant Operators. Changes take effect after the controller restarts."
+	>
+		{#if instancePluginsLoading}
+			<p class="text-sm text-[var(--text-muted)]">Loading instance plugins...</p>
+		{:else if instancePluginsError}
+			<Callout tone="danger" title="Failed to load">{instancePluginsError}</Callout>
+		{:else if instancePlugins.length === 0}
+			<p class="text-sm text-[var(--text-muted)]">No instance-scoped plugins available.</p>
+		{:else}
+			<DataTable
+				columns={[
+					{ key: 'plugin', label: 'Plugin' },
+					{ key: 'state', label: 'State' },
+					{ key: 'actions', label: 'Actions' }
+				]}
+				rows={instancePlugins as unknown as Record<string, unknown>[]}
+				loading={false}
+				error={null}
+				emptyTitle="No instance plugins"
+				emptyDescription="No instance-scoped plugins available."
+				rowKey={(row) => (row as unknown as InstancePluginSummary).plugin_type}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Plugin</th
+						>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>State</th
+						>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Actions</th
+						>
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue, _index)}
+					{@const plugin = rowValue as unknown as InstancePluginSummary}
+					{@const restartPending = plugin.enabled !== plugin.running_enabled}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<td class="table-cell-pad">
+							<div class="flex flex-col">
+								<span>{plugin.display_name}</span>
+								<span class="text-xs text-[var(--text-muted)]">{plugin.plugin_type}</span>
+							</div>
+						</td>
+						<td class="table-cell-pad">
+							<div class="flex items-center gap-2">
+								{#if plugin.enabled}
+									<StatusBadge tone="success" label="Enabled" />
+								{:else}
+									<StatusBadge tone="neutral" label="Disabled" />
+								{/if}
+								{#if restartPending}
+									<StatusBadge tone="warning" label="Pending restart" />
+								{/if}
+							</div>
+						</td>
+						<td class="table-cell-pad">
+							<div class="flex flex-wrap gap-1">
+								<Button
+									variant="secondary"
+									size="sm"
+									onclick={() =>
+										(instancePluginToggleConfirm = {
+											plugin_type: plugin.plugin_type,
+											display_name: plugin.display_name,
+											next_enabled: !plugin.enabled
+										})}
+								>
+									{plugin.enabled ? 'Disable' : 'Enable'}
+								</Button>
+								{#if plugin.has_instance_config}
+									<Button variant="secondary" size="sm" onclick={() => openEditInstancePluginConfig(plugin.plugin_type)}
+										>Edit Settings</Button
+									>
+								{/if}
+							</div>
+						</td>
+					</tr>
+				{/snippet}
+			</DataTable>
+		{/if}
+	</SectionCard>
+{/if}
+
+{#if instancePluginToggleConfirm}
+	<ConfirmDialog
+		title="{instancePluginToggleConfirm.next_enabled ? 'Enable' : 'Disable'} {instancePluginToggleConfirm.display_name}"
+		messagePrefix="Are you sure you want to {instancePluginToggleConfirm.next_enabled ? 'enable' : 'disable'}"
+		entityName={instancePluginToggleConfirm.display_name}
+		confirmLabel={instancePluginToggleConfirm.next_enabled ? 'Enable' : 'Disable'}
+		confirmVariant={instancePluginToggleConfirm.next_enabled ? 'primary' : 'danger'}
+		warnings={['Restart the controller to apply this change.']}
+		onconfirm={executeInstancePluginToggle}
+		oncancel={() => (instancePluginToggleConfirm = null)}
+	/>
+{/if}
+
+{#if showInstancePluginConfigModal && editingInstancePluginType}
+	{@const summary = instancePlugins.find((p) => p.plugin_type === editingInstancePluginType)}
+	{#if summary}
+		<ModalShell
+			title="Edit Instance Configuration — {summary.display_name}"
+			onclose={closeInstancePluginConfigModal}
+			maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
+		>
+			<div class="space-y-4">
+				{#each summary.instance_config_form_fields ?? [] as field (field.key)}
+					{#if isFieldVisible(field, instancePluginFormValues)}
+						<FormFieldRow
+							label={field.label}
+							inputId={'ip-' + field.key}
+							required={field.required}
+							hint={field.field_type === 'toggle' ? undefined : field.help_text}
+							error={instancePluginFieldErrors[field.key] || undefined}
+						>
+							{#if field.field_type === 'textarea'}
+								<Textarea
+									id="ip-{field.key}"
+									bind:value={instancePluginFormValues[field.key]}
+									placeholder={field.placeholder}
+									required={field.required}
+									oninput={() => clearInstancePluginFieldError(field.key)}
+									variant="mono"
+									rows={3}
+								/>
+							{:else if field.field_type === 'select'}
+								<Select
+									id="ip-{field.key}"
+									bind:value={instancePluginFormValues[field.key]}
+									options={resolvedOptions(field)}
+									placeholder="— select —"
+									required={field.required}
+									error={instancePluginFieldErrors[field.key] || undefined}
+									onchange={() => clearInstancePluginFieldError(field.key)}
+								/>
+							{:else if field.field_type === 'toggle'}
+								<label class="flex items-center gap-2">
+									<Checkbox
+										id="ip-{field.key}"
+										checked={instancePluginFormValues[field.key] === 'true'}
+										onchange={(e) => {
+											instancePluginFormValues[field.key] = String((e.target as HTMLInputElement).checked);
+											clearInstancePluginFieldError(field.key);
+										}}
+									/>
+									<span class="text-sm">{field.help_text ?? ''}</span>
+								</label>
+							{:else}
+								<Input
+									id="ip-{field.key}"
+									type={field.field_type === 'password' ? 'password' : 'text'}
+									bind:value={instancePluginFormValues[field.key]}
+									placeholder={field.placeholder}
+									required={field.required}
+									error={instancePluginFieldErrors[field.key] || undefined}
+									oninput={() => clearInstancePluginFieldError(field.key)}
+								/>
+							{/if}
+						</FormFieldRow>
+					{/if}
+				{/each}
+			</div>
+			{#snippet footer()}
+				<Button variant="secondary" onclick={closeInstancePluginConfigModal}>Cancel</Button>
+				<Button variant="primary" onclick={saveInstancePluginConfig}>Save</Button>
+			{/snippet}
+		</ModalShell>
+	{/if}
+{/if}
 
 {#if canViewConfigs}
 	<!-- Plugin Configurations -->
@@ -1029,7 +1291,7 @@
 								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Current Settings</th
 								>
-								{#if canManageTypeSettings}
+								{#if canManageGlobalSettings}
 									<th
 										class="w-36 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 										>Actions</th
@@ -1052,7 +1314,7 @@
 											class="h-3 w-40 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									{#if canManageTypeSettings}
+									{#if canManageGlobalSettings}
 										<td class="table-cell-pad">
 											<div
 												data-ui="loading-skeleton-cell"
@@ -1084,7 +1346,7 @@
 						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 							>Current Settings</th
 						>
-						{#if canManageTypeSettings}
+						{#if canManageGlobalSettings}
 							<th class="w-36 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								>Actions</th
 							>
@@ -1103,7 +1365,7 @@
 								<span class="text-sm text-[var(--text-muted)]">Default</span>
 							{/if}
 						</td>
-						{#if canManageTypeSettings}
+						{#if canManageGlobalSettings}
 							<td class="table-cell-pad">
 								<div class="flex flex-wrap gap-1">
 									<Button variant="secondary" size="sm" onclick={() => openEditTypeSettings(t.plugin_type)}>Edit</Button
