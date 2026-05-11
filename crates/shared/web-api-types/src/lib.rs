@@ -21,6 +21,7 @@ pub mod error;
 pub mod events;
 pub mod host_tags;
 pub mod hosts;
+pub mod instance_plugins;
 pub mod masked_url;
 pub mod notifications;
 pub mod oidc_auth;
