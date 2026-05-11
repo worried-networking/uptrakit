@@ -274,9 +274,9 @@ Rules:
 
 - Built-in settings sections and `settings.tabs` share one tab strip.
 - Active tab persists in `?tab=<tab-id>`.
-- Form-heavy views historically referenced a `110px` label width; current `FormFieldRow` uses a
-  responsive `minmax(0,16rem)` grid column. No manual width override is needed when using
-  `FormFieldRow`.
+- Form-heavy views historically referenced a `110px` label width; current `FormFieldRow` and
+  `FormFieldReadOnly` derive their label-column width from `FormLayout` context — `11rem` inside
+  modals, `20rem` on pages. No manual width override is needed when using either primitive.
 - Destructive actions live in a danger zone at the bottom of the page.
 - `settings.below.global` renders below built-in global settings content.
 

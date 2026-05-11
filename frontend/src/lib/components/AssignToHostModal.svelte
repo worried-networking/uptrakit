@@ -265,6 +265,7 @@
 	}
 </script>
 
+<!-- This modal uses hand-rolled label/control rows. Do NOT add FormFieldRow here without migrating ALL rows to it — FormLayout.Modal defaults to 11rem and would diverge from the hand-rolled widths. -->
 <Modal title="Assign to Hosts" {onclose} maxWidth="max-w-2xl max-h-[85vh] flex flex-col">
 	{#snippet subtitle()}Select hosts to track <strong>{softwareItemName}</strong> on.{/snippet}
 	{#if assignmentError}

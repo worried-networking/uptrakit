@@ -359,8 +359,50 @@ Usage:
 </FormFieldRow>
 ```
 
-Layout: `grid gap-3 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]` — label column is up to `16rem`
-wide, input column fills the rest. Stacks to a single column on narrow screens.
+Layout: the label-column width is derived from a `FormLayout` Svelte context
+(`frontend/src/lib/components/forms/form-layout-context.ts`):
+
+- `FormLayout.Modal` → `md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (narrow column, room for inputs).
+- `FormLayout.Page` → `md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (wider column, prevents label
+  wrapping in page forms).
+
+`Modal.svelte` sets `FormLayout.Modal` automatically; pages default to `FormLayout.Page`. Stacks to
+a single column on narrow screens. No manual width override is needed when using `FormFieldRow`.
+
+---
+
+### FormFieldReadOnly
+
+Static-value sibling of `FormFieldRow`. Use this for read-only URLs, fingerprints, IDs, or other
+non-interactive values displayed inside a form section so they align with surrounding
+`FormFieldRow` inputs (both primitives read the same `FormLayout` context for label-column width).
+
+```typescript
+// frontend/src/lib/components/forms/FormFieldReadOnly.svelte
+{
+  label: string;
+  hint?: string;          // secondary helper text below the label
+  value?: string;         // text rendered in the value column
+  mono?: boolean;         // default false; when true, applies font-mono to the value text
+  children?: Snippet;     // overrides `value` rendering (badges, links, custom content)
+}
+```
+
+Usage:
+
+```svelte
+<FormFieldReadOnly label="Current URL" mono value={currentUrl} />
+
+<FormFieldReadOnly label="CA Fingerprint" mono value={fingerprint} hint="SHA-256." />
+
+<FormFieldReadOnly label="Status">
+  <StatusBadge tone="success" label="Active" />
+</FormFieldReadOnly>
+```
+
+Layout: identical grid + label-column-by-context behaviour as `FormFieldRow`. Use this primitive
+instead of hand-rolling a `<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not
+track the modal/page context split and will misalign with sibling `FormFieldRow` rows.
 
 ---
 
