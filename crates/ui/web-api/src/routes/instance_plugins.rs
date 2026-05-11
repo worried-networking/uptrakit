@@ -95,6 +95,7 @@ fn emit_toggle_audit(
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::INSTANCE_PLUGIN_TOGGLED,
     )
+    .system_scope()
     .actor(actor_type, actor_id)
     .target(
         "instance_plugin",
@@ -126,6 +127,7 @@ fn emit_config_upsert_audit(
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::INSTANCE_PLUGIN_CONFIG_UPSERTED,
     )
+    .system_scope()
     .actor(actor_type, actor_id)
     .target(
         "instance_plugin",
@@ -274,13 +276,15 @@ pub async fn set_instance_plugin_enabled(
         config: model.config,
         updated_at: model.updated_at,
     };
-    let new_snapshot = state
-        .instance_plugin_snapshot
-        .load()
-        .with_upserted(plugin_type.clone(), new_row);
+    let new_snapshot = Arc::new(
+        state
+            .instance_plugin_snapshot
+            .load()
+            .with_upserted(plugin_type.clone(), new_row),
+    );
     state
         .instance_plugin_snapshot
-        .store(Arc::new(new_snapshot.clone()));
+        .store(Arc::clone(&new_snapshot));
 
     emit_toggle_audit(
         &state.audit_emitter,
@@ -294,7 +298,7 @@ pub async fn set_instance_plugin_enabled(
     // The registry is immutable after boot; resolve_instance_plugin already verified this
     // plugin type exists and is Instance-scoped, so get() will succeed here.
     if let Some(desc) = ops.get(&id) {
-        let summary = build_summary(&id, desc, &new_snapshot, ops);
+        let summary = build_summary(&id, desc, new_snapshot.as_ref(), ops);
         return (StatusCode::OK, Json(summary)).into_response();
     }
     error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -366,13 +370,15 @@ pub async fn upsert_instance_plugin_config(
         config: model.config,
         updated_at: model.updated_at,
     };
-    let new_snapshot = state
-        .instance_plugin_snapshot
-        .load()
-        .with_upserted(plugin_type.clone(), new_row);
+    let new_snapshot = Arc::new(
+        state
+            .instance_plugin_snapshot
+            .load()
+            .with_upserted(plugin_type.clone(), new_row),
+    );
     state
         .instance_plugin_snapshot
-        .store(Arc::new(new_snapshot.clone()));
+        .store(Arc::clone(&new_snapshot));
 
     emit_config_upsert_audit(
         &state.audit_emitter,
@@ -385,7 +391,7 @@ pub async fn upsert_instance_plugin_config(
     // The registry is immutable after boot; resolve_instance_plugin already verified this
     // plugin type exists and is Instance-scoped, so get() will succeed here.
     if let Some(desc) = ops.get(&id) {
-        let summary = build_summary(&id, desc, &new_snapshot, ops);
+        let summary = build_summary(&id, desc, new_snapshot.as_ref(), ops);
         return (StatusCode::OK, Json(summary)).into_response();
     }
     error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
