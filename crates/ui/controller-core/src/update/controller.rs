@@ -488,7 +488,8 @@ async fn forward_protection_output(
 ///
 /// Maps `ActorType` to `AuditActorType`:
 /// - `User` / `ApiToken` → UUID parsed from `actor_id` string.
-/// - `Scheduler` → System actor (no `actor_id`).
+/// - `Service` / `Mqtt` → Service actor with UUID parsed from `actor_id` string.
+/// - `Scheduler` / `SystemService` / `System` → System actor (no `actor_id`).
 fn emit_update_audit(
     audit_emitter: &uptrakit_audit_log::AuditEmitter,
     params: &UpdateDispatchParams,
@@ -529,6 +530,15 @@ fn actor_audit_pair(actor_type: &ActorType, actor_id_str: &str) -> (AuditActorTy
             (AuditActorType::ApiToken, id)
         }
         ActorType::Scheduler => (AuditActorType::System, None),
+        // Service-originated writes carry a Service UUID in `actor_id` (see
+        // `ActorType::from_service_app_name` in web-api-queries). The MQTT Service is the same
+        // family with a legacy on-disk spelling, so both map to the audit `Service` actor.
+        ActorType::Service | ActorType::Mqtt => {
+            let id = actor_id_str.parse::<Uuid>().ok();
+            (AuditActorType::Service, id)
+        }
+        // Instance-wide system paths (no per-Service identity) map to the audit `System` actor.
+        ActorType::SystemService | ActorType::System => (AuditActorType::System, None),
     }
 }
 

@@ -13,6 +13,7 @@ use uptrakit_wire::{
 
 use super::shared_types::ProcessorResponse;
 use crate::AppState;
+use crate::queries::update_types::ActorType;
 
 fn emit_software_update_audit(
     state: &AppState,
@@ -119,7 +120,7 @@ pub(super) async fn handle_service_trigger_update(
             item_id: payload.software_item_id,
             host_id: payload.host_id,
             to_version: payload.to_version.clone(),
-            actor_type: service_app_name,
+            actor_type: ActorType::from_service_app_name(service_app_name).as_str(),
             actor_id: &payload.actor_service_id.to_string(),
             release_info: None,
             interactive: false,
@@ -264,7 +265,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     let params = crate::queries::update_batches::CreateBatchParams {
         tenant_id: payload.tenant_id,
         batch_type: crate::queries::update_types::BatchType::HostUpdate,
-        actor_type: service_app_name,
+        actor_type: ActorType::from_service_app_name(service_app_name).as_str(),
         actor_id: &payload.actor_service_id.to_string(),
     };
     match crate::queries::update_batches::create_batch(
