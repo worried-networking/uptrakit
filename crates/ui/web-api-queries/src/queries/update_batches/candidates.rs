@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item,
 };
+use uptrakit_shared_types::{PluginTypeId, UpdateCategory};
 use uuid::Uuid;
 
 use super::Result;
@@ -25,15 +26,50 @@ pub struct BatchUpdateCandidate {
     pub update_category: String,
 }
 
-/// Find all outdated items for a host, optionally filtered by update category.
+/// Find all outdated items for a host, optionally filtered by category and/or plugin source.
+///
+/// `categories`: `None` = no filter; `Some(&[..])` = items whose
+/// `host_software_item.update_category` is in the slice. Passing `Some(&[])` is a caller bug —
+/// `debug_assert!` panics in debug; production logs `tracing::warn!` and returns `Ok(vec![])`.
+/// Validation at the HTTP boundary should reject empty lists before reaching this helper.
+///
+/// `plugin_type_ids`: `None` = no filter; `Some(&[..])` = items whose
+/// `host_software_item_plugin.plugin_type` (role `execute_update`) matches. Same empty-slice
+/// contract as `categories`.
+///
+/// # Errors
+///
+/// Returns a [`TriggerUpdateError`] if the host is missing/wrong tenant, or if a DB error occurs.
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn find_outdated_items_for_host(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
-    category_filter: Option<&str>,
+    categories: Option<&[UpdateCategory]>,
+    plugin_type_ids: Option<&[PluginTypeId]>,
     exclude_item_ids: Option<&[Uuid]>,
 ) -> Result<Vec<BatchUpdateCandidate>> {
+    if let Some(c) = categories {
+        debug_assert!(
+            !c.is_empty(),
+            "categories: empty slice is a caller bug; pass None to disable filter"
+        );
+        if c.is_empty() {
+            tracing::warn!("find_outdated_items_for_host called with empty categories slice");
+            return Ok(vec![]);
+        }
+    }
+    if let Some(p) = plugin_type_ids {
+        debug_assert!(
+            !p.is_empty(),
+            "plugin_type_ids: empty slice is a caller bug; pass None to disable filter"
+        );
+        if p.is_empty() {
+            tracing::warn!("find_outdated_items_for_host called with empty plugin_type_ids slice");
+            return Ok(vec![]);
+        }
+    }
+
     // Verify host exists and belongs to tenant
     let host_record = Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_id))
@@ -49,8 +85,9 @@ pub async fn find_outdated_items_for_host(
         .filter(host_software_item::Column::InstalledVersion.is_not_null())
         .filter(host_software_item::Column::LatestVersion.is_not_null());
 
-    if let Some(cat) = category_filter {
-        query = query.filter(host_software_item::Column::UpdateCategory.eq(cat));
+    if let Some(cats) = categories {
+        let strs: Vec<&str> = cats.iter().map(UpdateCategory::as_str).collect();
+        query = query.filter(host_software_item::Column::UpdateCategory.is_in(strs));
     }
 
     let links = query.all(db).await.context_to()?;
@@ -72,11 +109,20 @@ pub async fn find_outdated_items_for_host(
         .map(|i| (i.id, i))
         .collect();
 
-    // Batch-load execute_update plugin assignments for this host
-    let execute_plugin_item_ids: HashSet<Uuid> = HostSoftwareItemPlugin::find()
+    // Batch-load execute_update plugin assignments for this host, optionally filtered by plugin
+    // source.
+    let mut plugin_query = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(link_ids))
-        .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+        .filter(host_software_item_plugin::Column::Role.eq("execute_update"));
+
+    if let Some(ptids) = plugin_type_ids {
+        let strs: Vec<&str> = ptids.iter().map(PluginTypeId::as_str).collect();
+        plugin_query =
+            plugin_query.filter(host_software_item_plugin::Column::PluginType.is_in(strs));
+    }
+
+    let execute_plugin_item_ids: HashSet<Uuid> = plugin_query
         .all(db)
         .await
         .context_to()?
@@ -130,14 +176,48 @@ pub async fn find_outdated_items_for_host(
     Ok(candidates)
 }
 
-/// Find all hosts where a software item is outdated.
+/// Find all hosts where a software item is outdated, optionally filtered by category and/or
+/// plugin source.
+///
+/// `categories` and `plugin_type_ids` follow the same contract as
+/// [`find_outdated_items_for_host`]: `None` = no filter, `Some(&[..])` = filter on the slice.
+/// `Some(&[])` is a caller bug (`debug_assert!` panics in debug, production logs and returns
+/// `Ok(vec![])`).
+///
+/// # Errors
+///
+/// Returns a [`TriggerUpdateError`] if the software item is missing/wrong tenant, or if a DB
+/// error occurs.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_outdated_hosts_for_item(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     item_id: Uuid,
     host_ids: Option<&[Uuid]>,
+    categories: Option<&[UpdateCategory]>,
+    plugin_type_ids: Option<&[PluginTypeId]>,
 ) -> Result<Vec<BatchUpdateCandidate>> {
+    if let Some(c) = categories {
+        debug_assert!(
+            !c.is_empty(),
+            "categories: empty slice is a caller bug; pass None to disable filter"
+        );
+        if c.is_empty() {
+            tracing::warn!("find_outdated_hosts_for_item called with empty categories slice");
+            return Ok(vec![]);
+        }
+    }
+    if let Some(p) = plugin_type_ids {
+        debug_assert!(
+            !p.is_empty(),
+            "plugin_type_ids: empty slice is a caller bug; pass None to disable filter"
+        );
+        if p.is_empty() {
+            tracing::warn!("find_outdated_hosts_for_item called with empty plugin_type_ids slice");
+            return Ok(vec![]);
+        }
+    }
+
     // Verify software item exists and is active
     let item = SoftwareItem::find_by_id(item_id)
         .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -155,6 +235,11 @@ pub async fn find_outdated_hosts_for_item(
 
     if let Some(ids) = host_ids {
         query = query.filter(host_software_item::Column::HostId.is_in(ids.to_vec()));
+    }
+
+    if let Some(cats) = categories {
+        let strs: Vec<&str> = cats.iter().map(UpdateCategory::as_str).collect();
+        query = query.filter(host_software_item::Column::UpdateCategory.is_in(strs));
     }
 
     let links = query.all(db).await.context_to()?;
@@ -176,11 +261,20 @@ pub async fn find_outdated_hosts_for_item(
         .map(|h| (h.id, h))
         .collect();
 
-    // Batch-load execute_update plugin assignments for this item across all hosts
-    let execute_plugin_host_ids: HashSet<Uuid> = HostSoftwareItemPlugin::find()
+    // Batch-load execute_update plugin assignments for this item across all hosts, optionally
+    // filtered by plugin source.
+    let mut plugin_query = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
         .filter(host_software_item_plugin::Column::HostId.is_in(host_record_ids))
-        .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+        .filter(host_software_item_plugin::Column::Role.eq("execute_update"));
+
+    if let Some(ptids) = plugin_type_ids {
+        let strs: Vec<&str> = ptids.iter().map(PluginTypeId::as_str).collect();
+        plugin_query =
+            plugin_query.filter(host_software_item_plugin::Column::PluginType.is_in(strs));
+    }
+
+    let execute_plugin_host_ids: HashSet<Uuid> = plugin_query
         .all(db)
         .await
         .context_to()?
@@ -234,6 +328,7 @@ mod tests {
     use uptrakit_shared_db::entity::{
         host_software_item, host_software_item_plugin, plugin_config, software_item,
     };
+    use uptrakit_shared_types::{PluginTypeId, UpdateCategory};
     use uuid::Uuid;
 
     // -- find_outdated_items_for_host --
@@ -253,9 +348,10 @@ mod tests {
         active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
         active.update(&db).await.unwrap();
 
-        let candidates = find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
-            .await
-            .unwrap();
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None, None)
+                .await
+                .unwrap();
         assert!(
             candidates.is_empty(),
             "expected empty; got {}",
@@ -268,9 +364,10 @@ mod tests {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
 
-        let candidates = find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
-            .await
-            .unwrap();
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None, None)
+                .await
+                .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].software_item_id, f.item_id);
         assert_eq!(candidates[0].installed_version, "1.0.0");
@@ -357,18 +454,30 @@ mod tests {
         .unwrap();
 
         // Filter by "security" -- should return only the first item.
-        let candidates =
-            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, Some("security"), None)
-                .await
-                .unwrap();
+        let candidates = find_outdated_items_for_host(
+            &db,
+            f.tenant_id,
+            f.host_id,
+            Some(&[UpdateCategory::Security]),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].software_item_id, f.item_id);
 
         // Filter by "feature" -- should return only the second item.
-        let candidates_feature =
-            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, Some("feature"), None)
-                .await
-                .unwrap();
+        let candidates_feature = find_outdated_items_for_host(
+            &db,
+            f.tenant_id,
+            f.host_id,
+            Some(&[UpdateCategory::Feature]),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(candidates_feature.len(), 1);
         assert_eq!(candidates_feature[0].software_item_id, item2_id);
     }
@@ -378,10 +487,16 @@ mod tests {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
 
-        let candidates =
-            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&[f.item_id]))
-                .await
-                .unwrap();
+        let candidates = find_outdated_items_for_host(
+            &db,
+            f.tenant_id,
+            f.host_id,
+            None,
+            None,
+            Some(&[f.item_id]),
+        )
+        .await
+        .unwrap();
         assert!(
             candidates.is_empty(),
             "excluded item must not appear in results"
@@ -405,9 +520,10 @@ mod tests {
         active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
         active.update(&db).await.unwrap();
 
-        let candidates = find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
-            .await
-            .unwrap();
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, None)
+                .await
+                .unwrap();
         assert!(
             candidates.is_empty(),
             "expected empty; got {}",
@@ -420,13 +536,133 @@ mod tests {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
 
-        let candidates = find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
-            .await
-            .unwrap();
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, None)
+                .await
+                .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].host_id, f.host_id);
         assert_eq!(candidates[0].software_item_id, f.item_id);
         assert_eq!(candidates[0].installed_version, "1.0.0");
         assert_eq!(candidates[0].latest_version, "1.1.0");
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_filters_by_multiple_categories() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await; // fixture item has update_category = "security"
+        let now = OffsetDateTime::now_utc();
+
+        // Add a second item with "feature" category.
+        let item2_id = Uuid::now_v7();
+        let pc2_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: Set(item2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("feat-app".to_string()),
+            featured: Set(true),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        plugin_config::ActiveModel {
+            id: Set(pc2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("feat-plugin".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let hsi2_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(hsi2_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(pc2_id)),
+            package_identifier: Set(Some("feat-app".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("feature".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            host_software_item_id: Set(hsi2_id),
+            plugin_config_id: Set(Some(pc2_id)),
+            plugin_type: Set("releases_github".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/feat".to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Filter for security + bugfix — fixture (security) matches, item2 (feature) does not.
+        let cats = [UpdateCategory::Security, UpdateCategory::Bugfix];
+        let candidates = find_outdated_items_for_host(
+            &db,
+            f.tenant_id,
+            f.host_id,
+            Some(&cats),
+            None, // plugin_type_ids
+            None, // exclude_item_ids
+        )
+        .await
+        .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].software_item_id, f.item_id);
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_plugin_type_ids_matches() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let ptids = [PluginTypeId::from_static("releases_github")];
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&ptids), None)
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_plugin_type_ids_excludes_unmatched() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let ptids = [PluginTypeId::from_static("releases_gitlab")];
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&ptids), None)
+                .await
+                .unwrap();
+        assert!(candidates.is_empty());
     }
 }

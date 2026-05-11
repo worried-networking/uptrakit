@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uptrakit_shared_db::entity::{host, software_item, update_batch, update_history};
-use uptrakit_shared_types::{BatchStatus, UpdateStatus};
+use uptrakit_shared_types::{BatchStatus, UpdateCategory, UpdateStatus};
 use uptrakit_web_api_types::update_batches::{
     HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
     UpdateBatchListQuery, UpdateBatchSummaryResponse,
@@ -137,7 +137,31 @@ pub async fn trigger_host_batch_update(
         Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
         None => (ActorType::User, user.user_id.to_string()),
     };
-    let category_filter = req.category_filter.clone();
+    // `Validated<HostBatchUpdateRequest>` already enforced that any present
+    // `category_filter` parses as a known `UpdateCategory`. If the parse fails here it indicates
+    // a `Validate` impl regression; surface as a 500 rather than silently dropping the filter.
+    let categories: Option<Vec<UpdateCategory>> = match req
+        .category_filter
+        .as_deref()
+        .map(str::parse::<UpdateCategory>)
+        .transpose()
+    {
+        Ok(parsed) => parsed.map(|c| vec![c]),
+        Err(err) => {
+            tracing::error!(
+                error = %err,
+                category = ?req.category_filter,
+                "HostBatchUpdateRequest::validate accepted a category that failed to parse",
+            );
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid update category",
+                "internal_error",
+                Some("validate/parse mismatch on category_filter".to_string()),
+            ));
+        }
+    };
+    let categories_slice = categories.as_deref();
     let excluded_item_count = req.exclude_item_ids.as_ref().map_or(0, Vec::len);
     let ctx = state.mutation_context();
     let bctx = batch_actions::BatchDispatchCtx {
@@ -155,7 +179,7 @@ pub async fn trigger_host_batch_update(
         host_id,
         update_actor_type,
         &update_actor_id,
-        category_filter.as_deref(),
+        categories_slice,
         req.exclude_item_ids.as_deref(),
     )
     .await
@@ -171,7 +195,7 @@ pub async fn trigger_host_batch_update(
                 outcome,
                 serde_json::json!({
                     "batch_scope": "host",
-                    "category_filter_present": category_filter.is_some(),
+                    "category_filter_present": categories.is_some(),
                     "excluded_item_count": excluded_item_count,
                     "reason_code": reason_code,
                 }),
@@ -192,7 +216,7 @@ pub async fn trigger_host_batch_update(
             "batch_id": resp.batch_id,
             "accepted_count": resp.total_created,
             "skipped_count": skipped_count,
-            "category_filter_present": category_filter.is_some(),
+            "category_filter_present": categories.is_some(),
             "excluded_item_count": excluded_item_count,
             "no_op": resp.total_created == 0,
         }),
