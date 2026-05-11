@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
 	getPluginConfigs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
@@ -15,7 +15,10 @@ vi.mock('$lib/api', () => ({
 	listPluginTypeSettings: vi.fn().mockResolvedValue([]),
 	upsertPluginTypeSettings: vi.fn(),
 	deletePluginTypeSettings: vi.fn(),
-	testPluginConfig: vi.fn()
+	testPluginConfig: vi.fn(),
+	listInstancePlugins: vi.fn().mockResolvedValue([]),
+	setInstancePluginEnabled: vi.fn(),
+	upsertInstancePluginConfig: vi.fn()
 }));
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => ({
@@ -40,8 +43,9 @@ vi.mock('$lib/stores/events.svelte', () => ({
 	getLastEvent: vi.fn(() => null)
 }));
 
-import { Permission } from '$lib/types';
+import { Permission, type InstancePluginSummary } from '$lib/types';
 import * as auth from '$lib/auth.svelte';
+import * as api from '$lib/api';
 import PluginConfigsTab from './PluginConfigsTab.svelte';
 
 describe('PluginConfigsTab button variants', () => {
@@ -81,5 +85,66 @@ describe('PluginConfigsTab button variants', () => {
 			const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Add Config');
 			expect(btn?.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
 		});
+	});
+});
+
+describe('PluginConfigsTab — Instance Plugins section', () => {
+	const dashboardIconsPlugin: InstancePluginSummary = {
+		plugin_type: 'dashboard-icons',
+		display_name: 'Dashboard Icons',
+		enabled: false,
+		running_enabled: false,
+		has_instance_config: false,
+		current_config: {},
+		updated_at: null
+	};
+
+	it('renders the section when user has ManageGlobalSettings', async () => {
+		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		render(PluginConfigsTab);
+		expect(await screen.findByText('Instance Plugins')).toBeTruthy();
+		expect(await screen.findByText('Dashboard Icons')).toBeTruthy();
+	});
+
+	it('does not render the section when user lacks ManageGlobalSettings', async () => {
+		vi.mocked(auth.getUser).mockReturnValueOnce({
+			id: 'u1',
+			email: 'a@b.com',
+			first_name: 'A',
+			last_name: 'B',
+			has_pending_email_change: false,
+			permissions: [
+				Permission.ViewSoftware,
+				Permission.ManageCommands,
+				Permission.TriggerChecks,
+				Permission.UpdateSoftware,
+				Permission.TestPluginConfigs
+			]
+		} as ReturnType<typeof auth.getUser>);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		render(PluginConfigsTab);
+		await waitFor(() => {
+			expect(screen.queryByText('Instance Plugins')).toBeNull();
+		});
+	});
+
+	it('shows "Pending restart" badge when stored enabled differs from running_enabled', async () => {
+		vi.mocked(api.listInstancePlugins).mockResolvedValue([
+			{
+				...dashboardIconsPlugin,
+				enabled: true,
+				running_enabled: false
+			}
+		]);
+		render(PluginConfigsTab);
+		expect(await screen.findByText('Pending restart')).toBeTruthy();
+	});
+
+	it('hides the Edit Settings button when has_instance_config is false', async () => {
+		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		render(PluginConfigsTab);
+		// Wait for the plugin row to render before asserting absence.
+		await screen.findByText('Dashboard Icons');
+		expect(screen.queryByText('Edit Settings')).toBeNull();
 	});
 });
