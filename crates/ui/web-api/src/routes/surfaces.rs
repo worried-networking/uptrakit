@@ -15,7 +15,7 @@ use axum::{
 };
 use sea_orm::EntityTrait;
 use serde_json::Value;
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::{Permission, PluginTypeId};
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
     SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
@@ -37,6 +37,7 @@ use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
 pub async fn list_surfaces(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Query(query): Query<ListSurfacesQuery>,
 ) -> Response {
     let catalog = state.surface_proxy_deps.registry.list_surfaces_for_tenant(
@@ -45,7 +46,25 @@ pub async fn list_surfaces(
         query.page.as_deref(),
     );
 
-    (StatusCode::OK, Json(group_surface_catalog(catalog))).into_response()
+    let snapshot = state.instance_plugin_snapshot.load_full();
+    let plugin_ops = state.plugin.plugin_ops.as_ref();
+    let filtered: Vec<SurfaceCatalogItem> = catalog
+        .into_iter()
+        .filter(|item| {
+            if item.descriptor.provider_kind != surfaces::ProviderKind::Plugin {
+                return true;
+            }
+            // Plugin-backed surface — consult predicate.
+            plugin_ops
+                .get(&PluginTypeId::new(&item.provider_id))
+                .map(|d| {
+                    crate::visibility::is_plugin_visible_to_user(d, snapshot.as_ref(), &auth_user)
+                })
+                .unwrap_or(true) // Unknown plugin id → pass through (defensive default).
+        })
+        .collect();
+
+    (StatusCode::OK, Json(group_surface_catalog(filtered))).into_response()
 }
 
 fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceResponse> {
