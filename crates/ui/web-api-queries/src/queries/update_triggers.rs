@@ -22,6 +22,7 @@ use super::update_dispatch::{
     config_prefers_interactive, create_update_history_record, has_active_update_for_host,
     validate_update_preconditions,
 };
+use crate::queries::update_types::ActorType;
 
 // Re-export for tests that exercise the enrichment logic.
 #[cfg(test)]
@@ -56,15 +57,16 @@ pub struct TriggerUpdateResult {
 }
 
 /// Parameters for [`trigger_update_for_host`].
-pub struct TriggerUpdateParams<'a> {
+pub struct TriggerUpdateParams {
     pub tenant_id: Uuid,
     pub item_id: Uuid,
     pub host_id: Uuid,
     pub to_version: String,
-    /// Who initiated the update.
-    pub actor_type: &'a str,
-    /// User UUID string, API token UUID string, service UUID string, or empty string.
-    pub actor_id: &'a str,
+    /// Who initiated the update (typed).
+    pub actor_type: ActorType,
+    /// Variant-dependent identifier (user UUID string, API token UUID string, Service UUID
+    /// string, or empty string).
+    pub actor_id: String,
     /// Optional release metadata supplied by the REST caller.
     /// `None` when triggered from a service or a scheduler.
     pub release_info: Option<ReleaseInfo>,
@@ -109,7 +111,7 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
 #[tracing::instrument(skip_all)]
 pub async fn trigger_update_for_host(
     db: &sea_orm::DatabaseConnection,
-    params: TriggerUpdateParams<'_>,
+    params: TriggerUpdateParams,
 ) -> super::update_dispatch::Result<TriggerUpdateResult> {
     let target =
         validate_update_preconditions(db, params.tenant_id, params.host_id, params.item_id).await?;
@@ -137,7 +139,7 @@ pub async fn trigger_update_for_host(
         to_version: &params.to_version,
         from_version: target.hsi_link.installed_version.clone(),
         actor_type: params.actor_type,
-        actor_id: params.actor_id,
+        actor_id: params.actor_id.clone(),
         update_category: &target.hsi_link.update_category,
         batch_id: None,
         initial_status,
@@ -655,8 +657,8 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.2.0".to_string(),
-                actor_type: ActorType::User.as_str(),
-                actor_id: "user-1",
+                actor_type: ActorType::User,
+                actor_id: "user-1".to_string(),
                 release_info: None,
                 interactive: false,
             },
@@ -693,8 +695,8 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.1.0".to_string(),
-                actor_type: ActorType::User.as_str(),
-                actor_id: "user-1",
+                actor_type: ActorType::User,
+                actor_id: "user-1".to_string(),
                 release_info: None,
                 interactive: false,
             },
@@ -1055,8 +1057,8 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.1.0".to_string(),
-                actor_type: ActorType::User.as_str(),
-                actor_id: "user-1",
+                actor_type: ActorType::User,
+                actor_id: "user-1".to_string(),
                 release_info: None,
                 interactive: false,
             },
@@ -1122,8 +1124,8 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.2.0".to_string(),
-                actor_type: ActorType::User.as_str(),
-                actor_id: "user-1",
+                actor_type: ActorType::User,
+                actor_id: "user-1".to_string(),
                 release_info: None,
                 interactive: false,
             },

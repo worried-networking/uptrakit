@@ -95,9 +95,6 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
             None => None,
         };
 
-        let actor_type_str = params.actor.actor_type.as_str();
-        let actor_id_str = params.actor.actor_id.as_str();
-
         let trigger_result = trigger_update_for_host(
             &self.db,
             TriggerUpdateParams {
@@ -105,8 +102,8 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
                 item_id: params.software_item_id,
                 host_id: params.host_id,
                 to_version: params.to_version.clone(),
-                actor_type: actor_type_str,
-                actor_id: actor_id_str,
+                actor_type: params.actor.actor_type,
+                actor_id: params.actor.actor_id.clone(),
                 release_info,
                 interactive: params.interactive,
             },

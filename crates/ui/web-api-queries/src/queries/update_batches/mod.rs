@@ -45,7 +45,7 @@ use crate::queries::update_dispatch::{
     CreateUpdateRecordParams, DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome,
     TriggerUpdateError, has_active_update_for_host, prepare_pre_update_protection,
 };
-use crate::queries::update_types::BatchType;
+use crate::queries::update_types::{ActorType, BatchType};
 use crate::token_utils::generate_uuid;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
@@ -68,13 +68,13 @@ fn trigger_status_from_update_history_status(
 // ---------------------------------------------------------------------------
 
 /// Parameters for creating a batch update.
-pub struct CreateBatchParams<'a> {
+pub struct CreateBatchParams {
     pub tenant_id: Uuid,
     /// The batch category.
     pub batch_type: BatchType,
-    /// Who initiated the batch.
-    pub actor_type: &'a str,
-    pub actor_id: &'a str,
+    /// Who initiated the batch (typed).
+    pub actor_type: ActorType,
+    pub actor_id: String,
 }
 
 /// Create a batch with associated update_history records.
@@ -88,7 +88,7 @@ pub struct CreateBatchParams<'a> {
 pub async fn create_batch(
     db: &DatabaseConnection,
     dispatch: DispatchContext<'_>,
-    params: &CreateBatchParams<'_>,
+    params: &CreateBatchParams,
     candidates: Vec<BatchUpdateCandidate>,
 ) -> Result<BatchUpdateResponse> {
     if candidates.is_empty() {
@@ -177,8 +177,8 @@ pub async fn create_batch(
         batch_type: Set(params.batch_type.as_str().to_string()),
         status: Set(BatchStatus::InProgress),
         total_count: Set(validated.len() as i32),
-        actor_type: Set(params.actor_type.to_string()),
-        actor_id: Set(params.actor_id.to_string()),
+        actor_type: Set(params.actor_type.as_str().to_string()),
+        actor_id: Set(params.actor_id.clone()),
         output: Set(String::new()),
         output_bytes: Set(0),
         created_at: Set(now),
@@ -213,7 +213,7 @@ pub async fn create_batch(
                 to_version: &candidate.latest_version,
                 from_version: Some(candidate.installed_version.clone()),
                 actor_type: params.actor_type,
-                actor_id: params.actor_id,
+                actor_id: params.actor_id.clone(),
                 update_category: &candidate.update_category,
                 batch_id: Some(batch_id),
                 initial_status,
@@ -733,8 +733,8 @@ pub(crate) mod tests {
             &CreateBatchParams {
                 tenant_id: f.tenant_id,
                 batch_type: BatchType::HostUpdate,
-                actor_type: ActorType::User.as_str(),
-                actor_id: "test-user",
+                actor_type: ActorType::User,
+                actor_id: "test-user".to_string(),
             },
             candidates,
         )
@@ -828,8 +828,8 @@ pub(crate) mod tests {
             &CreateBatchParams {
                 tenant_id: f.tenant_id,
                 batch_type: BatchType::HostUpdate,
-                actor_type: ActorType::User.as_str(),
-                actor_id: "test-user",
+                actor_type: ActorType::User,
+                actor_id: "test-user".to_string(),
             },
             candidates,
         )
