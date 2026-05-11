@@ -64,8 +64,8 @@ pub(crate) async fn trigger_host_batch(
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id(),
             batch_type: BatchType::HostUpdate,
-            actor_type: actor_type.as_str(),
-            actor_id,
+            actor_type,
+            actor_id: actor_id.to_string(),
         },
         candidates,
     )
@@ -316,8 +316,8 @@ pub(crate) async fn trigger_item_batch(
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id(),
             batch_type: BatchType::ItemRollout,
-            actor_type: actor_type.as_str(),
-            actor_id,
+            actor_type,
+            actor_id: actor_id.to_string(),
         },
         candidates,
     )

@@ -36,6 +36,7 @@ use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
 use crate::queries::software_items::find_active_item;
+use crate::queries::update_types::ActorType;
 use crate::token_utils::generate_uuid;
 
 // ---------------------------------------------------------------------------
@@ -274,9 +275,10 @@ pub struct CreateUpdateRecordParams<'a> {
     /// record shows the "before" version even while the update is still
     /// pending or in progress.
     pub from_version: Option<String>,
-    /// Who initiated the update.
-    pub actor_type: &'a str,
-    pub actor_id: &'a str,
+    /// Who initiated the update (typed).
+    pub actor_type: ActorType,
+    /// Variant-dependent identifier (user UUID, API-token UUID, Service UUID, or empty string).
+    pub actor_id: String,
     pub update_category: &'a str,
     /// Set when the update belongs to a batch.
     pub batch_id: Option<Uuid>,
@@ -978,8 +980,8 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         status: Set(params.initial_status),
         output: Set(String::new()),
         output_bytes: Set(0),
-        actor_type: Set(params.actor_type.to_string()),
-        actor_id: Set(params.actor_id.to_string()),
+        actor_type: Set(params.actor_type.as_str().to_string()),
+        actor_id: Set(params.actor_id.clone()),
         execution_owner_service_id: Set(None),
         execution_owner_instance_id: Set(None),
         started_at: Set(Some(now)),
@@ -1331,6 +1333,38 @@ mod tests {
             .await
             .unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn create_update_record_accepts_typed_actor() {
+        use crate::queries::update_batches::tests::{insert_base_fixture, setup_db};
+        use crate::queries::update_types::ActorType;
+
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let params = super::CreateUpdateRecordParams {
+            tenant_id: f.tenant_id,
+            host_id: f.host_id,
+            item_id: f.item_id,
+            host_software_item_id: None,
+            to_version: "1.1.0",
+            from_version: None,
+            actor_type: ActorType::Mqtt,
+            actor_id: f.service_id.to_string(),
+            update_category: "feature",
+            batch_id: None,
+            initial_status: uptrakit_shared_db::entity::update_history::UpdateStatus::Pending,
+            interactive: false,
+        };
+        let id = super::create_update_history_record(&db, &params)
+            .await
+            .unwrap();
+        let row = <uptrakit_shared_db::entity::prelude::UpdateHistory as sea_orm::EntityTrait>::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.actor_type, "uptrakit-mqtt");
     }
 
     #[tokio::test]
