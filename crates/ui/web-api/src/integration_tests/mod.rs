@@ -6,6 +6,7 @@ mod instance_plugins;
 mod notifications;
 mod oidc_callback;
 mod plugin_configs;
+mod plugin_type_settings;
 mod service_ws;
 mod services_crud;
 mod settings;

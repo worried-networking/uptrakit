@@ -9,7 +9,9 @@
 )]
 
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::{insert_host, link_service_host, register_and_get_token};
+use crate::test_harness::fixtures::{
+    insert_host, link_service_host, register_and_get_token, register_user,
+};
 #[cfg(feature = "dashboard-icons")]
 use sea_orm::{ActiveModelTrait, Set};
 #[cfg(not(feature = "dashboard-icons"))]
@@ -565,6 +567,103 @@ async fn upsert_type_settings_rejects_invalid_dashboard_icons_enabled_type() {
         .send_status()
         .await;
     assert_eq!(missing_status, http::StatusCode::NOT_FOUND);
+}
+
+/// Register the admin (first user), re-open registration, then register a
+/// second user who gets the built-in "user" role (ViewSettings but NOT
+/// ManageGlobalSettings).  Returns `(admin_token, tenant_token)`.
+#[cfg(feature = "dashboard-icons")]
+async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
+    let client = app.client();
+
+    // First registered user becomes owner (all permissions including ManageGlobalSettings).
+    let (status, admin_auth) = register_user(&client, "owner@test.local", "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "admin registration failed"
+    );
+    let admin_token = admin_auth.access_token.expose_secret().to_string();
+
+    // Re-open registration so the second user can sign up.
+    let reopen = client
+        .put_json(
+            "/api/v1/settings/registration",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&admin_token)
+        .send_status()
+        .await;
+    assert_eq!(
+        reopen,
+        http::StatusCode::OK,
+        "failed to re-open registration"
+    );
+
+    // Second user gets the built-in "user" role: ViewSettings but NOT ManageGlobalSettings.
+    let (status, tenant_auth) =
+        register_user(&client, "tenant@test.local", "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "tenant user registration failed"
+    );
+    let tenant_token = tenant_auth.access_token.expose_secret().to_string();
+
+    (admin_token, tenant_token)
+}
+
+/// A tenant user (ViewSettings, no ManageGlobalSettings) must not see a
+/// disabled Instance-scoped plugin in the `GET /api/v1/plugin-types` list.
+///
+/// `enhancement_dashboard_icons` is Instance-scoped and the snapshot defaults
+/// to `all_disabled()` at TestApp boot, so it must be absent from the response.
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn tenant_user_does_not_see_disabled_instance_plugin_in_plugin_types_list() {
+    let app = TestApp::new().await;
+    let (_admin_token, tenant_token) = register_admin_and_tenant_user(&app).await;
+
+    let (status, body): (_, serde_json::Value) = app
+        .client()
+        .get("/api/v1/plugin-types")
+        .bearer(&tenant_token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let entries = body.as_array().expect("plugin-types must be an array");
+    assert!(
+        !entries
+            .iter()
+            .any(|e| e["plugin_type"] == "enhancement_dashboard_icons"),
+        "tenant user must not see disabled instance-scoped plugin; entries: {entries:?}"
+    );
+}
+
+/// An admin (ManageGlobalSettings) must see a disabled Instance-scoped plugin
+/// in the `GET /api/v1/plugin-types` list — the predicate passes for owners.
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn admin_sees_disabled_instance_plugin_in_plugin_types_list() {
+    let app = TestApp::new().await;
+    let (admin_token, _tenant_token) = register_admin_and_tenant_user(&app).await;
+
+    let (status, body): (_, serde_json::Value) = app
+        .client()
+        .get("/api/v1/plugin-types")
+        .bearer(&admin_token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let entries = body.as_array().expect("plugin-types must be an array");
+    assert!(
+        entries
+            .iter()
+            .any(|e| e["plugin_type"] == "enhancement_dashboard_icons"),
+        "admin must see disabled instance-scoped plugin; entries: {entries:?}"
+    );
 }
 
 #[cfg(feature = "dashboard-icons")]
