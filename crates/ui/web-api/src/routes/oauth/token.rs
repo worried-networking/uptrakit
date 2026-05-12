@@ -217,7 +217,7 @@ fn emit_poll_audit(state: &AppState, device_code: &str, outcome: &PollOutcome) {
 ///
 /// Current grant support:
 /// - `authorization_code` — fully implemented (Task 13).
-/// - `refresh_token` — stub returning `unsupported_grant_type` (Task 14).
+/// - `refresh_token` — fully implemented (Task 14).
 #[utoipa::path(
     post,
     path = "/oauth/token",
@@ -273,18 +273,121 @@ pub async fn mcp_token(
             )
             .await
         }
-        TokenRequest::RefreshToken { .. } => {
-            // Task 14 will implement this branch.
-            oauth_400(
-                "unsupported_grant_type",
-                "refresh_token not yet implemented",
-            )
-        }
+        TokenRequest::RefreshToken {
+            refresh_token,
+            client_id,
+            scope,
+            resource,
+        } => refresh_token_grant(state, resource, refresh_token, client_id, scope).await,
         _ => {
             tracing::warn!("unhandled TokenRequest variant; returning unsupported_grant_type");
             oauth_400("unsupported_grant_type", "grant type not supported")
         }
     }
+}
+
+/// Handle `grant_type=refresh_token` — spec §10.3 full rotation algorithm.
+///
+/// Delegates the full rotation algorithm (replay detection, scope subset check,
+/// consent check, access JWT mint, cascade revoke on replay) to
+/// [`OAuthRefreshTokenService::rotate`]. Audit emission is performed inside the
+/// service; no additional audit calls are needed here.
+async fn refresh_token_grant(
+    state: Arc<AppState>,
+    resource: String,
+    refresh_token_str: String,
+    client_id: String,
+    scope_opt: Option<String>,
+) -> Response {
+    use crate::oauth::services::refresh_token::OAuthRefreshError;
+
+    // Step 1 — validate resource indicator.
+    if !state.oauth.canonical.accepts_audience(&resource) {
+        return oauth_400("invalid_target", "resource indicator not accepted");
+    }
+
+    // Step 2 — client lookup + revocation check.
+    let client_svc = OAuthClientService::new(
+        state.db.db().clone(),
+        Arc::clone(&state.oauth.clock),
+        Arc::new(state.audit_emitter.clone()),
+    );
+    match client_svc.lookup(&client_id).await {
+        Ok(Some(client)) => {
+            if client.revoked_at.is_some() {
+                return oauth_400("invalid_client", "client revoked");
+            }
+        }
+        Ok(None) => return oauth_400("invalid_client", "unknown client_id"),
+        Err(e) => {
+            tracing::error!(error = %e, "oauth client lookup failed during refresh_token grant");
+            return oauth_500();
+        }
+    }
+
+    // Step 3 — rotate via service.
+    let issuer = state.oauth.canonical.issuer().as_str().to_string();
+    let rt_svc = OAuthRefreshTokenService::with_defaults(
+        state.db.db().clone(),
+        Arc::clone(&state.oauth.clock),
+        Arc::clone(&state.oauth.signer),
+        Arc::new(state.audit_emitter.clone()),
+        issuer,
+        resource.clone(),
+    );
+
+    let outcome = match rt_svc
+        .rotate(
+            &refresh_token_str,
+            &client_id,
+            scope_opt.as_deref(),
+            &resource,
+        )
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return match e.current_context() {
+                OAuthRefreshError::InvalidGrant(reason) => oauth_400("invalid_grant", reason),
+                OAuthRefreshError::InvalidTarget => {
+                    oauth_400("invalid_target", "resource mismatch")
+                }
+                OAuthRefreshError::InvalidScope => {
+                    oauth_400("invalid_scope", "requested scope exceeds granted scope")
+                }
+                OAuthRefreshError::ConsentRevoked => {
+                    oauth_400("invalid_grant", "consent has been revoked")
+                }
+                OAuthRefreshError::Jwt(_) => {
+                    tracing::error!(error = %e, "JWT error during refresh_token rotation");
+                    oauth_500()
+                }
+                OAuthRefreshError::Database(_) => {
+                    tracing::error!(error = %e, "DB error during refresh_token rotation");
+                    oauth_500()
+                }
+                #[expect(
+                    unreachable_patterns,
+                    reason = "OAuthRefreshError is #[non_exhaustive]; wildcard required for forward-compatibility"
+                )]
+                _ => {
+                    tracing::error!(error = %e, "unexpected error during refresh_token rotation");
+                    oauth_500()
+                }
+            };
+        }
+    };
+
+    // Step 4 — return token response.
+    let body = TokenResponse::new(
+        outcome.access_token,
+        "Bearer".into(),
+        outcome.expires_in,
+        Some(outcome.refresh_token.as_str().to_string()),
+        Some(outcome.refresh_expires_in),
+        outcome.scope,
+    );
+    (StatusCode::OK, axum::Json(body)).into_response()
 }
 
 /// Handle `grant_type=authorization_code` — spec §10.3 steps 17-21.
@@ -1116,6 +1219,293 @@ mod mcp_token_tests {
             parsed["error"].as_str().unwrap_or(""),
             "invalid_grant",
             "replay must return invalid_grant"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Refresh-token grant helpers
+    // -----------------------------------------------------------------------
+
+    /// Build a raw `upr_testtoken` and insert the corresponding DB row.
+    async fn insert_refresh_token(
+        db: &sea_orm::DatabaseConnection,
+        client_id: &str,
+        user_id: Uuid,
+        consent_id: Uuid,
+        scope: &str,
+        resource: &str,
+        revoked: bool,
+    ) -> String {
+        use uptrakit_shared_db::entity::oauth_refresh_token;
+        let raw = "upr_testtoken".to_string();
+        let token_hash = hash_token(&raw);
+        let now = OffsetDateTime::now_utc();
+        oauth_refresh_token::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            family_id: Set(Uuid::now_v7()),
+            parent_id: Set(None),
+            token_hash: Set(token_hash),
+            client_id: Set(client_id.to_string()),
+            user_id: Set(user_id),
+            consent_id: Set(consent_id),
+            scope: Set(scope.to_string()),
+            resource: Set(resource.to_string()),
+            issued_at: Set(now),
+            expires_at: Set(now + time::Duration::days(30)),
+            family_expires_at: Set(now + time::Duration::days(90)),
+            rotated_at: Set(None),
+            revoked_at: Set(if revoked { Some(now) } else { None }),
+        }
+        .insert(db)
+        .await
+        .expect("insert oauth_refresh_token");
+        raw
+    }
+
+    fn refresh_token_form(
+        refresh_token: &str,
+        client_id: &str,
+        resource: &str,
+        scope: Option<&str>,
+    ) -> String {
+        let base = format!(
+            "grant_type=refresh_token&refresh_token={rt}&client_id={cid}&resource={res}",
+            rt = percent_encode(refresh_token),
+            cid = client_id,
+            res = percent_encode(resource),
+        );
+        match scope {
+            Some(s) => format!("{base}&scope={}", percent_encode(s)),
+            None => base,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8 — refresh_token grant rotates and returns a new pair
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_refresh_token_rotates_and_returns_new_pair() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        let consent_id = insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        let raw_rt = insert_refresh_token(
+            &app.db,
+            TEST_CLIENT_ID,
+            user_id,
+            consent_id,
+            TEST_SCOPE,
+            TEST_RESOURCE,
+            false,
+        )
+        .await;
+
+        let body = refresh_token_form(&raw_rt, TEST_CLIENT_ID, TEST_RESOURCE, None);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::OK,
+            "expected 200 on valid refresh_token grant"
+        );
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: uptrakit_web_api_types::oauth::TokenResponse =
+            serde_json::from_slice(&body_bytes).expect("valid TokenResponse JSON");
+        assert!(
+            !parsed.access_token.is_empty(),
+            "access_token must not be empty"
+        );
+        let new_rt = parsed
+            .refresh_token
+            .as_deref()
+            .expect("refresh_token must be present");
+        assert!(
+            new_rt.starts_with("upr_"),
+            "new refresh_token must start with upr_"
+        );
+        assert_ne!(
+            new_rt,
+            raw_rt.as_str(),
+            "new refresh_token must differ from the original"
+        );
+        assert_eq!(parsed.scope, TEST_SCOPE);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 9 — replay of the same refresh_token returns 400 invalid_grant
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_refresh_replay_returns_invalid_grant() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        let consent_id = insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        let raw_rt = insert_refresh_token(
+            &app.db,
+            TEST_CLIENT_ID,
+            user_id,
+            consent_id,
+            TEST_SCOPE,
+            TEST_RESOURCE,
+            false,
+        )
+        .await;
+
+        let body = refresh_token_form(&raw_rt, TEST_CLIENT_ID, TEST_RESOURCE, None);
+
+        // First use — must succeed.
+        let req1 = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.clone()))
+            .expect("build request 1");
+        let resp1 = router.clone().oneshot(req1).await.expect("oneshot 1");
+        assert_eq!(
+            resp1.status(),
+            http::StatusCode::OK,
+            "first rotation must succeed"
+        );
+
+        // Second use (replay) — must be rejected.
+        let req2 = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request 2");
+        let resp2 = router.oneshot(req2).await.expect("oneshot 2");
+
+        assert_eq!(
+            resp2.status(),
+            http::StatusCode::BAD_REQUEST,
+            "replay must return 400"
+        );
+        let body_bytes = resp2.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(
+            parsed["error"].as_str().unwrap_or(""),
+            "invalid_grant",
+            "replay must return invalid_grant"
+        );
+        assert_eq!(
+            parsed["error_description"].as_str().unwrap_or(""),
+            "replay_detected",
+            "replay must describe reason as replay_detected"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 10 — refresh_token with revoked_at set returns 400 invalid_grant
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_refresh_revoked_returns_invalid_grant() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        let consent_id = insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        // Insert a refresh token that is already revoked.
+        let raw_rt = insert_refresh_token(
+            &app.db,
+            TEST_CLIENT_ID,
+            user_id,
+            consent_id,
+            TEST_SCOPE,
+            TEST_RESOURCE,
+            true,
+        )
+        .await;
+
+        let body = refresh_token_form(&raw_rt, TEST_CLIENT_ID, TEST_RESOURCE, None);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::BAD_REQUEST,
+            "revoked token must return 400"
+        );
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(
+            parsed["error"].as_str().unwrap_or(""),
+            "invalid_grant",
+            "revoked token must return invalid_grant"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 11 — requesting scope superset returns 400 invalid_scope
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_refresh_scope_superset_returns_invalid_scope() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        let consent_id = insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        // Token is bound to "mcp:read" only.
+        let raw_rt = insert_refresh_token(
+            &app.db,
+            TEST_CLIENT_ID,
+            user_id,
+            consent_id,
+            "mcp:read",
+            TEST_RESOURCE,
+            false,
+        )
+        .await;
+
+        // Request a superset "mcp:read mcp:write".
+        let body = refresh_token_form(
+            &raw_rt,
+            TEST_CLIENT_ID,
+            TEST_RESOURCE,
+            Some("mcp:read mcp:write"),
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::BAD_REQUEST,
+            "scope superset must return 400"
+        );
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(
+            parsed["error"].as_str().unwrap_or(""),
+            "invalid_scope",
+            "scope superset must return invalid_scope"
         );
     }
 }
