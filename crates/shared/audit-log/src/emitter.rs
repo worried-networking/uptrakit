@@ -1,5 +1,5 @@
 use crate::dispatcher::AuditLogDispatcher;
-use crate::entry::AuditEntry;
+use crate::entry::{AuditEntry, Event, validate};
 
 #[derive(Clone)]
 pub struct AuditEmitter {
@@ -11,8 +11,8 @@ impl AuditEmitter {
         Self { dispatcher }
     }
 
-    pub fn emit_best_effort(&self, entry: AuditEntry) {
-        if let Err(err) = entry.validate() {
+    pub fn emit_best_effort(&self, entry: AuditEntry<Event>) {
+        if let Err(err) = validate(&entry) {
             tracing::warn!(error = %err, "dropping invalid audit entry");
             return;
         }

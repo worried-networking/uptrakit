@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use crate::backend::AuditLogBackend;
 use crate::enricher::ActorEnricher;
-use crate::entry::AuditEntry;
+use crate::entry::{AuditEntry, Event};
 
 /// Fire-and-forget audit log dispatcher.
 ///
@@ -22,7 +22,7 @@ use crate::entry::AuditEntry;
 /// If the channel is closed (dispatcher shut down), the entry is silently dropped.
 #[derive(Clone)]
 pub struct AuditLogDispatcher {
-    tx: mpsc::UnboundedSender<AuditEntry>,
+    tx: mpsc::UnboundedSender<AuditEntry<Event>>,
 }
 
 impl AuditLogDispatcher {
@@ -49,7 +49,7 @@ impl AuditLogDispatcher {
     /// This never blocks and never fails from the caller's perspective.
     /// If the channel is closed (dispatcher shut down), the entry is silently dropped.
     /// Audit entries are **never** dropped due to backpressure — the channel is unbounded.
-    pub fn dispatch(&self, entry: AuditEntry) {
+    pub fn dispatch(&self, entry: AuditEntry<Event>) {
         // UnboundedSender::send only fails when the receiver is dropped (shutdown).
         // Silently discard on shutdown — there is nothing meaningful to do at that point.
         #[expect(
@@ -63,7 +63,7 @@ impl AuditLogDispatcher {
 async fn dispatch_loop(
     backend: Arc<dyn AuditLogBackend>,
     enricher: Option<Arc<dyn ActorEnricher>>,
-    mut rx: mpsc::UnboundedReceiver<AuditEntry>,
+    mut rx: mpsc::UnboundedReceiver<AuditEntry<Event>>,
 ) {
     while let Some(mut entry) = rx.recv().await {
         if entry.actor_display.is_none()

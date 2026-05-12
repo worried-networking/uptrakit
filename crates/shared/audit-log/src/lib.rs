@@ -19,7 +19,10 @@ pub use backend::{AuditLogBackend, MultiplexBackend, NoopBackend};
 pub use dispatcher::AuditLogDispatcher;
 pub use emitter::AuditEmitter;
 pub use enricher::ActorEnricher;
-pub use entry::{AuditActorType, AuditEntry, AuditEntryBuilder, AuditOutcome, AuditView};
+pub use entry::{
+    AuditActorType, AuditEntry, AuditEntryBuilder, AuditOutcome, AuditView, Event, HasAfter,
+    HasBefore, NeedsAfter, NeedsBefore, Stateful,
+};
 pub use error::{AuditLogError, Result};
 pub use filter::{AuditFilter, FilterMode};
 pub use runtime_emitter::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};

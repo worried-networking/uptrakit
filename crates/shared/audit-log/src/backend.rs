@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use crate::entry::AuditEntry;
+#[cfg(any(feature = "db", feature = "journald"))]
+use crate::entry::validate;
+use crate::entry::{AuditEntry, Event};
 use crate::error::AuditLogError;
 
 /// Trait for audit log storage backends.
 #[async_trait::async_trait]
 pub trait AuditLogBackend: Send + Sync {
     /// Persist a single audit entry. Implementations must not panic.
-    async fn write(&self, entry: &AuditEntry) -> std::result::Result<(), AuditLogError>;
+    async fn write(&self, entry: &AuditEntry<Event>) -> std::result::Result<(), AuditLogError>;
 }
 
 /// Backend that silently discards all entries. Used when audit logging is disabled.
@@ -15,7 +17,7 @@ pub struct NoopBackend;
 
 #[async_trait::async_trait]
 impl AuditLogBackend for NoopBackend {
-    async fn write(&self, _entry: &AuditEntry) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, _entry: &AuditEntry<Event>) -> std::result::Result<(), AuditLogError> {
         Ok(())
     }
 }
@@ -35,7 +37,7 @@ impl MultiplexBackend {
 
 #[async_trait::async_trait]
 impl AuditLogBackend for MultiplexBackend {
-    async fn write(&self, entry: &AuditEntry) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, entry: &AuditEntry<Event>) -> std::result::Result<(), AuditLogError> {
         let futures: Vec<_> = self
             .backends
             .iter()
@@ -71,10 +73,10 @@ impl DatabaseBackend {
 #[cfg(feature = "db")]
 #[async_trait::async_trait]
 impl AuditLogBackend for DatabaseBackend {
-    async fn write(&self, entry: &AuditEntry) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, entry: &AuditEntry<Event>) -> std::result::Result<(), AuditLogError> {
         use sea_orm::{ActiveValue::Set, EntityTrait};
 
-        if let Err(err) = entry.validate() {
+        if let Err(err) = validate(entry) {
             return Err(AuditLogError::Validation(err.to_string()));
         }
 
@@ -136,8 +138,8 @@ pub struct JournaldBackend;
 #[cfg(feature = "journald")]
 #[async_trait::async_trait]
 impl AuditLogBackend for JournaldBackend {
-    async fn write(&self, entry: &AuditEntry) -> std::result::Result<(), AuditLogError> {
-        if let Err(err) = entry.validate() {
+    async fn write(&self, entry: &AuditEntry<Event>) -> std::result::Result<(), AuditLogError> {
+        if let Err(err) = validate(entry) {
             return Err(AuditLogError::Validation(err.to_string()));
         }
 
@@ -232,7 +234,7 @@ mod db_tests {
     async fn database_backend_persists_semantic_audit_entry() {
         let db = setup_db().await;
         let backend = DatabaseBackend::new(db.clone());
-        let entry = AuditEntry::builder(AuditActionType::PLUGIN_CONFIG_CREATE)
+        let entry = AuditEntry::<Event>::builder_event(AuditActionType::PLUGIN_CONFIG_CREATE)
             .tenant_scope(Uuid::now_v7())
             .build()
             .expect("stub entry should validate");
@@ -251,10 +253,11 @@ mod db_tests {
     async fn database_backend_routes_system_scope_entries_to_system_table() {
         let db = setup_db().await;
         let backend = DatabaseBackend::new(db.clone());
-        let entry = AuditEntry::builder(AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP)
-            .system_scope()
-            .build()
-            .expect("stub entry should validate");
+        let entry =
+            AuditEntry::<Event>::builder_event(AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP)
+                .system_scope()
+                .build()
+                .expect("stub entry should validate");
 
         backend.write(&entry).await.expect("insert should succeed");
         let row = uptrakit_shared_db::entity::system_audit_log::Entity::find()
@@ -372,7 +375,7 @@ mod journald_tests {
         let _guard = tracing::subscriber::set_default(capture);
 
         let backend = JournaldBackend;
-        let entry = AuditEntry::builder(AuditActionType::PLUGIN_CONFIG_CREATE)
+        let entry = AuditEntry::<Event>::builder_event(AuditActionType::PLUGIN_CONFIG_CREATE)
             .build()
             .expect("stub entry should validate");
         backend.write(&entry).await.expect("write should succeed");
