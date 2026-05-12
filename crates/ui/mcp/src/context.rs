@@ -1,5 +1,4 @@
-use std::fmt;
-
+use thiserror::Error;
 use uuid::Uuid;
 
 use uptrakit_controller_core::auth::Permission;
@@ -69,17 +68,22 @@ impl McpRequestContext {
 ///
 /// `#[non_exhaustive]`: OAuth 2.1 will introduce new rejection cases.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum McpAuthError {
     /// No `Authorization` header or empty bearer token.
+    #[error("missing credentials")]
     MissingCredentials,
     /// Token is present but not an `upk_`-prefixed API token (e.g. a JWT).
+    #[error("JWT tokens not accepted for MCP")]
     JwtNotAccepted,
     /// API token is invalid, expired, or revoked.
+    #[error("unauthorized")]
     Unauthorized,
     /// User is deactivated or lacks the `AccessMcp` permission.
+    #[error("forbidden")]
     Forbidden,
     /// Internal error during validation.
+    #[error("internal error")]
     Internal,
 }
 
@@ -88,31 +92,24 @@ pub enum McpAuthError {
 /// NOT a wire type — converted to MCP tool error responses internally.
 /// `#[non_exhaustive]`: future triggers may add variants (rate-limit, quota).
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum McpTriggerError {
+    #[error("permission denied")]
     PermissionDenied,
+    #[error("host not found")]
     HostNotFound,
+    #[error("software item not found")]
     SoftwareItemNotFound,
     /// Host exists but lacks assignment, plugin config, or a known plugin type.
+    #[error("host not configured for updates")]
     NotConfigured,
     /// Host has no linked agent or agent is not in Approved status.
+    #[error("agent unavailable")]
     AgentUnavailable,
+    #[error("update already in progress")]
     AlreadyInProgress,
+    #[error("internal error")]
     Internal,
-}
-
-impl fmt::Display for McpTriggerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PermissionDenied => write!(f, "permission denied"),
-            Self::HostNotFound => write!(f, "host not found"),
-            Self::SoftwareItemNotFound => write!(f, "software item not found"),
-            Self::NotConfigured => write!(f, "host not configured for updates"),
-            Self::AgentUnavailable => write!(f, "agent unavailable"),
-            Self::AlreadyInProgress => write!(f, "update already in progress"),
-            Self::Internal => write!(f, "internal error"),
-        }
-    }
 }
 
 impl From<&UpdateDispatchError> for McpTriggerError {
@@ -131,5 +128,22 @@ impl From<&UpdateDispatchError> for McpTriggerError {
                 Self::Internal
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_std_error<E: std::error::Error>() {}
+
+    #[test]
+    fn mcp_auth_error_implements_std_error() {
+        assert_std_error::<McpAuthError>();
+    }
+
+    #[test]
+    fn mcp_trigger_error_implements_std_error() {
+        assert_std_error::<McpTriggerError>();
     }
 }

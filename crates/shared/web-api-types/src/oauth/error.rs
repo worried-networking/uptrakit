@@ -73,7 +73,7 @@ pub enum OAuthError {
     InsufficientScope,
     /// Database error encountered while servicing the request. Bridged via
     /// `impl_report_conversion!` — no `#[from]` here.
-    #[error("database error: {0}")]
+    #[error("database error")]
     Database(sea_orm::DbErr),
 }
 

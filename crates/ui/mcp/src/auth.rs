@@ -77,9 +77,9 @@ where
 
     fn call(&mut self, mut req: axum::extract::Request<B>) -> Self::Future {
         let state = self.state.clone();
-        // Standard Tower clone-and-swap so the ready clone is used.
-        let mut inner = self.inner.clone();
-        std::mem::swap(&mut inner, &mut self.inner);
+        // Standard Tower clone-and-replace so the ready service is used for this call.
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
 
         Box::pin(async move {
             let token = extract_bearer_token(&req);

@@ -42,6 +42,16 @@ pub enum ResponseType {
     Code,
 }
 
+impl ResponseType {
+    /// Returns the canonical OAuth string representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ResponseType::Code => "code",
+        }
+    }
+}
+
 /// PKCE code challenge methods (RFC 7636 §4.2).
 ///
 /// MCP authorization servers only accept `S256` per OAuth 2.1.
@@ -64,6 +74,17 @@ pub enum TokenEndpointAuthMethod {
     ClientSecretBasic,
 }
 
+impl TokenEndpointAuthMethod {
+    /// Returns the canonical OAuth string representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TokenEndpointAuthMethod::None => "none",
+            TokenEndpointAuthMethod::ClientSecretBasic => "client_secret_basic",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +105,31 @@ mod tests {
     fn code_challenge_method_only_s256() {
         let s = serde_json::to_string(&CodeChallengeMethod::S256).unwrap();
         assert_eq!(s, r#""S256""#);
+    }
+
+    #[test]
+    fn response_type_as_str_matches_serde() {
+        assert_eq!(
+            serde_json::to_string(&ResponseType::Code).unwrap(),
+            r#""code""#
+        );
+        assert_eq!(ResponseType::Code.as_str(), "code");
+    }
+
+    #[test]
+    fn token_endpoint_auth_method_as_str_matches_serde() {
+        assert_eq!(TokenEndpointAuthMethod::None.as_str(), "none");
+        assert_eq!(
+            serde_json::to_string(&TokenEndpointAuthMethod::None).unwrap(),
+            r#""none""#
+        );
+        assert_eq!(
+            TokenEndpointAuthMethod::ClientSecretBasic.as_str(),
+            "client_secret_basic"
+        );
+        assert_eq!(
+            serde_json::to_string(&TokenEndpointAuthMethod::ClientSecretBasic).unwrap(),
+            r#""client_secret_basic""#
+        );
     }
 }
