@@ -83,7 +83,6 @@ mod tests {
         reason = "test assertions — is_ok/is_err provides readable failure messages"
     )]
     use crate::auth::{AuthResponse, UserResponse};
-    use crate::device_auth::DeviceAuthPollResponse;
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
@@ -92,7 +91,7 @@ mod tests {
     use crate::software_items::CreateSoftwareItemRequest;
     use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
-    use uptrakit_shared_types::{DeviceAuthStatus, SecretString};
+    use uptrakit_shared_types::SecretString;
     use uuid::Uuid;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
@@ -352,73 +351,7 @@ mod tests {
     }
 
     // ── 5. Option fields serialize as null ─────────────────────────────────
-
-    #[test]
-    fn device_auth_poll_response_serializes_none_as_null() {
-        let resp = DeviceAuthPollResponse {
-            status: DeviceAuthStatus::Pending,
-            token: None,
-            token_name: None,
-        };
-        let json = serde_json::to_value(&resp).unwrap();
-        let obj = json.as_object().unwrap();
-
-        assert!(obj.contains_key("status"));
-        assert!(
-            obj.get("token").unwrap().is_null(),
-            "token should serialize as null when None"
-        );
-        assert!(
-            obj.get("token_name").unwrap().is_null(),
-            "token_name should serialize as null when None"
-        );
-    }
-
-    #[test]
-    fn device_auth_poll_response_includes_some_fields() {
-        let resp = DeviceAuthPollResponse {
-            status: DeviceAuthStatus::Authorized,
-            token: Some(SecretString::new("secret-token-value")),
-            token_name: Some("my-device".to_string()),
-        };
-        let json = serde_json::to_value(&resp).unwrap();
-        let obj = json.as_object().unwrap();
-
-        assert_eq!(obj.get("status").unwrap(), "authorized");
-        assert_eq!(obj.get("token").unwrap(), "secret-token-value");
-        assert_eq!(obj.get("token_name").unwrap(), "my-device");
-    }
-
-    #[test]
-    fn device_auth_poll_response_round_trip_with_none() {
-        let resp = DeviceAuthPollResponse {
-            status: DeviceAuthStatus::Pending,
-            token: None,
-            token_name: None,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        let deserialized: DeviceAuthPollResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.status, DeviceAuthStatus::Pending);
-        assert!(deserialized.token.is_none());
-        assert!(deserialized.token_name.is_none());
-    }
-
-    #[test]
-    fn device_auth_poll_response_round_trip_with_some() {
-        let resp = DeviceAuthPollResponse {
-            status: DeviceAuthStatus::Authorized,
-            token: Some(SecretString::new("tok")),
-            token_name: Some("dev".to_string()),
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        let deserialized: DeviceAuthPollResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.status, DeviceAuthStatus::Authorized);
-        assert_eq!(
-            deserialized.token.as_ref().map(|t| t.expose_secret()),
-            Some("tok")
-        );
-        assert_eq!(deserialized.token_name.as_deref(), Some("dev"));
-    }
+    // (device_auth_poll_response tests removed — DeviceAuthPollResponse deleted in RFC 8628 migration)
 
     // ── 6. Representative struct round-trips ──────────────────────────────
 
@@ -1083,29 +1016,6 @@ mod tests {
         assert_eq!(err.field, "trusted_proxies");
     }
 
-    // ── 12. Device auth SSE types ────────────────────────────────────
-
-    #[test]
-    fn device_auth_authorized_sse_round_trip() {
-        use crate::device_auth::DeviceAuthAuthorizedSse;
-        let event = DeviceAuthAuthorizedSse {
-            token: SecretString::new("secret-api-token"),
-            token_name: "my-device".to_string(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        let deserialized: DeviceAuthAuthorizedSse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.token.expose_secret(), "secret-api-token");
-        assert_eq!(deserialized.token_name, "my-device");
-    }
-
-    #[test]
-    fn device_auth_expired_sse_round_trip() {
-        use crate::device_auth::DeviceAuthExpiredSse;
-        let event = DeviceAuthExpiredSse {
-            message: "Device flow expired".to_string(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        let deserialized: DeviceAuthExpiredSse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.message, "Device flow expired");
-    }
+    // (device_auth SSE type tests removed — DeviceAuthAuthorizedSse / DeviceAuthExpiredSse
+    //  deleted in RFC 8628 migration)
 }
