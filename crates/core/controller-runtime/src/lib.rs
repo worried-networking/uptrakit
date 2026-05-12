@@ -264,9 +264,16 @@ async fn run_server(args: cli::Args) -> Result<()> {
     } = pki;
 
     // Build shared application state
+    // Two-step: clone as concrete type then coerce to Arc<dyn IssuerSource>.
+    // Arc::clone resolves its argument type from the return annotation, so
+    // we cannot pass &Arc<CrlManager> when the binding expects Arc<dyn Trait>.
+    let issuer_source: Arc<dyn cert_signer::IssuerSource> = {
+        let concrete: Arc<crl_manager::CrlManager> = Arc::clone(&crl_manager);
+        concrete
+    };
     let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
         ca_rx.clone(),
-        Arc::clone(&crl_manager) as Arc<dyn cert_signer::IssuerSource>,
+        issuer_source,
     ));
 
     #[cfg(feature = "oidc")]
