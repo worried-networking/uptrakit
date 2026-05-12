@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rcgen::{
     CertificateParams, CertificateSigningRequestParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair,
@@ -10,9 +12,24 @@ use uuid::Uuid;
 
 use crate::pki::CaSnapshot;
 
+/// Abstraction over the cached `Arc<Issuer>` store so that tests can inject a
+/// simple `HashMap`-backed stub without pulling in the full `CrlManager`
+/// (which requires a live `DatabaseConnection`).
+#[async_trait::async_trait]
+pub(crate) trait IssuerSource: Send + Sync {
+    async fn issuer_for(&self, fingerprint: &str) -> Option<Arc<Issuer<'static, KeyPair>>>;
+}
+
+#[async_trait::async_trait]
+impl IssuerSource for crate::crl_manager::CrlManager {
+    async fn issuer_for(&self, fingerprint: &str) -> Option<Arc<Issuer<'static, KeyPair>>> {
+        self.issuer_for(fingerprint).await
+    }
+}
+
 pub(crate) struct RcgenAgentCertSigner {
     ca_rx: watch::Receiver<CaSnapshot>,
-    ca_key_store: uptrakit_web_api::CaKeyStoreRef,
+    issuer_source: Arc<dyn IssuerSource>,
 }
 
 /// Maximum certificate lifetime: 2 years (730 days).
@@ -21,11 +38,11 @@ const MAX_CERT_LIFETIME: time::Duration = time::Duration::days(730);
 impl RcgenAgentCertSigner {
     pub(crate) fn new(
         ca_rx: watch::Receiver<CaSnapshot>,
-        ca_key_store: uptrakit_web_api::CaKeyStoreRef,
+        issuer_source: Arc<dyn IssuerSource>,
     ) -> Self {
         Self {
             ca_rx,
-            ca_key_store,
+            issuer_source,
         }
     }
 }
@@ -39,14 +56,16 @@ impl AgentCertSigner for RcgenAgentCertSigner {
         lifetime: time::Duration,
     ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
         let snapshot = self.ca_rx.borrow().clone();
-        let key_pem = {
-            let key_store = self.ca_key_store.read().await;
-            key_store.active_key_pem.clone()
-        };
-        let key_pair = KeyPair::from_pem(&key_pem)
-            .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
-        let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
-            .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
+        let issuer = self
+            .issuer_source
+            .issuer_for(&snapshot.active_fingerprint)
+            .await
+            .ok_or_else(|| {
+                report!(CertSignerError::CaKeyParse(format!(
+                    "no cached issuer for fingerprint {}",
+                    snapshot.active_fingerprint
+                )))
+            })?;
         sign_agent_csr(
             csr_pem,
             &issuer,
@@ -168,8 +187,23 @@ mod tests {
         reason = "test code: discarding `install_default` result is idiomatic — it returns `Err` once the provider is already installed"
     )]
 
+    use std::collections::HashMap;
+
     use super::*;
     use crate::pki;
+
+    /// Minimal `IssuerSource` backed by an in-memory map — avoids the need for
+    /// a live `DatabaseConnection` in unit tests.
+    struct MapIssuerSource {
+        map: HashMap<String, Arc<Issuer<'static, KeyPair>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl IssuerSource for MapIssuerSource {
+        async fn issuer_for(&self, fingerprint: &str) -> Option<Arc<Issuer<'static, KeyPair>>> {
+            self.map.get(fingerprint).cloned()
+        }
+    }
 
     fn make_test_signer() -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
         let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
@@ -192,10 +226,18 @@ mod tests {
             trusted: vec![ca],
             managed: true,
         };
-        let (snapshot, key_store) = state.to_snapshot(None).unwrap();
-        let ca_key_store = std::sync::Arc::new(tokio::sync::RwLock::new(key_store));
+        let (snapshot, _key_store) = state.to_snapshot(None).unwrap();
+
+        let fingerprint = snapshot.active_fingerprint.clone();
+        let key_pair2 = KeyPair::from_pem(&key_pem).unwrap();
+        let issuer = Arc::new(Issuer::from_ca_cert_pem(&cert_pem, key_pair2).unwrap());
+
+        let mut map = HashMap::new();
+        map.insert(fingerprint, issuer);
+        let issuer_source: Arc<dyn IssuerSource> = Arc::new(MapIssuerSource { map });
+
         let (tx, rx) = watch::channel(snapshot);
-        (RcgenAgentCertSigner::new(rx, ca_key_store), tx)
+        (RcgenAgentCertSigner::new(rx, issuer_source), tx)
     }
 
     /// Generate a test CSR with the given CN using rcgen.
