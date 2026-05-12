@@ -42,21 +42,34 @@ impl FromStr for AuditActionKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RegisteredAuditAction(&'static str);
+pub struct RegisteredAuditAction {
+    value: &'static str,
+    kind: AuditActionKind,
+}
 
 impl RegisteredAuditAction {
-    pub const fn new(value: &'static str) -> Self {
-        Self(value)
+    /// Creates a new registered audit action with the given string key and kind.
+    #[must_use]
+    pub const fn new(value: &'static str, kind: AuditActionKind) -> Self {
+        Self { value, kind }
     }
 
+    /// Returns the canonical dot-separated string key for this action.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
-        self.0
+        self.value
+    }
+
+    /// Returns the [`AuditActionKind`] classification for this action.
+    #[must_use]
+    pub const fn kind(self) -> AuditActionKind {
+        self.kind
     }
 }
 
 impl fmt::Display for RegisteredAuditAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
+        f.write_str(self.value)
     }
 }
 
@@ -64,235 +77,263 @@ impl fmt::Display for RegisteredAuditAction {
 pub struct AuditActionType(String);
 
 impl AuditActionType {
-    pub const AUTH_LOGIN: RegisteredAuditAction = RegisteredAuditAction::new("auth.login");
-    pub const AUTH_LOGOUT: RegisteredAuditAction = RegisteredAuditAction::new("auth.logout");
+    pub const AUTH_LOGIN: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.login", AuditActionKind::Event);
+    pub const AUTH_LOGOUT: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.logout", AuditActionKind::Event);
     pub const AUTH_API_TOKEN_AUTHENTICATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.api_token.authenticate");
+        RegisteredAuditAction::new("auth.api_token.authenticate", AuditActionKind::Event);
     pub const AUTH_JWT_AUTHENTICATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.jwt.authenticate");
+        RegisteredAuditAction::new("auth.jwt.authenticate", AuditActionKind::Event);
     pub const AUTH_SERVICE_AUTHENTICATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.service.authenticate");
+        RegisteredAuditAction::new("auth.service.authenticate", AuditActionKind::Event);
     pub const AUTH_TOKEN_REFRESH: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.token_refresh");
+        RegisteredAuditAction::new("auth.token_refresh", AuditActionKind::Event);
     pub const AUTH_DEVICE_START: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.device.start");
+        RegisteredAuditAction::new("auth.device.start", AuditActionKind::Event);
     pub const AUTH_DEVICE_POLL: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.device.poll");
+        RegisteredAuditAction::new("auth.device.poll", AuditActionKind::Event);
     pub const AUTH_DEVICE_APPROVE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.device.approve");
+        RegisteredAuditAction::new("auth.device.approve", AuditActionKind::Event);
     pub const AUTH_DEVICE_DENY: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.device.deny");
+        RegisteredAuditAction::new("auth.device.deny", AuditActionKind::Event);
     pub const AUTH_OIDC_AUTHORIZE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.oidc.authorize");
+        RegisteredAuditAction::new("auth.oidc.authorize", AuditActionKind::Event);
     pub const AUTH_OIDC_CALLBACK: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.oidc.callback");
+        RegisteredAuditAction::new("auth.oidc.callback", AuditActionKind::Event);
     pub const AUTH_OIDC_EXCHANGE: RegisteredAuditAction =
-        RegisteredAuditAction::new("auth.oidc.exchange");
-    pub const AUTH_OIDC_LINK: RegisteredAuditAction = RegisteredAuditAction::new("auth.oidc.link");
+        RegisteredAuditAction::new("auth.oidc.exchange", AuditActionKind::Event);
+    pub const AUTH_OIDC_LINK: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.oidc.link", AuditActionKind::Event);
     pub const API_TOKEN_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("api_token.create");
+        RegisteredAuditAction::new("api_token.create", AuditActionKind::Stateful);
     pub const API_TOKEN_REVOKE: RegisteredAuditAction =
-        RegisteredAuditAction::new("api_token.revoke");
+        RegisteredAuditAction::new("api_token.revoke", AuditActionKind::Stateful);
     pub const ENROLLMENT_TOKEN_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("enrollment_token.create");
+        RegisteredAuditAction::new("enrollment_token.create", AuditActionKind::Stateful);
     pub const ENROLLMENT_TOKEN_REVOKE: RegisteredAuditAction =
-        RegisteredAuditAction::new("enrollment_token.revoke");
-    pub const USER_CREATE: RegisteredAuditAction = RegisteredAuditAction::new("user.create");
-    pub const USER_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("user.update");
-    pub const USER_DELETE: RegisteredAuditAction = RegisteredAuditAction::new("user.delete");
+        RegisteredAuditAction::new("enrollment_token.revoke", AuditActionKind::Stateful);
+    pub const USER_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("user.create", AuditActionKind::Stateful);
+    pub const USER_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("user.update", AuditActionKind::Stateful);
+    pub const USER_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("user.delete", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("oidc_provider.create");
+        RegisteredAuditAction::new("oidc_provider.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("oidc_provider.update");
+        RegisteredAuditAction::new("oidc_provider.update", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("oidc_provider.delete");
+        RegisteredAuditAction::new("oidc_provider.delete", AuditActionKind::Stateful);
     pub const PLUGIN_CONFIG_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("plugin_config.create");
+        RegisteredAuditAction::new("plugin_config.create", AuditActionKind::Stateful);
     pub const PLUGIN_CONFIG_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("plugin_config.update");
+        RegisteredAuditAction::new("plugin_config.update", AuditActionKind::Stateful);
     pub const PLUGIN_CONFIG_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("plugin_config.delete");
+        RegisteredAuditAction::new("plugin_config.delete", AuditActionKind::Stateful);
     pub const PLUGIN_TYPE_SETTINGS_UPSERT: RegisteredAuditAction =
-        RegisteredAuditAction::new("plugin_type_settings.upsert");
+        RegisteredAuditAction::new("plugin_type_settings.upsert", AuditActionKind::Stateful);
     pub const PLUGIN_TYPE_SETTINGS_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("plugin_type_settings.delete");
+        RegisteredAuditAction::new("plugin_type_settings.delete", AuditActionKind::Stateful);
     pub const INSTANCE_PLUGIN_TOGGLED: RegisteredAuditAction =
-        RegisteredAuditAction::new("instance_plugin.toggled");
+        RegisteredAuditAction::new("instance_plugin.toggled", AuditActionKind::Stateful);
     pub const INSTANCE_PLUGIN_CONFIG_UPSERTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("instance_plugin.config_upserted");
+        RegisteredAuditAction::new("instance_plugin.config_upserted", AuditActionKind::Stateful);
     pub const NOTIFICATION_CHANNEL_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_channel.create");
+        RegisteredAuditAction::new("notification_channel.create", AuditActionKind::Stateful);
     pub const NOTIFICATION_CHANNEL_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_channel.update");
+        RegisteredAuditAction::new("notification_channel.update", AuditActionKind::Stateful);
     pub const NOTIFICATION_CHANNEL_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_channel.delete");
+        RegisteredAuditAction::new("notification_channel.delete", AuditActionKind::Stateful);
     pub const NOTIFICATION_CHANNEL_TEST: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_channel.test");
+        RegisteredAuditAction::new("notification_channel.test", AuditActionKind::Event);
     pub const NOTIFICATION_RULE_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_rule.create");
+        RegisteredAuditAction::new("notification_rule.create", AuditActionKind::Stateful);
     pub const NOTIFICATION_RULE_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_rule.update");
+        RegisteredAuditAction::new("notification_rule.update", AuditActionKind::Stateful);
     pub const NOTIFICATION_RULE_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_rule.delete");
+        RegisteredAuditAction::new("notification_rule.delete", AuditActionKind::Stateful);
     pub const NOTIFICATION_RULE_TEST: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification_rule.test");
+        RegisteredAuditAction::new("notification_rule.test", AuditActionKind::Event);
     pub const NOTIFICATION_CALLBACK: RegisteredAuditAction =
-        RegisteredAuditAction::new("notification.callback");
+        RegisteredAuditAction::new("notification.callback", AuditActionKind::Event);
     pub const GLOBAL_SETTING_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("global_setting.update");
+        RegisteredAuditAction::new("global_setting.update", AuditActionKind::Stateful);
     pub const TENANT_SETTING_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("tenant_setting.update");
+        RegisteredAuditAction::new("tenant_setting.update", AuditActionKind::Stateful);
     pub const TENANT_DATA_RESET: RegisteredAuditAction =
-        RegisteredAuditAction::new("tenant.data.reset");
+        RegisteredAuditAction::new("tenant.data.reset", AuditActionKind::Event);
     pub const SYSTEM_CA_ROTATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.ca.rotate");
+        RegisteredAuditAction::new("system.ca.rotate", AuditActionKind::Event);
     pub const SYSTEM_SERVER_CERTIFICATE_RENEW: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.server_certificate.renew");
+        RegisteredAuditAction::new("system.server_certificate.renew", AuditActionKind::Event);
     pub const SCHEDULED_TASK_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("scheduled_task.update");
+        RegisteredAuditAction::new("scheduled_task.update", AuditActionKind::Stateful);
     pub const SCHEDULED_TASK_TRIGGER: RegisteredAuditAction =
-        RegisteredAuditAction::new("scheduled_task.trigger");
+        RegisteredAuditAction::new("scheduled_task.trigger", AuditActionKind::Event);
     pub const HOST_TAG_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("host_tag.create");
+        RegisteredAuditAction::new("host_tag.create", AuditActionKind::Stateful);
     pub const HOST_TAG_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("host_tag.update");
+        RegisteredAuditAction::new("host_tag.update", AuditActionKind::Stateful);
     pub const HOST_TAG_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("host_tag.delete");
+        RegisteredAuditAction::new("host_tag.delete", AuditActionKind::Stateful);
     pub const HOST_TAG_ASSIGN: RegisteredAuditAction =
-        RegisteredAuditAction::new("host_tag.assign");
-    pub const HOST_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("host.update");
+        RegisteredAuditAction::new("host_tag.assign", AuditActionKind::Event);
+    pub const HOST_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host.update", AuditActionKind::Stateful);
     pub const HOST_DEACTIVATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("host.deactivate");
-    pub const HOST_DISCOVER: RegisteredAuditAction = RegisteredAuditAction::new("host.discover");
-    pub const SERVICE_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("service.update");
+        RegisteredAuditAction::new("host.deactivate", AuditActionKind::Stateful);
+    pub const HOST_DISCOVER: RegisteredAuditAction =
+        RegisteredAuditAction::new("host.discover", AuditActionKind::Event);
+    pub const SERVICE_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.update", AuditActionKind::Stateful);
     pub const SERVICE_APPROVE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.approve");
-    pub const SERVICE_REJECT: RegisteredAuditAction = RegisteredAuditAction::new("service.reject");
-    pub const SERVICE_MERGE: RegisteredAuditAction = RegisteredAuditAction::new("service.merge");
+        RegisteredAuditAction::new("service.approve", AuditActionKind::Stateful);
+    pub const SERVICE_REJECT: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.reject", AuditActionKind::Stateful);
+    pub const SERVICE_MERGE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.merge", AuditActionKind::Event);
     pub const SERVICE_UPDATE_FREEZE_ENABLE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.update_freeze.enable");
+        RegisteredAuditAction::new("service.update_freeze.enable", AuditActionKind::Stateful);
     pub const SERVICE_UPDATE_FREEZE_DISABLE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.update_freeze.disable");
+        RegisteredAuditAction::new("service.update_freeze.disable", AuditActionKind::Stateful);
     pub const SERVICE_DEACTIVATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.deactivate");
+        RegisteredAuditAction::new("service.deactivate", AuditActionKind::Stateful);
     pub const SERVICE_CONFIG_STORE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service_config.store");
+        RegisteredAuditAction::new("service_config.store", AuditActionKind::Stateful);
     pub const SERVICE_CONFIG_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service_config.delete");
+        RegisteredAuditAction::new("service_config.delete", AuditActionKind::Stateful);
     pub const SERVICE_CONFIG_DELIVER: RegisteredAuditAction =
-        RegisteredAuditAction::new("service_config.deliver");
+        RegisteredAuditAction::new("service_config.deliver", AuditActionKind::Event);
     pub const SERVICE_CERTIFICATE_ISSUE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.certificate.issue");
+        RegisteredAuditAction::new("service.certificate.issue", AuditActionKind::Event);
     pub const SERVICE_CERTIFICATE_RENEW: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.certificate.renew");
+        RegisteredAuditAction::new("service.certificate.renew", AuditActionKind::Event);
     pub const SERVICE_ENROLLMENT_COMPLETED: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.enrollment.completed");
+        RegisteredAuditAction::new("service.enrollment.completed", AuditActionKind::Event);
     pub const SERVICE_CREDENTIALS_DELIVER: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.credentials.deliver");
+        RegisteredAuditAction::new("service.credentials.deliver", AuditActionKind::Event);
     pub const SERVICE_WORKLOAD_CLAIM: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.workload.claim");
+        RegisteredAuditAction::new("service.workload.claim", AuditActionKind::Event);
     pub const SERVICE_WORKLOAD_RELEASE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.workload.release");
+        RegisteredAuditAction::new("service.workload.release", AuditActionKind::Event);
     pub const SURFACE_PROVIDER_REGISTER: RegisteredAuditAction =
-        RegisteredAuditAction::new("surface_provider.register");
+        RegisteredAuditAction::new("surface_provider.register", AuditActionKind::Event);
     pub const SURFACE_ACTION_INVOKE: RegisteredAuditAction =
-        RegisteredAuditAction::new("surface_action.invoke");
+        RegisteredAuditAction::new("surface_action.invoke", AuditActionKind::Event);
     pub const SOFTWARE_IGNORE_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.ignore.create");
+        RegisteredAuditAction::new("software.ignore.create", AuditActionKind::Stateful);
     pub const SOFTWARE_IGNORE_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.ignore.delete");
+        RegisteredAuditAction::new("software.ignore.delete", AuditActionKind::Stateful);
     pub const DISCOVERY_ALLOWLIST_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("discovery_allowlist.create");
+        RegisteredAuditAction::new("discovery_allowlist.create", AuditActionKind::Stateful);
     pub const DISCOVERY_ALLOWLIST_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("discovery_allowlist.delete");
+        RegisteredAuditAction::new("discovery_allowlist.delete", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_CREATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.create");
+        RegisteredAuditAction::new("software_item.create", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_UPDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.update");
+        RegisteredAuditAction::new("software_item.update", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.delete");
+        RegisteredAuditAction::new("software_item.delete", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_APPROVE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.approve");
+        RegisteredAuditAction::new("software_item.approve", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_ASSIGN_HOSTS: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.assign_hosts");
+        RegisteredAuditAction::new("software_item.assign_hosts", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_UNASSIGN_HOST: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.unassign_host");
+        RegisteredAuditAction::new("software_item.unassign_host", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.update_host_assignment");
+        RegisteredAuditAction::new(
+            "software_item.update_host_assignment",
+            AuditActionKind::Stateful,
+        );
     pub const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.delete_plugin_assignment");
+        RegisteredAuditAction::new(
+            "software_item.delete_plugin_assignment",
+            AuditActionKind::Stateful,
+        );
     pub const SOFTWARE_ITEM_MERGE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.merge");
+        RegisteredAuditAction::new("software_item.merge", AuditActionKind::Event);
     pub const SOFTWARE_ITEM_BATCH: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.batch");
+        RegisteredAuditAction::new("software_item.batch", AuditActionKind::Event);
     pub const SOFTWARE_VERSION_CHECK_TRIGGERED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.version_check.triggered");
+        RegisteredAuditAction::new("software.version_check.triggered", AuditActionKind::Event);
     pub const SOFTWARE_VERSION_CHECK_COMPLETED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.version_check.completed");
+        RegisteredAuditAction::new("software.version_check.completed", AuditActionKind::Event);
     pub const SOFTWARE_UPDATE_TRIGGERED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.update.triggered");
+        RegisteredAuditAction::new("software.update.triggered", AuditActionKind::Event);
     pub const SOFTWARE_BATCH_UPDATE_TRIGGERED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.batch_update.triggered");
+        RegisteredAuditAction::new("software.batch_update.triggered", AuditActionKind::Event);
     pub const SOFTWARE_UPDATE_STARTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.update.started");
+        RegisteredAuditAction::new("software.update.started", AuditActionKind::Event);
     pub const SOFTWARE_BATCH_UPDATE_STARTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.batch_update.started");
+        RegisteredAuditAction::new("software.batch_update.started", AuditActionKind::Event);
     pub const SOFTWARE_UPDATE_FINALIZED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.update.finalized");
+        RegisteredAuditAction::new("software.update.finalized", AuditActionKind::Event);
     pub const SOFTWARE_BATCH_UPDATE_FINALIZED: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.batch_update.finalized");
+        RegisteredAuditAction::new("software.batch_update.finalized", AuditActionKind::Event);
     pub const SOFTWARE_UPDATE_STDIN_ATTENTION: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.update.stdin_attention");
+        RegisteredAuditAction::new("software.update.stdin_attention", AuditActionKind::Event);
     pub const SOFTWARE_UPDATE_INTERACTIVE_CONTROL: RegisteredAuditAction =
-        RegisteredAuditAction::new("software.update.interactive_control");
+        RegisteredAuditAction::new(
+            "software.update.interactive_control",
+            AuditActionKind::Event,
+        );
     pub const SOFTWARE_ITEM_ENRICH: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.enrich");
+        RegisteredAuditAction::new("software_item.enrich", AuditActionKind::Event);
     pub const SYSTEM_SERVICE_UPDATE_GATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.service.update_gate");
+        RegisteredAuditAction::new("system.service.update_gate", AuditActionKind::Event);
     pub const SYSTEM_SERVICE_MACHINE_ID_VALIDATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.service.machine_id.validate");
+        RegisteredAuditAction::new("system.service.machine_id.validate", AuditActionKind::Event);
     pub const SYSTEM_SERVICE_UPDATE_FREEZE_APPLY: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.service.update_freeze.apply");
+        RegisteredAuditAction::new(
+            "system.service.update_freeze.apply",
+            AuditActionKind::Event,
+        );
     pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: RegisteredAuditAction =
-        RegisteredAuditAction::new("system.scheduler.audit_log_cleanup");
+        RegisteredAuditAction::new(
+            "system.scheduler.audit_log_cleanup",
+            AuditActionKind::Event,
+        );
     pub const OAUTH_AUTHORIZE_REQUEST: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.authorize_request");
+        RegisteredAuditAction::new("oauth.authorize_request", AuditActionKind::Event);
     pub const OAUTH_TOKEN_ISSUED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.token_issued");
+        RegisteredAuditAction::new("oauth.token_issued", AuditActionKind::Event);
     pub const OAUTH_TOKEN_REJECTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.token_rejected");
+        RegisteredAuditAction::new("oauth.token_rejected", AuditActionKind::Event);
     pub const OAUTH_REFRESH_ROTATED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.refresh_rotated");
+        RegisteredAuditAction::new("oauth.refresh_rotated", AuditActionKind::Event);
     pub const OAUTH_REFRESH_REPLAY_DETECTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.refresh_replay_detected");
+        RegisteredAuditAction::new("oauth.refresh_replay_detected", AuditActionKind::Event);
     pub const OAUTH_CLIENT_REGISTERED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_registered");
+        RegisteredAuditAction::new("oauth.client_registered", AuditActionKind::Event);
     pub const OAUTH_CLIENT_FIRST_USE: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_first_use");
+        RegisteredAuditAction::new("oauth.client_first_use", AuditActionKind::Event);
     pub const OAUTH_CLIENT_METADATA_REFRESHED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_metadata_refreshed");
-    pub const OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_metadata_changed_materially");
+        RegisteredAuditAction::new("oauth.client_metadata_refreshed", AuditActionKind::Event);
+    pub const OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY: RegisteredAuditAction = RegisteredAuditAction::new(
+        "oauth.client_metadata_changed_materially",
+        AuditActionKind::Event,
+    );
     pub const OAUTH_CLIENT_TRUSTED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_trusted");
+        RegisteredAuditAction::new("oauth.client_trusted", AuditActionKind::Event);
     pub const OAUTH_CLIENT_REVOKED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_revoked");
+        RegisteredAuditAction::new("oauth.client_revoked", AuditActionKind::Event);
     pub const OAUTH_CLIENT_REGISTRATION_RATE_LIMITED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_registration_rate_limited");
+        RegisteredAuditAction::new("oauth.client_registration_rate_limited", AuditActionKind::Event);
     pub const OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.config_audience_hosts_changed");
+        RegisteredAuditAction::new("oauth.config_audience_hosts_changed", AuditActionKind::Event);
     pub const OAUTH_CIMD_PARSE_FAILED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.cimd_parse_failed");
+        RegisteredAuditAction::new("oauth.cimd_parse_failed", AuditActionKind::Event);
     pub const OAUTH_CONSENT_GRANT: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.consent_grant");
+        RegisteredAuditAction::new("oauth.consent_grant", AuditActionKind::Event);
     pub const OAUTH_CONSENT_DENY: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.consent_deny");
+        RegisteredAuditAction::new("oauth.consent_deny", AuditActionKind::Event);
     pub const OAUTH_CONSENT_REVOKE: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.consent_revoke");
+        RegisteredAuditAction::new("oauth.consent_revoke", AuditActionKind::Event);
     pub const OAUTH_RATE_LIMITED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.rate_limited");
+        RegisteredAuditAction::new("oauth.rate_limited", AuditActionKind::Event);
     pub const MCP_OAUTH_AUTHENTICATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("mcp.oauth_authenticate");
+        RegisteredAuditAction::new("mcp.oauth_authenticate", AuditActionKind::Event);
 
     fn parse_any(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
@@ -415,6 +456,25 @@ impl AuditActionType {
             AuditActionType::SYSTEM_SERVICE_MACHINE_ID_VALIDATE,
             AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY,
             AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP,
+            AuditActionType::OAUTH_AUTHORIZE_REQUEST,
+            AuditActionType::OAUTH_TOKEN_ISSUED,
+            AuditActionType::OAUTH_TOKEN_REJECTED,
+            AuditActionType::OAUTH_REFRESH_ROTATED,
+            AuditActionType::OAUTH_REFRESH_REPLAY_DETECTED,
+            AuditActionType::OAUTH_CLIENT_REGISTERED,
+            AuditActionType::OAUTH_CLIENT_FIRST_USE,
+            AuditActionType::OAUTH_CLIENT_METADATA_REFRESHED,
+            AuditActionType::OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY,
+            AuditActionType::OAUTH_CLIENT_TRUSTED,
+            AuditActionType::OAUTH_CLIENT_REVOKED,
+            AuditActionType::OAUTH_CLIENT_REGISTRATION_RATE_LIMITED,
+            AuditActionType::OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED,
+            AuditActionType::OAUTH_CIMD_PARSE_FAILED,
+            AuditActionType::OAUTH_CONSENT_GRANT,
+            AuditActionType::OAUTH_CONSENT_DENY,
+            AuditActionType::OAUTH_CONSENT_REVOKE,
+            AuditActionType::OAUTH_RATE_LIMITED,
+            AuditActionType::MCP_OAUTH_AUTHENTICATE,
         ];
 
         V1_ACTIONS.iter().any(|action| action.as_str() == value)
@@ -441,26 +501,26 @@ impl PartialEq<&str> for AuditActionType {
 
 impl PartialEq<RegisteredAuditAction> for AuditActionType {
     fn eq(&self, other: &RegisteredAuditAction) -> bool {
-        self.0 == other.0
+        self.0 == other.value
     }
 }
 
 impl PartialEq<String> for RegisteredAuditAction {
     fn eq(&self, other: &String) -> bool {
-        self.0 == other
+        self.value == other
     }
 }
 
 impl PartialEq<str> for RegisteredAuditAction {
     fn eq(&self, other: &str) -> bool {
-        self.0 == other
+        self.value == other
     }
 }
 
 #[cfg(feature = "db")]
 impl From<RegisteredAuditAction> for sea_orm::Value {
     fn from(action: RegisteredAuditAction) -> Self {
-        sea_orm::Value::String(Some(action.0.to_owned()))
+        sea_orm::Value::String(Some(action.value.to_owned()))
     }
 }
 
@@ -723,5 +783,14 @@ mod tests {
             Ok(AuditActionKind::Event)
         );
         assert!(AuditActionKind::from_str("other").is_err());
+    }
+
+    #[test]
+    fn registered_action_carries_kind() {
+        assert_eq!(AuditActionType::AUTH_LOGIN.kind(), AuditActionKind::Event);
+        assert_eq!(
+            AuditActionType::PLUGIN_CONFIG_UPDATE.kind(),
+            AuditActionKind::Stateful
+        );
     }
 }
