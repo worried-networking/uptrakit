@@ -8453,6 +8453,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-wire",
+ "url",
  "utoipa",
  "uuid",
  "zeroize",
