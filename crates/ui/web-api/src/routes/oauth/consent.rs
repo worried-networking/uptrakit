@@ -10,9 +10,9 @@ use axum::Extension;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uptrakit_audit_log::{AuditActorType, AuditEntry, AuditOutcome, Event};
-use uptrakit_shared_db::entity::oauth_authorization_request;
+use uptrakit_shared_db::entity::{oauth_authorization_request, oauth_consent};
 use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api_types::oauth::ConsentDecision;
 use uuid::Uuid;
@@ -152,6 +152,25 @@ pub async fn consent_details(
         }
     };
 
+    // Check whether an existing active consent requires revalidation.
+    let existing_consent = match oauth_consent::Entity::find()
+        .filter(oauth_consent::Column::UserId.eq(row.user_id))
+        .filter(oauth_consent::Column::ClientId.eq(row.client_id.as_str()))
+        .filter(oauth_consent::Column::RevokedAt.is_null())
+        .one(state.db())
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to fetch oauth_consent for revalidation check");
+            return oauth_500();
+        }
+    };
+    let revalidation_required = existing_consent
+        .as_ref()
+        .map(|c| c.revalidation_required_at.is_some())
+        .unwrap_or(false);
+
     // Derive redirect_uri_hostname and typed_confirmation_value.
     let redirect_hostname = url::Url::parse(&row.redirect_uri)
         .ok()
@@ -171,7 +190,8 @@ pub async fn consent_details(
         "redirect_uri_hostname": redirect_hostname,
         "requires_typed_confirmation": requires_typed_confirmation,
         "typed_confirmation_value": typed_confirmation_value,
-        "revalidation_required": false,
+        "revalidation_required": revalidation_required,
+        "metadata_change_diff": null,  // populated when CIMD lands
     });
 
     (StatusCode::OK, axum::Json(body)).into_response()
@@ -226,6 +246,27 @@ pub async fn approve_consent(
         return r;
     }
 
+    // Pre-flight ownership check before consuming.
+    let preflight = match oauth_authorization_request::Entity::find_by_id(request_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return oauth_400(
+                "invalid_request",
+                "authorization request expired or already used",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "preflight fetch failed");
+            return oauth_500();
+        }
+    };
+    if preflight.user_id != auth_user.user_id {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     // Consume the authorization request atomically.
     let ar_svc =
         OAuthAuthorizationRequestService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
@@ -243,7 +284,7 @@ pub async fn approve_consent(
         }
     };
 
-    // Ownership check.
+    // Defensive ownership check: row.user_id must match since preflight verified it.
     if row.user_id != auth_user.user_id {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -745,7 +786,29 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 3 — POST approve redirects with code
+    // Test 3 — GET without auth returns 401
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn consent_details_unauthenticated_returns_401() {
+        let app = setup().await;
+        let user_id = insert_test_user(&app.db).await;
+        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
+        let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/oauth/consent/{request_id}"))
+            // No Authorization header.
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = app.router.oneshot(req).await.expect("oneshot");
+        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 4 — POST approve redirects with code
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -789,7 +852,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 4 — POST approve with wrong typed confirmation returns 400
+    // Test 5 — POST approve with wrong typed confirmation returns 400
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -823,7 +886,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 5 — POST deny redirects with access_denied
+    // Test 6 — POST deny redirects with access_denied
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -865,7 +928,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 6 — OAuth disabled returns 404
+    // Test 7 — OAuth disabled returns 404
     // -----------------------------------------------------------------------
 
     #[tokio::test]
