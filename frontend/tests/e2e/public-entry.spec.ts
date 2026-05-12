@@ -174,7 +174,7 @@ test.describe('public-entry snapshots', () => {
 
 			test(`device unauthenticated — ${theme}`, async ({ page }) => {
 				await mockAuthMethods(page);
-				await page.goto('/device?code=BCDF-GHJK');
+				await page.goto('/device?user_code=BCDF-GHJK');
 				await page.waitForSelector(SHELL_SELECTOR);
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-unauth-${theme}.png`, {
 					threshold: 0.005
@@ -184,9 +184,16 @@ test.describe('public-entry snapshots', () => {
 			test(`device authenticated — ${theme}`, async ({ page }) => {
 				await mockAuthenticatedSession(page);
 				await mockAuthMethods(page);
-				await page.goto('/device?code=BCDF-GHJK');
+				await page.route('**/api/v1/auth/device/lookup*', (route) =>
+					route.fulfill({
+						json: { client_name: null, expires_at: '2026-05-12T12:00:00Z' }
+					})
+				);
+				const lookupDone = page.waitForResponse('**/api/v1/auth/device/lookup*');
+				await page.goto('/device?user_code=BCDF-GHJK');
 				await page.waitForSelector(SHELL_SELECTOR);
 				await page.waitForSelector('[role="button"]:has-text("Approve"), button:has-text("Approve")');
+				await lookupDone;
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-auth-${theme}.png`, {
 					threshold: 0.005
 				});

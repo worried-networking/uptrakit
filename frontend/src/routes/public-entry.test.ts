@@ -4,7 +4,9 @@ import { page } from '$app/state';
 
 vi.mock('$lib/api', () => ({
 	getAuthMethods: vi.fn(),
-	approveDeviceAuth: vi.fn()
+	approveDeviceAuth: vi.fn(),
+	denyDeviceAuth: vi.fn(),
+	lookupDeviceAuth: vi.fn().mockResolvedValue({ client_name: null, expires_at: '2026-05-12T12:00:00Z' })
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -116,7 +118,7 @@ describe('Public entry shell contract', () => {
 	});
 
 	it('uses semantic invalid-code callout treatment on /device', () => {
-		page.url = new URL('http://localhost/device?code=AB12-1BAD') as typeof page.url;
+		page.url = new URL('http://localhost/device?user_code=AB12-1BAD') as typeof page.url;
 
 		render(DevicePage);
 
@@ -165,7 +167,7 @@ describe('Public entry shell contract', () => {
 	});
 
 	it('Approve button shows aria-busy=true while approving', async () => {
-		page.url = new URL('http://localhost/device?code=BCDF-GHJK') as typeof page.url;
+		page.url = new URL('http://localhost/device?user_code=BCDF-GHJK') as typeof page.url;
 		vi.mocked(auth.getUser).mockReturnValue({
 			id: '1',
 			email: 'user@example.com',
@@ -226,7 +228,7 @@ describe('Public entry shell contract', () => {
 	});
 
 	it('text-swap guard: "Authorizing..." literal does not appear in device page', () => {
-		page.url = new URL('http://localhost/device?code=BCDF-GHJK') as typeof page.url;
+		page.url = new URL('http://localhost/device?user_code=BCDF-GHJK') as typeof page.url;
 		render(DevicePage);
 		expect(document.body.textContent).not.toContain('Authorizing...');
 	});
