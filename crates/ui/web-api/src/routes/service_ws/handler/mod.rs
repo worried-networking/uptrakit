@@ -3370,6 +3370,10 @@ mod tests {
     use uptrakit_wire::surfaces;
     use uuid::Uuid;
 
+    #[expect(
+        dead_code,
+        reason = "used in test setup for surface registration tests"
+    )]
     fn test_surface_registration(
         provider_id: &str,
         tenant_id: Uuid,
@@ -3454,6 +3458,7 @@ mod tests {
         }
     }
 
+    #[expect(dead_code, reason = "used in test setup for handler initialization")]
     async fn build_handler_test_state(
         surface_registry: Arc<crate::surface_registry::SurfaceRegistry>,
         surface_proxy: Arc<crate::surface_proxy::SurfaceProxy>,
