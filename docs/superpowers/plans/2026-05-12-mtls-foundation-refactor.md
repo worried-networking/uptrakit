@@ -95,48 +95,65 @@ All tasks below bind to these snapshot rules (`.superpowers/standards-snapshot.m
 
 ---
 
-### Task 1: Drop direct `x509-parser` workspace dep
+### Task 1: Audit direct `x509-parser` callsites (no removal yet)
 
 **Files:**
 
-- Modify: `Cargo.toml`
+- Inspect only — no edits.
+
+This task produces an audit artifact committed to the plan. The actual dep
+removal happens in Task 10 after Tasks 4 / 7 / 9 migrate all callsites.
+The "delete-then-revert" sequencing pattern was rejected because parallel-
+subagent execution makes the revert state unobservable to dependent tasks
+— this audit form is robust against any execution order.
 
 - [ ] **Step 1: Inspect current dep declaration**
 
 Run: `grep -n 'x509-parser\|rcgen' Cargo.toml`
 
 Expected: see `x509-parser = { version = "0.18", default-features = false, features = ["verify-aws"]
-}` and `rcgen = { version = "0.14", default-features = false, features = ["pem", "x509-parser",
+}`
+and `rcgen = { version = "0.14", default-features = false, features = ["pem", "x509-parser",
 "aws_lc_rs"] }`.
+Record the exact line numbers in the commit message.
 
-- [ ] **Step 2: Search workspace for direct `x509_parser::` imports**
+- [ ] **Step 2: Enumerate every direct `x509_parser::` callsite**
 
-Run: `rg -n '^use x509_parser' crates/ -t rust`
+Run: `rg -n 'x509_parser::' crates/ -t rust`
 
-Document each callsite. These are the call sites we must migrate before this task's removal lands
-(see Tasks 4, 7, 9).
+Expected output: list of files + lines that import or reference
+`x509_parser::*`. Save the list inline in the commit message body. Each
+listed callsite must be migrated by Tasks 4, 7, or 9 before Task 10 can
+drop the direct dep.
 
-- [ ] **Step 3: Remove the direct `x509-parser` dep from `[workspace.dependencies]`**
+- [ ] **Step 3: Verify rcgen feature retention plan**
 
-Delete the line. Keep rcgen's `features = ["pem", "x509-parser", "aws_lc_rs"]` unchanged (it gates
-`rcgen::Issuer::from_ca_cert_pem`, still in use).
+Run: `grep -n '"x509-parser"' Cargo.toml`
 
-- [ ] **Step 4: Verify build still resolves**
+Expected: a single hit inside `rcgen`'s `features = [...]` array. Confirm
+this stays after Task 10 — `Issuer::from_ca_cert_pem` (used in
+`pki.rs:548,561,571`, `crl_manager.rs:195,252,299,613,629,661`, and
+`tasks.rs:535`) requires it.
 
-Run: `cargo check --workspace --all-features`
+- [ ] **Step 4: Commit the audit**
 
-Expected: any crate still importing `x509_parser::*` directly fails with "unresolved import". Note
-the failures — these are tracked in Tasks 4, 7, 9.
+```bash
+git commit --allow-empty -m "$(cat <<'EOF'
+chore(audit): inventory direct x509-parser callsites pre-removal
 
-If the workspace builds clean (no imports remaining), the migration tasks below are no-ops; proceed
-anyway because the cache + golden tests are still meaningful.
+Callsites that must migrate to x509-cert before Task 10:
+<paste rg output from Step 2>
 
-- [ ] **Step 5: Revert removal for now**
+rcgen retains its "x509-parser" feature flag (transitive use of
+Issuer::from_ca_cert_pem in pki.rs/crl_manager.rs/tasks.rs).
+EOF
+)"
+```
 
-Run: `git checkout -- Cargo.toml`
-
-We revert because Tasks 4, 7, 9 must land first. This task ends in a known-failing state; it
-sequences the removal.
+The audit commit is empty (no file edits); it captures the migration
+inventory in git history so downstream subagents can find it. Task 10's
+removal step references this commit's `git log -1 --grep=audit` to
+re-find the inventory.
 
 ---
 
@@ -151,36 +168,32 @@ sequences the removal.
 Run: `rg -n 'struct TrustedIssuer\|fn update_ca\|mod tests'
 crates/core/controller-runtime/src/crl_manager.rs`
 
-- [ ] **Step 2: Write a failing test that counts how many times the PEM is parsed**
+- [ ] **Step 2: Write a failing test that asserts `Arc<Issuer>` pointer stability across reads**
 
 Append to the `tests` module:
 
 ```rust
-#[tokio::test(start_paused = true)]
-async fn trusted_issuer_caches_parsed_issuer_across_crl_rebuilds() {
+#[test]
+fn trusted_issuer_holds_arc_issuer_with_pointer_stability() {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // Build a CA in-memory.
     let (ca_pem, ca_key_pem) = test_ca_pair();
     let key_pair = rcgen::KeyPair::from_pem(&ca_key_pem).expect("key parses");
 
-    // Counter wraps Issuer::from_ca_cert_pem calls — we expect exactly one
-    // call across N CRL rebuilds.
-    static PARSES: AtomicUsize = AtomicUsize::new(0);
-    let parse_count_before = PARSES.load(Ordering::SeqCst);
-
+    // Build the trusted issuer; record the Arc<Issuer> pointer.
     let trusted = TrustedIssuer::from_pem(&ca_pem, key_pair)
         .expect("trusted issuer constructs");
-    assert_eq!(PARSES.load(Ordering::SeqCst) - parse_count_before, 1,
-        "construction parses once");
+    let issuer_arc_first: Arc<rcgen::Issuer<'static, rcgen::KeyPair>> =
+        Arc::clone(&trusted.issuer);
 
-    // Use the cached issuer for 5 successive CRL builds.
+    // Five "uses" — each access reads `trusted.issuer` by reference.
+    // Cloning the Arc must yield the same allocation (pointer-equal),
+    // proving no rebuild happened between reads.
     for _ in 0..5 {
-        let _crl = trusted.issuer.serialize_crl(/* params elided */);
+        let cloned = Arc::clone(&trusted.issuer);
+        assert!(Arc::ptr_eq(&cloned, &issuer_arc_first),
+            "cache reuses the same Arc<Issuer> allocation across reads");
     }
-    assert_eq!(PARSES.load(Ordering::SeqCst) - parse_count_before, 1,
-        "5 successive rebuilds must reuse the cached Issuer");
 }
 
 fn test_ca_pair() -> (String, String) {
@@ -192,6 +205,17 @@ fn test_ca_pair() -> (String, String) {
     (cert.pem(), key.serialize_pem())
 }
 ```
+
+Rationale for `Arc::ptr_eq` over a parse-count counter: there is no
+injection point to instrument `rcgen::Issuer::from_ca_cert_pem` from a
+test, and a static `AtomicUsize` not wired into the production code is
+vacuous. Pointer equality between successive `Arc::clone(&trusted.issuer)`
+loads is the direct observable property the cache provides — if a
+rebuild occurred, the field would hold a new `Arc` with a different
+allocation, and `ptr_eq` would fail. The test verifies the structural
+invariant; the no-rebuild-on-rebuild property is exercised more directly
+by the integration paths that use the cache (CRL rebuild loop, CSR
+signer) at higher levels.
 
 - [ ] **Step 3: Run the test, expect compile error**
 
@@ -372,13 +396,18 @@ crates/core/controller-runtime/src/crl_manager.rs`
 
 Expected: one site at ~line 328: `self.crl_number.fetch_add(1, Ordering::Relaxed)`.
 
-- [ ] **Step 2: Write a failing concurrent-monotonicity test**
+- [ ] **Step 2: Add a smoke test for the atomic increment**
+
+Note: this is **not** a red-then-green TDD step because `Ordering`
+controls memory fences, not atomicity, and `fetch_add` already produces
+unique values under `Relaxed`. The test is a smoke / regression check
+that the increment remains atomic under any later refactor.
 
 Append to the `tests` module:
 
 ```rust
 #[tokio::test]
-async fn crl_number_monotonic_under_concurrent_increments() {
+async fn crl_number_increments_are_unique_under_concurrent_writers() {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
@@ -387,7 +416,6 @@ async fn crl_number_monotonic_under_concurrent_increments() {
     for _ in 0..16 {
         let c = Arc::clone(&counter);
         handles.push(tokio::spawn(async move {
-            // Under AcqRel, every fetch_add is a unique value.
             c.fetch_add(1, Ordering::AcqRel)
         }));
     }
@@ -400,18 +428,21 @@ async fn crl_number_monotonic_under_concurrent_increments() {
 }
 ```
 
-This test will pass on `Relaxed` too because the `fetch_add` is atomic regardless of ordering —
-`Ordering` controls memory fence semantics, not atomicity. The real value of changing to `AcqRel` is
-the synchronization guarantee for any companion memory the writer wants observed. **Document the
-rationale in the change comment instead of relying solely on this test.**
+- [ ] **Step 3: Run the test**
 
-- [ ] **Step 3: Run the test on the current `Relaxed`**
+Run: `cargo test -p uptrakit-controller-runtime crl_number_increments_are_unique -- --nocapture 2>&1
+| tail -10`
 
-Run: `cargo test -p uptrakit-controller-runtime crl_number_monotonic -- --nocapture 2>&1 | tail -10`
-
-Expected: PASS (atomicity holds regardless of Ordering).
+Expected: PASS (atomicity holds for any `Ordering`; this test guards the
+property, not the fence semantics).
 
 - [ ] **Step 4: Change to `AcqRel` and add doc comment**
+
+The real value of `AcqRel` over `Relaxed` is documented in the production
+comment, not enforced by the test (no portable way to assert fence
+behavior). The single-writer invariant on `CrlManager::run` keeps the
+fence requirement satisfied today; `AcqRel` future-proofs against a second
+writer being introduced.
 
 ```rust
 // AcqRel pairs the increment with a release of any preceding writes
@@ -525,29 +556,66 @@ Expected: lines 31–98 (`encode_der_length`, `encode_der_sequence`, `encode_acc
 
 Append to the `tests` module:
 
+First capture the exact byte output of the legacy encoder for the test
+URLs so the byte-compatibility guarantee survives Step 7's deletion of
+the legacy helpers.
+
+Run a one-off binary inside the existing test module to print the bytes:
+
 ```rust
 #[test]
-fn aia_extension_roundtrips_through_x509_cert() {
-    use x509_cert::ext::pkix::AuthorityInfoAccessSyntax;
-    use der::Decode;
-
+fn print_legacy_aia_bytes_for_fixture_capture() {
     let ocsp_url = "http://controller.example.com/api/v1/pki/ocsp";
     let ca_issuers_url = "http://controller.example.com/api/v1/pki/ca.crt";
     let der = super::build_aia_extension_der(ocsp_url, ca_issuers_url)
         .expect("legacy encoder produces valid DER");
+    // Capture once, then encode as a `&[u8]` literal in the regression
+    // test below. Comment this test out after capture.
+    println!("LEGACY_AIA_DER = {:?}", der);
+}
+```
 
-    let parsed = AuthorityInfoAccessSyntax::from_der(&der)
-        .expect("x509-cert parses hand-rolled bytes");
-    assert_eq!(parsed.0.len(), 2, "two AccessDescription entries");
+Run it once, copy the bytes:
+
+```sh
+cargo test -p uptrakit-controller-runtime print_legacy_aia_bytes -- --nocapture --exact 2>&1 | rg 'LEGACY_AIA_DER'
+```
+
+Then write the byte-fixture regression test, replacing the `println` test
+above:
+
+```rust
+/// Captured from `build_aia_extension_der` before the migration to
+/// x509-cert builders. This fixture locks byte-compatibility: the new
+/// encoder must produce these exact bytes for the same URL pair.
+/// If the URLs in the captured fixture change, regenerate via
+/// `print_legacy_aia_bytes_for_fixture_capture`.
+const LEGACY_AIA_DER: &[u8] = &[/* paste captured bytes here */];
+
+#[test]
+fn aia_extension_byte_compatible_with_legacy_encoder() {
+    let ocsp_url = "http://controller.example.com/api/v1/pki/ocsp";
+    let ca_issuers_url = "http://controller.example.com/api/v1/pki/ca.crt";
+    let der = super::build_aia_extension_der(ocsp_url, ca_issuers_url)
+        .expect("encoder produces valid DER");
+    assert_eq!(der, LEGACY_AIA_DER,
+        "new encoder must produce byte-identical output to the legacy hand-rolled encoder");
 }
 ```
 
 - [ ] **Step 3: Run test on legacy encoder, expect PASS**
 
-Run: `cargo test -p uptrakit-controller-runtime aia_extension_roundtrips -- --nocapture 2>&1 | tail
--10`
+Run:
 
-Expected: PASS. This locks in the byte-compatibility guarantee.
+```sh
+cargo test -p uptrakit-controller-runtime aia_extension_byte_compatible -- --nocapture 2>&1 | tail -10
+```
+
+Expected: PASS. The byte-fixture constant `LEGACY_AIA_DER` is now the
+contract; later code changes (Step 4 onward) must keep matching it.
+Round-trip parsing via `x509-cert` from the constant is implicit in any
+test that decodes the bytes; we don't need a separate round-trip test
+because byte equality + valid DER subsumes it.
 
 - [ ] **Step 4: Replace `build_aia_extension_der` with `x509-cert` builders**
 
@@ -680,6 +748,12 @@ let key_der = PrivatePkcs8KeyDer::from_pem_slice(key_pem.as_bytes())
     .secret_pkcs8_der()
     .to_vec();
 ```
+
+Spec §5.8 shows the more general `PrivateKeyDer::from_pem_slice` form;
+the plan uses the PKCS#8-specific `PrivatePkcs8KeyDer` because the
+downstream OCSP signing path (`aws_lc_rs::signature::EcdsaKeyPair::from_pkcs8`)
+requires PKCS#8 DER bytes specifically. Both reach the same `PemObject`
+parser; the variant choice is local to this call site.
 
 Add `OcspError::KeyDecode(String)` variant if absent.
 

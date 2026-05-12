@@ -29,6 +29,14 @@ DynamicClientVerifier, §5.7 ALPN + session resumption). Depends on Plan 1 havin
 
 ## File Map
 
+> **Spec deviation:** Spec §5.4.1 places `AgentClientCertResolver` inside
+> `crates/shared/service-sdk/src/tls.rs`. The plan creates a dedicated
+> `cert_resolver.rs` module instead. Reason: `tls.rs` already houses the
+> trust-composition root-store builder plus mode-dispatched verifier;
+> piling the cert resolver into the same file makes it grow past the
+> snapshot's preferred-focused-modules threshold. The behavior, public
+> API, and integration shape are identical to the spec.
+
 - Create: `crates/shared/service-sdk/src/cert_resolver.rs`
   - `AgentClientCertResolver` impl of `rustls::client::ResolvesClientCert`
   - `swap` method called by `cert_handler.rs` on incoming `Certificate` payload
@@ -868,12 +876,19 @@ fn build_two_root_fixtures() -> (Vec<u8>, Vec<u8>, CertificateDer<'static>) {
     let (ca_a, _key_a) = make_ca("test-ca-a");
     let (ca_b, key_b) = make_ca("test-ca-b");
 
-    // Leaf signed by CA-B.
+    // Leaf signed by CA-B. Construct the Issuer from CA-B's actual cert
+    // so the resulting leaf chains back to CA-B. `from_ca_cert_pem` is
+    // gated by rcgen's `x509-parser` feature (already enabled in the
+    // workspace `Cargo.toml`). Do NOT use `Issuer::new(...)` with a
+    // fresh `CertificateParams::default()` — that produces an issuer
+    // unrelated to CA-B, and `WebPkiClientVerifier` with `ca_b.der()`
+    // as the root would reject the resulting leaf.
     let leaf_key = rcgen::KeyPair::generate().expect("leaf kp");
     let mut leaf_params = rcgen::CertificateParams::new(vec!["leaf.local".into()])
         .expect("leaf params");
     leaf_params.distinguished_name.push(rcgen::DnType::CommonName, "leaf");
-    let issuer_b = rcgen::Issuer::new(rcgen::CertificateParams::default(), key_b);
+    let issuer_b = rcgen::Issuer::from_ca_cert_pem(&ca_b.pem(), key_b)
+        .expect("issuer from CA-B PEM");
     let leaf = leaf_params.signed_by(&leaf_key, &issuer_b).expect("leaf cert");
 
     (
@@ -963,14 +978,40 @@ pub fn build_rustls_config(/* ... existing args ... */) -> Result<BuiltTlsConfig
 }
 ```
 
-- [ ] **Step 3: Update callers in `tasks.rs` + bootstrap**
+- [ ] **Step 3: Keep `build_rustls_config_with_client_auth_and_crls` as a thin wrapper**
+
+To avoid breaking the in-flight graceful-reload `[tls]` Section consumer
+(see `docs/superpowers/specs/2026-05-12-graceful-reload-design.md`,
+ADR-0008) which calls `RustlsConfig::reload_from_config(server_config)`
+during ALPN / cipher-suite / TLS-version changes, retain the original
+function as a wrapper that returns just the `ServerConfig`:
+
+```rust
+/// Compatibility shim for callers that only need `Arc<ServerConfig>`.
+/// Prefer `build_rustls_config` (the new function) when the caller will
+/// also need to hot-swap the server cert or the client verifier.
+pub fn build_rustls_config_with_client_auth_and_crls(/* same args */)
+    -> Result<Arc<rustls::ServerConfig>, rootcause::Report<PkiError>>
+{
+    Ok(build_rustls_config(/* args */)?.server_config)
+}
+```
+
+This preserves the original signature for any code path that was about to
+land on a parallel branch (graceful-reload, etc.) without forcing a
+coordinated merge.
+
+- [ ] **Step 4: Update callers in `tasks.rs` + bootstrap**
 
 Run: `rg -n 'build_rustls_config_with_client_auth_and_crls' crates/`
 
-For each caller, replace with the new function, and store the returned `BuiltTlsConfig` handles in
-`AppState` (Task 9 wires it).
+For each caller that needs hot-swap handles (CRL manager, server-cert
+renewal flow, AppState construction), replace with the new
+`build_rustls_config` and store the returned `BuiltTlsConfig` in
+`AppState`. Callers that only need the `Arc<ServerConfig>` (e.g.,
+graceful-reload `[tls]` Section reload path) can keep using the wrapper.
 
-- [ ] **Step 4: Verify ALPN + session resumption**
+- [ ] **Step 5: Verify ALPN + session resumption**
 
 Run: `cargo test -p uptrakit-controller-runtime pki -- --nocapture 2>&1 | tail -20`
 
@@ -986,13 +1027,13 @@ fn server_config_has_h2_and_http11_alpn() {
 
 Expected: PASS.
 
-- [ ] **Step 5: Run reverse-proxy integration tests**
+- [ ] **Step 6: Run reverse-proxy integration tests**
 
 Run: `cargo test -p uptrakit-controller reverse_proxy -- --ignored 2>&1 | tail -30`
 
 Expected: PASS. Reverse proxies now negotiate `h2` where supported.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add crates/core/controller-runtime/src/pki.rs crates/core/controller-runtime/src/tasks.rs
@@ -1185,6 +1226,14 @@ fn property_concurrent_swap_no_spurious_accept() {
     }
 
     // Swap thread: alternate v_a ↔ v_b at 1ms cadence until verifiers finish.
+    //
+    // Note on `std::thread::sleep`: the snapshot rule "tests must never
+    // sleep on real wall-clock time" applies to tests using tokio time
+    // APIs (`#[tokio::test(start_paused = true)]` + `tokio::time::advance`).
+    // This test is a sync `#[test]` exercising thread contention with no
+    // timing assertion — the sleep merely throttles swap cadence so verify
+    // threads observe a mix of inner verifiers. No flakiness or wall-clock
+    // dependency.
     while !stop.load(Ordering::SeqCst) {
         dyn_v.swap(Arc::clone(&v_b));
         std::thread::sleep(std::time::Duration::from_millis(1));

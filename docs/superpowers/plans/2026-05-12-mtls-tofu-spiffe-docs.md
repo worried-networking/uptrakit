@@ -546,19 +546,16 @@ impl TofuConfig {
         skip_hostname: bool,
         fingerprint_acknowledge: Option<Sha256Hash>,
     ) -> Result<Self, TofuConfigError> {
-        let selected: u8 =
-            (fingerprint.is_some() as u8)
-            + (spki.is_some() as u8)
-            + (insecure as u8);
-        if selected > 1 {
-            return Err(TofuConfigError::MultipleModes);
-        }
+        // Exhaustive match without `unreachable!` so that if clap's
+        // `ArgGroup::multiple(false)` is ever relaxed or removed, this
+        // function still returns a real error (not a panic).
         let mode = match (fingerprint, spki, insecure) {
             (Some(h), None, false) => TofuMode::PinFingerprint(h),
             (None, Some(h), false) => TofuMode::PinSpki(h),
             (None, None, true) => TofuMode::InsecureTofu,
             (None, None, false) => TofuMode::System,
-            _ => unreachable!("guarded by selected > 1 check"),
+            // Any combination with two or more modes set lands here.
+            _ => return Err(TofuConfigError::MultipleModes),
         };
 
         // Insecure mode forces skip_hostname.
@@ -1005,6 +1002,15 @@ impl ServerCertVerifier for ModeBasedVerifier {
         }
     }
 
+    // Handshake-signature verification is always delegated to the
+    // system verifier — even in `pin-*` and `insecure-tofu` modes. The
+    // pin/insecure modes only relax *chain trust*; they do NOT weaken
+    // the proof-of-key-possession that signature verification provides
+    // (the server must still hold the private key matching the leaf
+    // cert it presented). Removing this delegation would allow an
+    // attacker who captures a valid cert to replay it without holding
+    // the key — a real regression. Do NOT "simplify" by returning
+    // `Ok(HandshakeSignatureValid::assertion())` here.
     fn verify_tls12_signature(
         &self,
         m: &[u8],
@@ -1042,17 +1048,56 @@ impl ModeBasedVerifier {
                     std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
                 )))
             ))?;
-        let dialed = match server_name {
-            ServerName::DnsName(n) => n.as_ref(),
-            ServerName::IpAddress(_) => return Ok(()), // IP SAN check deferred to impl plan
-            _ => return Err(TlsError::InvalidCertificate(rustls::CertificateError::NotValidForName)),
-        };
-        if cert_sans_match(&cert, dialed) {
-            Ok(())
-        } else {
-            Err(TlsError::InvalidCertificate(rustls::CertificateError::NotValidForName))
+        match server_name {
+            ServerName::DnsName(n) => {
+                if cert_dns_sans_match(&cert, n.as_ref()) {
+                    Ok(())
+                } else {
+                    Err(TlsError::InvalidCertificate(
+                        rustls::CertificateError::NotValidForName,
+                    ))
+                }
+            }
+            ServerName::IpAddress(ip) => {
+                // x509-cert exposes IP SAN entries via GeneralName::IpAddress
+                // (raw bytes — 4 bytes for v4, 16 for v6, RFC 5280 §4.2.1.6).
+                let dialed_bytes: Vec<u8> = match ip {
+                    rustls::pki_types::IpAddr::V4(v) => v.as_ref().to_vec(),
+                    rustls::pki_types::IpAddr::V6(v) => v.as_ref().to_vec(),
+                };
+                if cert_ip_sans_match(&cert, &dialed_bytes) {
+                    Ok(())
+                } else {
+                    Err(TlsError::InvalidCertificate(
+                        rustls::CertificateError::NotValidForName,
+                    ))
+                }
+            }
+            _ => Err(TlsError::InvalidCertificate(
+                rustls::CertificateError::NotValidForName,
+            )),
         }
     }
+}
+
+fn cert_ip_sans_match(cert: &x509_cert::Certificate, dialed: &[u8]) -> bool {
+    use x509_cert::ext::pkix::SubjectAltName;
+    use x509_cert::ext::pkix::name::GeneralName;
+    use der::Decode;
+
+    let Some(exts) = &cert.tbs_certificate.extensions else { return false };
+    let oid = const_oid::db::rfc5280::ID_CE_SUBJECT_ALT_NAME;
+    for ext in exts {
+        if ext.extn_id != oid { continue; }
+        if let Ok(san) = SubjectAltName::from_der(ext.extn_value.as_bytes()) {
+            for gn in san.0 {
+                if let GeneralName::IpAddress(bytes) = gn {
+                    if bytes.as_bytes() == dialed { return true; }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn sha256_hex(bytes: &[u8]) -> Sha256Hash {
@@ -1070,7 +1115,7 @@ fn spki_sha256(cert_der: &[u8]) -> Result<Sha256Hash, x509_cert::der::Error> {
     Ok(sha256_hex(&spki_der))
 }
 
-fn cert_sans_match(cert: &x509_cert::Certificate, name: &str) -> bool {
+fn cert_dns_sans_match(cert: &x509_cert::Certificate, name: &str) -> bool {
     // Iterate SAN extension entries, return true if any DNS SAN matches.
     // Real impl: x509_cert::ext::pkix::SubjectAltName from extensions.
     use x509_cert::ext::pkix::SubjectAltName;
@@ -1094,6 +1139,14 @@ fn cert_sans_match(cert: &x509_cert::Certificate, name: &str) -> bool {
 ```
 
 Add `sha2 = { workspace = true }` to `crates/shared/service-sdk/Cargo.toml` if not present.
+Verify the workspace already has `sha2 = "0.10"` in `[workspace.dependencies]`:
+
+```sh
+grep -n '^sha2' Cargo.toml
+```
+
+Expected: present. If absent, add it. The workspace `Cargo.toml` already
+declares `sha2 = "0.10"` at the time this plan was written.
 
 - [ ] **Step 2: Add tests for each mode**
 
@@ -1146,6 +1199,33 @@ mod verifier_tests {
             &[], UnixTime::now(),
         );
         assert!(result.is_ok());
+    }
+
+    /// Regression test for the contrarian-flagged "LE-fronted Controller +
+    /// SPKI pin" scenario: the leaf cert chains to an external root
+    /// (simulated as a different CA from the controller-CA bundle held by
+    /// `ModeBasedVerifier`), but the SPKI pin matches the leaf. The pin
+    /// mode must accept regardless of whether the leaf would chain to the
+    /// bundle's roots, because chain validation is intentionally skipped
+    /// in pin mode.
+    #[test]
+    fn pin_spki_accepts_leaf_outside_controller_ca_bundle() {
+        let (other_cert, _other_key, _other_pem) = build_self_signed_with_pem();
+        let spki = spki_sha256(&other_cert).unwrap();
+        // Controller-CA bundle is a DIFFERENT self-signed CA.
+        let (_unrelated_cert, _unrelated_key, unrelated_pem) = build_self_signed_with_pem();
+
+        let verifier = make_mode_verifier(
+            TofuConfig::from_flags(None, Some(spki), false, true, None).unwrap(),
+            unrelated_pem, // controller-CA bundle that does NOT match `other_cert`
+        );
+        let result = verifier.verify_server_cert(
+            &other_cert, &[], &ServerName::try_from("test.local").unwrap(),
+            &[], UnixTime::now(),
+        );
+        assert!(result.is_ok(),
+            "SPKI pin mode must accept a leaf that does not chain to the controller-CA bundle, \
+             as long as the SPKI matches");
     }
 
     #[test]
@@ -1344,9 +1424,51 @@ pub struct ServiceSettingsPayload {
 
 - [ ] **Step 3: Update existing constructors**
 
-External callers using struct literals must add `..Default::default()` if `Default` is
-impl'd, or pass `trust_domain: String::new()` explicitly. The `#[non_exhaustive]` blocks
-ad-hoc struct literals from outside crates — wire's own code can still construct.
+Enumerate every in-workspace struct-literal construction site of
+`ServiceSettingsPayload` and update each. `#[non_exhaustive]` on the
+struct allows direct construction from within the defining crate
+(`uptrakit-wire`) but forbids it from external crates — those sites
+must use a constructor pattern.
+
+**Do NOT use `#[derive(Default)]`** — `renewal_window_hours` deriving
+`0` would silently disable certificate renewal scheduling on the
+Service side. Either:
+
+- Write `Default` by hand with sane domain values (look up current
+  defaults from `docs/security/pki-certificates.md`: `renewal_window_hours`
+  defaults to the per-cert auto-computed window when 0 is sent, but other
+  fields may demand non-zero — verify each), **or**
+- Skip `Default` entirely and require every external site to spell out
+  every field explicitly. The `#[non_exhaustive]` compile error will
+  catch any missed field on each site.
+
+The second option is preferred for safety: it forces a conscious
+review of every default-value choice. Add a hand-written
+`#[non_exhaustive]`-friendly constructor `ServiceSettingsPayload::new(...)`
+in the wire crate that takes the minimal required parameters and fills
+in the rest, only if multiple call-sites converge on the same defaults.
+
+Construction sites (run `rg -n 'ServiceSettingsPayload {' crates/` to
+re-verify before editing — Plan 2 may have shifted line numbers):
+
+```text
+crates/ui/web-api/src/routes/service_ws/connection.rs:487
+crates/core/controller-runtime/src/embedded/mod.rs:114
+crates/core/mqtt-runtime/src/handler.rs:281
+crates/shared/wire/src/wire_validate_impls.rs:2205, 2220
+crates/shared/wire/src/tests.rs:674, 694, 713, 738, 757, 771
+```
+
+For each external-crate site (everything outside
+`crates/shared/wire/`), add `trust_domain: String::new()` (or the
+configured trust domain) as an explicit field. Do NOT use
+`..Default::default()` — see the `Default` rationale above. Wire
+crate's own sites add the field explicitly too. Run `cargo check
+--all-features` after each batch of edits — `#[non_exhaustive]`
+emission produces a compile error pointing at every literal that
+needs updating, **and** every site receives the explicit
+`trust_domain` value, surfacing any caller that doesn't know what
+trust domain to pass (deliberate review point).
 
 - [ ] **Step 4: Update `asyncapi.yaml`**
 
@@ -1363,22 +1485,87 @@ trust_domain:
     no trust domain configured; Agent falls back to dialed hostname.
 ```
 
-- [ ] **Step 5: Run wire tests**
+- [ ] **Step 5: Add a serde round-trip test for trust_domain**
+
+Append to `crates/shared/wire/src/tests.rs`:
+
+Locate the existing test fixture builder in `tests.rs` (search for the
+helper that produces a `ServiceSettingsPayload` for the existing
+serialization tests). The wire crate is the defining crate, so it can
+still construct via struct literal with `#[non_exhaustive]` set —
+`#[non_exhaustive]` only constrains external crates. Add the three
+tests below using the existing helper or by spelling all fields
+explicitly (do NOT use `..Default::default()` — see Step 3 rationale
+above):
+
+```rust
+// Helper alias for the existing fixture; adjust to the actual helper
+// name in tests.rs after locating it.
+fn fixture_payload_with_trust_domain(td: &str) -> ServiceSettingsPayload {
+    let mut p = default_fixture_payload(); // existing helper in tests.rs
+    p.trust_domain = td.to_owned();
+    p
+}
+
+#[test]
+fn service_settings_payload_trust_domain_round_trips() {
+    let payload = fixture_payload_with_trust_domain("controller.example.com");
+    let json = serde_json::to_string(&payload).expect("serialize");
+    assert!(json.contains("\"trust_domain\":\"controller.example.com\""));
+    let back: ServiceSettingsPayload = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back.trust_domain, "controller.example.com");
+}
+
+#[test]
+fn service_settings_payload_trust_domain_default_empty() {
+    // Cross-version pair: old Controller serializes without trust_domain;
+    // new Agent deserializes with default empty string.
+    let json = r#"{"renewal_window_hours":24, /* other required fields ... */}"#;
+    let payload: ServiceSettingsPayload = serde_json::from_str(json).expect("deserialize");
+    assert_eq!(payload.trust_domain, "");
+}
+
+#[test]
+fn service_settings_payload_empty_trust_domain_skipped_on_serialize() {
+    // skip_serializing_if = "String::is_empty" omits the field on the wire
+    // when empty, keeping the payload byte-identical to pre-rollout for
+    // Controllers that have not yet set trust_domain.
+    let payload = fixture_payload_with_trust_domain("");
+    let json = serde_json::to_string(&payload).expect("serialize");
+    assert!(!json.contains("trust_domain"), "empty trust_domain omitted from wire");
+}
+```
+
+- [ ] **Step 6: Run wire tests**
 
 Run: `cargo test -p uptrakit-wire 2>&1 | tail -20`
 
 Expected: PASS.
 
-- [ ] **Step 6: Run asyncapi schema-compliance tests**
+- [ ] **Step 7: Run asyncapi schema-compliance tests**
 
 Run: `cargo test -p uptrakit-wire asyncapi 2>&1 | tail -20`
 
-Expected: PASS.
+Expected: PASS. asyncapi.yaml is the source of truth (per snapshot rule);
+schema matches the new field.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Update wire CHANGELOG**
+
+Edit `crates/shared/wire/CHANGELOG.md`. Prepend under the current
+unreleased section:
+
+```markdown
+- Added: `ServiceSettingsPayload.trust_domain: String` (#[serde(default,
+  skip_serializing_if = "String::is_empty")]). Controller advertises its
+  SPIFFE trust domain to every connecting Service. Empty string preserves
+  pre-rollout wire-byte-compatibility for cross-version deployments.
+```
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add crates/shared/wire/src/payloads.rs crates/shared/wire/asyncapi.yaml
+git add crates/shared/wire/src/payloads.rs crates/shared/wire/src/tests.rs \
+        crates/shared/wire/asyncapi.yaml crates/shared/wire/CHANGELOG.md
 git commit -m "feat(wire): add ServiceSettingsPayload.trust_domain (#[serde(default)])"
 ```
 
@@ -1463,19 +1650,39 @@ pub fn generate_keypair_and_csr(
 
 Add `IdentityError::InvalidTrustDomain` variant.
 
-- [ ] **Step 4: Update the caller in `cert_handler.rs`** to pass `trust_domain` from
+- [ ] **Step 4: Precondition check — Plan 2 Task 3 must have landed**
+
+Plan 2 Task 3 rewrote `cert_handler::handle_certificate` to use the
+`AgentClientCertResolver::swap` path with the deadline-bound forced
+reconnect. Plan 3 builds on top of that. Confirm the production code
+already contains the resolver swap before editing the CSR generation
+flow:
+
+```sh
+rg -n 'cert_resolver.swap\|self.cert_resolver.swap' crates/shared/service-sdk/src/cert_handler.rs
+```
+
+Expected: at least one hit inside `handle_certificate`. If absent, Plan 2
+has not landed yet — stop and complete Plan 2 first, otherwise this task's
+edits will merge-conflict with Plan 2 and may regress the resolver swap
+to "reconnect always".
+
+- [ ] **Step 5: Update the caller in `cert_handler.rs`** to pass `trust_domain` from
   `ServiceSettings`
 
 Field: `self.trust_domain: String` on `CertificateRenewalHandler`. Populate from
-`handle_service_settings` (where `ServiceSettingsPayload` is consumed).
+`handle_service_settings` (where `ServiceSettingsPayload` is consumed). The
+`generate_keypair_and_csr(service_id, &self.trust_domain)` call replaces the
+prior signature (no trust_domain argument); the resolver swap path from
+Plan 2 is untouched.
 
-- [ ] **Step 5: Run**
+- [ ] **Step 6: Run**
 
 Run: `cargo test -p uptrakit-service-sdk identity -- --nocapture 2>&1 | tail -20`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add crates/shared/service-sdk/src/identity.rs crates/shared/service-sdk/src/cert_handler.rs
@@ -1655,14 +1862,28 @@ fn extract_identity_rejects_san_with_wrong_trust_domain() {
 }
 
 #[test]
-fn extract_identity_rejects_malformed_spiffe_uri() {
-    let cert = build_test_cert_with_non_spiffe_uri_san();
-    // Non-spiffe URI SAN is skipped; CN fallback used if present.
+fn extract_identity_skips_non_spiffe_uri_san_no_cn_returns_none() {
+    // Fixture: cert has a non-SPIFFE URI SAN (e.g., `https://example.com`)
+    // and NO CN containing a UUID. Non-SPIFFE URI is skipped by the SAN
+    // path; CN fallback finds nothing parseable as a UUID; result is None.
+    let cert = build_test_cert_with_non_spiffe_uri_san_no_uuid_cn();
     let identity = service_identity_from_der_with_trust_domain(
         cert.der(), "controller.example.com",
     );
-    // Behavior depends on test fixture; assert deterministic outcome.
-    assert!(identity.is_none() || identity.is_some(), "deterministic");
+    assert!(identity.is_none(),
+        "non-SPIFFE URI SAN without UUID CN must return None");
+}
+
+#[test]
+fn extract_identity_skips_non_spiffe_uri_san_falls_back_to_cn() {
+    // Fixture: cert has a non-SPIFFE URI SAN AND a CN that is a valid UUID.
+    // Non-SPIFFE URI is skipped; CN fallback succeeds.
+    let service_id = uuid::Uuid::now_v7();
+    let cert = build_test_cert_with_non_spiffe_uri_san_and_cn(service_id);
+    let identity = service_identity_from_der_with_trust_domain(
+        cert.der(), "controller.example.com",
+    ).expect("CN fallback succeeds");
+    assert_eq!(identity.service_id, service_id);
 }
 ```
 
