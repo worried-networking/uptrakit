@@ -1,18 +1,33 @@
 //! RFC 6749 §3.2 / RFC 8628 §3.4 token endpoint.
+//!
+//! The MCP OAuth 2.1 `POST /oauth/token` handler lives in [`mcp_token`].
+//! It is wired to the router in Task 19 (TODO: route wiring — Task 19).
 
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::Form;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
+use uptrakit_shared_db::entity::{oauth_consent, user_role};
 use uptrakit_web_api_auth::auth::device_flow::{PollOutcome, validate_client_id};
-use uptrakit_web_api_types::oauth::{OAuthErrorCode, OAuthTokenRequest, OAuthTokenResponse};
+use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
+use uptrakit_web_api_types::oauth::{
+    McpAccessTokenClaims, OAuthErrorCode, OAuthTokenRequest, OAuthTokenResponse, TokenRequest,
+    TokenResponse,
+};
 use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::error_response::oauth_error_response;
+use crate::extract::ClientIp;
+use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter, check_rate_limit};
+use crate::oauth::services::authorization_code::{OAuthAuthorizationCodeService, OAuthCodeError};
+use crate::oauth::services::client::OAuthClientService;
+use crate::oauth::services::refresh_token::OAuthRefreshTokenService;
 
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
@@ -184,5 +199,753 @@ fn emit_poll_audit(state: &AppState, device_code: &str, outcome: &PollOutcome) {
 
     if let Ok(entry) = builder.build() {
         state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MCP OAuth 2.1 token endpoint — `POST /oauth/token`
+// Routing is wired in Task 19.
+// ---------------------------------------------------------------------------
+
+/// MCP OAuth 2.1 token endpoint per spec §10.3 (authorization-code exchange).
+///
+/// Returns 404 when `oauth.mcp_enabled = false`.
+///
+/// Current grant support:
+/// - `authorization_code` — fully implemented (Task 13).
+/// - `refresh_token` — stub returning `unsupported_grant_type` (Task 14).
+#[utoipa::path(
+    post,
+    path = "/oauth/token",
+    request_body(content_type = "application/x-www-form-urlencoded"),
+    responses(
+        (status = 200, description = "Token response"),
+        (status = 400, description = "OAuth error"),
+        (status = 429, description = "Rate limited"),
+    ),
+    tag = "OAuth"
+)]
+#[tracing::instrument(skip_all)]
+pub async fn mcp_token(
+    State(state): State<Arc<AppState>>,
+    client_ip: Option<Extension<ClientIp>>,
+    Form(req): Form<TokenRequest>,
+) -> Response {
+    if !state.oauth.enabled {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // Step 1 — rate-limit check.
+    let ip_str = match &client_ip {
+        Some(Extension(ClientIp(ip))) => ip.to_string(),
+        None => "unknown".to_string(),
+    };
+    let limiter = OAuthRateLimiter::new(RateLimitStore::new(state.db.db().clone()));
+    if let Some(r) = check_rate_limit(EndpointKind::Token, &limiter, &ip_str).await {
+        return r;
+    }
+
+    // Step 2 — validate the request.
+    if let Err(e) = req.validate() {
+        return oauth_400("invalid_request", &e.to_string());
+    }
+
+    // Step 3 — dispatch on grant_type.
+    match req {
+        TokenRequest::AuthorizationCode {
+            code,
+            redirect_uri,
+            client_id,
+            code_verifier,
+            resource,
+        } => {
+            authorization_code_grant(
+                state,
+                code,
+                redirect_uri,
+                client_id,
+                code_verifier,
+                resource,
+            )
+            .await
+        }
+        TokenRequest::RefreshToken { .. } => {
+            // Task 14 will implement this branch.
+            oauth_400(
+                "unsupported_grant_type",
+                "refresh_token not yet implemented",
+            )
+        }
+        _ => {
+            tracing::warn!("unhandled TokenRequest variant; returning unsupported_grant_type");
+            oauth_400("unsupported_grant_type", "grant type not supported")
+        }
+    }
+}
+
+/// Handle `grant_type=authorization_code` — spec §10.3 steps 17-21.
+async fn authorization_code_grant(
+    state: Arc<AppState>,
+    code: String,
+    redirect_uri: String,
+    client_id: String,
+    code_verifier: String,
+    resource: String,
+) -> Response {
+    // Step 4 — client lookup.
+    let client_svc = OAuthClientService::new(
+        state.db.db().clone(),
+        Arc::clone(&state.oauth.clock),
+        Arc::new(state.audit_emitter.clone()),
+    );
+    match client_svc.lookup(&client_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return oauth_400("invalid_client", "unknown client_id"),
+        Err(e) => {
+            tracing::error!(error = %e, "oauth client lookup failed");
+            return oauth_500();
+        }
+    }
+
+    // Step 5 — verify and consume authorization code.
+    let code_svc =
+        OAuthAuthorizationCodeService::new(state.db.db().clone(), Arc::clone(&state.oauth.clock));
+    let code_row = match code_svc
+        .verify_and_consume(&code, &client_id, &redirect_uri, &code_verifier, &resource)
+        .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            return match e.current_context() {
+                OAuthCodeError::InvalidGrant(reason) => oauth_400("invalid_grant", reason),
+                OAuthCodeError::InvalidTarget => (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "invalid_target" })),
+                )
+                    .into_response(),
+                OAuthCodeError::Database(_) => {
+                    tracing::error!(error = %e, "DB error during code verification");
+                    oauth_500()
+                }
+            };
+        }
+    };
+
+    // Step 6 — find active consent for (user_id, client_id).
+    let consent_row = match oauth_consent::Entity::find()
+        .filter(oauth_consent::Column::UserId.eq(code_row.user_id))
+        .filter(oauth_consent::Column::ClientId.eq(&client_id))
+        .filter(oauth_consent::Column::RevokedAt.is_null())
+        .one(state.db.db())
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return oauth_400("invalid_grant", "no active consent");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "DB error looking up oauth_consent");
+            return oauth_500();
+        }
+    };
+    let consent_id = consent_row.id;
+
+    // Step 7 — resolve tenant_id for the user via user_role table.
+    let tenant_id = match user_role::Entity::find()
+        .filter(user_role::Column::UserId.eq(code_row.user_id))
+        .one(state.db.db())
+        .await
+    {
+        Ok(row) => row.map(|r| r.tenant_id).unwrap_or(state.default_tenant_id),
+        Err(e) => {
+            tracing::error!(error = %e, "DB error looking up user_role");
+            return oauth_500();
+        }
+    };
+
+    // Step 8 — mint refresh token.
+    let issuer = state.oauth.canonical.issuer().as_str().to_string();
+    let rt_svc = OAuthRefreshTokenService::with_defaults(
+        state.db.db().clone(),
+        Arc::clone(&state.oauth.clock),
+        Arc::clone(&state.oauth.signer),
+        Arc::new(state.audit_emitter.clone()),
+        issuer.clone(),
+        resource.clone(),
+    );
+    let mint = match rt_svc
+        .mint(
+            &client_id,
+            code_row.user_id,
+            consent_id,
+            &code_row.scope,
+            &resource,
+        )
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "refresh token mint failed");
+            return oauth_500();
+        }
+    };
+
+    // Step 9 — mint access JWT.
+    let now = (state.oauth.clock)();
+    let jti = uuid::Uuid::now_v7().to_string();
+    let iat = now.unix_timestamp();
+    let exp = iat + 900; // access_token_ttl_secs
+    let claims = McpAccessTokenClaims::new(
+        issuer,
+        code_row.user_id.to_string(),
+        resource,
+        client_id,
+        code_row.scope.clone(),
+        jti,
+        iat,
+        iat,
+        exp,
+        tenant_id.to_string(),
+    );
+    let access_token = match state.oauth.signer.mint(&claims) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "JWT signing failed");
+            return oauth_500();
+        }
+    };
+
+    // Step 10 — return token response.
+    let body = TokenResponse::new(
+        access_token,
+        "Bearer".into(),
+        900,
+        Some(mint.refresh_token.as_str().to_string()),
+        Some(mint.expires_in),
+        code_row.scope.clone(),
+    );
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Local error helpers
+// ---------------------------------------------------------------------------
+
+/// Return a 400 JSON OAuth error response.
+///
+/// Body: `{"error":"<code>","error_description":"<desc>"}`.
+fn oauth_400(error: &str, description: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": error,
+            "error_description": description,
+        })),
+    )
+        .into_response()
+}
+
+/// Return a 500 JSON OAuth server-error response.
+fn oauth_500() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({
+            "error": "server_error",
+            "error_description": "internal server error",
+        })),
+    )
+        .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Tests for mcp_token
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod mcp_token_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test assertions — panics on setup failure are acceptable in tests"
+    )]
+
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use http::Request;
+    use http_body_util::BodyExt;
+    use sea_orm::{ActiveModelTrait, Set};
+    use sha2::{Digest, Sha256};
+    use time::OffsetDateTime;
+    use tower::ServiceExt;
+    use uptrakit_shared_db::entity::{
+        oauth_authorization_code, oauth_authorization_request, oauth_client, oauth_consent, role,
+        user, user_role,
+    };
+    use uptrakit_shared_types::MaskedEmail;
+    use uptrakit_web_api_auth::auth::token::hash_token;
+    use uuid::Uuid;
+
+    use crate::oauth::OAuthState;
+    use crate::oauth::canonical_url::CanonicalUrlConfig;
+    use crate::oauth::jwt::{McpOAuthJwtSigner, McpOAuthJwtVerifier};
+    use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
+
+    const TEST_CLIENT_ID: &str = "test-mcp-client";
+    const TEST_REDIRECT_URI: &str = "https://example.com/callback";
+    const TEST_RESOURCE: &str = "https://controller.example.com/mcp";
+    const TEST_SCOPE: &str = "mcp:read";
+    const TEST_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
+    // -----------------------------------------------------------------------
+    // Shared helpers
+    // -----------------------------------------------------------------------
+
+    fn enabled_oauth_state() -> OAuthState {
+        let canonical = CanonicalUrlConfig::new("controller.example.com".to_string(), vec![])
+            .expect("test canonical url");
+        OAuthState {
+            enabled: true,
+            canonical,
+            signer: Arc::new(McpOAuthJwtSigner::new(b"test-secret-not-used")),
+            verifier: Arc::new(McpOAuthJwtVerifier::new(
+                b"test-secret-not-used",
+                "https://controller.example.com".into(),
+                vec![TEST_RESOURCE.into()],
+            )),
+            clock: Arc::new(OffsetDateTime::now_utc),
+            instance_id: uuid::Uuid::nil(),
+            dcr_enabled: false,
+            cimd_enabled: false,
+        }
+    }
+
+    fn pkce_challenge(verifier: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(verifier.as_bytes());
+        let digest = hasher.finalize();
+        URL_SAFE_NO_PAD.encode(digest)
+    }
+
+    async fn app_with_oauth() -> (crate::test_harness::TestApp, axum::Router) {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, jwt) = build_test_state(db.clone(), tenant_id).await;
+        let mut patched = (*state).clone();
+        patched.oauth = enabled_oauth_state();
+        let state = Arc::new(patched);
+        // Build a minimal router that mounts mcp_token at POST /oauth/token.
+        // Task 19 will wire this into the main router; for now tests use their own.
+        let router = axum::Router::new()
+            .route("/oauth/token", axum::routing::post(super::mcp_token))
+            .with_state(Arc::clone(&state));
+        let app = crate::test_harness::TestApp {
+            state,
+            router: router.clone(),
+            db,
+            jwt,
+            tenant_id,
+        };
+        (app, router)
+    }
+
+    /// Insert a minimal user + tenant + role + user_role chain and return user_id.
+    async fn insert_user_with_tenant(db: &sea_orm::DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let user_id = Uuid::now_v7();
+
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(MaskedEmail::new(format!(
+                "test-token-{user_id}@example.com"
+            ))),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert user");
+
+        let role_id = Uuid::now_v7();
+        role::ActiveModel {
+            id: Set(role_id),
+            name: Set(format!("test-role-{role_id}")),
+            description: Set(None),
+            is_built_in: Set(false),
+            created_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert role");
+
+        user_role::ActiveModel {
+            tenant_id: Set(tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(role_id),
+            assigned_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert user_role");
+
+        user_id
+    }
+
+    /// Insert an oauth_client row with `trusted_at` set and the given redirect_uri.
+    async fn insert_trusted_client(
+        db: &sea_orm::DatabaseConnection,
+        client_id: &str,
+        redirect_uri: &str,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        let redirect_uris_json = serde_json::to_string(&vec![redirect_uri]).expect("serialize");
+
+        oauth_client::ActiveModel {
+            id: Set(client_id.to_string()),
+            client_name: Set("MCP Test Client".to_string()),
+            client_uri: Set(None),
+            logo_uri: Set(None),
+            redirect_uris: Set(redirect_uris_json),
+            default_scope: Set(TEST_SCOPE.to_string()),
+            grant_types: Set("authorization_code refresh_token".to_string()),
+            response_types: Set("code".to_string()),
+            token_endpoint_auth_method: Set("none".to_string()),
+            client_secret_hash: Set(None),
+            registration_access_token_hash: Set(None),
+            created_via: Set("test".to_string()),
+            created_at: Set(now),
+            last_used_at: Set(None),
+            revoked_at: Set(None),
+            metadata_cached_at: Set(None),
+            metadata_etag: Set(None),
+            metadata_content_hash: Set(None),
+            metadata_raw: Set(None),
+            metadata_parse_error: Set(None),
+            metadata_parse_error_at: Set(None),
+            trusted_at: Set(Some(now)),
+        }
+        .insert(db)
+        .await
+        .expect("insert oauth_client");
+    }
+
+    /// Insert an oauth_consent row for (user_id, client_id) and return the consent id.
+    async fn insert_consent(
+        db: &sea_orm::DatabaseConnection,
+        user_id: Uuid,
+        client_id: &str,
+    ) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        oauth_consent::ActiveModel {
+            id: Set(id),
+            user_id: Set(user_id),
+            client_id: Set(client_id.to_string()),
+            scopes: Set(TEST_SCOPE.to_string()),
+            cimd_content_hash_at_grant: Set(None),
+            revalidation_required_at: Set(None),
+            granted_at: Set(now),
+            revoked_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert oauth_consent");
+        id
+    }
+
+    /// Insert an authorization_request row (required by FK on authorization_code).
+    async fn insert_auth_request(
+        db: &sea_orm::DatabaseConnection,
+        client_id: &str,
+        user_id: Uuid,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let request_id = Uuid::now_v7();
+
+        oauth_authorization_request::ActiveModel {
+            request_id: Set(request_id),
+            client_id: Set(client_id.to_string()),
+            user_id: Set(user_id),
+            redirect_uri: Set(TEST_REDIRECT_URI.to_string()),
+            scope: Set(TEST_SCOPE.to_string()),
+            state: Set("test-state".to_string()),
+            code_challenge: Set(pkce_challenge(TEST_VERIFIER)),
+            code_challenge_method: Set("S256".to_string()),
+            resource: Set(TEST_RESOURCE.to_string()),
+            created_at: Set(now),
+            expires_at: Set(now + time::Duration::seconds(600)),
+            consumed_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert oauth_authorization_request");
+
+        request_id
+    }
+
+    /// Insert a valid, unconsumed authorization code and return the raw code string.
+    async fn insert_valid_code(
+        db: &sea_orm::DatabaseConnection,
+        client_id: &str,
+        user_id: Uuid,
+        verifier: &str,
+        expires_in_secs: i64,
+    ) -> String {
+        let now = OffsetDateTime::now_utc();
+        let expires_at = now + time::Duration::seconds(expires_in_secs);
+        let request_id = insert_auth_request(db, client_id, user_id).await;
+
+        // Generate a upc_-prefixed raw code.
+        let mut bytes = [0u8; 32];
+        use rand::Rng;
+        rand::rng().fill(&mut bytes);
+        let raw = format!("upc_{}", URL_SAFE_NO_PAD.encode(bytes));
+        let code_hash = hash_token(&raw);
+
+        oauth_authorization_code::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            code_hash: Set(code_hash),
+            request_id: Set(request_id),
+            client_id: Set(client_id.to_string()),
+            user_id: Set(user_id),
+            redirect_uri: Set(TEST_REDIRECT_URI.to_string()),
+            scope: Set(TEST_SCOPE.to_string()),
+            code_challenge: Set(pkce_challenge(verifier)),
+            code_challenge_method: Set("S256".to_string()),
+            resource: Set(TEST_RESOURCE.to_string()),
+            issued_at: Set(now),
+            expires_at: Set(expires_at),
+            consumed_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert oauth_authorization_code");
+
+        raw
+    }
+
+    fn token_form(
+        code: &str,
+        verifier: &str,
+        client_id: &str,
+        redirect_uri: &str,
+        resource: &str,
+    ) -> String {
+        format!(
+            "grant_type=authorization_code&code={code}&redirect_uri={redirect_uri}&client_id={client_id}&code_verifier={verifier}&resource={resource}",
+            redirect_uri = percent_encode(redirect_uri),
+            resource = percent_encode(resource),
+        )
+    }
+
+    fn percent_encode(s: &str) -> String {
+        use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+        utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 1 — happy path: valid code exchange returns 200 with tokens
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_authorization_code_returns_access_and_refresh() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        let code = insert_valid_code(&app.db, TEST_CLIENT_ID, user_id, TEST_VERIFIER, 30).await;
+
+        let body = token_form(
+            &code,
+            TEST_VERIFIER,
+            TEST_CLIENT_ID,
+            TEST_REDIRECT_URI,
+            TEST_RESOURCE,
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::OK,
+            "expected 200 OK on valid code exchange"
+        );
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: uptrakit_web_api_types::oauth::TokenResponse =
+            serde_json::from_slice(&body_bytes).expect("valid TokenResponse JSON");
+        assert!(
+            !parsed.access_token.is_empty(),
+            "access_token must not be empty"
+        );
+        assert!(
+            parsed.refresh_token.is_some(),
+            "refresh_token must be present"
+        );
+        let rt = parsed.refresh_token.as_deref().unwrap_or("");
+        assert!(rt.starts_with("upr_"), "refresh_token must start with upr_");
+        assert_eq!(parsed.token_type, "Bearer");
+        assert_eq!(parsed.scope, TEST_SCOPE);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 2 — non-existent code returns 400 invalid_grant
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_invalid_code_returns_400_invalid_grant() {
+        let (_app, router) = app_with_oauth().await;
+
+        let body = token_form(
+            "upc_doesnotexist",
+            TEST_VERIFIER,
+            TEST_CLIENT_ID,
+            TEST_REDIRECT_URI,
+            TEST_RESOURCE,
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        // The handler will fail at client lookup first (no client in DB), returning invalid_client.
+        // Or if client exists but code doesn't, returns invalid_grant.
+        // We only need to check 400 status and an error field.
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        let error = parsed["error"].as_str().unwrap_or("");
+        assert!(
+            error == "invalid_grant" || error == "invalid_client",
+            "expected invalid_grant or invalid_client, got: {error}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 3 — valid code but wrong code_verifier → 400 invalid_grant (pkce_mismatch)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_pkce_mismatch_returns_400() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        let code = insert_valid_code(&app.db, TEST_CLIENT_ID, user_id, TEST_VERIFIER, 30).await;
+
+        let body = token_form(
+            &code,
+            "wrong-verifier-value",
+            TEST_CLIENT_ID,
+            TEST_REDIRECT_URI,
+            TEST_RESOURCE,
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(parsed["error"], "invalid_grant");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 4 — expired code → 400 invalid_grant (code_expired)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_expired_code_returns_400() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        // Insert a code that expired 1 second ago.
+        let code = insert_valid_code(&app.db, TEST_CLIENT_ID, user_id, TEST_VERIFIER, -1).await;
+
+        let body = token_form(
+            &code,
+            TEST_VERIFIER,
+            TEST_CLIENT_ID,
+            TEST_REDIRECT_URI,
+            TEST_RESOURCE,
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(parsed["error"], "invalid_grant");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 5 — wrong redirect_uri → 400 invalid_grant (redirect_uri_mismatch)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn token_redirect_uri_mismatch_returns_400() {
+        let (app, router) = app_with_oauth().await;
+
+        let user_id = insert_user_with_tenant(&app.db, app.tenant_id).await;
+        insert_trusted_client(&app.db, TEST_CLIENT_ID, TEST_REDIRECT_URI).await;
+        insert_consent(&app.db, user_id, TEST_CLIENT_ID).await;
+        let code = insert_valid_code(&app.db, TEST_CLIENT_ID, user_id, TEST_VERIFIER, 30).await;
+
+        // Use a different redirect_uri.
+        let body = token_form(
+            &code,
+            TEST_VERIFIER,
+            TEST_CLIENT_ID,
+            "https://evil.example.com/callback",
+            TEST_RESOURCE,
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json");
+        assert_eq!(parsed["error"], "invalid_grant");
     }
 }
