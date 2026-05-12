@@ -296,10 +296,10 @@ mod tests {
             return false;
         };
         for ext in exts {
-            if ext.extn_id == ID_CE_EXT_KEY_USAGE {
-                if let Ok(eku) = ExtendedKeyUsage::from_der(ext.extn_value.as_bytes()) {
-                    return eku.0.iter().any(|oid| *oid == ID_KP_CLIENT_AUTH);
-                }
+            if ext.extn_id == ID_CE_EXT_KEY_USAGE
+                && let Ok(eku) = ExtendedKeyUsage::from_der(ext.extn_value.as_bytes())
+            {
+                return eku.0.contains(&ID_KP_CLIENT_AUTH);
             }
         }
         false
@@ -318,10 +318,10 @@ mod tests {
             return false;
         };
         for ext in exts {
-            if ext.extn_id == ID_CE_BASIC_CONSTRAINTS {
-                if let Ok(bc) = BasicConstraints::from_der(ext.extn_value.as_bytes()) {
-                    return bc.ca;
-                }
+            if ext.extn_id == ID_CE_BASIC_CONSTRAINTS
+                && let Ok(bc) = BasicConstraints::from_der(ext.extn_value.as_bytes())
+            {
+                return bc.ca;
             }
         }
         false

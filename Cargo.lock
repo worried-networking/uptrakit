@@ -7505,7 +7505,6 @@ dependencies = [
  "url",
  "uuid",
  "x509-cert",
- "x509-parser",
  "zeroize",
 ]
 
@@ -8633,7 +8632,6 @@ dependencies = [
  "uuid",
  "x509-cert",
  "x509-ocsp",
- "x509-parser",
  "zeroize",
 ]
 
