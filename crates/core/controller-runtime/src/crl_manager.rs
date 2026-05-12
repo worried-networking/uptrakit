@@ -18,7 +18,9 @@ pub(crate) struct CrlManagerConfig {
     pub server_cert_pem: String,
     pub server_key_pem: String,
     pub db: DatabaseConnection,
-    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Hot-swap handle for replacing the [`ClientCertVerifier`] after a CRL rebuild
+    /// or CA rotation, without rebuilding the full [`rustls::ServerConfig`].
+    pub client_verifier: std::sync::Arc<crate::dynamic_verifier::DynamicClientVerifier>,
     pub revocation_notify: Arc<Notify>,
     pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,
 }
@@ -391,41 +393,47 @@ impl CrlManager {
         Ok((crls, combined_pem, persist_entries))
     }
 
-    /// Rebuild the CRLs and hot-reload the TLS configuration.
+    /// Rebuild CRLs and swap the [`DynamicClientVerifier`] — no `ServerConfig` rebuild.
     ///
-    /// Lock ordering: always acquire `issuers` before `server_cert`.
-    /// Both locks are held only long enough to snapshot the required fields;
-    /// they are dropped before the CPU-heavy `build_rustls_config_*` call to
-    /// avoid blocking writers (CA rotation, server cert renewal) for longer
-    /// than necessary.
+    /// Replaces the inner [`ClientCertVerifier`] held by the `DynamicClientVerifier`
+    /// with one backed by fresh CRLs and the current CA bundle.  Ongoing TLS
+    /// handshakes see the new verifier on their next verification call; no
+    /// existing connections are dropped.
     ///
-    /// After hot-reload, the new CRLs are persisted to the `crl_cache` table
+    /// After the swap the new CRLs are persisted to the `crl_cache` table
     /// so that restarting controllers can load them without regeneration.
-    pub(crate) async fn reload_tls_config(&self) -> pki::Result<()> {
+    pub(crate) async fn swap_verifier(&self) -> pki::Result<()> {
         let (crls, crl_pem, persist_entries) = self.build_crls().await?;
 
-        // Snapshot under each lock in order, then release before crypto work.
         let bundle_pem = {
             let issuers = self.issuers.read();
             issuers.bundle_pem.clone()
         };
-        let (cert_pem, key_pem) = {
-            let server_cert = self.server_cert.read();
-            (server_cert.0.clone(), server_cert.1.clone())
-        };
 
-        let server_config = pki::build_rustls_config_with_client_auth_and_crls(
-            &cert_pem,
-            &key_pem,
-            &bundle_pem,
-            crls,
-        )?;
+        // Build a new WebPkiClientVerifier with fresh CRLs.
+        use rustls::RootCertStore;
+        use rustls::pki_types::CertificateDer;
+        use rustls::pki_types::pem::PemObject;
+        use rustls::server::WebPkiClientVerifier;
+        use rustls::server::danger::ClientCertVerifier;
 
-        self.config
-            .rustls_config
-            .reload_from_config(Arc::new(server_config));
+        let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(bundle_pem.as_bytes())
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|_pem_err| report!(pki::PkiError::PemParse))?;
+        let mut root_store = RootCertStore::empty();
+        for ca_cert in ca_certs {
+            root_store.add(ca_cert).context_to::<pki::PkiError>()?;
+        }
+        let new_verifier: std::sync::Arc<dyn ClientCertVerifier> =
+            WebPkiClientVerifier::builder(std::sync::Arc::new(root_store))
+                .with_crls(crls)
+                .allow_unauthenticated()
+                .build()
+                .map_err(|e| report!(pki::PkiError::VerifierBuilder(e.to_string())))?;
 
-        // Update the CRL PEM cache for the HTTP endpoint
+        self.config.client_verifier.swap(new_verifier);
+
+        // Update the CRL PEM cache for the HTTP endpoint.
         *self.config.crl_pem_cache.write() = crl_pem;
 
         // Persist each CA's CRL to the database cache (best-effort).
@@ -443,12 +451,12 @@ impl CrlManager {
                 tracing::warn!(
                     %ca_fingerprint,
                     error = ?e,
-                    "failed to persist CRL to database after reload"
+                    "failed to persist CRL after verifier swap"
                 );
             }
         }
 
-        tracing::info!("TLS configuration reloaded with updated CRL");
+        tracing::info!("client verifier swapped with updated CRL");
         Ok(())
     }
 
@@ -491,8 +499,8 @@ impl CrlManager {
                 }
             }
 
-            if let Err(e) = self.reload_tls_config().await {
-                tracing::error!(error = ?e, "failed to reload TLS config with updated CRL");
+            if let Err(e) = self.swap_verifier().await {
+                tracing::error!(error = ?e, "failed to swap verifier with updated CRL");
             }
         }
     }
