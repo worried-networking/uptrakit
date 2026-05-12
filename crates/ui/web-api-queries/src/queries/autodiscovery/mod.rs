@@ -19,7 +19,9 @@ pub mod default_configs;
 // Re-export all public items so callers see the same API as before.
 pub use default_configs::find_or_create_default_plugin_config;
 pub use ignore_rules::{
-    batch_delete_ignore_rules, create_or_ignore_ignore_rule, delete_ignore_rule, list_ignore_rules,
+    SoftwareIgnoreView, batch_delete_ignore_rules, create_or_ignore_ignore_rule,
+    create_or_ignore_ignore_rule_in_tx, delete_ignore_rule, delete_ignore_rule_in_tx,
+    list_ignore_rules,
 };
 
 use time::OffsetDateTime;

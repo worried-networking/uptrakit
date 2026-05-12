@@ -9,6 +9,26 @@ use uptrakit_web_api_types::autodiscovery::SoftwareIgnoreResponse;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "software_ignore")]
+pub struct SoftwareIgnoreView {
+    id: Uuid,
+    name: String,
+    host_id: Option<Uuid>,
+}
+
+impl From<&software_ignore::Model> for SoftwareIgnoreView {
+    fn from(m: &software_ignore::Model) -> Self {
+        Self {
+            id: m.id,
+            name: m.name.clone(),
+            host_id: m.host_id,
+        }
+    }
+}
+
 /// Insert an autodiscovery ignore rule by software item name (idempotent).
 ///
 /// Returns `true` if a new rule was inserted, `false` if the rule already
@@ -94,6 +114,81 @@ pub async fn delete_ignore_rule(
         .await
         .context_to()?;
     Ok(result.rows_affected > 0)
+}
+
+// ── Transaction-aware variants (for emit_stateful callers) ───────────────────
+
+/// Insert an autodiscovery ignore rule inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(was_created, model)`:
+/// - `was_created = true`  → new row inserted.
+/// - `was_created = false` → rule already existed; model is the existing row.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn create_or_ignore_ignore_rule_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    name: &str,
+    host_id: Option<Uuid>,
+) -> Result<(bool, software_ignore::Model)> {
+    let new_id = Uuid::now_v7();
+    let record = software_ignore::ActiveModel {
+        id: Set(new_id),
+        tenant_id: Set(tenant_id),
+        host_id: Set(host_id),
+        name: Set(name.to_string()),
+        created_at: Set(time::OffsetDateTime::now_utc()),
+    };
+
+    match SoftwareIgnore::insert(record).exec_with_returning(tx).await {
+        Ok(model) => Ok((true, model)),
+        Err(e) if is_unique_constraint_violation(&e) => {
+            // Rule already exists — look it up.
+            let mut query = SoftwareIgnore::find()
+                .filter(software_ignore::Column::TenantId.eq(tenant_id))
+                .filter(software_ignore::Column::Name.eq(name));
+            if let Some(hid) = host_id {
+                query = query.filter(software_ignore::Column::HostId.eq(hid));
+            } else {
+                query = query.filter(software_ignore::Column::HostId.is_null());
+            }
+            let model = query.one(tx).await.context_to()?.ok_or_else(|| {
+                report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
+                    "concurrent insert race: ignore rule vanished after unique violation"
+                        .to_string()
+                )))
+            })?;
+            Ok((false, model))
+        }
+        Err(e) => Err(report!(AutodiscoveryError::Db(e))),
+    }
+}
+
+/// Read before-snapshot then hard-delete, inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns the `before` [`software_ignore::Model`] on success, or `None` if not found.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn delete_ignore_rule_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<software_ignore::Model>> {
+    let Some(before) = SoftwareIgnore::find_by_id(id)
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    SoftwareIgnore::delete_many()
+        .filter(software_ignore::Column::Id.eq(id))
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(before))
 }
 
 /// Hard-delete multiple autodiscovery ignore rules.
