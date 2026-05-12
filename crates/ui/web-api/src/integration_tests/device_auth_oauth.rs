@@ -396,7 +396,7 @@ async fn deny_unknown_user_code_returns_not_found() {
     let status = client
         .post_json(
             "/api/v1/auth/device/deny",
-            &serde_json::json!({ "user_code": "UNKN-OWNX" }),
+            &serde_json::json!({ "user_code": "BCDF-GHJK" }),
         )
         .bearer(&token)
         .send_status()
@@ -457,7 +457,7 @@ async fn lookup_unknown_user_code_returns_not_found() {
     let token = register_and_get_token(&client).await;
 
     let status = client
-        .get("/api/v1/auth/device/lookup?user_code=UNKN-OWNX")
+        .get("/api/v1/auth/device/lookup?user_code=BCDF-GHJK")
         .bearer(&token)
         .send_status()
         .await;
