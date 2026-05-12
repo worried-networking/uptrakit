@@ -8,6 +8,8 @@ pub mod error;
 pub mod filter;
 pub mod runtime_emitter;
 
+pub use uptrakit_audit_log_derive::AuditView;
+
 pub use action_type::{AuditActionType, RegisteredAuditAction};
 #[cfg(feature = "db")]
 pub use backend::DatabaseBackend;
