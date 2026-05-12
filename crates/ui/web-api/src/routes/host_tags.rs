@@ -2,10 +2,8 @@ use crate::AppState;
 use crate::actions::host_tags as tag_actions;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateHosts, CanViewHosts};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
-use crate::queries::host_tags as tag_queries;
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
+use crate::queries::host_tags::{self as tag_queries, HostTagView};
 use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
@@ -13,9 +11,13 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
+    TransactionTrait,
+};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{host, host_tag};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::entity::host;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -27,38 +29,6 @@ pub use uptrakit_web_api_types::host_tags::{
     UpdateHostTagRequest,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
-
-struct AuditContext<'a> {
-    state: &'a AppState,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_host_tag_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_type: Option<&'static str>,
-    target_id: Option<String>,
-    target_display: Option<String>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
-
-    if let (Some(target_type), Some(target_id)) = (target_type, target_id) {
-        builder = builder.target(target_type, target_id, target_display);
-    }
-
-    if let Ok(entry) = builder.build() {
-        ctx.state.audit_emitter.emit_best_effort(entry);
-    }
-}
 
 // --- Endpoints ---
 
@@ -153,80 +123,134 @@ pub async fn create_host_tag(
     Json(body): Json<CreateHostTagRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if let Err(e) = body.validate() {
-        emit_host_tag_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
-            None,
-            None,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        if let Ok(entry) =
+            AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "invalid_request" }))
+                .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let ctx = state.mutation_context();
-    match tag_actions::create(&tenant_db, &ctx, &body).await {
-        Ok(resp) => {
-            emit_host_tag_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
-                Some("host_tag"),
-                Some(resp.id.to_string()),
-                Some(resp.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "name": resp.name,
-                    "tag_name": resp.name,
-                    "color": resp.color,
-                    "description_present": resp.description.is_some(),
-                }),
-            );
-            (StatusCode::CREATED, Json(resp)).into_response()
-        }
+    // Resolve the auto-color before opening the transaction (read-only).
+    let color = match &body.color {
+        Some(c) => c.clone(),
+        None => tag_queries::auto_color(&tenant_db).await,
+    };
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
         Err(e) => {
+            tracing::error!("Failed to begin transaction for host tag create: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let tag = match tag_queries::create_host_tag_in_tx(&tx, tenant_id, &body, color).await {
+        Ok(tag) => tag,
+        Err(e) => {
+            drop(tx);
             let msg = e.to_string();
             if msg.contains("UNIQUE") || msg.contains("unique") || msg.contains("duplicate") {
-                emit_host_tag_audit(
-                    &audit_ctx,
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
                     uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
-                    None,
-                    None,
-                    None,
-                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                    serde_json::json!({
-                        "reason_code": "duplicate_tag_name",
-                        "name": body.name,
-                    }),
-                );
-                error_response(StatusCode::CONFLICT, "A tag with this name already exists")
-            } else {
-                tracing::error!("Failed to create host tag: {e}");
-                emit_host_tag_audit(
-                    &audit_ctx,
-                    uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
-                    None,
-                    None,
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    serde_json::json!({
-                        "reason_code": "host_tag_create_failed",
-                        "name": body.name,
-                    }),
-                );
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({
+                    "reason_code": "duplicate_tag_name",
+                    "name": body.name,
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::CONFLICT, "A tag with this name already exists");
             }
+            tracing::error!("Failed to create host tag: {e}");
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "reason_code": "host_tag_create_failed",
+                "name": body.name,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let after_view = HostTagView::from(&tag);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::host_tag_create(&AbsentView(&after_view), &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "tag_name": tag.name,
+                "color": tag.color,
+                "description_present": tag.description.is_some(),
+            }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for host tag create: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for host tag create: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit host tag create: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Broadcast the creation event.
+    let ctx = state.mutation_context();
+    ctx.event_broadcaster
+        .send(
+            tenant_id,
+            uptrakit_web_api_types::events::AdminEvent::HostTagCreated { id: tag.id },
+        )
+        .await;
+
+    let resp = tag_queries::model_to_response(tag, 0);
+    (StatusCode::CREATED, Json(resp)).into_response()
 }
 
 /// Update an existing host tag
@@ -259,103 +283,155 @@ pub async fn update_host_tag(
     Json(body): Json<UpdateHostTagRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if let Err(e) = body.validate() {
-        emit_host_tag_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
-            Some("host_tag"),
-            Some(tag_id.to_string()),
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        if let Ok(entry) =
+            AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("host_tag", tag_id.to_string(), None)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "invalid_request" }))
+                .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let ctx = state.mutation_context();
-    match tag_actions::update(&tenant_db, &ctx, tag_id, &body).await {
-        Ok(Some(resp)) => {
-            let mut changed_fields = Vec::new();
-            if body.name.is_some() {
-                changed_fields.push("name");
-            }
-            if body.color.is_some() {
-                changed_fields.push("color");
-            }
-            if body.description.is_some() {
-                changed_fields.push("description");
-            }
-
-            emit_host_tag_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
-                Some("host_tag"),
-                Some(resp.id.to_string()),
-                Some(resp.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "name": resp.name,
-                    "color": resp.color,
-                    "description_present": resp.description.is_some(),
-                    "changed_fields": changed_fields,
-                }),
-            );
-            (StatusCode::OK, Json(resp)).into_response()
-        }
-        Ok(None) => {
-            emit_host_tag_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
-                Some("host_tag"),
-                Some(tag_id.to_string()),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "tag_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Host tag not found")
-        }
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
         Err(e) => {
+            tracing::error!("Failed to begin transaction for host tag update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let pair = match tag_queries::update_host_tag_in_tx(&tx, tenant_id, tag_id, &body).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            drop(tx);
             let msg = e.to_string();
             if msg.contains("UNIQUE") || msg.contains("unique") || msg.contains("duplicate") {
-                emit_host_tag_audit(
-                    &audit_ctx,
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
                     uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
-                    Some("host_tag"),
-                    Some(tag_id.to_string()),
-                    None,
-                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                    serde_json::json!({
-                        "reason_code": "duplicate_tag_name",
-                    }),
-                );
-                error_response(StatusCode::CONFLICT, "A tag with this name already exists")
-            } else {
-                tracing::error!("Failed to update host tag: {e}");
-                emit_host_tag_audit(
-                    &audit_ctx,
-                    uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
-                    Some("host_tag"),
-                    Some(tag_id.to_string()),
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    serde_json::json!({
-                        "reason_code": "host_tag_update_failed",
-                    }),
-                );
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("host_tag", tag_id.to_string(), None)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "duplicate_tag_name" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::CONFLICT, "A tag with this name already exists");
             }
+            tracing::error!("Failed to update host tag: {e}");
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host_tag", tag_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "host_tag_update_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) =
+            AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("host_tag", tag_id.to_string(), None)
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({ "reason_code": "tag_not_found" }))
+                .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::NOT_FOUND, "Host tag not found");
+    };
+
+    let before_view = HostTagView::from(&before_model);
+    let after_view = HostTagView::from(&after_model);
+
+    let mut changed_fields = Vec::new();
+    if body.name.is_some() {
+        changed_fields.push("name");
     }
+    if body.color.is_some() {
+        changed_fields.push("color");
+    }
+    if body.description.is_some() {
+        changed_fields.push("description");
+    }
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::host_tag_update(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "name": after_model.name,
+            "color": after_model.color,
+            "description_present": after_model.description.is_some(),
+            "changed_fields": changed_fields,
+        }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for host tag update: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for host tag update: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit host tag update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Broadcast the update event.
+    let ctx = state.mutation_context();
+    ctx.event_broadcaster
+        .send(
+            tenant_id,
+            uptrakit_web_api_types::events::AdminEvent::HostTagUpdated { id: tag_id },
+        )
+        .await;
+
+    let host_count = tag_queries::count_hosts_for_tag(state.db(), tag_id).await;
+    let resp = tag_queries::model_to_response(after_model, host_count);
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Delete a host tag (soft-delete)
@@ -384,66 +460,105 @@ pub async fn delete_host_tag(
     Path(tag_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
-    let existing_tag = host_tag::Entity::find_by_id(tag_id)
-        .filter(host_tag::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(host_tag::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-        .ok()
-        .flatten();
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
-    let ctx = state.mutation_context();
-    match tag_actions::delete(&tenant_db, &ctx, tag_id).await {
-        Ok(true) => {
-            emit_host_tag_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-                Some("host_tag"),
-                Some(tag_id.to_string()),
-                existing_tag.as_ref().map(|tag| tag.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "name": existing_tag.as_ref().map(|tag| tag.name.clone()),
-                }),
-            );
-            StatusCode::NO_CONTENT.into_response()
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for host tag delete: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        Ok(false) => {
-            emit_host_tag_audit(
-                &audit_ctx,
+    };
+
+    let before_model = match tag_queries::delete_host_tag_in_tx(&tx, tenant_id, tag_id).await {
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-                Some("host_tag"),
-                Some(tag_id.to_string()),
-                existing_tag.as_ref().map(|tag| tag.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "tag_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Host tag not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host_tag", tag_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "tag_not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Host tag not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!("Failed to delete host tag: {e}");
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-                Some("host_tag"),
-                Some(tag_id.to_string()),
-                existing_tag.as_ref().map(|tag| tag.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_tag_delete_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host_tag", tag_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "host_tag_delete_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = HostTagView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::host_tag_delete(&before_view, &AbsentView(&before_view))
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({ "name": before_model.name }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for host tag delete: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for host tag delete: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit host tag delete: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Broadcast the deletion event.
+    let ctx = state.mutation_context();
+    ctx.event_broadcaster
+        .send(
+            tenant_id,
+            uptrakit_web_api_types::events::AdminEvent::HostTagDeleted { id: tag_id },
+        )
+        .await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Perform a batch action on multiple host tags.
@@ -472,25 +587,23 @@ pub async fn batch_host_tags(
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if let Err(e) = body.validate() {
-        emit_host_tag_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-            None,
-            None,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "update_kind": "batch_delete",
-                "reason_code": "invalid_request",
-            }),
-        );
+        if let Ok(entry) =
+            AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({
+                    "update_kind": "batch_delete",
+                    "reason_code": "invalid_request",
+                }))
+                .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -504,19 +617,21 @@ pub async fn batch_host_tags(
             }
         },
         unknown => {
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-                None,
-                None,
-                None,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                serde_json::json!({
-                    "update_kind": "batch_delete",
-                    "reason_code": "unknown_action",
-                    "action": unknown,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "update_kind": "batch_delete",
+                "reason_code": "unknown_action",
+                "action": unknown,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown action: {unknown}. Supported: delete"),
@@ -524,26 +639,27 @@ pub async fn batch_host_tags(
         }
     };
 
-    emit_host_tag_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
-        None,
-        None,
-        None,
-        if failed.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Success
-        } else if succeeded_ids.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Denied
-        } else {
-            uptrakit_audit_log::AuditOutcome::Partial
-        },
-        serde_json::json!({
-            "update_kind": "batch_delete",
-            "requested_count": body.ids.len(),
-            "deleted_count": succeeded_ids.len(),
-            "failed_count": failed.len(),
-        }),
-    );
+    if let Ok(entry) =
+        AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(if failed.is_empty() {
+                AuditOutcome::Success
+            } else if succeeded_ids.is_empty() {
+                AuditOutcome::Denied
+            } else {
+                AuditOutcome::Partial
+            })
+            .details(serde_json::json!({
+                "update_kind": "batch_delete",
+                "requested_count": body.ids.len(),
+                "deleted_count": succeeded_ids.len(),
+                "failed_count": failed.len(),
+            }))
+            .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -588,24 +704,21 @@ pub async fn set_host_tags(
     Json(body): Json<SetHostTagsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if let Err(e) = body.validate() {
-        emit_host_tag_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
-            Some("host"),
-            Some(host_id.to_string()),
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        if let Ok(entry) =
+            AuditEntry::<Event>::builder_event(uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("host", host_id.to_string(), None)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "invalid_request" }))
+                .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -617,34 +730,40 @@ pub async fn set_host_tags(
     {
         Ok(Some(host)) => host,
         Ok(None) => {
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
-                Some("host"),
-                Some(host_id.to_string()),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "host_not_found",
-                    "requested_tag_count": body.tag_ids.len(),
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "reason_code": "host_not_found",
+                "requested_tag_count": body.tag_ids.len(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::NOT_FOUND, "Host not found");
         }
         Err(e) => {
             tracing::error!("DB error: {e}");
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
-                Some("host"),
-                Some(host_id.to_string()),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_lookup_failed",
-                    "requested_tag_count": body.tag_ids.len(),
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "reason_code": "host_lookup_failed",
+                "requested_tag_count": body.tag_ids.len(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -653,39 +772,45 @@ pub async fn set_host_tags(
     // Refresh MQTT `{prefix}/hosts/{h}/tags` for all connected MQTT services.
     match tag_actions::set(&tenant_db, &ctx, host_id, &body.tag_ids).await {
         Ok(tags) => {
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
-                Some("host"),
-                Some(host_id.to_string()),
-                Some(host_record.friendly_name),
-                if tags.len() == body.tag_ids.len() {
-                    uptrakit_audit_log::AuditOutcome::Success
-                } else {
-                    uptrakit_audit_log::AuditOutcome::Partial
-                },
-                serde_json::json!({
-                    "requested_tag_count": body.tag_ids.len(),
-                    "assigned_tag_count": tags.len(),
-                    "assigned_tag_ids": tags.iter().map(|tag| tag.id).collect::<Vec<_>>(),
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), Some(host_record.friendly_name))
+            .outcome(if tags.len() == body.tag_ids.len() {
+                AuditOutcome::Success
+            } else {
+                AuditOutcome::Partial
+            })
+            .details(serde_json::json!({
+                "requested_tag_count": body.tag_ids.len(),
+                "assigned_tag_count": tags.len(),
+                "assigned_tag_ids": tags.iter().map(|tag| tag.id).collect::<Vec<_>>(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             (StatusCode::OK, Json(tags)).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to set host tags: {e}");
-            emit_host_tag_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
-                Some("host"),
-                Some(host_id.to_string()),
-                Some(host_record.friendly_name),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_tag_assignment_failed",
-                    "requested_tag_count": body.tag_ids.len(),
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), Some(host_record.friendly_name))
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "reason_code": "host_tag_assignment_failed",
+                "requested_tag_count": body.tag_ids.len(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
