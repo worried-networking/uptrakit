@@ -201,7 +201,7 @@ mod tests {
     fn migration_index() -> u32 {
         Migrator::migrations()
             .iter()
-            .position(|m| m.name() == "m20260512_000004_oauth_authorization_codes")
+            .position(|m| m.name() == "m20260513_000004_oauth_authorization_codes")
             .expect("oauth_authorization_codes migration must be registered") as u32
     }
 

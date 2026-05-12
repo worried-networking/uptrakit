@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 /// `oauth_authorization_codes` row.
 ///
 /// Single-use authorization code minted at consent time and redeemed once
-/// at `/oauth/token`. See `m20260512_000004_oauth_authorization_codes`
+/// at `/oauth/token`. See `m20260513_000004_oauth_authorization_codes`
 /// for the full schema rationale.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "oauth_authorization_codes")]
