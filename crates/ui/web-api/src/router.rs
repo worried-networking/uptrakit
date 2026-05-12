@@ -807,6 +807,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::oidc_providers::activate_provider))
         .routes(routes!(crate::routes::oidc_providers::deactivate_provider));
 
+    // Operator OAuth Clients API (spec §11.4) — authenticated, ManageAuthSettings required.
+    let auth_routes = auth_routes
+        .route(
+            "/api/oauth/clients",
+            get(crate::routes::oauth::clients_api::list_clients)
+                .post(crate::routes::oauth::clients_api::manual_register_client),
+        )
+        .route(
+            "/api/oauth/clients/{client_id}",
+            axum::routing::delete(crate::routes::oauth::clients_api::revoke_client),
+        )
+        .route(
+            "/api/oauth/clients/{client_id}/trust",
+            axum::routing::post(crate::routes::oauth::clients_api::trust_client),
+        );
+
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),
         crate::middleware::require_auth::require_auth,
