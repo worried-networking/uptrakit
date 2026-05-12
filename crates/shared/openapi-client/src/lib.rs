@@ -390,13 +390,15 @@ impl UptrakitClient {
         if status == reqwest::StatusCode::OK {
             return serde_json::from_slice::<T>(&bytes).context_to();
         }
-        if status == reqwest::StatusCode::BAD_REQUEST {
-            if let Ok(err_resp) =
-                serde_json::from_slice::<uptrakit_web_api_types::oauth::OAuthErrorResponse>(&bytes)
-            {
-                bail!(ClientError::OAuthError(err_resp));
-            }
+        if status == reqwest::StatusCode::BAD_REQUEST
+            && let Ok(err_resp) =
+                serde_json::from_slice::<crate::types_impl::oauth::OAuthErrorResponse>(&bytes)
+        {
+            bail!(ClientError::OAuthError(err_resp));
         }
+        // Body did not match the OAuth error envelope — fall through to the
+        // shared status-dispatcher so 400 surfaces consistently with every
+        // other endpoint.
 
         self.handle_response_bytes(status, bytes.to_vec(), retry_after)
             .await
@@ -487,25 +489,9 @@ impl UptrakitClient {
 
     async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
         let status = resp.status();
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let retry_after = parse_retry_after(&resp);
-            bail!(ClientError::RateLimited {
-                retry_after_seconds: retry_after,
-            });
-        }
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            bail!(ClientError::NotAuthenticated);
-        }
-        let text = resp.text().await.context_to()?;
-        if status == reqwest::StatusCode::NOT_FOUND {
-            let message = extract_error_message(&text);
-            bail!(ClientError::NotFound(message));
-        }
-        if status.is_client_error() || status.is_server_error() {
-            let message = extract_error_message(&text);
-            bail!(ClientError::Api { status, message });
-        }
-        serde_json::from_str(&text).context_to()
+        let retry_after = parse_retry_after(&resp);
+        let bytes = resp.bytes().await.context_to()?.to_vec();
+        self.handle_response_bytes(status, bytes, retry_after).await
     }
 
     async fn handle_response_bytes<T: DeserializeOwned>(
