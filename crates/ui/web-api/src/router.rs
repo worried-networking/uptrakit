@@ -33,7 +33,8 @@ use crate::AppState;
         (name = "Notifications", description = "Notification channel, rule, and log management"),
         (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
         (name = "Audit Logs", description = "Tenant and system-level audit log access"),
-        (name = "Users", description = "User management, roles, and access presets")
+        (name = "Users", description = "User management, roles, and access presets"),
+        (name = "OAuth", description = "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)")
     ),
     paths(
         crate::routes::auth::register,
@@ -74,6 +75,12 @@ use crate::AppState;
         crate::routes::api_tokens::list_api_tokens,
         crate::routes::api_tokens::revoke_api_token,
         crate::routes::device_auth::device_auth_approve,
+        crate::routes::device_auth::device_auth_deny,
+        crate::routes::device_auth::device_auth_lookup,
+        // OAuth 2.0 (RFC 8628 + RFC 8414)
+        crate::routes::oauth::device_authorization::device_authorization,
+        crate::routes::oauth::token::token,
+        crate::routes::oauth::metadata::metadata,
         crate::routes::settings_global_combined::get_global_combined_settings,
         crate::routes::settings_provider_github::get_github_provider_settings,
         crate::routes::settings_provider_github::update_github_provider_settings,
@@ -222,6 +229,17 @@ use crate::AppState;
             crate::routes::api_tokens::ApiTokenListResponse,
             crate::routes::device_auth::DeviceAuthApproveRequest,
             crate::routes::device_auth::DeviceAuthApproveResponse,
+            // OAuth 2.0 types
+            uptrakit_web_api_types::oauth::DeviceAuthorizationRequest,
+            uptrakit_web_api_types::oauth::DeviceAuthorizationResponse,
+            uptrakit_web_api_types::oauth::OAuthTokenRequest,
+            uptrakit_web_api_types::oauth::OAuthTokenResponse,
+            uptrakit_web_api_types::oauth::OAuthErrorResponse,
+            uptrakit_web_api_types::oauth::OAuthErrorCode,
+            uptrakit_web_api_types::oauth::OAuthAuthorizationServerMetadata,
+            uptrakit_web_api_types::oauth::DeviceAuthDenyRequest,
+            uptrakit_web_api_types::oauth::DeviceAuthDenyResponse,
+            uptrakit_web_api_types::oauth::DeviceAuthLookupResponse,
             crate::routes::settings_network::NetworkSettingsResponse,
             crate::routes::settings_network::UpdateNetworkSettingsRequest,
             crate::routes::hosts::HostResponse,
@@ -543,6 +561,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::settings_network::update_network_settings
         ))
         .routes(routes!(crate::routes::device_auth::device_auth_approve))
+        .routes(routes!(crate::routes::device_auth::device_auth_deny))
+        .routes(routes!(crate::routes::device_auth::device_auth_lookup))
         .routes(routes!(crate::routes::settings_ca::rotate_ca))
         .routes(routes!(crate::routes::hosts::list_hosts))
         .routes(routes!(crate::routes::hosts::get_host))
@@ -827,6 +847,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/auth/email-change/confirm",
             axum::routing::get(crate::routes::auth::confirm_email_change),
         )
+        // OAuth 2.0 device grant (RFC 8628) — unauthenticated, no CSRF required
+        .routes(routes!(
+            crate::routes::oauth::device_authorization::device_authorization
+        ))
+        .routes(routes!(crate::routes::oauth::token::token))
         .merge(auth_routes);
 
     #[cfg(feature = "oidc")]
@@ -843,6 +868,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let (api_router, api) = base_router.split_for_parts();
 
     let mut router = api_router
+        // RFC 8615 / RFC 8414 §3 — must be at the root, outside any /api/v1 prefix.
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(crate::routes::oauth::metadata::metadata),
+        )
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",
             axum::routing::post(crate::routes::notifications::notification_callback),
