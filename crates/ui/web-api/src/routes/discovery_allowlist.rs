@@ -16,60 +16,25 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
+    TransactionTrait,
+};
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::discovery_allowlist as allowlist_queries;
 use crate::tenant_db::TenantDb;
-use uptrakit_shared_db::entity::{
-    host, host_discovery_allowlist, prelude::*, tenant_discovery_allowlist,
-};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::entity::{host, prelude::*};
 pub use uptrakit_web_api_types::discovery_allowlist::{
     CreateDiscoveryAllowlistEntryRequest, HostDiscoveryAllowlistEntry,
     TenantDiscoveryAllowlistEntry,
 };
-
-struct AuditContext<'a> {
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_discovery_allowlist_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target: Option<(Uuid, Option<String>)>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
-
-    if let Some((entry_id, target_display)) = target {
-        builder = builder.target(
-            "discovery_allowlist_entry",
-            entry_id.to_string(),
-            target_display,
-        );
-    }
-
-    if let Ok(entry) = builder.build() {
-        audit_emitter.emit_best_effort(entry);
-    }
-}
 
 // ── Tenant-wide endpoints ─────────────────────────────────────────────────────
 
@@ -131,66 +96,139 @@ pub async fn add_tenant_discovery_allowlist_entry(
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let plugin_type = req.plugin_type.to_string();
-    let was_created = tenant_discovery_allowlist::Entity::find()
-        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(tenant_discovery_allowlist::Column::PluginType.eq(&plugin_type))
-        .one(tenant_db.db())
-        .await
-        .map(|row| row.is_none())
-        .unwrap_or(true);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+    let plugin_type_str = req.plugin_type.to_string();
 
-    let entry = match allowlist_queries::add_tenant_allowlist_entry(
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for tenant allowlist create");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let (was_created, entry) = match allowlist_queries::add_tenant_allowlist_entry_in_tx(
         state.plugin.plugin_ops.as_ref(),
-        tenant_db.db(),
-        tenant_db.tenant_id(),
+        &tx,
+        tenant_id,
         req.plugin_type,
     )
     .await
     {
-        Ok(entry) => entry,
+        Ok(result) => result,
         Err(report) => {
+            drop(tx);
             let (outcome, reason_code) = report
                 .current_context()
                 .tenant_create_audit_classification();
-            emit_discovery_allowlist_audit(
-                &state.audit_emitter,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-                None,
-                outcome,
-                serde_json::json!({
-                    "scope": "tenant",
-                    "plugin_type": plugin_type,
-                    "reason_code": reason_code,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(outcome)
+            .details(serde_json::json!({
+                "scope": "tenant",
+                "plugin_type": plugin_type_str,
+                "reason_code": reason_code,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Err(report.into());
         }
     };
 
-    emit_discovery_allowlist_audit(
-        &state.audit_emitter,
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-        Some((entry.id, Some(entry.plugin_type.clone()))),
-        if was_created {
-            uptrakit_audit_log::AuditOutcome::Success
-        } else {
-            uptrakit_audit_log::AuditOutcome::Partial
-        },
-        serde_json::json!({
+    if !was_created {
+        // Entry already existed — no state change.
+        drop(tx);
+        if let Ok(audit_entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(
+            "discovery_allowlist_entry",
+            entry.id.to_string(),
+            Some(entry.plugin_type.clone()),
+        )
+        .outcome(AuditOutcome::Partial)
+        .details(serde_json::json!({
             "scope": "tenant",
             "plugin_type": entry.plugin_type,
             "host_id": serde_json::Value::Null,
-            "was_created": was_created,
-        }),
-    );
+            "was_created": false,
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(audit_entry);
+        }
+        return Ok((StatusCode::CREATED, Json(entry)).into_response());
+    }
+
+    // Newly inserted — emit_stateful.
+    let view = allowlist_queries::TenantAllowlistView::from(&entry);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::discovery_allowlist_create(
+        &AbsentView(&view),
+        &view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "scope": "tenant",
+        "plugin_type": entry.plugin_type,
+        "host_id": serde_json::Value::Null,
+        "was_created": true,
+    }))
+    .build()
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for tenant allowlist create");
+            drop(tx);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for tenant allowlist create");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit tenant allowlist create");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
     Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
@@ -213,98 +251,119 @@ pub async fn add_tenant_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(entry_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let existing_entry = match tenant_discovery_allowlist::Entity::find_by_id(entry_id)
-        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
-        .one(tenant_db.db())
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(entry) => entry,
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, "DB error loading tenant discovery allowlist entry");
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, None)),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "scope": "tenant",
-                    "reason_code": "tenant_discovery_allowlist_lookup_failed",
-                }),
-            );
+            tracing::error!(error = %e, "Failed to begin transaction for tenant allowlist delete");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    match allowlist_queries::remove_tenant_allowlist_entry(
-        tenant_db.db(),
-        tenant_db.tenant_id(),
-        entry_id,
+    let before_model = match allowlist_queries::remove_tenant_allowlist_entry_in_tx(
+        &tx, tenant_id, entry_id,
     )
     .await
     {
-        Ok(true) => {
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((
-                    entry_id,
-                    existing_entry
-                        .as_ref()
-                        .map(|entry| entry.plugin_type.clone()),
-                )),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "scope": "tenant",
-                    "plugin_type": existing_entry.as_ref().map(|entry| entry.plugin_type.clone()),
-                    "host_id": serde_json::Value::Null,
-                }),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "scope": "tenant",
-                    "reason_code": "allowlist_entry_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Allowlist entry not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("discovery_allowlist_entry", entry_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "scope": "tenant",
+                "reason_code": "allowlist_entry_not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Allowlist entry not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!(error = %e, "DB error removing tenant discovery allowlist entry");
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "scope": "tenant",
-                    "reason_code": "tenant_discovery_allowlist_delete_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("discovery_allowlist_entry", entry_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "scope": "tenant",
+                "reason_code": "tenant_discovery_allowlist_delete_failed",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = allowlist_queries::TenantAllowlistView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::discovery_allowlist_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "scope": "tenant",
+        "plugin_type": before_model.plugin_type,
+        "host_id": serde_json::Value::Null,
+    }))
+    .build()
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for tenant allowlist delete");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for tenant allowlist delete");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit tenant allowlist delete");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ── Host-specific endpoints ───────────────────────────────────────────────────
@@ -391,52 +450,55 @@ pub async fn add_host_discovery_allowlist_entry(
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let plugin_type = req.plugin_type.to_string();
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+    let plugin_type_str = req.plugin_type.to_string();
 
-    // Verify host belongs to tenant.
+    // Verify host belongs to tenant (read-only, outside the tx).
     match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
+        .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
         Ok(Some(_)) => {}
         Ok(None) => {
-            emit_discovery_allowlist_audit(
-                &state.audit_emitter,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "plugin_type": plugin_type,
-                    "reason_code": "host_not_found",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "plugin_type": plugin_type_str,
+                "reason_code": "host_not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Ok(error_response(StatusCode::NOT_FOUND, "Host not found"));
         }
         Err(e) => {
             tracing::error!(error = %e, "DB error checking host");
-            emit_discovery_allowlist_audit(
-                &state.audit_emitter,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "plugin_type": plugin_type,
-                    "reason_code": "host_lookup_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "plugin_type": plugin_type_str,
+                "reason_code": "host_lookup_failed",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -444,62 +506,136 @@ pub async fn add_host_discovery_allowlist_entry(
         }
     }
 
-    let was_created = host_discovery_allowlist::Entity::find()
-        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
-        .filter(host_discovery_allowlist::Column::PluginType.eq(&plugin_type))
-        .one(tenant_db.db())
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
-        .map(|row| row.is_none())
-        .unwrap_or(true);
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for host allowlist create");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
-    let entry = match allowlist_queries::add_host_allowlist_entry(
+    let (was_created, entry) = match allowlist_queries::add_host_allowlist_entry_in_tx(
         state.plugin.plugin_ops.as_ref(),
-        tenant_db.db(),
-        tenant_db.tenant_id(),
+        &tx,
+        tenant_id,
         host_id,
         req.plugin_type,
     )
     .await
     {
-        Ok(entry) => entry,
+        Ok(result) => result,
         Err(report) => {
+            drop(tx);
             let (outcome, reason_code) =
                 report.current_context().host_create_audit_classification();
-            emit_discovery_allowlist_audit(
-                &state.audit_emitter,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-                None,
-                outcome,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "plugin_type": plugin_type,
-                    "reason_code": reason_code,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(outcome)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "plugin_type": plugin_type_str,
+                "reason_code": reason_code,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Err(report.into());
         }
     };
 
-    emit_discovery_allowlist_audit(
-        &state.audit_emitter,
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
-        Some((entry.id, Some(entry.plugin_type.clone()))),
-        if was_created {
-            uptrakit_audit_log::AuditOutcome::Success
-        } else {
-            uptrakit_audit_log::AuditOutcome::Partial
-        },
-        serde_json::json!({
+    if !was_created {
+        // Entry already existed — no state change.
+        drop(tx);
+        if let Ok(audit_entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(
+            "discovery_allowlist_entry",
+            entry.id.to_string(),
+            Some(entry.plugin_type.clone()),
+        )
+        .outcome(AuditOutcome::Partial)
+        .details(serde_json::json!({
             "scope": "host",
             "host_id": entry.host_id,
             "plugin_type": entry.plugin_type,
-            "was_created": was_created,
-        }),
-    );
+            "was_created": false,
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(audit_entry);
+        }
+        return Ok((StatusCode::CREATED, Json(entry)).into_response());
+    }
+
+    // Newly inserted — emit_stateful.
+    let view = allowlist_queries::HostAllowlistView::from(&entry);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::discovery_allowlist_create(
+        &AbsentView(&view),
+        &view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "scope": "host",
+        "host_id": entry.host_id,
+        "plugin_type": entry.plugin_type,
+        "was_created": true,
+    }))
+    .build()
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for host allowlist create");
+            drop(tx);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for host allowlist create");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit host allowlist create");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
     Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
@@ -526,103 +662,121 @@ pub async fn add_host_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((host_id, entry_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let existing_entry = match host_discovery_allowlist::Entity::find_by_id(entry_id)
-        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
-        .one(tenant_db.db())
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(entry) => entry,
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, "DB error loading host discovery allowlist entry");
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, None)),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "reason_code": "host_discovery_allowlist_lookup_failed",
-                }),
-            );
+            tracing::error!(error = %e, "Failed to begin transaction for host allowlist delete");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    match allowlist_queries::remove_host_allowlist_entry(
-        tenant_db.db(),
-        tenant_db.tenant_id(),
-        host_id,
-        entry_id,
+    let before_model = match allowlist_queries::remove_host_allowlist_entry_in_tx(
+        &tx, tenant_id, host_id, entry_id,
     )
     .await
     {
-        Ok(true) => {
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((
-                    entry_id,
-                    existing_entry
-                        .as_ref()
-                        .map(|entry| entry.plugin_type.clone()),
-                )),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "plugin_type": existing_entry.as_ref().map(|entry| entry.plugin_type.clone()),
-                }),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "reason_code": "allowlist_entry_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Allowlist entry not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("discovery_allowlist_entry", entry_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "reason_code": "allowlist_entry_not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Allowlist entry not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!(error = %e, "DB error removing host discovery allowlist entry");
-            emit_discovery_allowlist_audit(
-                &audit.0,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
-                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "scope": "host",
-                    "host_id": host_id,
-                    "reason_code": "host_discovery_allowlist_delete_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("discovery_allowlist_entry", entry_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "reason_code": "host_discovery_allowlist_delete_failed",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = allowlist_queries::HostAllowlistView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::discovery_allowlist_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "scope": "host",
+        "host_id": host_id,
+        "plugin_type": before_model.plugin_type,
+    }))
+    .build()
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for host allowlist delete");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for host allowlist delete");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit host allowlist delete");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]

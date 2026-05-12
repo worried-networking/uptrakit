@@ -24,6 +24,63 @@ use uptrakit_web_api_types::discovery_allowlist::{
 };
 use uuid::Uuid;
 
+// ── Audit snapshots ───────────────────────────────────────────────────────────
+
+/// Audit snapshot for a tenant-wide discovery allowlist entry.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "discovery_allowlist_entry")]
+pub struct TenantAllowlistView {
+    id: Uuid,
+    plugin_type: String,
+}
+
+impl From<&tenant_discovery_allowlist::Model> for TenantAllowlistView {
+    fn from(m: &tenant_discovery_allowlist::Model) -> Self {
+        Self {
+            id: m.id,
+            plugin_type: m.plugin_type.clone(),
+        }
+    }
+}
+
+impl From<&TenantDiscoveryAllowlistEntry> for TenantAllowlistView {
+    fn from(e: &TenantDiscoveryAllowlistEntry) -> Self {
+        Self {
+            id: e.id,
+            plugin_type: e.plugin_type.clone(),
+        }
+    }
+}
+
+/// Audit snapshot for a host-specific discovery allowlist entry.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "discovery_allowlist_entry")]
+pub struct HostAllowlistView {
+    id: Uuid,
+    host_id: Uuid,
+    plugin_type: String,
+}
+
+impl From<&host_discovery_allowlist::Model> for HostAllowlistView {
+    fn from(m: &host_discovery_allowlist::Model) -> Self {
+        Self {
+            id: m.id,
+            host_id: m.host_id,
+            plugin_type: m.plugin_type.clone(),
+        }
+    }
+}
+
+impl From<&HostDiscoveryAllowlistEntry> for HostAllowlistView {
+    fn from(e: &HostDiscoveryAllowlistEntry) -> Self {
+        Self {
+            id: e.id,
+            host_id: e.host_id,
+            plugin_type: e.plugin_type.clone(),
+        }
+    }
+}
+
 // ── Error type ────────────────────────────────────────────────────────────────
 
 /// Error returned by discovery allowlist query helpers.
@@ -383,6 +440,246 @@ pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> 
             HashSet::new()
         }
     }
+}
+
+// ── Transaction-aware variants (for emit_stateful callers) ───────────────────
+
+/// Add a tenant-wide allowlist entry inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(was_created, entry)`:
+/// - `was_created = true`  → new row inserted.
+/// - `was_created = false` → entry already existed; returns the existing row.
+///
+/// Rejects invalid/non-discovery plugin types with [`AllowlistError::InvalidPluginType`].
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn add_tenant_allowlist_entry_in_tx(
+    ops: &dyn PluginMetadataOps,
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    plugin_type: PluginTypeId,
+) -> Result<(bool, TenantDiscoveryAllowlistEntry)> {
+    if !is_valid_discovery_plugin(ops, &plugin_type) {
+        bail!(AllowlistError::InvalidPluginType);
+    }
+
+    let type_str = plugin_type.to_string();
+
+    // Fast path: check for an existing entry before attempting the insert.
+    if let Some(existing) = tenant_discovery_allowlist::Entity::find()
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .filter(tenant_discovery_allowlist::Column::PluginType.eq(&type_str))
+        .one(tx)
+        .await
+        .context_to()?
+    {
+        return Ok((
+            false,
+            TenantDiscoveryAllowlistEntry {
+                id: existing.id,
+                plugin_type: existing.plugin_type,
+                created_at: existing.created_at,
+            },
+        ));
+    }
+
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+
+    let model = tenant_discovery_allowlist::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        plugin_type: Set(type_str.clone()),
+        created_at: Set(now),
+    };
+
+    match model.insert(tx).await {
+        Ok(_) => Ok((
+            true,
+            TenantDiscoveryAllowlistEntry {
+                id,
+                plugin_type: type_str,
+                created_at: now,
+            },
+        )),
+        Err(e) if is_unique_violation(&e) => {
+            // Lost a concurrent race — fetch the winner's entry.
+            tenant_discovery_allowlist::Entity::find()
+                .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
+                .filter(tenant_discovery_allowlist::Column::PluginType.eq(&type_str))
+                .one(tx)
+                .await
+                .context_to()?
+                .map(|existing| {
+                    (
+                        false,
+                        TenantDiscoveryAllowlistEntry {
+                            id: existing.id,
+                            plugin_type: existing.plugin_type,
+                            created_at: existing.created_at,
+                        },
+                    )
+                })
+                .ok_or_else(|| {
+                    report!(AllowlistError::Db(sea_orm::DbErr::Custom(
+                        "concurrent insert race: entry vanished after unique violation".to_string()
+                    )))
+                })
+        }
+        Err(e) => Err(e).context_to(),
+    }
+}
+
+/// Read before-snapshot then hard-delete a tenant-wide allowlist entry inside a
+/// caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns the before [`tenant_discovery_allowlist::Model`], or `None` if not found.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn remove_tenant_allowlist_entry_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<tenant_discovery_allowlist::Model>> {
+    let Some(before) = tenant_discovery_allowlist::Entity::find_by_id(id)
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    tenant_discovery_allowlist::Entity::delete_many()
+        .filter(tenant_discovery_allowlist::Column::Id.eq(id))
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(before))
+}
+
+/// Add a host-specific allowlist entry inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(was_created, entry)`:
+/// - `was_created = true`  → new row inserted.
+/// - `was_created = false` → entry already existed; returns the existing row.
+///
+/// Rejects invalid/non-discovery plugin types with [`AllowlistError::InvalidPluginType`].
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
+pub async fn add_host_allowlist_entry_in_tx(
+    ops: &dyn PluginMetadataOps,
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    plugin_type: PluginTypeId,
+) -> Result<(bool, HostDiscoveryAllowlistEntry)> {
+    if !is_valid_discovery_plugin(ops, &plugin_type) {
+        bail!(AllowlistError::InvalidPluginType);
+    }
+
+    let type_str = plugin_type.to_string();
+
+    // Fast path: check for an existing entry before attempting the insert.
+    if let Some(existing) = host_discovery_allowlist::Entity::find()
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+        .filter(host_discovery_allowlist::Column::PluginType.eq(&type_str))
+        .one(tx)
+        .await
+        .context_to()?
+    {
+        return Ok((
+            false,
+            HostDiscoveryAllowlistEntry {
+                id: existing.id,
+                host_id: existing.host_id,
+                plugin_type: existing.plugin_type,
+                created_at: existing.created_at,
+            },
+        ));
+    }
+
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+
+    let model = host_discovery_allowlist::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        host_id: Set(host_id),
+        plugin_type: Set(type_str.clone()),
+        created_at: Set(now),
+    };
+
+    match model.insert(tx).await {
+        Ok(_) => Ok((
+            true,
+            HostDiscoveryAllowlistEntry {
+                id,
+                host_id,
+                plugin_type: type_str,
+                created_at: now,
+            },
+        )),
+        Err(e) if is_unique_violation(&e) => {
+            // Lost a concurrent race — fetch the winner's entry.
+            host_discovery_allowlist::Entity::find()
+                .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
+                .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+                .filter(host_discovery_allowlist::Column::PluginType.eq(&type_str))
+                .one(tx)
+                .await
+                .context_to()?
+                .map(|existing| {
+                    (
+                        false,
+                        HostDiscoveryAllowlistEntry {
+                            id: existing.id,
+                            host_id: existing.host_id,
+                            plugin_type: existing.plugin_type,
+                            created_at: existing.created_at,
+                        },
+                    )
+                })
+                .ok_or_else(|| {
+                    report!(AllowlistError::Db(sea_orm::DbErr::Custom(
+                        "concurrent insert race: entry vanished after unique violation".to_string()
+                    )))
+                })
+        }
+        Err(e) => Err(e).context_to(),
+    }
+}
+
+/// Read before-snapshot then hard-delete a host-specific allowlist entry inside a
+/// caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns the before [`host_discovery_allowlist::Model`], or `None` if not found.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
+pub async fn remove_host_allowlist_entry_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    entry_id: Uuid,
+) -> Result<Option<host_discovery_allowlist::Model>> {
+    let Some(before) = host_discovery_allowlist::Entity::find_by_id(entry_id)
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    host_discovery_allowlist::Entity::delete_many()
+        .filter(host_discovery_allowlist::Column::Id.eq(entry_id))
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
+        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(before))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
