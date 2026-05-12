@@ -34,6 +34,20 @@ pub use super::notification_channel::{
 };
 pub use super::notification_log::{Entity as NotificationLog, Model as NotificationLogModel};
 pub use super::notification_rule::{Entity as NotificationRule, Model as NotificationRuleModel};
+pub use super::oauth_authorization_code::{
+    Entity as OauthAuthorizationCode, Model as OauthAuthorizationCodeModel,
+};
+pub use super::oauth_authorization_request::{
+    Entity as OauthAuthorizationRequest, Model as OauthAuthorizationRequestModel,
+};
+pub use super::oauth_client::{Entity as OauthClient, Model as OauthClientModel};
+pub use super::oauth_consent::{Entity as OauthConsent, Model as OauthConsentModel};
+pub use super::oauth_controller_instance::{
+    Entity as OauthControllerInstance, Model as OauthControllerInstanceModel,
+};
+pub use super::oauth_refresh_token::{
+    Entity as OauthRefreshToken, Model as OauthRefreshTokenModel,
+};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,
