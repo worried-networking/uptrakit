@@ -142,8 +142,9 @@ pub async fn build_ocsp_response(
             selected_ca_index = Some(ca_index);
         }
 
-        // Extract serial number for DB lookup (hex-encoded)
-        let serial_hex = format_serial_hex(cert_id.serial_number.as_bytes());
+        // Serial in DB is uppercase colon-separated (e.g. "01:AB:CD").
+        // SerialNumber::Display produces that format directly.
+        let serial_hex = cert_id.serial_number.to_string();
 
         // Query certificate status from DB
         let ca_fingerprint = &trusted[ca_index].fingerprint;
@@ -221,11 +222,6 @@ pub async fn build_ocsp_response(
         Ok(response_bytes) => response_bytes,
         Err(_) => build_error_response(OcspResponseStatus::InternalError),
     }
-}
-
-/// Format a serial number byte slice as a lowercase hex string.
-fn format_serial_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 /// Build a DER-encoded error OCSP response (no response body).
@@ -601,12 +597,6 @@ mod tests {
                 OcspResponseStatus::MalformedRequest
             );
         });
-    }
-
-    #[test]
-    fn format_serial_hex_works() {
-        assert_eq!(format_serial_hex(&[0x01, 0x0a, 0xff]), "010aff");
-        assert_eq!(format_serial_hex(&[0x00]), "00");
     }
 
     #[test]
