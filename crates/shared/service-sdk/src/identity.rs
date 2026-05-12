@@ -1312,4 +1312,26 @@ mod tests {
 
         assert!(matches!(outcome, SaveOutcome::CrashAfterCert));
     }
+
+    #[tokio::test]
+    async fn startup_sweep_removes_orphan_tmp_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path();
+        std::fs::write(base.join("service.json"), b"intact").expect("seed");
+        std::fs::write(base.join("service.key"), b"intact").expect("seed");
+        // Simulate orphaned tempfile names (NamedTempFile uses .tmp prefix)
+        std::fs::write(base.join(".tmpAB12cd"), b"orphan").expect("seed tmp1");
+        std::fs::write(base.join(".tmpEF34gh"), b"orphan").expect("seed tmp2");
+
+        sweep_tmp_siblings(base).expect("sweep ok");
+
+        assert!(base.join("service.json").exists(), "intact file preserved");
+        assert!(base.join("service.key").exists(), "intact file preserved");
+        let leftover: Vec<_> = std::fs::read_dir(base)
+            .expect("readdir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "all .tmp files removed by sweep");
+    }
 }
