@@ -92,11 +92,13 @@ In `crates/shared/openapi-client/src/lib.rs`, immediately after `post_json_unaut
 ```rust
 /// POST a form-urlencoded body without authentication (OAuth endpoints).
 ///
-/// On HTTP 200, deserialise the response body as JSON into `T`.
-/// On HTTP 400 with a parseable RFC 6749 §5.2 `OAuthErrorResponse` body,
-/// return `Err(ClientError::OAuthError(...))`. Any other status falls through
-/// to the shared `handle_response` path (which surfaces `RateLimited`,
-/// `NotAuthenticated`, `Api { status, message }`, etc.).
+/// On HTTP 200, deserialise the JSON response body into `T`.
+/// On HTTP 400, try to parse the body as an RFC 6749 §5.2 `OAuthErrorResponse`;
+/// on success, return `Err(ClientError::OAuthError(...))`. If the 400 body is
+/// not a parseable OAuth error envelope, or for any other non-success status,
+/// fall through to `handle_response_bytes` (the shared status-dispatcher) so
+/// `RateLimited` (429), `NotAuthenticated` (401), `NotFound` (404), and
+/// generic `Api { status, message }` still flow through one place.
 async fn post_form_unauth<T: DeserializeOwned, F: Serialize + ?Sized>(
     &self,
     path: &str,
@@ -107,32 +109,42 @@ async fn post_form_unauth<T: DeserializeOwned, F: Serialize + ?Sized>(
     let resp = self.send_with_retry(req).await?;
 
     let status = resp.status();
-    if status.as_u16() == 400 {
-        let bytes = resp.bytes().await.context_to()?;
+    // Extract Retry-After while the response is still alive — the bytes
+    // helper cannot reconstruct headers from the body.
+    let retry_after = parse_retry_after(&resp);
+    let bytes = resp.bytes().await.context_to()?;
+
+    if status == http::StatusCode::OK {
+        return serde_json::from_slice::<T>(&bytes).context_to();
+    }
+    if status == http::StatusCode::BAD_REQUEST {
         if let Ok(err_resp) =
             serde_json::from_slice::<uptrakit_web_api_types::oauth::OAuthErrorResponse>(&bytes)
         {
-            return Err(rootcause::Report::from(ClientError::OAuthError(err_resp)));
+            bail!(ClientError::OAuthError(err_resp));
         }
-        // Body did not parse as an RFC error envelope — fall back to generic API error.
-        let message = String::from_utf8_lossy(&bytes).to_string();
-        bail!(ClientError::Api { status, message });
+        // Body did not match the OAuth error envelope — fall through to the
+        // shared status-dispatcher so 400 surfaces consistently with every
+        // other endpoint.
     }
 
-    // For non-400 responses, hand off to the existing handler.
-    let resp = reqwest::Response::from(resp); // already a Response; no-op clarifier
-    // The actual existing helper takes a `reqwest::Response`. The simplest path
-    // is to call `handle_response(resp).await` directly:
-    self.handle_response(resp).await
+    self.handle_response_bytes(status, bytes, retry_after).await
 }
 ```
 
-> **Note.** `send_with_retry` returns a `reqwest::Response`. If the existing
-> code uses an intermediate wrapper, adapt the variable types; the helper's
-> contract is: form-POST → 200 means deserialise as `T`; 400 means try to
-> parse `OAuthErrorResponse`. Read the surrounding helpers (lines 340–510)
-> before finalising the body — there are likely shared response-handler
-> patterns that this helper should hook into rather than duplicating.
+Add a `handle_response_bytes(status: StatusCode, bytes: Bytes, retry_after: Option<u64>) -> Result<T>`
+helper alongside the existing `handle_response`
+(`crates/shared/openapi-client/src/lib.rs` around lines 440–510). Refactor
+`handle_response` into two steps: (a) extract `retry_after` via
+`parse_retry_after(&resp)` while the response is still alive, (b) consume
+the body via `resp.bytes().await`, (c) defer to
+`handle_response_bytes(status, bytes, retry_after)`. The new helper carries
+the same status-code branches (`RateLimited` / `NotAuthenticated` /
+`NotFound` / `Api { status, message }`) and uses the passed-in `retry_after`
+when constructing `ClientError::RateLimited`. Every existing call site of
+`handle_response` continues to work unchanged. This avoids losing the
+`Retry-After` header value for `post_form_unauth` callers — the CLI's
+back-off in Plan 2 Task 5 still gets the server-provided delay hint.
 
 - [ ] **Step 3: Compile**
 
@@ -148,15 +160,21 @@ git commit -m "feat(openapi-client): add post_form_unauth helper and ClientError
 
 ---
 
-## Task 2: Update path constants
+## Task 2: Rewrite `openapi-client/src/auth.rs` + path constants in one commit
 
 **Files:**
 
 - Modify: `crates/shared/openapi-client/src/paths.rs` (find the `auth` submodule).
+- Modify: `crates/shared/openapi-client/src/auth.rs`
 
-- [ ] **Step 1: Replace the device-auth paths**
+Path constants and method rewrites land in a single commit so the
+feature-branch history stays bisectable — no commit on the branch is
+allowed to leave the workspace red. The reordering also removes the
+"transient build break" footgun.
 
-In `crates/shared/openapi-client/src/paths.rs` under `pub mod auth { ... }`, replace the device-auth path constants:
+- [ ] **Step 1: Add the new path constants**
+
+In `crates/shared/openapi-client/src/paths.rs` under `pub mod auth { ... }`, add (do not yet delete the old ones):
 
 ```rust
 pub mod auth {
@@ -174,21 +192,7 @@ pub mod auth {
 }
 ```
 
-Delete the old `DEVICE` (start) and `DEVICE_POLL` constants. If a `DEVICE_STREAM` constant exists, delete it too.
-
-- [ ] **Step 2: Compile**
-
-Run: `cargo check -p uptrakit-openapi-client --all-features`
-Expected: build fails with errors at every consumer of the deleted constants. Tasks 3, 4 below fix them.
-
-- [ ] **Step 3: Commit (with the compile error)**
-
-```bash
-git add crates/shared/openapi-client/src/paths.rs
-git commit -m "feat(openapi-client): rename device-auth paths to RFC 8628 names (transient build break)"
-```
-
-(The transient break is intentional — the next task removes every reference to the deleted symbols. Keep it on the feature branch only.)
+Leave the old `DEVICE`, `DEVICE_POLL`, and (if present) `DEVICE_STREAM` constants in place for the moment; they are deleted later in this same task once `auth.rs` no longer references them.
 
 ---
 
@@ -279,31 +283,34 @@ impl UptrakitClient {
         self.post_json(crate::paths::auth::DEVICE_DENY, req).await
     }
 
-    /// Look up the `client_name` + `expires_at` for a pending flow (UI-internal).
+    /// Look up the `client_name` + `expires_at` for a pending flow.
+    ///
+    /// Authenticated; requires `CanViewServices`. Query parameters are
+    /// serialised by `reqwest::RequestBuilder::query` (which uses
+    /// `serde_urlencoded` internally) so no manual URL building is required.
     pub async fn device_auth_lookup(
         &self,
         query: &DeviceAuthLookupQuery,
     ) -> Result<DeviceAuthLookupResponse> {
-        let url = format!(
-            "{}{}?user_code={}",
-            self.base_url,
-            crate::paths::auth::DEVICE_LOOKUP,
-            urlencoding::encode(&query.user_code),
-        );
-        // Use a small inline GET — or, if a helper exists, prefer
-        // self.get_with_query(crate::paths::auth::DEVICE_LOOKUP, query).await.
-        // Check `lib.rs` for an existing authenticated-GET-with-query helper.
+        let url = format!("{}{}", self.base_url, crate::paths::auth::DEVICE_LOOKUP);
         let req = self
             .http
             .get(&url)
-            .bearer_auth(self.token_or_err()?);
+            .bearer_auth(self.token_or_err()?)
+            .query(query);
         let resp = self.send_with_retry(req).await?;
         self.handle_response(resp).await
     }
 }
 ```
 
-(The `device_auth_lookup` request requires authentication — note the `bearer_auth(self.token_or_err()?)` call, in contrast to the OAuth endpoints which are unauth.)
+`device_auth_lookup` uses `bearer_auth(self.token_or_err()?)` (authenticated,
+requires `CanViewServices` on the server) and `.query(query)` (idiomatic
+`reqwest` query-param serialisation via the existing `serde_urlencoded`
+support). The OAuth endpoints above are unauth; the lookup endpoint is the
+only one in this group that carries the user's bearer token. No new
+workspace dependencies required — `serde_urlencoded` is already pulled in
+transitively by `reqwest`.
 
 - [ ] **Step 3: Refresh the serialisation tests**
 
@@ -351,15 +358,20 @@ fn device_auth_deny_request_serialization() {
 
 Keep `device_auth_approve_request_serialization`.
 
-- [ ] **Step 4: Compile + test**
+- [ ] **Step 4: Remove dead path constants**
+
+Now that `auth.rs` no longer references them, delete the old `DEVICE`, `DEVICE_POLL`, and `DEVICE_STREAM` constants from `crates/shared/openapi-client/src/paths.rs`. (Run `cargo check` first to confirm no other file references them.)
+
+- [ ] **Step 5: Compile + test**
 
 Run: `cargo test -p uptrakit-openapi-client --all-features -- auth`
-Expected: every new test passes.
+Expected: clean compile; every new test passes.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add crates/shared/openapi-client/src/auth.rs
+git add crates/shared/openapi-client/src/auth.rs \
+        crates/shared/openapi-client/src/paths.rs
 git commit -m "feat(openapi-client): swap device_auth_{start,poll} for OAuth 2.0 methods"
 ```
 
@@ -488,9 +500,8 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
 
     eprintln!("  Waiting for authorization...");
 
-    // Poll the token endpoint at the recommended interval until success or
-    // a terminal error.
-    poll_for_token(&server, &start_resp, &client_name, insecure).await
+    // Reuse the existing client (one connection pool for the whole flow).
+    poll_for_token(&client, &server, &start_resp, &client_name).await
 }
 
 fn print_browser_instructions(start_resp: &DeviceAuthorizationResponse, insecure: bool) {
@@ -516,12 +527,11 @@ fn print_browser_instructions(start_resp: &DeviceAuthorizationResponse, insecure
 }
 
 async fn poll_for_token(
+    client: &UptrakitClient,
     server: &str,
     start_resp: &DeviceAuthorizationResponse,
     client_name: &str,
-    insecure: bool,
 ) -> Result<()> {
-    let client = UptrakitClient::new(server, None, insecure, None).context_to()?;
     let started = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(start_resp.expires_in);
     let mut interval = u64::try_from(start_resp.interval.max(1)).unwrap_or(5);
@@ -578,8 +588,26 @@ async fn poll_for_token(
                             err_resp.error.as_str()
                         )));
                     }
+                    OAuthErrorCode::ServerError => {
+                        bail!(CliError::Other(
+                            "Server-side error, please try again.".into()
+                        ));
+                    }
                     OAuthErrorCode::Other(s) => {
                         bail!(CliError::Other(format!("Unexpected OAuth error: {s}")));
+                    }
+                    // `OAuthErrorCode` is `#[non_exhaustive]` (generated by
+                    // `wire_safe_enum!`). Any future variant added on the
+                    // server side and shipped to an older CLI lands here.
+                    _ => {
+                        tracing::warn!(
+                            error_code = err_resp.error.as_str(),
+                            "received unknown OAuth error code from server"
+                        );
+                        bail!(CliError::Other(format!(
+                            "Unexpected OAuth error: {}",
+                            err_resp.error.as_str()
+                        )));
                     }
                 },
                 ClientError::RateLimited { retry_after_seconds } => {
@@ -866,6 +894,7 @@ Replace `frontend/src/routes/device/+page.svelte`:
                 type="button"
                 class="flex-1 justify-center"
                 disabled={processing}
+                loading={processing}
                 onclick={onDeny}
             >
                 Deny
@@ -1003,9 +1032,10 @@ cargo clippy --all-targets --no-default-features --features db-sqlite
 cargo clippy --all-targets --all-features
 cargo test --all-features
 cargo deny check
+sentrux check .
 ```
 
-Expected: every command exits 0 with no warnings.
+Expected: every command exits 0 with no warnings. `sentrux check .` validates architectural constraints (layer ordering, coupling, complexity thresholds) per the standards snapshot.
 
 - [ ] **Step 2: Markdown**
 

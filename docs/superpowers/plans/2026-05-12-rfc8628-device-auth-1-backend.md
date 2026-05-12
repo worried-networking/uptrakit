@@ -398,6 +398,7 @@ wire_safe_enum! {
         InvalidClient        => "invalid_client",
         InvalidGrant         => "invalid_grant",
         UnsupportedGrantType => "unsupported_grant_type",
+        ServerError          => "server_error",
     }
     parse_error = ParseOAuthErrorCodeError("invalid OAuth 2.0 error code");
 }
@@ -584,6 +585,7 @@ mod tests {
         "invalid_client",
         "invalid_grant",
         "unsupported_grant_type",
+        "server_error",
     ];
 
     #[test]
@@ -726,10 +728,13 @@ This task expands the `pending_device_flow` ActiveModel sites to set the new col
 In `crates/ui/web-api-auth/src/auth/device_flow.rs`, add to the top of the file (after the existing imports):
 
 ```rust
-use sea_orm::{TransactionTrait, TransactionOptions};
-use sea_orm::SqliteTransactionMode;
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use uptrakit_web_api_types::oauth::OAuthErrorCode;
 ```
+
+(See `crates/ui/web-api-auth/src/auth/session.rs:120` for the canonical
+`begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), ..Default::default() })`
+call shape used throughout the codebase.)
 
 (Keep the existing imports.) Add new constants after `USER_CODE_ALPHABET`:
 
@@ -779,35 +784,58 @@ pub fn apply_scope_to_token(_token_id: uuid::Uuid, _scope: Option<&str>) {
 For `issue_access_token`, we will route it through the existing API-token mint code. Look at the existing `consume` consumer in `routes/device_auth.rs` for the call shape. Add this function next to the seam helpers above:
 
 ```rust
-/// Mint a long-lived API access token for the given user.
+use sea_orm::ConnectionTrait;
+use uptrakit_shared_db::entity::api_token;
+use uptrakit_shared_types::SecretString;
+
+use crate::auth::token::{generate_secure_token, generate_uuid, hash_token};
+
+/// Mint a long-lived API access token for the given user inside the caller's
+/// transaction.
 ///
 /// **Seam 1** — future migration replaces this single function with
 /// short-lived bearer + refresh-token issuance. Callers receive a
 /// `SecretString` today; the future signature returns a `TokenPair`.
+///
+/// The function takes `txn: &impl ConnectionTrait` (not a pool) because the
+/// row must land inside the same `BEGIN IMMEDIATE` transaction as the
+/// `pending_device_flows` delete that authorises it — otherwise on SQLite the
+/// pooled connection holding the txn would self-deadlock against a different
+/// pooled connection issuing the insert, and on Postgres the insert would
+/// fall outside the txn's atomicity envelope (orphan rows on crash between
+/// the insert and the txn commit).
 #[must_use = "minted token must be returned to the caller"]
-pub async fn issue_access_token(
-    db: &DatabaseConnection,
+pub async fn issue_access_token<C: ConnectionTrait>(
+    txn: &C,
     user_id: Uuid,
-    token_name: String,
+    token_name: &str,
 ) -> Result<SecretString> {
-    // Delegate to the existing API-token issuance pipeline. The exact call is
-    // resolved by reading `crates/ui/web-api-auth/src/auth/api_token.rs` —
-    // typically `ApiTokenStore::create(db, user_id, token_name).await`.
-    // Until refactored to a free function, the caller can construct the store
-    // and invoke `create()` directly; this wrapper exists so future
-    // refresh-token support has exactly one call site to update.
-    use crate::auth::api_token::ApiTokenStore;
-    let store = ApiTokenStore::new(db.clone());
-    store
-        .create(user_id, token_name)
-        .await
-        .map(|created| created.raw_token)
+    // Mirror the row layout used by `ApiTokenService::create_token`
+    // (`crates/ui/web-api-auth/src/auth/api_token.rs:42-66`). The standalone
+    // service is kept for tenant-Operator-driven token creation; this seam
+    // exists so device-grant issuance writes the row on the open txn.
+    let raw = generate_secure_token()
+        .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
+    let plaintext = format!("upk_{raw}");
+    let token_hash = hash_token(&plaintext);
+    let now = OffsetDateTime::now_utc();
+
+    let model = api_token::ActiveModel {
+        id: Set(generate_uuid()),
+        user_id: Set(user_id),
+        name: Set(token_name.to_string()),
+        token_hash: Set(token_hash),
+        created_at: Set(now),
+        last_used_at: Set(None),
+        revoked_at: Set(None),
+    };
+    model.insert(txn).await.context_to()?;
+
+    Ok(SecretString::new(plaintext))
 }
 ```
 
-If the existing API-token API differs slightly (different return shape, named `mint` instead of `create`, etc.), adapt this wrapper to match — read `api_token.rs` first and use the actual function. The point is one wrapping function; the body is the swap-point.
-
-Add `use uptrakit_shared_types::SecretString;` near the top imports if not already present.
+`SecretString::new(...)` wrapping is required because `PollOutcome::Authorized` carries `SecretString` (the wire-redaction type). The function is generic over `C: ConnectionTrait` so callers pass either a `&DatabaseConnection` (for non-transactional contexts) or `&DatabaseTransaction` (for transactional contexts like `poll`).
 
 - [ ] **Step 3: Expand the `create` method to write the new columns**
 
@@ -871,10 +899,14 @@ Replaces `get_status` + `consume` + `get_device_code_hash_by_user_code` with the
 After the existing `DeviceFlowStatus` enum, add:
 
 ```rust
-/// Outcome of a single `poll()` call. Internal — the route layer maps these
-/// onto RFC 8628 §3.5 wire codes.
+/// Outcome of a single `poll()` call. The route layer maps these onto
+/// RFC 8628 §3.5 wire codes.
 ///
-/// Not `#[non_exhaustive]`: this type is crate-private.
+/// `#[non_exhaustive]` because this type crosses the `web-api-auth` →
+/// `web-api` crate boundary and matches against the project's standard for
+/// extensible public enums. External match sites carry a wildcard arm with
+/// `tracing::warn!` per `docs/development/coding-standards.md`.
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum PollOutcome {
     /// Flow is approved; token has been minted.
@@ -913,19 +945,12 @@ pub async fn poll(&self, device_code: &str, now: OffsetDateTime) -> Result<PollO
 
     let txn = self
         .db
-        .begin_with_config(
-            Some(sea_orm::IsolationLevel::Serializable),
-            Some(sea_orm::AccessMode::ReadWrite),
-        )
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
         .context_to()?;
-    // SeaORM exposes per-driver hints through TransactionOptions in some
-    // versions; if `begin_with_options` is available in this revision, prefer:
-    //   let txn = self.db.begin_with_options(TransactionOptions {
-    //       sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-    //       ..Default::default()
-    //   }).await.context_to()?;
-    // Adapt at impl time based on the version pinned in Cargo.toml.
 
     let flow_opt = PendingDeviceFlow::find()
         .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
@@ -965,8 +990,10 @@ pub async fn poll(&self, device_code: &str, now: OffsetDateTime) -> Result<PollO
                 return Ok(PollOutcome::Unknown);
             }
 
-            let token =
-                issue_access_token(&self.db, user_id, token_name.clone()).await?;
+            // Mint the API token inside the same txn so the consume-delete
+            // and the api_token insert commit atomically. See `issue_access_token`'s
+            // doc comment for the rationale.
+            let token = issue_access_token(&txn, user_id, &token_name).await?;
             txn.commit().await.context_to()?;
             Ok(PollOutcome::Authorized { token, token_name })
         }
@@ -1024,7 +1051,7 @@ pub async fn poll(&self, device_code: &str, now: OffsetDateTime) -> Result<PollO
 }
 ```
 
-> **Note on `begin_with_options`.** Check the SeaORM version pinned in the workspace `Cargo.toml`. If `begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), .. })` is available, use it (matches CLAUDE.md guidance verbatim). Otherwise use `begin_with_config` as shown and pin the SQLite-specific pragma via `txn.execute_unprepared("PRAGMA ...")` before the read. The point is: every read-then-write under `poll` must serialise against concurrent writers; the existing project standard is `BEGIN IMMEDIATE`.
+> **Note.** `begin_with_options` with `SqliteTransactionMode::Immediate` is the canonical SeaORM call for `BEGIN IMMEDIATE` on SQLite. On Postgres it is a no-op (Postgres uses snapshot isolation by default). This matches the pattern at `crates/ui/web-api-auth/src/auth/session.rs:120`.
 
 - [ ] **Step 3: Implement `deny`**
 
@@ -1033,24 +1060,44 @@ Inside `impl DeviceFlowStore`, add:
 ```rust
 /// Deny a pending device flow. RFC 8628 access_denied path.
 ///
-/// Atomic update: `status = 'pending' → 'denied'`, stored on `denied_by`.
-/// Concurrent approve/deny races resolve at this CAS; the loser returns
-/// `DeviceFlowError::AlreadyAuthorized` (same shape as `approve` losers).
+/// Read-then-write under `BEGIN IMMEDIATE` so the row read and the atomic
+/// CAS commit on the same SQLite connection. Concurrent approve/deny races
+/// resolve at the `WHERE status = 'pending'` filter on the update; the
+/// loser returns `DeviceFlowError::AlreadyAuthorized` (same shape as
+/// `approve` losers).
 pub async fn deny(&self, user_code: &str, denied_by: Uuid) -> Result<()> {
     let normalized = user_code.replace('-', "").to_uppercase();
     let now = OffsetDateTime::now_utc();
 
-    let flow = PendingDeviceFlow::find()
-        .filter(pending_device_flow::Column::UserCode.eq(&normalized))
-        .one(&self.db)
+    let txn = self
+        .db
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
-        .context_to()?
-        .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
+        .context_to()?;
+
+    let flow_opt = PendingDeviceFlow::find()
+        .filter(pending_device_flow::Column::UserCode.eq(&normalized))
+        .one(&txn)
+        .await
+        .context_to()?;
+
+    let Some(flow) = flow_opt else {
+        // Commit the (read-only) transaction before bailing so we match the
+        // commit-every-branch pattern `poll` uses and don't rely on
+        // rollback-on-drop semantics.
+        txn.commit().await.context_to()?;
+        bail!(DeviceFlowError::NotFound);
+    };
 
     if flow.expires_at <= now {
+        txn.commit().await.context_to()?;
         bail!(DeviceFlowError::NotFound);
     }
     if flow.status != DeviceAuthStatus::Pending {
+        txn.commit().await.context_to()?;
         bail!(DeviceFlowError::AlreadyAuthorized);
     }
 
@@ -1066,12 +1113,14 @@ pub async fn deny(&self, user_code: &str, denied_by: Uuid) -> Result<()> {
         .filter(pending_device_flow::Column::Id.eq(flow.id))
         .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Pending.as_str()))
         .filter(pending_device_flow::Column::ExpiresAt.gt(now))
-        .exec(&self.db)
+        .exec(&txn)
         .await
         .context_to()?;
     if result.rows_affected == 0 {
+        txn.commit().await.context_to()?;
         bail!(DeviceFlowError::AlreadyAuthorized);
     }
+    txn.commit().await.context_to()?;
     Ok(())
 }
 ```
@@ -1341,16 +1390,15 @@ Use this handler skeleton as the template. The audit-emission and external-URL-r
 ```rust
 use std::sync::Arc;
 
-use axum::Extension;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Json, Response};
-use axum::Form;
+use axum::response::{IntoResponse, Response};
+use axum::{Extension, Form, Json};
+use uptrakit_web_api_auth::auth::device_flow::validate_client_id;
+use uptrakit_web_api_types::Validate;
 use uptrakit_web_api_types::oauth::{
     DeviceAuthorizationRequest, DeviceAuthorizationResponse, OAuthErrorCode,
 };
-use uptrakit_web_api_types::Validate;
-use uptrakit_web_api_auth::auth::device_flow::validate_client_id;
 
 use crate::app_state::AppState;
 use crate::error_response::oauth_error_response;
@@ -1395,7 +1443,7 @@ pub async fn device_authorization(
             tracing::error!("device flow create failed: {e}");
             return oauth_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                OAuthErrorCode::InvalidRequest,
+                OAuthErrorCode::ServerError,
                 Some("internal error".into()),
                 None,
             );
@@ -1542,7 +1590,7 @@ async fn device_code_grant(state: Arc<AppState>, req: OAuthTokenRequest) -> Resp
             tracing::error!("device flow poll failed: {e}");
             return oauth_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                OAuthErrorCode::InvalidRequest,
+                OAuthErrorCode::ServerError,
                 Some("internal error".into()),
                 None,
             );
@@ -1592,6 +1640,20 @@ async fn device_code_grant(state: Arc<AppState>, req: OAuthTokenRequest) -> Resp
             None,
             None,
         ),
+        _ => {
+            // `PollOutcome` is `#[non_exhaustive]`; future variants land here
+            // until the route layer is updated.
+            tracing::warn!(
+                "unhandled PollOutcome variant returned by device_flow_store.poll(); \
+                 treating as server_error"
+            );
+            oauth_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                OAuthErrorCode::ServerError,
+                None,
+                None,
+            )
+        }
     }
 }
 
@@ -2137,15 +2199,15 @@ Add to `crates/ui/web-api/src/routes/oauth/token.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_harness::TestAppState;
+    use crate::test_harness::TestApp;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
 
-    async fn make_router(state: TestAppState) -> axum::Router {
+    async fn make_router(state: TestApp) -> axum::Router {
         axum::Router::new()
             .route("/api/v1/oauth/token", axum::routing::post(token))
-            .with_state(state.app_state())
+            .with_state(state.state.clone())
     }
 
     fn form_body(items: &[(&str, &str)]) -> Body {
@@ -2154,7 +2216,7 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_grant_type_response() {
-        let state = TestAppState::new().await;
+        let state = TestApp::new().await;
         let app = make_router(state).await;
         let resp = app
             .oneshot(
@@ -2177,7 +2239,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_grant_when_device_code_unknown() {
-        let state = TestAppState::new().await;
+        let state = TestApp::new().await;
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
@@ -2191,7 +2253,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_request_when_missing_fields() {
-        let state = TestAppState::new().await;
+        let state = TestApp::new().await;
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
@@ -2204,8 +2266,8 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_client_when_client_id_mismatches() {
-        let state = TestAppState::new().await;
-        let (device_code, _) = state.app_state().auth.device_flow_store
+        let state = TestApp::new().await;
+        let (device_code, _) = state.state.clone().auth.device_flow_store
             .create(None, None).await.unwrap();
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
@@ -2220,8 +2282,8 @@ mod tests {
 
     #[tokio::test]
     async fn authorization_pending_400() {
-        let state = TestAppState::new().await;
-        let (device_code, _) = state.app_state().auth.device_flow_store
+        let state = TestApp::new().await;
+        let (device_code, _) = state.state.clone().auth.device_flow_store
             .create(None, None).await.unwrap();
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
@@ -2236,8 +2298,8 @@ mod tests {
 
     #[tokio::test]
     async fn slow_down_400_with_interval() {
-        let state = TestAppState::new().await;
-        let (device_code, _) = state.app_state().auth.device_flow_store
+        let state = TestApp::new().await;
+        let (device_code, _) = state.state.clone().auth.device_flow_store
             .create(None, None).await.unwrap();
         let app = make_router(state).await;
         // First poll → pending.
@@ -2260,11 +2322,11 @@ mod tests {
 
     #[tokio::test]
     async fn access_denied_400() {
-        let state = TestAppState::new().await;
-        let (device_code, user_code) = state.app_state().auth.device_flow_store
+        let state = TestApp::new().await;
+        let (device_code, user_code) = state.state.clone().auth.device_flow_store
             .create(None, None).await.unwrap();
         let denier = uuid::Uuid::now_v7();
-        state.app_state().auth.device_flow_store.deny(&user_code, denier).await.unwrap();
+        state.state.clone().auth.device_flow_store.deny(&user_code, denier).await.unwrap();
 
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
@@ -2287,11 +2349,11 @@ mod tests {
 
     #[tokio::test]
     async fn success_returns_bearer_token() {
-        let state = TestAppState::new().await;
-        let (device_code, user_code) = state.app_state().auth.device_flow_store
+        let state = TestApp::new().await;
+        let (device_code, user_code) = state.state.clone().auth.device_flow_store
             .create(Some("test-client".into()), None).await.unwrap();
         let approver = uuid::Uuid::now_v7();
-        state.app_state().auth.device_flow_store.approve(&user_code, approver).await.unwrap();
+        state.state.clone().auth.device_flow_store.approve(&user_code, approver).await.unwrap();
         let app = make_router(state).await;
         let resp = app.oneshot(make_token_req(&[
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
@@ -2310,7 +2372,7 @@ mod tests {
     #[tokio::test]
     async fn audit_records_slow_down_outcome() {
         // Mirror the existing pattern in routes/device_auth.rs:
-        // - Provide a recording audit emitter via TestAppState.
+        // - Provide a recording audit emitter via TestApp.
         // - Drive a second poll within `interval`.
         // - Assert AUTH_DEVICE_POLL appears with details.reason_code == "slow_down".
     }
@@ -2331,7 +2393,7 @@ mod tests {
 }
 ```
 
-(The exact `TestAppState` shape lives in `crates/ui/web-api/src/test_harness/mod.rs` — read it before writing this test and adapt as needed.)
+(The exact `TestApp` shape lives in `crates/ui/web-api/src/test_harness/mod.rs` — read it before writing this test and adapt as needed.)
 
 - [ ] **Step 2: Tests for `oauth/device_authorization.rs`**
 
@@ -2556,16 +2618,21 @@ Expected: green across the workspace, including the new `device_flow`, `oauth::*
 Run: `cargo deny check`
 Expected: clean. (No new crate dependencies were introduced by this plan; if `cargo deny` reports a violation, fix it before proceeding.)
 
-- [ ] **Step 4: Markdown lint**
+- [ ] **Step 4: Architectural rules (sentrux)**
+
+Run: `sentrux check .`
+Expected: clean. Sentrux validates layer ordering, coupling, and complexity thresholds; the new OAuth routes module and the rewritten store cross the same layer boundaries the existing routes do, but verify before continuing.
+
+- [ ] **Step 5: Markdown lint**
 
 Run: `markdownlint --config .markdownlint.json '**/*.md'` (or the workspace's `npx markdownlint ...` equivalent).
 Expected: clean.
 
-- [ ] **Step 5: Final state check**
+- [ ] **Step 6: Final state check**
 
 Run: `git log --oneline -20`
 Expected: a coherent commit graph through Tasks 1–14, all on the feature branch, with no uncommitted changes outside the spec scope.
 
-- [ ] **Step 6: Plan-completion note**
+- [ ] **Step 7: Plan-completion note**
 
 Plan 1 is complete. Proceed to Plan 2 (CLI + frontend + openapi-client) — see `docs/superpowers/plans/2026-05-12-rfc8628-device-auth-2-client.md`. Plan 2 depends on the routes mounted in Task 11 being live.
