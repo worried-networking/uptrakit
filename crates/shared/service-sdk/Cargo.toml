@@ -19,6 +19,7 @@ openapi = ["uptrakit-shared-types/openapi"]
 service-migrations = ["dep:sea-orm-migration"]
 
 [dependencies]
+arc-swap = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 futures-util = { workspace = true, features = ["async-await-macro"] }
