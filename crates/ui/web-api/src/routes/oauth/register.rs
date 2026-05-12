@@ -67,7 +67,7 @@ fn extract_registration_bearer(headers: &HeaderMap) -> Option<String> {
 // Helper: constant-time verification of the registration access token
 // ---------------------------------------------------------------------------
 
-async fn verify_registration_token(client: &oauth_client::Model, bearer: &str) -> bool {
+fn verify_registration_token(client: &oauth_client::Model, bearer: &str) -> bool {
     use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
 
@@ -219,7 +219,7 @@ pub async fn get_client_registration(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    if !verify_registration_token(&client, &bearer).await {
+    if !verify_registration_token(&client, &bearer) {
         return oauth_401("invalid registration access token");
     }
 
@@ -283,7 +283,7 @@ pub async fn update_client_registration(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    if !verify_registration_token(&client, &bearer).await {
+    if !verify_registration_token(&client, &bearer) {
         return oauth_401("invalid registration access token");
     }
 
@@ -307,9 +307,7 @@ pub async fn update_client_registration(
     active.grant_types = Set(grant_types_json);
     active.response_types = Set(response_types_json);
     active.token_endpoint_auth_method = Set(req.token_endpoint_auth_method.clone());
-    if let Some(scope) = &req.scope {
-        active.default_scope = Set(scope.clone());
-    }
+    active.default_scope = Set(req.scope.clone().unwrap_or_default());
 
     let updated = match active.update(state.db.db()).await {
         Ok(m) => m,
@@ -377,7 +375,7 @@ pub async fn delete_client_registration(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    if !verify_registration_token(&client, &bearer).await {
+    if !verify_registration_token(&client, &bearer) {
         return oauth_401("invalid registration access token");
     }
 
@@ -396,13 +394,14 @@ pub async fn delete_client_registration(
 
 /// Build a [`DcrRegistrationResponse`] from a stored `oauth_client::Model`.
 ///
-/// The `registration_access_token` is always redacted — it must never be
-/// re-exposed after the initial registration response.
+/// The `registration_access_token` is omitted (`None`) — it is a one-time
+/// secret returned only in the initial POST response and must never be
+/// re-exposed on GET or PUT (RFC 7592 §2).
 fn client_to_response(client: &oauth_client::Model) -> DcrRegistrationResponse {
     DcrRegistrationResponse::new(
         client.id.clone(),
         client.created_at.unix_timestamp(),
-        "<redacted>".to_string(),
+        None,
         format!("/oauth/register/{}", client.id),
         client.client_name.clone(),
         client.client_uri.clone(),
@@ -443,6 +442,12 @@ mod tests {
     use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
 
     // -----------------------------------------------------------------------
+    // Shared constants
+    // -----------------------------------------------------------------------
+
+    const TEST_CLIENT_NAME: &str = "Test MCP Client";
+
+    // -----------------------------------------------------------------------
     // Shared helpers
     // -----------------------------------------------------------------------
 
@@ -477,7 +482,7 @@ mod tests {
 
     fn minimal_dcr_body() -> serde_json::Value {
         serde_json::json!({
-            "client_name": "Test MCP Client",
+            "client_name": TEST_CLIENT_NAME,
             "redirect_uris": ["https://example.com/callback"],
             "grant_types": ["authorization_code"],
             "response_types": ["code"],
@@ -501,7 +506,10 @@ mod tests {
         let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
         let resp: DcrRegistrationResponse =
             serde_json::from_slice(&body_bytes).expect("parse DCR response");
-        (resp.client_id, resp.registration_access_token)
+        let token = resp
+            .registration_access_token
+            .expect("POST /oauth/register must return registration_access_token");
+        (resp.client_id, token)
     }
 
     // -----------------------------------------------------------------------
@@ -594,7 +602,11 @@ mod tests {
         let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
         let body: DcrRegistrationResponse =
             serde_json::from_slice(&body_bytes).expect("parse response");
-        assert_eq!(body.client_name, "Test MCP Client");
+        assert_eq!(body.client_name, TEST_CLIENT_NAME);
+        assert!(
+            body.registration_access_token.is_none(),
+            "GET must not return the registration access token"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -677,5 +689,122 @@ mod tests {
         let resp = router.oneshot(req).await.expect("oneshot");
 
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8 — GET after DELETE returns 404
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_get_after_delete_returns_404() {
+        let (router, _db) = app_with_state(enabled_oauth_state(true, false)).await;
+
+        let (client_id, token) = register_and_get_token(&router).await;
+
+        // DELETE the client.
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/oauth/register/{client_id}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request");
+        let delete_resp = router.clone().oneshot(delete_req).await.expect("oneshot");
+        assert_eq!(delete_resp.status(), http::StatusCode::NO_CONTENT);
+
+        // GET must now return 404.
+        let get_req = Request::builder()
+            .method("GET")
+            .uri(format!("/oauth/register/{client_id}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request");
+        let get_resp = router.clone().oneshot(get_req).await.expect("oneshot");
+
+        assert_eq!(
+            get_resp.status(),
+            http::StatusCode::NOT_FOUND,
+            "GET after DELETE must return 404"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 9 — PUT updates fields and returns 200
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_put_updates_client_name() {
+        let (router, _db) = app_with_state(enabled_oauth_state(true, false)).await;
+
+        let (client_id, token) = register_and_get_token(&router).await;
+
+        let updated_name = "Updated MCP Client";
+        let put_body = serde_json::json!({
+            "client_name": updated_name,
+            "redirect_uris": ["https://example.com/callback"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        });
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri(format!("/oauth/register/{client_id}"))
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(put_body.to_string()))
+            .expect("build request");
+        let put_resp = router.clone().oneshot(put_req).await.expect("oneshot");
+
+        assert_eq!(put_resp.status(), http::StatusCode::OK);
+        let body_bytes = put_resp
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let body: DcrRegistrationResponse =
+            serde_json::from_slice(&body_bytes).expect("parse PUT response");
+        assert_eq!(
+            body.client_name, updated_name,
+            "PUT must update client_name"
+        );
+        assert!(
+            body.registration_access_token.is_none(),
+            "PUT must not return the registration access token"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 10 — PUT with wrong token returns 401
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_put_wrong_token_returns_401() {
+        let (router, _db) = app_with_state(enabled_oauth_state(true, false)).await;
+
+        let (client_id, _real_token) = register_and_get_token(&router).await;
+
+        let put_body = serde_json::json!({
+            "client_name": "Attacker Client",
+            "redirect_uris": ["https://attacker.example.com/cb"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        });
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri(format!("/oauth/register/{client_id}"))
+            .header("authorization", "Bearer wrong-token-value")
+            .header("content-type", "application/json")
+            .body(Body::from(put_body.to_string()))
+            .expect("build request");
+        let put_resp = router.clone().oneshot(put_req).await.expect("oneshot");
+
+        assert_eq!(
+            put_resp.status(),
+            http::StatusCode::UNAUTHORIZED,
+            "PUT with wrong token must return 401"
+        );
     }
 }

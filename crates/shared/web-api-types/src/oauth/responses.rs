@@ -152,7 +152,8 @@ impl Validate for DcrRegistrationRequest {
 pub struct DcrRegistrationResponse {
     pub client_id: String,
     pub client_id_issued_at: i64,
-    pub registration_access_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration_access_token: Option<String>,
     pub registration_client_uri: String,
     pub client_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,7 +177,7 @@ impl DcrRegistrationResponse {
     pub fn new(
         client_id: String,
         client_id_issued_at: i64,
-        registration_access_token: String,
+        registration_access_token: Option<String>,
         registration_client_uri: String,
         client_name: String,
         client_uri: Option<String>,
