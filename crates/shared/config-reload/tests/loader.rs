@@ -1,4 +1,9 @@
-use uptrakit_config_reload::config::db::DbConfig;
+use uptrakit_config_reload::config::{
+    AuditConfig, DbConfig, EmbeddedServicesConfig, NatsConfig, NetworkConfig, TlsConfig,
+    ZeroconfConfig,
+};
+
+// ── DbConfig tests ──────────────────────────────────────────────────────────
 
 #[test]
 fn db_config_rejects_zero_pool_size() {
@@ -29,4 +34,118 @@ unknown_key = "value"
     let cfg: DbConfig = toml::from_str(raw).expect("parse should succeed; unknowns land in extra");
     assert_eq!(cfg.extra.len(), 1);
     assert!(cfg.extra.contains_key("unknown_key"));
+}
+
+// ── NetworkConfig tests ─────────────────────────────────────────────────────
+
+#[test]
+fn network_parses_https_and_pki() {
+    let raw = r#"
+[https]
+addr = "0.0.0.0:8443"
+trusted_proxies = ["127.0.0.1/32"]
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header  = "x-fcc-pem"
+
+[pki]
+addr = "0.0.0.0:8444"
+"#;
+    let parsed: NetworkConfig = toml::from_str(raw).unwrap();
+    assert_eq!(parsed.https.addr, "0.0.0.0:8443");
+    assert_eq!(parsed.pki.addr, "0.0.0.0:8444");
+    assert!(parsed.validate().is_ok());
+}
+
+#[test]
+fn network_rejects_collision() {
+    let raw = r#"
+[https]
+addr = "0.0.0.0:8443"
+trusted_proxies = []
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header  = "x-fcc-pem"
+
+[pki]
+addr = "0.0.0.0:8443"
+"#;
+    let parsed: NetworkConfig = toml::from_str(raw).unwrap();
+    assert!(
+        parsed.validate().is_err(),
+        "https and pki on same addr must fail"
+    );
+}
+
+// ── AuditConfig tests ───────────────────────────────────────────────────────
+
+#[test]
+fn audit_rejects_unknown_filter() {
+    let bad: AuditConfig = toml::from_str("filter = \"weird\"\nretention_days = 90\n").unwrap();
+    assert!(bad.validate().is_err());
+}
+
+#[test]
+fn audit_accepts_known_filters() {
+    for filter in ["all", "mutations", "none"] {
+        let cfg: AuditConfig =
+            toml::from_str(&format!("filter = \"{filter}\"\nretention_days = 90\n")).unwrap();
+        cfg.validate().unwrap();
+    }
+}
+
+// ── NatsConfig tests ────────────────────────────────────────────────────────
+
+#[test]
+fn nats_validates_url() {
+    let good = NatsConfig::new("nats://localhost:4222");
+    assert!(good.validate().is_ok());
+    let bad = NatsConfig::new("");
+    assert!(bad.validate().is_err());
+}
+
+// ── TlsConfig tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn tls_requires_both_paths() {
+    let bad: TlsConfig = toml::from_str(
+        r#"
+cert_path = "/etc/tls/cert.pem"
+key_path = ""
+sans = []
+"#,
+    )
+    .unwrap();
+    assert!(bad.validate().is_err());
+}
+
+// ── EmbeddedServicesConfig tests ────────────────────────────────────────────
+
+#[test]
+fn embedded_services_accepts_all_false() {
+    let cfg: EmbeddedServicesConfig = toml::from_str(
+        r#"
+agent = false
+agent_ssh = false
+mqtt = false
+scheduler = false
+"#,
+    )
+    .unwrap();
+    cfg.validate().unwrap();
+}
+
+// ── ZeroconfConfig tests ────────────────────────────────────────────────────
+
+#[test]
+fn zeroconf_disabled_does_not_require_url() {
+    let cfg: ZeroconfConfig = toml::from_str("enabled = false\n").unwrap();
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn zeroconf_enabled_requires_url_and_pki_addr() {
+    let raw = "enabled = true\nurl = \"\"\npki_addr = \"\"\n";
+    let cfg: ZeroconfConfig = toml::from_str(raw).unwrap();
+    assert!(cfg.validate().is_err());
 }
