@@ -41,6 +41,36 @@ pub struct DcrRegistrationRequest {
     pub scope: Option<String>,
 }
 
+impl DcrRegistrationRequest {
+    /// Construct a new registration request.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "RFC 7591 §2 mandates all these fields; a builder would not reduce the footprint"
+    )]
+    #[must_use]
+    pub fn new(
+        client_name: impl Into<String>,
+        client_uri: Option<String>,
+        logo_uri: Option<String>,
+        redirect_uris: Vec<String>,
+        grant_types: Vec<String>,
+        response_types: Vec<String>,
+        token_endpoint_auth_method: impl Into<String>,
+        scope: Option<String>,
+    ) -> Self {
+        Self {
+            client_name: client_name.into(),
+            client_uri,
+            logo_uri,
+            redirect_uris,
+            grant_types,
+            response_types,
+            token_endpoint_auth_method: token_endpoint_auth_method.into(),
+            scope,
+        }
+    }
+}
+
 const ALLOWED_GRANT_TYPES: &[&str] = &[
     OAuthGrantType::AuthorizationCode.as_str(),
     OAuthGrantType::RefreshToken.as_str(),
@@ -107,6 +137,44 @@ pub struct DcrRegistrationResponse {
     pub response_types: Vec<String>,
     pub token_endpoint_auth_method: String,
     pub scope: String,
+}
+
+impl DcrRegistrationResponse {
+    /// Construct a new registration response.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "RFC 7591 §3.2.1 mandates all these fields; a builder would not reduce the footprint"
+    )]
+    #[must_use]
+    pub fn new(
+        client_id: String,
+        client_id_issued_at: i64,
+        registration_access_token: String,
+        registration_client_uri: String,
+        client_name: String,
+        client_uri: Option<String>,
+        logo_uri: Option<String>,
+        redirect_uris: Vec<String>,
+        grant_types: Vec<String>,
+        response_types: Vec<String>,
+        token_endpoint_auth_method: String,
+        scope: String,
+    ) -> Self {
+        Self {
+            client_id,
+            client_id_issued_at,
+            registration_access_token,
+            registration_client_uri,
+            client_name,
+            client_uri,
+            logo_uri,
+            redirect_uris,
+            grant_types,
+            response_types,
+            token_endpoint_auth_method,
+            scope,
+        }
+    }
 }
 
 #[cfg(test)]
