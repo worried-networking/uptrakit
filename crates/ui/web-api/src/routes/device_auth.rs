@@ -170,9 +170,9 @@ pub async fn device_auth_deny(
 
     Ok((
         StatusCode::OK,
-        Json(DeviceAuthDenyResponse {
-            message: "Device authorization denied.".into(),
-        }),
+        Json(DeviceAuthDenyResponse::new(
+            "Device authorization denied.".into(),
+        )),
     )
         .into_response())
 }
@@ -222,8 +222,8 @@ pub async fn device_auth_lookup(
             )
         })?;
 
-    Ok(axum::Json(DeviceAuthLookupResponse {
-        client_name: flow.client_name,
-        expires_at: flow.expires_at,
-    }))
+    Ok(axum::Json(DeviceAuthLookupResponse::new(
+        flow.client_name,
+        flow.expires_at,
+    )))
 }

@@ -41,10 +41,6 @@ pub fn oauth_error_response(
     description: Option<String>,
     interval: Option<i32>,
 ) -> Response {
-    let body = uptrakit_web_api_types::oauth::OAuthErrorResponse {
-        error,
-        error_description: description,
-        interval,
-    };
+    let body = uptrakit_web_api_types::oauth::OAuthErrorResponse::new(error, description, interval);
     (status, Json(body)).into_response()
 }

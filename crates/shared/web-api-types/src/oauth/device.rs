@@ -35,7 +35,8 @@ wire_safe_enum! {
 // --- Device-authorization request / response ---------------------------
 
 /// RFC 8628 §3.1 device-authorization request. Form-urlencoded body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthorizationRequest {
     /// Public client identifier. Must match the server's configured constant.
@@ -47,6 +48,17 @@ pub struct DeviceAuthorizationRequest {
     /// Uptrakit extension: free-form audit label, e.g. `cli-laptop-2026-05-12`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
+}
+
+impl DeviceAuthorizationRequest {
+    /// Construct a `DeviceAuthorizationRequest`.
+    pub fn new(client_id: String, scope: Option<String>, client_name: Option<String>) -> Self {
+        Self {
+            client_id,
+            scope,
+            client_name,
+        }
+    }
 }
 
 impl Validate for DeviceAuthorizationRequest {
@@ -68,6 +80,7 @@ impl Validate for DeviceAuthorizationRequest {
 }
 
 /// RFC 8628 §3.2 device-authorization response.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthorizationResponse {
@@ -79,6 +92,27 @@ pub struct DeviceAuthorizationResponse {
     pub interval: i32,
 }
 
+impl DeviceAuthorizationResponse {
+    /// Construct a `DeviceAuthorizationResponse`.
+    pub fn new(
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        verification_uri_complete: String,
+        expires_in: u64,
+        interval: i32,
+    ) -> Self {
+        Self {
+            device_code,
+            user_code,
+            verification_uri,
+            verification_uri_complete,
+            expires_in,
+            interval,
+        }
+    }
+}
+
 // --- Token request / response ------------------------------------------
 
 /// RFC 6749 §3.2 / RFC 8628 §3.4 token endpoint request. Form-urlencoded.
@@ -87,7 +121,8 @@ pub struct DeviceAuthorizationResponse {
 /// literal URI `urn:ietf:params:oauth:grant-type:device_code`; the handler
 /// matches the raw string and returns `unsupported_grant_type` for any other
 /// value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OAuthTokenRequest {
     pub grant_type: String,
@@ -95,6 +130,17 @@ pub struct OAuthTokenRequest {
     pub device_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+}
+
+impl OAuthTokenRequest {
+    /// Construct an `OAuthTokenRequest`.
+    pub fn new(grant_type: String, device_code: Option<String>, client_id: Option<String>) -> Self {
+        Self {
+            grant_type,
+            device_code,
+            client_id,
+        }
+    }
 }
 
 impl Validate for OAuthTokenRequest {
@@ -115,6 +161,7 @@ impl Validate for OAuthTokenRequest {
 /// so they are omitted (not serialised as `null`) when unset. Today the server
 /// always omits all three; the fields exist on the wire type so a future
 /// migration to short-lived bearer + refresh tokens is purely additive (Seam 1).
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OAuthTokenResponse {
@@ -128,8 +175,24 @@ pub struct OAuthTokenResponse {
     pub scope: Option<String>,
 }
 
+impl OAuthTokenResponse {
+    /// Construct an `OAuthTokenResponse` with the required fields.
+    ///
+    /// `expires_in`, `refresh_token`, and `scope` default to `None`.
+    pub fn new(access_token: String, token_type: String) -> Self {
+        Self {
+            access_token,
+            token_type,
+            expires_in: None,
+            refresh_token: None,
+            scope: None,
+        }
+    }
+}
+
 /// RFC 6749 §5.2 error response, with the uptrakit `interval` extension used
 /// by `slow_down` (RFC 8628 §3.5).
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OAuthErrorResponse {
@@ -141,9 +204,25 @@ pub struct OAuthErrorResponse {
     pub interval: Option<i32>,
 }
 
+impl OAuthErrorResponse {
+    /// Construct an `OAuthErrorResponse`.
+    pub fn new(
+        error: OAuthErrorCode,
+        error_description: Option<String>,
+        interval: Option<i32>,
+    ) -> Self {
+        Self {
+            error,
+            error_description,
+            interval,
+        }
+    }
+}
+
 // --- Discovery metadata ------------------------------------------------
 
 /// RFC 8414 §3 authorization server metadata (device-grant-only subset).
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OAuthAuthorizationServerMetadata {
@@ -154,6 +233,29 @@ pub struct OAuthAuthorizationServerMetadata {
     pub response_types_supported: Vec<String>,
     pub token_endpoint_auth_methods_supported: Vec<String>,
     pub code_challenge_methods_supported: Vec<String>,
+}
+
+impl OAuthAuthorizationServerMetadata {
+    /// Construct an `OAuthAuthorizationServerMetadata`.
+    pub fn new(
+        issuer: String,
+        device_authorization_endpoint: String,
+        token_endpoint: String,
+        grant_types_supported: Vec<String>,
+        response_types_supported: Vec<String>,
+        token_endpoint_auth_methods_supported: Vec<String>,
+        code_challenge_methods_supported: Vec<String>,
+    ) -> Self {
+        Self {
+            issuer,
+            device_authorization_endpoint,
+            token_endpoint,
+            grant_types_supported,
+            response_types_supported,
+            token_endpoint_auth_methods_supported,
+            code_challenge_methods_supported,
+        }
+    }
 }
 
 // --- UI-internal: deny + lookup ---------------------------------------
@@ -180,10 +282,18 @@ fn validate_user_code_format(user_code: &str) -> Result<(), ValidationError> {
 }
 
 /// Request body for `POST /api/v1/auth/device/deny` (UI-internal).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthDenyRequest {
     pub user_code: String,
+}
+
+impl DeviceAuthDenyRequest {
+    /// Construct a `DeviceAuthDenyRequest`.
+    pub fn new(user_code: String) -> Self {
+        Self { user_code }
+    }
 }
 
 impl Validate for DeviceAuthDenyRequest {
@@ -193,14 +303,23 @@ impl Validate for DeviceAuthDenyRequest {
 }
 
 /// Response body for `POST /api/v1/auth/device/deny`.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthDenyResponse {
     pub message: String,
 }
 
+impl DeviceAuthDenyResponse {
+    /// Construct a `DeviceAuthDenyResponse`.
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
 /// Query string for `GET /api/v1/auth/device/lookup` (UI-internal).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct DeviceAuthLookupQuery {
     pub user_code: String,
@@ -213,6 +332,7 @@ impl Validate for DeviceAuthLookupQuery {
 }
 
 /// Response body for `GET /api/v1/auth/device/lookup`.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthLookupResponse {
@@ -223,6 +343,16 @@ pub struct DeviceAuthLookupResponse {
         schema(value_type = String, format = DateTime)
     )]
     pub expires_at: OffsetDateTime,
+}
+
+impl DeviceAuthLookupResponse {
+    /// Construct a `DeviceAuthLookupResponse`.
+    pub fn new(client_name: Option<String>, expires_at: OffsetDateTime) -> Self {
+        Self {
+            client_name,
+            expires_at,
+        }
+    }
 }
 
 // --- Tests --------------------------------------------------------------
