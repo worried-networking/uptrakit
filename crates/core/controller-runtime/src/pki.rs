@@ -6,7 +6,6 @@
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rootcause::prelude::*;
@@ -1129,41 +1128,29 @@ pub(crate) fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Re
 
 // --- TLS config builders ---
 
-/// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
-#[cfg(test)]
-pub(crate) fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::ServerConfig> {
-    use rustls::pki_types::pem::PemObject;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-
-    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_transform(|_| PkiError::PemParse)?;
-
-    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
-        .context_transform(|_| PkiError::PemParse)?;
-
-    let config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .context_to::<PkiError>()?;
-
-    Ok(config)
+/// Carries both the server config and the hot-swap handles.
+pub(crate) struct BuiltTlsConfig {
+    pub server_config: std::sync::Arc<rustls::ServerConfig>,
+    pub server_cert_resolver:
+        std::sync::Arc<crate::server_cert_resolver::ControllerServerCertResolver>,
+    pub client_verifier: std::sync::Arc<crate::dynamic_verifier::DynamicClientVerifier>,
 }
 
-/// Build a `rustls::ServerConfig` with mTLS client authentication and multiple CRLs.
+/// Build a full TLS config with dynamic hot-swap resolvers.
 ///
-/// Each CA in the bundle gets its own CRL. The verifier checks client certificates
-/// against all supplied CRLs.
-pub(crate) fn build_rustls_config_with_client_auth_and_crls(
+/// Called at startup. Returns handles for subsequent CRL rebuild, CA rotation,
+/// and server cert renewal without rebuilding `ServerConfig`.
+pub(crate) fn build_rustls_server_config(
     cert_pem: &str,
     key_pem: &str,
     ca_bundle_pem: &str,
     crls: Vec<rustls::pki_types::CertificateRevocationListDer<'static>>,
-) -> Result<rustls::ServerConfig> {
+) -> Result<BuiltTlsConfig> {
     use rustls::RootCertStore;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use rustls::server::WebPkiClientVerifier;
+    use rustls::server::danger::ClientCertVerifier;
+    use rustls::server::{ServerSessionMemoryCache, WebPkiClientVerifier};
 
     let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -1181,38 +1168,97 @@ pub(crate) fn build_rustls_config_with_client_auth_and_crls(
         root_store.add(ca_cert).context_to::<PkiError>()?;
     }
 
-    // allow_unauthenticated() is intentional.
-    //
-    // The controller exposes a single mTLS listener for both enrolled agents
-    // (which present a client certificate) and agents that have not yet
-    // enrolled (which have no certificate).  At the TLS layer the handshake
-    // succeeds for both.  The `MtlsAcceptor` then extracts the peer
-    // certificate CN into an `Option<ServiceIdentity>`:
-    //
-    //   - `Some(ServiceIdentity)` → established agent, authenticated by cert.
-    //   - `None`                  → unenrolled agent, authenticated later via
-    //                              the enrollment secret bearer token.
-    //
-    // Removing allow_unauthenticated() would break the enrollment flow
-    // entirely, because the agent cannot present a certificate it has not yet
-    // received.  Application-level handlers guard their endpoints against
-    // `None` identities as appropriate.
-    // `.only_check_end_entity_revocation()` is intentionally NOT called.
-    // The managed CA is issued with pathLenConstraint=0 (see
-    // docs/security/pki-certificates.md). No intermediate CAs exist in any
-    // Agent's certificate chain, so end-entity-only revocation checking and
-    // full-chain revocation checking are equivalent. Omitting the flag is
-    // the safer default: if a future change introduces intermediates (e.g.
-    // the Path A root/intermediate split in ADR-0013), the default
-    // (full-chain check) is the correct behaviour without further edits.
-    let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
-        .with_crls(crls)
-        .allow_unauthenticated()
-        .build()
-        .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
+    // allow_unauthenticated() is intentional — see build_rustls_config_with_client_auth_and_crls
+    // for the full rationale.
+    let initial_verifier: std::sync::Arc<dyn ClientCertVerifier> =
+        WebPkiClientVerifier::builder(std::sync::Arc::new(root_store))
+            .with_crls(crls)
+            .allow_unauthenticated()
+            .build()
+            .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
+    let client_verifier = std::sync::Arc::new(crate::dynamic_verifier::DynamicClientVerifier::new(
+        initial_verifier,
+    ));
+
+    let provider = rustls::crypto::CryptoProvider::get_default().ok_or_else(|| {
+        report!(PkiError::CaValidation(
+            "no crypto provider installed".into()
+        ))
+    })?;
+    let signing_key = provider
+        .key_provider
+        .load_private_key(key)
+        .context_to::<PkiError>()?;
+    let initial_cert_key = rustls::sign::CertifiedKey::new(certs, signing_key);
+    let server_cert_resolver = std::sync::Arc::new(
+        crate::server_cert_resolver::ControllerServerCertResolver::new(std::sync::Arc::new(
+            initial_cert_key,
+        )),
+    );
+
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(
+            std::sync::Arc::clone(&client_verifier) as std::sync::Arc<dyn ClientCertVerifier>
+        )
+        .with_cert_resolver(std::sync::Arc::clone(&server_cert_resolver)
+            as std::sync::Arc<dyn rustls::server::ResolvesServerCert>);
+
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    server_config.session_storage = ServerSessionMemoryCache::new(1024);
+
+    Ok(BuiltTlsConfig {
+        server_config: std::sync::Arc::new(server_config),
+        server_cert_resolver,
+        client_verifier,
+    })
+}
+
+/// Build a [`rustls::sign::CertifiedKey`] from PEM-encoded cert and key.
+///
+/// Used by the hot-swap path to update [`ControllerServerCertResolver`] after
+/// server certificate renewal without rebuilding the full `ServerConfig`.
+pub(crate) fn build_certified_key(
+    cert_pem: &str,
+    key_pem: &str,
+) -> Result<rustls::sign::CertifiedKey> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let provider = rustls::crypto::CryptoProvider::get_default().ok_or_else(|| {
+        report!(PkiError::CaValidation(
+            "no crypto provider installed".into()
+        ))
+    })?;
+    let signing_key = provider
+        .key_provider
+        .load_private_key(key)
+        .context_to::<PkiError>()?;
+
+    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
+}
+
+/// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
+#[cfg(test)]
+pub(crate) fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::ServerConfig> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .context_transform(|_| PkiError::PemParse)?;
 
     let config = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(verifier)
+        .with_no_client_auth()
         .with_single_cert(certs, key)
         .context_to::<PkiError>()?;
 
@@ -1607,6 +1653,22 @@ mod tests {
     fn validate_ca_pki_addr_neither_set() {
         let ca = generate_ca(None).unwrap();
         assert!(validate_ca_pki_addr(&ca.cert_pem, None).is_ok());
+    }
+
+    #[test]
+    fn server_config_has_h2_and_http11_alpn() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let ca = generate_ca(None).unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        let crls = vec![];
+        let built =
+            build_rustls_server_config(&server.cert_pem, &server.key_pem, &ca.cert_pem, crls)
+                .expect("build_rustls_server_config should succeed");
+        assert_eq!(
+            built.server_config.alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+            "server config must advertise h2 and http/1.1"
+        );
     }
 
     #[test]
