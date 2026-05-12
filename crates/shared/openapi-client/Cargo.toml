@@ -20,7 +20,7 @@ sea-orm = ["uptrakit-shared-types/sea-orm"]
 openapi = ["uptrakit-web-api-types/openapi"]
 
 [dependencies]
-reqwest = { workspace = true, features = ["query"] }
+reqwest = { workspace = true, features = ["form", "query"] }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

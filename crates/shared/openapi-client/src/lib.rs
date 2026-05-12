@@ -359,6 +359,49 @@ impl UptrakitClient {
         self.handle_response(resp).await
     }
 
+    /// POST a form-urlencoded body without authentication (OAuth endpoints).
+    ///
+    /// On HTTP 200, deserialise the JSON response body into `T`.
+    /// On HTTP 400, try to parse the body as an RFC 6749 §5.2 `OAuthErrorResponse`;
+    /// on success, return `Err(ClientError::OAuthError(...))`. If the 400 body is
+    /// not a parseable OAuth error envelope, or for any other non-success status,
+    /// fall through to `handle_response_bytes` (the shared status-dispatcher) so
+    /// `RateLimited` (429), `NotAuthenticated` (401), `NotFound` (404), and
+    /// generic `Api { status, message }` still flow through one place.
+    #[expect(
+        dead_code,
+        reason = "OAuth form POST helper — call sites added in device auth task 2"
+    )]
+    async fn post_form_unauth<T: DeserializeOwned, F: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        form: &F,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.post(&url).form(form);
+        let resp = self.send_with_retry(req).await?;
+
+        let status = resp.status();
+        // Extract Retry-After while the response is still alive — the bytes
+        // helper cannot reconstruct headers from the body.
+        let retry_after = parse_retry_after(&resp);
+        let bytes = resp.bytes().await.context_to()?;
+
+        if status == reqwest::StatusCode::OK {
+            return serde_json::from_slice::<T>(&bytes).context_to();
+        }
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            if let Ok(err_resp) =
+                serde_json::from_slice::<uptrakit_web_api_types::oauth::OAuthErrorResponse>(&bytes)
+            {
+                bail!(ClientError::OAuthError(err_resp));
+            }
+        }
+
+        self.handle_response_bytes(status, bytes.to_vec(), retry_after)
+            .await
+    }
+
     async fn delete(&self, path: &str) -> Result<()> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.delete(&url).bearer_auth(self.token_or_err()?);
@@ -463,6 +506,32 @@ impl UptrakitClient {
             bail!(ClientError::Api { status, message });
         }
         serde_json::from_str(&text).context_to()
+    }
+
+    async fn handle_response_bytes<T: DeserializeOwned>(
+        &self,
+        status: reqwest::StatusCode,
+        bytes: Vec<u8>,
+        retry_after: Option<u64>,
+    ) -> Result<T> {
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            bail!(ClientError::RateLimited {
+                retry_after_seconds: retry_after,
+            });
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            bail!(ClientError::NotAuthenticated);
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            let message = extract_error_message(&text);
+            bail!(ClientError::NotFound(message));
+        }
+        if status.is_client_error() || status.is_server_error() {
+            let message = extract_error_message(&text);
+            bail!(ClientError::Api { status, message });
+        }
+        serde_json::from_slice::<T>(&bytes).context_to()
     }
 
     async fn handle_empty_response(&self, resp: reqwest::Response) -> Result<()> {
