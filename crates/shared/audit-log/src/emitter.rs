@@ -172,13 +172,13 @@ mod tests {
     use crate::commit_hook::AuditCommitHook;
     use crate::dispatcher::AuditLogDispatcher;
     use crate::entry::{AuditActorType, AuditEntry, AuditEntryErased, AuditOutcome, Event};
-    use crate::error::AuditLogError;
+    use crate::error::Result;
 
     struct Counting(Arc<Mutex<usize>>);
 
     #[async_trait::async_trait]
     impl AuditLogBackend for Counting {
-        async fn write(&self, _e: &AuditEntryErased) -> Result<(), AuditLogError> {
+        async fn write(&self, _e: &AuditEntryErased) -> Result<()> {
             *self.0.lock() += 1;
             Ok(())
         }

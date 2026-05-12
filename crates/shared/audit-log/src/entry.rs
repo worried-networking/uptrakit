@@ -29,6 +29,7 @@ pub struct NeedsAfter;
 pub struct HasAfter;
 
 /// Classifies the actor that triggered an audit-logged operation.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuditActorType {
     User,
@@ -58,6 +59,7 @@ impl fmt::Display for AuditActorType {
 }
 
 /// The outcome of the audited operation.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuditOutcome {
     Success,
@@ -454,7 +456,8 @@ fn apply_truncation(mut value: Value, truncatable_keys: &[&str]) -> Result<Value
         // Extract the field (if present), replace it, then re-measure.
         let replaced = if let Value::Object(obj) = &mut value {
             if let Some(field) = obj.get_mut(*key) {
-                let serialised = serde_json::to_vec(field).unwrap_or_default();
+                let serialised = serde_json::to_vec(field)
+                    .map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
                 let end = TRUNCATED_PREVIEW_BYTES.min(serialised.len());
                 let preview = serialised
                     .get(..end)

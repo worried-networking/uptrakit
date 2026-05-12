@@ -103,7 +103,7 @@ mod tests {
     use crate::action_type::{AuditActionKind, AuditActionType};
     use crate::backend::{AuditLogBackend, NoopBackend};
     use crate::entry::{AuditActorType, AuditEntryErased, AuditOutcome};
-    use crate::error::AuditLogError;
+    use crate::error::Result;
 
     use super::AuditCommitHook;
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AuditLogBackend for Counting {
-        async fn write(&self, _e: &AuditEntryErased) -> Result<(), AuditLogError> {
+        async fn write(&self, _e: &AuditEntryErased) -> Result<()> {
             *self.0.lock() += 1;
             Ok(())
         }
@@ -180,5 +180,96 @@ mod tests {
         hook.enqueue(make_stub_erased());
         hook.flush_after_commit().await;
         assert_eq!(*count.lock(), 3, "all three entries must be written");
+    }
+
+    /// Verifies the `Drop` impl emits `tracing::warn!` when entries were enqueued
+    /// but the hook was dropped without calling `flush_after_commit`.
+    #[tokio::test]
+    async fn commit_hook_warns_on_drop_with_pending_entries() {
+        use tracing::field::{Field, Visit};
+        use tracing::span::{Attributes, Id, Record};
+        use tracing::subscriber::Interest;
+        use tracing::{Event as TracingEvent, Metadata, Subscriber};
+
+        #[derive(Default)]
+        struct WarnCapture {
+            messages: Arc<Mutex<Vec<String>>>,
+        }
+
+        struct FieldVisitor(String);
+        impl Visit for FieldVisitor {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.0 = format!("{value:?}");
+                }
+            }
+
+            fn record_str(&mut self, field: &Field, value: &str) {
+                if field.name() == "message" {
+                    self.0 = value.to_string();
+                }
+            }
+
+            fn record_u64(&mut self, _field: &Field, _value: u64) {}
+            fn record_i64(&mut self, _field: &Field, _value: i64) {}
+            fn record_bool(&mut self, _field: &Field, _value: bool) {}
+        }
+
+        impl Subscriber for WarnCapture {
+            fn enabled(&self, _meta: &Metadata<'_>) -> bool {
+                true
+            }
+
+            fn new_span(&self, _span: &Attributes<'_>) -> Id {
+                Id::from_u64(1)
+            }
+
+            fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+            fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+            fn event(&self, event: &TracingEvent<'_>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    let mut visitor = FieldVisitor(String::new());
+                    event.record(&mut visitor);
+                    self.messages.lock().push(visitor.0);
+                }
+            }
+
+            fn enter(&self, _span: &Id) {}
+
+            fn exit(&self, _span: &Id) {}
+
+            fn register_callsite(&self, _meta: &'static Metadata<'static>) -> Interest {
+                Interest::always()
+            }
+
+            fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+                Some(tracing::level_filters::LevelFilter::WARN)
+            }
+
+            fn clone_span(&self, id: &Id) -> Id {
+                id.clone()
+            }
+
+            fn try_close(&self, _id: Id) -> bool {
+                true
+            }
+        }
+
+        let capture = WarnCapture::default();
+        let messages = Arc::clone(&capture.messages);
+        let _guard = tracing::subscriber::set_default(capture);
+
+        let hook = AuditCommitHook::new(Arc::new(NoopBackend));
+        hook.enqueue(make_stub_erased());
+        // Drop without flush — must emit a tracing::warn!.
+        drop(hook);
+
+        let msgs = messages.lock();
+        assert!(
+            msgs.iter().any(|m| m.contains("un-flushed")),
+            "expected a warning about un-flushed entries, got: {msgs:?}",
+        );
     }
 }

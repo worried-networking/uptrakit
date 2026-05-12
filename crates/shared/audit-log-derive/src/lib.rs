@@ -34,14 +34,17 @@ pub fn derive_audit_view(input: TokenStream) -> TokenStream {
 
 /// Function-like macro that generates per-action constructor methods on `AuditEntry`.
 ///
+/// **Internal macro.** The generated code uses `crate::` paths and is only
+/// correct when invoked from within `uptrakit-audit-log` itself.
+///
 /// # Example
 ///
 /// ```rust,ignore
 /// audit_actions! {
-///     HostCreated { host: HostSnapshot },
-///     HostDeleted { host_id: uuid::Uuid },
+///     auth_login => AUTH_LOGIN, Event;
 /// }
 /// ```
+#[doc(hidden)]
 #[proc_macro]
 pub fn audit_actions(input: TokenStream) -> TokenStream {
     audit_actions::expand(input)

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 /// Errors that can occur in the audit log subsystem.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum AuditLogError {
     #[error("audit log backend error: {0}")]
