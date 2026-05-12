@@ -495,6 +495,7 @@ fn runtime_audit_event_to_service_message(event: &RuntimeAuditEvent) -> ServiceM
         outcome: runtime_audit_outcome(event.level).to_string(),
         details_json: Some(event.details.to_string()),
         request_id: None,
+        correlation_id: None,
     })
 }
 

@@ -998,6 +998,7 @@ pub(super) async fn emit_service_enrollment_completed_audit_event(
             .to_string(),
         details_json: Some(serde_json::json!({ "service_id": service_id }).to_string()),
         request_id: None,
+        correlation_id: None,
     };
     let _ = ingest_service_audit_event(state, service_id, false, None, None, payload).await;
 }
@@ -1029,6 +1030,7 @@ pub(super) async fn emit_service_certificate_issue_audit_event(
             .to_string(),
         ),
         request_id: None,
+        correlation_id: None,
     };
     let _ = ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
 }
@@ -1055,6 +1057,7 @@ pub(super) async fn emit_service_certificate_renew_audit_event(
             .to_string(),
         ),
         request_id: None,
+        correlation_id: None,
     };
     let _ = ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
 }
@@ -4657,6 +4660,7 @@ mod tests {
                         .to_string(),
                     details_json: Some(serde_json::json!({ "interactive": false }).to_string()),
                     request_id: None,
+                    correlation_id: None,
                 }),
                 None,
             )
@@ -4727,6 +4731,7 @@ mod tests {
                         .to_string(),
                     ),
                     request_id: None,
+                    correlation_id: None,
                 }),
                 None,
             )
@@ -4795,6 +4800,7 @@ mod tests {
                         .to_string(),
                     ),
                     request_id: None,
+                    correlation_id: None,
                 }),
                 None,
             )
@@ -4996,6 +5002,7 @@ mod tests {
                     outcome: "validation_failed".to_string(),
                     details_json: None,
                     request_id: None,
+                    correlation_id: None,
                 }),
                 None,
             )
