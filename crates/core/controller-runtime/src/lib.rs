@@ -240,6 +240,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // Phase 7b: Enrollment token bootstrap
     startup::bootstrap_enrollment_tokens(&db_conn, default_tenant_id, &args).await?;
 
+    // Phase 7c: OAuth settings defaults
+    startup::seed_oauth_defaults(&db_conn).await?;
+
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(&args, &reconciled)?;
 
