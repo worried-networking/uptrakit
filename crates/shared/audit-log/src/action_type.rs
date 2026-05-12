@@ -287,10 +287,7 @@ impl AuditActionType {
     pub const SYSTEM_SERVICE_UPDATE_FREEZE_APPLY: RegisteredAuditAction =
         RegisteredAuditAction::new("system.service.update_freeze.apply", AuditActionKind::Event);
     pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: RegisteredAuditAction =
-        RegisteredAuditAction::new(
-            "system.scheduler.audit_log_cleanup",
-            AuditActionKind::Event,
-        );
+        RegisteredAuditAction::new("system.scheduler.audit_log_cleanup", AuditActionKind::Event);
     pub const OAUTH_AUTHORIZE_REQUEST: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.authorize_request", AuditActionKind::Event);
     pub const OAUTH_TOKEN_ISSUED: RegisteredAuditAction =
@@ -322,7 +319,10 @@ impl AuditActionType {
             AuditActionKind::Event,
         );
     pub const OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.config_audience_hosts_changed", AuditActionKind::Event);
+        RegisteredAuditAction::new(
+            "oauth.config_audience_hosts_changed",
+            AuditActionKind::Event,
+        );
     pub const OAUTH_CIMD_PARSE_FAILED: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.cimd_parse_failed", AuditActionKind::Event);
     pub const OAUTH_CONSENT_GRANT: RegisteredAuditAction =
