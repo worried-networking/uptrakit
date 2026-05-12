@@ -449,7 +449,34 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 5 — oauth disabled returns 404 for both endpoints
+    // Test 5 — revoke nonexistent consent returns 404
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn revoke_nonexistent_consent_returns_404() {
+        let app = setup_with_oauth(enabled_oauth_state()).await;
+        let user_id = insert_test_user(&app.db).await;
+
+        let token = app
+            .jwt
+            .create_access_token(user_id, &[], "password", None)
+            .expect("create_access_token");
+
+        let random_id = uuid::Uuid::new_v4();
+
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/oauth/consents/{random_id}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = app.router.oneshot(req).await.expect("oneshot");
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 6 — oauth disabled returns 404 for both endpoints
     // -----------------------------------------------------------------------
 
     #[tokio::test]
