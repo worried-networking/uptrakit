@@ -879,6 +879,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/oauth/authorize",
             get(crate::routes::oauth::authorize::authorize),
         )
+        // OAuth 2.1 §12 consent endpoints.
+        .route(
+            "/oauth/consent/{request_id}",
+            get(crate::routes::oauth::consent::consent_details),
+        )
+        .route(
+            "/oauth/consent/{request_id}/approve",
+            axum::routing::post(crate::routes::oauth::consent::approve_consent),
+        )
+        .route(
+            "/oauth/consent/{request_id}/deny",
+            axum::routing::post(crate::routes::oauth::consent::deny_consent),
+        )
         // RFC 7591 DCR + RFC 7592 management endpoints.
         .route(
             "/oauth/register",
