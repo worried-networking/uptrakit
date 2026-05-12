@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::entry::AuditEntryErased;
+#[cfg(any(feature = "db", feature = "journald"))]
 use crate::error::AuditLogError;
+use crate::error::Result;
 
 /// Trait for audit log storage backends.
 #[async_trait::async_trait]
@@ -10,8 +12,9 @@ pub trait AuditLogBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`AuditLogError`] when the underlying storage write fails.
-    async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError>;
+    /// Returns [`AuditLogError`] (wrapped in `rootcause::Report`) when the
+    /// underlying storage write fails.
+    async fn write(&self, entry: &AuditEntryErased) -> Result<()>;
 
     /// Write within a caller-supplied sea-orm transaction.
     ///
@@ -23,13 +26,14 @@ pub trait AuditLogBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`AuditLogError`] when the underlying storage write fails.
+    /// Returns [`AuditLogError`] (wrapped in `rootcause::Report`) when the
+    /// underlying storage write fails.
     #[cfg(feature = "db")]
     async fn write_in_tx(
         &self,
         entry: &AuditEntryErased,
         _tx: &sea_orm::DatabaseTransaction,
-    ) -> std::result::Result<(), AuditLogError> {
+    ) -> Result<()> {
         self.write(entry).await
     }
 }
@@ -39,7 +43,7 @@ pub struct NoopBackend;
 
 #[async_trait::async_trait]
 impl AuditLogBackend for NoopBackend {
-    async fn write(&self, _entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, _entry: &AuditEntryErased) -> Result<()> {
         Ok(())
     }
 }
@@ -60,7 +64,7 @@ impl MultiplexBackend {
 
 #[async_trait::async_trait]
 impl AuditLogBackend for MultiplexBackend {
-    async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, entry: &AuditEntryErased) -> Result<()> {
         let futures: Vec<_> = self
             .backends
             .iter()
@@ -89,7 +93,7 @@ impl AuditLogBackend for MultiplexBackend {
         &self,
         entry: &AuditEntryErased,
         tx: &sea_orm::DatabaseTransaction,
-    ) -> std::result::Result<(), AuditLogError> {
+    ) -> Result<()> {
         let mut iter = self.backends.iter();
         if let Some(first) = iter.next() {
             first.write_in_tx(entry, tx).await?;
@@ -120,7 +124,7 @@ impl DatabaseBackend {
 #[cfg(feature = "db")]
 #[async_trait::async_trait]
 impl AuditLogBackend for DatabaseBackend {
-    async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, entry: &AuditEntryErased) -> Result<()> {
         db_insert(entry, &self.db).await
     }
 
@@ -128,7 +132,7 @@ impl AuditLogBackend for DatabaseBackend {
         &self,
         entry: &AuditEntryErased,
         tx: &sea_orm::DatabaseTransaction,
-    ) -> std::result::Result<(), AuditLogError> {
+    ) -> Result<()> {
         db_insert(entry, tx).await
     }
 }
@@ -136,15 +140,12 @@ impl AuditLogBackend for DatabaseBackend {
 /// Shared INSERT logic that works against any sea-orm `ConnectionTrait` (pool
 /// connection or transaction).
 #[cfg(feature = "db")]
-async fn db_insert(
-    entry: &AuditEntryErased,
-    conn: &impl sea_orm::ConnectionTrait,
-) -> std::result::Result<(), AuditLogError> {
+async fn db_insert(entry: &AuditEntryErased, conn: &impl sea_orm::ConnectionTrait) -> Result<()> {
     use sea_orm::{ActiveValue::Set, EntityTrait};
 
     use crate::entry::validate_erased;
 
-    validate_erased(entry).map_err(|e| e.into_current_context())?;
+    validate_erased(entry)?;
 
     if let Some(tenant_id) = entry.tenant_id {
         let model = uptrakit_shared_db::entity::audit_log::ActiveModel {
@@ -169,7 +170,9 @@ async fn db_insert(
 
         uptrakit_shared_db::entity::audit_log::Entity::insert(model)
             .exec(conn)
-            .await?;
+            .await
+            .map_err(AuditLogError::Database)
+            .map_err(rootcause::Report::from)?;
     } else {
         let model = uptrakit_shared_db::entity::system_audit_log::ActiveModel {
             id: Set(entry.id),
@@ -192,7 +195,9 @@ async fn db_insert(
 
         uptrakit_shared_db::entity::system_audit_log::Entity::insert(model)
             .exec(conn)
-            .await?;
+            .await
+            .map_err(AuditLogError::Database)
+            .map_err(rootcause::Report::from)?;
     }
 
     Ok(())
@@ -209,10 +214,10 @@ pub struct JournaldBackend;
 #[cfg(feature = "journald")]
 #[async_trait::async_trait]
 impl AuditLogBackend for JournaldBackend {
-    async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
+    async fn write(&self, entry: &AuditEntryErased) -> Result<()> {
         use crate::entry::validate_erased;
 
-        validate_erased(entry).map_err(|e| e.into_current_context())?;
+        validate_erased(entry)?;
 
         tracing::info!(
             target: "uptrakit_audit",

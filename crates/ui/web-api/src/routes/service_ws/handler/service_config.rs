@@ -582,7 +582,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AuditLogBackend for RecordingAuditBackend {
-        async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
+        async fn write(
+            &self,
+            entry: &AuditEntryErased,
+        ) -> std::result::Result<(), rootcause::Report<AuditLogError>> {
             self.entries.lock().push(entry.clone());
             Ok(())
         }
