@@ -3,9 +3,12 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
 > this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the coordinated breaking change: `AuditView` impls on every Stateful entity, migration of ~100 producer call sites to the
-V2 emitter API, removal of `emit_best_effort`, `correlation_id` threading at workflow heads, and the additive wire-payload extension
-with ingress validation that rejects forwarded Stateful action types. Plan A made this compilable; Plan B is the atomic landing.
+**Goal:** Land the staged producer migration under the V1→V2 deprecation shim: `AuditView` impls on every Stateful entity, migration of
+~100 producer call sites to the V2 emitter API, removal of `emit_best_effort`, `correlation_id` threading at workflow heads, and the
+additive wire-payload extension with ingress validation that rejects forwarded Stateful action types. Plan A made this compilable via
+a `#[deprecated]` `emit_best_effort` shim that wraps `emit_event`. Plan B's per-entity commits (Tasks 5–23) each pass CI on their own.
+Task 26 (removal of the shim) is the only commit that is structurally a breaking change. Reviewers should expect a sequence of small
+entity-scoped PRs (one or a few entities each) followed by a final removal PR — not one ~100-site rewrite PR.
 
 **Architecture:** Plan B proceeds entity-by-entity for Stateful actions (each entity gets an `AuditView` derive and its producer sites
 migrate to `emit_stateful`) and route-by-route for Event actions (producer sites translate `emit_best_effort` → `emit_event`). The final
@@ -147,8 +150,12 @@ The V1 spec defined `AuditEventPayload` as additive over the wire (services may 
   Use the existing service-ws test harness. Send a payload with `action_type = "plugin_config.update"` (Stateful) and assert: no audit
   row is written; a `tracing::warn!` event is captured; the service connection remains open.
 
+  The test must NOT combine `#[tokio::test(start_paused = true)]` with the SQLx-backed `audit_row_count().await` call —
+  `docs/development/testing.md` exempts DB tests from paused time. Use real time and a deterministic completion signal
+  (`harness.wait_for_inbound_drain().await`) instead of `tokio::time::advance`.
+
   ```rust
-  #[tokio::test(start_paused = true)]
+  #[tokio::test]
   async fn forwarded_stateful_action_is_rejected_with_warning() {
       let harness = ServiceWsTestHarness::start().await;
       let payload = AuditEventPayload {
@@ -164,13 +171,20 @@ The V1 spec defined `AuditEventPayload` as additive over the wire (services may 
       };
       let logs = harness.capture_tracing();
       harness.send_service_message(ServiceMessage::AuditEvent(payload)).await;
-      tokio::time::advance(std::time::Duration::from_millis(50)).await;
+      // Wait for the controller to drain the inbound queue. The harness exposes a
+      // semaphore the ingress handler releases after processing each message — no
+      // wall-clock sleep, no paused-time `advance`.
+      harness.wait_for_inbound_drain().await;
 
       assert_eq!(harness.audit_row_count().await, 0);
       assert!(logs.warnings_contain("forwarded Stateful action"));
       assert!(harness.service_connection_alive().await);
   }
   ```
+
+  If the existing harness does not yet expose `wait_for_inbound_drain`, add it as part of this step — the harness's inbound
+  ingress already increments a counter on each handled message; expose a `tokio::sync::Notify` that fires when the counter
+  matches `sent_count`.
 
 - [ ] **Step 3: Run test (expected fail)**
 

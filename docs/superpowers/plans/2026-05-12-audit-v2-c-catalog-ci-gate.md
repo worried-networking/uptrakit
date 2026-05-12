@@ -345,7 +345,9 @@ The registry parser reads `crates/shared/audit-log/src/action_type.rs` as a `syn
   ```rust
   #[test]
   fn registry_load_finds_known_actions() {
-      let reg = registry::load(std::path::Path::new("../../src/action_type.rs")).expect("parse");
+      // Use CARGO_MANIFEST_DIR so the path resolves regardless of cwd.
+      let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/action_type.rs");
+      let reg = registry::load(&path).expect("parse");
       let login = reg.actions.get("auth.login").expect("auth.login");
       assert_eq!(login.kind, registry::Kind::Event);
       let pcu = reg.actions.get("plugin_config.update").expect("plugin_config.update");
@@ -550,16 +552,68 @@ exist regardless of build feature set.
       Ok(report)
   }
 
+  /// Map a file path like `crates/ui/web-api/src/routes/plugin_configs.rs` to
+  /// the Rust module path the catalog uses, e.g.
+  /// `uptrakit_web_api::routes::plugin_configs`. Falls back to a filesystem-
+  /// shaped identifier if the crate manifest cannot be located; in that case
+  /// the walker emits a warning so seeded catalog entries don't silently
+  /// mismatch.
   fn derive_module_path(root: &Path, file: &Path) -> String {
-      // crates/<crate>/src/<a>/<b>.rs  ->  <crate>::<a>::<b>
       let rel = file.strip_prefix(root).unwrap_or(file);
-      let comps: Vec<_> = rel.components().filter_map(|c| match c {
-          std::path::Component::Normal(s) => Some(s.to_string_lossy().to_string()),
-          _ => None,
-      }).collect();
-      // Drop the leading "crates/<crate>/src" and ".rs"
-      // …implementation detail; uses the same crate-name detection the existing tooling uses…
-      comps.join("::")
+      // Find the nearest ancestor Cargo.toml to determine the crate name.
+      let mut crate_dir = rel.parent().unwrap_or_else(|| Path::new(""));
+      let mut found_crate_name: Option<String> = None;
+      loop {
+          let abs_candidate = root.join(crate_dir).join("Cargo.toml");
+          if abs_candidate.is_file() {
+              if let Ok(s) = std::fs::read_to_string(&abs_candidate) {
+                  if let Ok(v) = toml::from_str::<toml::Value>(&s) {
+                      if let Some(name) = v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()) {
+                          // Cargo crate names use `-`; Rust module identifiers use `_`.
+                          found_crate_name = Some(name.replace('-', "_"));
+                          break;
+                      }
+                  }
+              }
+          }
+          match crate_dir.parent() {
+              Some(p) if p != crate_dir => crate_dir = p,
+              _ => break,
+          }
+      }
+      let Some(crate_name) = found_crate_name else {
+          // No crate manifest above this file — fall back to filesystem identifier
+          // and let the walker's catalog comparison flag the mismatch.
+          tracing::warn!(file = %file.display(), "audit-coverage-check: file outside any Cargo crate");
+          return rel.components().filter_map(|c| match c {
+              std::path::Component::Normal(s) => Some(s.to_string_lossy().to_string()),
+              _ => None,
+          }).collect::<Vec<_>>().join("::");
+      };
+      // The crate's `src/` is the boundary between filesystem and Rust module path.
+      let after_src: Vec<String> = rel.components()
+          .skip_while(|c| !matches!(c, std::path::Component::Normal(name) if name == std::ffi::OsStr::new("src")))
+          .skip(1) // skip the literal `src` component itself
+          .filter_map(|c| match c {
+              std::path::Component::Normal(s) => Some(s.to_string_lossy().to_string()),
+              _ => None,
+          })
+          .collect();
+      // Strip the trailing `.rs` extension and handle `mod.rs` (no module segment).
+      let mut segments: Vec<String> = Vec::with_capacity(after_src.len() + 1);
+      segments.push(crate_name);
+      for (i, comp) in after_src.iter().enumerate() {
+          let is_last = i == after_src.len() - 1;
+          if is_last {
+              if comp == "lib.rs" || comp == "main.rs" || comp == "mod.rs" { break; }
+              if let Some(stem) = comp.strip_suffix(".rs") {
+                  segments.push(stem.to_string());
+              }
+          } else {
+              segments.push(comp.clone());
+          }
+      }
+      segments.join("::")
   }
   ```
 

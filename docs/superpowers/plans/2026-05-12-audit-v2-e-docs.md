@@ -328,7 +328,44 @@ shipped, deferred items, anything noteworthy that emerged during implementation 
 
 ---
 
-## Task 10: Final markdownlint + push
+## Task 10: Update auto-memory notes
+
+**Files:** memory files under `~/.claude/projects/-Users-andreyyantsen-Development-uptrakit/memory/`
+
+The spec (§"Auto-memory note") mandates that the implementation plan updates the user's project memory once the V2 emitter is
+wired in. V1 memory notes about `emit_best_effort` and the V1 `AuditEntry` shape must be replaced or supplemented with V2 emit-path
+guidance so future sessions reach for the correct API.
+
+- [ ] **Step 1: Inventory memory entries that reference the V1 audit subsystem**
+
+  Run: `ls ~/.claude/projects/-Users-andreyyantsen-Development-uptrakit/memory/`. Open `MEMORY.md` and grep its referenced files
+  for `emit_best_effort`, `AuditEntry::builder`, "semantic audit", "security_audit".
+
+- [ ] **Step 2: Replace or update the V1-shaped entries with V2 guidance**
+
+  Each affected memory file gets a focused update covering:
+  - `AuditEntry<K>` typestate + per-action constructors (`AuditEntry::auth_login()`, `AuditEntry::plugin_config_update(&before, &after)`, etc.).
+  - Two emit paths: `emit_stateful(&tx, &hook, entry)` for Stateful (synchronous, in-tx) vs `emit_event(entry)` for Event
+    (async fire-and-forget).
+  - `AuditCommitHook::flush_after_commit()` after `tx.commit()`.
+  - `BEGIN IMMEDIATE` requirement for read-then-write transactions that capture snapshots.
+  - Banned patterns: no `emit_best_effort` (removed), no parallel `target: "security_audit"`, no service-forwarded Stateful events.
+  - Pointer to `docs/development/audit-logs.md` as the producer doc and `audit-catalog.toml` as the source-of-truth for coverage.
+
+- [ ] **Step 3: Update the `MEMORY.md` index if any memory file was renamed**
+
+  The index already lists topics; keep entries one-line under ~150 chars.
+
+- [ ] **Step 4: Confirm no V1 references remain**
+
+  Run: `grep -rn 'emit_best_effort\|AuditEntry::builder(' ~/.claude/projects/-Users-andreyyantsen-Development-uptrakit/memory/`
+  Expected: no matches.
+
+  Memory updates do not produce a git commit (memory lives outside the repo).
+
+---
+
+## Task 11: Final markdownlint + push
 
 - [ ] **Step 1:**
 

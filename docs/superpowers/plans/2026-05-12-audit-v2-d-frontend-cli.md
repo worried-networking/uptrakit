@@ -476,12 +476,26 @@ npm run test && npm run build`. Playwright E2E if a fixture is added.
   });
 
   test("correlation_id filter narrows list", async ({ page }) => {
+    // The seeded fixture (Step 1) inserts exactly two rows with one shared
+    // correlation_id (constant SEEDED_CORRELATION_ID exported from the test
+    // fixture module). The third row uses a different correlation_id and must
+    // be filtered out.
+    const SEEDED_CORRELATION_ID = "00000000-0000-0000-0000-000000000abc";
+
     await page.goto("/audit-logs");
-    const cid = await page.evaluate(() => /* read from a seeded element */ "");
-    await page.getByLabel("Correlation ID").fill(cid);
-    await expect(page.getByRole("row")).toHaveCount(/* expected seed count */);
+    await page.getByLabel("Correlation ID").fill(SEEDED_CORRELATION_ID);
+
+    // Wait for the list to settle on the filtered result. The row count
+    // excludes the header row, so we expect 2 data rows.
+    await expect(page.getByRole("row")).toHaveCount(3); // 1 header + 2 data rows
   });
   ```
+
+  The fixture module that this test depends on lives under
+  `frontend/tests/e2e/fixtures/audit-logs.ts` and exports
+  `SEEDED_CORRELATION_ID`. Insert it alongside the seed-row setup from
+  Step 1. Both the Playwright test and the seeding logic import the same
+  constant.
 
 - [ ] **Step 3: Run tests**
 
@@ -542,11 +556,46 @@ npm run test && npm run build`. Playwright E2E if a fixture is added.
       let (Some(before), Some(after)) = (&entry.before_snapshot, &entry.after_snapshot) else { return Ok(()); };
       let before_map = before.as_object();
       let after_map = after.as_object();
-      writeln!(out, "  State changes:")?;
-      // Same diff algorithm as the frontend: keys present in after (in order), then keys only in before.
-      // Render only `changed`/`added`/`removed` rows; suppress `unchanged` for compactness.
-      // …
+
+      let mut printed_header = false;
+      let mut header = |out: &mut dyn std::fmt::Write, printed: &mut bool| -> std::fmt::Result {
+          if !*printed { writeln!(out, "  State changes:")?; *printed = true; }
+          Ok(())
+      };
+
+      // Pass 1: keys present in `after`, in `after`'s insertion order.
+      if let Some(after_map) = after_map {
+          for (key, after_value) in after_map {
+              match before_map.and_then(|m| m.get(key)) {
+                  None => {
+                      header(out, &mut printed_header)?;
+                      writeln!(out, "    + {key} = {}", render_value(after_value))?;
+                  }
+                  Some(before_value) if before_value != after_value => {
+                      header(out, &mut printed_header)?;
+                      writeln!(out, "    ~ {key} = {} -> {}", render_value(before_value), render_value(after_value))?;
+                  }
+                  Some(_) => { /* unchanged; suppressed */ }
+              }
+          }
+      }
+      // Pass 2: keys present only in `before`.
+      if let Some(before_map) = before_map {
+          for (key, before_value) in before_map {
+              if after_map.is_some_and(|m| m.contains_key(key)) { continue; }
+              header(out, &mut printed_header)?;
+              writeln!(out, "    - {key} = {}", render_value(before_value))?;
+          }
+      }
       Ok(())
+  }
+
+  fn render_value(v: &serde_json::Value) -> String {
+      match v {
+          serde_json::Value::String(s) => s.clone(),
+          serde_json::Value::Null => "null".to_string(),
+          other => other.to_string(),
+      }
   }
   ```
 

@@ -88,7 +88,23 @@ caller commit via an `AuditCommitHook` accumulator.
   Run: `cargo check --workspace --no-default-features --features db-sqlite`
   Expected: no errors related to deps.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Pre-flight: run the entire test suite with `preserve_order` enabled**
+
+  Switching `serde_json::Map` from `BTreeMap` (sorted) to `IndexMap` (insertion order) is a silent semantic change for any test
+  or code path that compares serialized JSON as strings or asserts on iteration order. Catch breakage now, before any V2 logic
+  lands, so failures are not muddied with feature-implementation noise.
+
+  ```bash
+  cargo test --workspace --all-features
+  cargo test --workspace --no-default-features --features db-sqlite
+  cd frontend && npm run test
+  ```
+
+  Expected: green. If any test fails because it asserts on alphabetical key ordering, fix that test in a precursor commit
+  (replace string comparison with `serde_json::Value` equality, or rebuild the assertion against insertion order). Do not
+  proceed to Task 3 until the suite is green with the feature enabled.
+
+- [ ] **Step 4: Commit**
 
   ```bash
   git add Cargo.toml Cargo.lock
@@ -470,6 +486,13 @@ caller commit via an `AuditCommitHook` accumulator.
       fn audit_target_id(&self) -> String;
       fn audit_target_display(&self) -> Option<String>;
       fn audit_view(&self) -> serde_json::Value;
+
+      /// JSON keys in `audit_view()` whose fields are tagged `#[audit(truncatable)]`.
+      /// These are the first-pass strip targets when a snapshot exceeds the size cap.
+      /// Default empty — fields that are not truncatable contribute nothing here.
+      fn audit_truncatable_fields() -> &'static [&'static str] {
+          &[]
+      }
   }
   ```
 
@@ -629,6 +652,21 @@ caller commit via an `AuditCommitHook` accumulator.
       let name = &input.ident;
       let target_type_lit = LitStr::new(&target_type, proc_macro2::Span::call_site());
 
+      let truncatable_keys: Vec<_> = fields.iter()
+          .filter_map(|f| {
+              let ident = f.ident.as_ref()?;
+              let mut is_truncatable = false;
+              for attr in f.attrs.iter().filter(|a| a.path().is_ident("audit")) {
+                  let _ = attr.parse_nested_meta(|meta| {
+                      if meta.path.is_ident("truncatable") {
+                          is_truncatable = true;
+                      }
+                      Ok(())
+                  });
+              }
+              if is_truncatable { Some(LitStr::new(&ident.to_string(), proc_macro2::Span::call_site())) } else { None }
+          }).collect();
+
       Ok(quote! {
           impl ::uptrakit_audit_log::AuditView for #name {
               const TARGET_TYPE: &'static str = #target_type_lit;
@@ -642,6 +680,9 @@ caller commit via an `AuditCommitHook` accumulator.
                   let mut map = ::serde_json::Map::new();
                   #(#projections)*
                   ::serde_json::Value::Object(map)
+              }
+              fn audit_truncatable_fields() -> &'static [&'static str] {
+                  &[#(#truncatable_keys),*]
               }
           }
       })
@@ -689,6 +730,9 @@ caller commit via an `AuditCommitHook` accumulator.
               } else if meta.path.is_ident("project_with") {
                   let s: LitStr = meta.value()?.parse()?;
                   action = FieldAction::ProjectWith(format_ident!("{}", s.value()));
+              } else if meta.path.is_ident("truncatable") {
+                  // Handled by the truncatable_keys harvest in expand_inner;
+                  // the field itself is still projected normally here.
               } else {
                   return Err(meta.error("unknown audit attribute"));
               }
@@ -890,10 +934,47 @@ This is a sizable single-file rewrite. The shape is:
 
 - [ ] **Step 4: Implement `.before()` and `.after()` — Stateful only, state-transition methods**
 
+  Both methods capture the snapshot **and** apply the truncation pass before
+  storing the value, so by the time `.build()` runs the snapshot is already
+  either ≤ 16 KB or definitively over-cap with no further opportunity to
+  shrink. The truncation helper lives next to `validate` in `entry.rs`.
+
   ```rust
+  const MAX_SNAPSHOT_BYTES: usize = 16 * 1024;
+  const TRUNCATED_PREVIEW_BYTES: usize = 256;
+
+  /// Replace each truncatable field's value with a `{ truncated, byte_count, preview }`
+  /// sentinel until either the total serialised size is ≤ cap or no truncatable
+  /// fields remain. Returns the (possibly modified) value.
+  fn apply_truncation(mut value: Value, truncatable_keys: &[&str]) -> Result<Value> {
+      let measure = |v: &Value| -> Result<usize> {
+          let bytes = serde_json::to_vec(v).map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
+          Ok(bytes.len())
+      };
+      if measure(&value)? <= MAX_SNAPSHOT_BYTES { return Ok(value); }
+      let Value::Object(obj) = &mut value else { return Ok(value); };
+      for key in truncatable_keys {
+          if let Some(field) = obj.get_mut(*key) {
+              let serialised = serde_json::to_vec(field).unwrap_or_default();
+              let preview: String = serialised.iter()
+                  .take(TRUNCATED_PREVIEW_BYTES)
+                  .map(|b| char::from(*b))
+                  .collect();
+              *field = serde_json::json!({
+                  "truncated": true,
+                  "byte_count": serialised.len(),
+                  "preview": preview,
+              });
+              if measure(&value)? <= MAX_SNAPSHOT_BYTES { return Ok(value); }
+          }
+      }
+      Ok(value)
+  }
+
   impl<A> AuditEntryBuilder<Stateful, NeedsBefore, A> {
       pub fn before<V: AuditView>(mut self, view: &V) -> AuditEntryBuilder<Stateful, HasBefore, A> {
-          self.entry.before_snapshot = Some(view.audit_view());
+          let snapshot = view.audit_view();
+          self.entry.before_snapshot = Some(apply_truncation(snapshot, V::audit_truncatable_fields()).unwrap_or(Value::Null));
           self.entry.target_type = Some(V::TARGET_TYPE.to_string());
           self.entry.target_id = Some(view.audit_target_id());
           if self.entry.target_display.is_none() { self.entry.target_display = view.audit_target_display(); }
@@ -903,11 +984,19 @@ This is a sizable single-file rewrite. The shape is:
 
   impl<B> AuditEntryBuilder<Stateful, B, NeedsAfter> {
       pub fn after<V: AuditView>(mut self, view: &V) -> AuditEntryBuilder<Stateful, B, HasAfter> {
-          self.entry.after_snapshot = Some(view.audit_view());
+          let snapshot = view.audit_view();
+          self.entry.after_snapshot = Some(apply_truncation(snapshot, V::audit_truncatable_fields()).unwrap_or(Value::Null));
           AuditEntryBuilder { entry: self.entry, _state: PhantomData }
       }
   }
   ```
+
+  > Note: `unwrap_or(Value::Null)` here mirrors the derive-macro fallback
+  > rationale — `serde_json::to_vec` failures on `Serialize`-bound values
+  > cannot occur in practice, but the total-function fallback keeps the
+  > builder method infallible. `validate` later catches any genuinely
+  > oversized snapshot (`{truncated: true}` sentinels on every truncatable
+  > field that still exceed the cap).
 
 - [ ] **Step 5: Implement `.build()` only on the terminal builder states**
 
@@ -926,15 +1015,52 @@ This is a sizable single-file rewrite. The shape is:
       }
   }
 
-  fn validate<K>(e: &AuditEntry<K>) -> Result<()> { /* identical to V1 validate; plus enforce that
-      Stateful entries have both snapshots and total snapshot bytes per-column <= 16 KB; Event entries
-      have both snapshots = None */
+  fn validate<K>(e: &AuditEntry<K>) -> Result<()> {
+      const MAX_ACTION_TYPE_BYTES: usize = 128;
+      const MAX_DETAILS_JSON_BYTES: usize = 4 * 1024;
+      const MAX_ACTOR_DISPLAY_BYTES: usize = 255;
+      const MAX_TARGET_TYPE_BYTES: usize = 128;
+      const MAX_TARGET_DISPLAY_BYTES: usize = 255;
+      const MAX_TARGET_ID_BYTES: usize = 255;
+      const MAX_REQUEST_ID_BYTES: usize = 255;
       const MAX_SNAPSHOT_BYTES: usize = 16 * 1024;
-      const MAX_DETAILS_BYTES: usize = 4 * 1024;
-      // existing V1 checks (UTC offset, action_type length, target_id requires target_type, actor_display
-      // length, target_type length, target_display length, target_id length, request_id length,
-      // details_json size, system actor must not have actor_id) preserved verbatim from V1 entry.rs
-      // …
+
+      if e.occurred_at.offset() != time::UtcOffset::UTC {
+          return Err(rootcause::report!(AuditLogError::Validation("timestamps must be UTC".into())));
+      }
+      if matches!(e.actor_type, AuditActorType::System) && e.actor_id.is_some() {
+          return Err(rootcause::report!(AuditLogError::Validation("system actors must not include actor_id".into())));
+      }
+      if e.action_type.as_str().len() > MAX_ACTION_TYPE_BYTES {
+          return Err(rootcause::report!(AuditLogError::Validation("action_type exceeds 128 bytes".into())));
+      }
+      if e.target_id.is_some() && e.target_type.is_none() {
+          return Err(rootcause::report!(AuditLogError::Validation("target_id requires target_type".into())));
+      }
+      if e.target_display.is_some() && e.target_type.is_none() {
+          return Err(rootcause::report!(AuditLogError::Validation("target_display requires target_type".into())));
+      }
+      if e.actor_display.as_ref().is_some_and(|s| s.len() > MAX_ACTOR_DISPLAY_BYTES) {
+          return Err(rootcause::report!(AuditLogError::Validation("actor_display exceeds 255 bytes".into())));
+      }
+      if e.target_type.as_ref().is_some_and(|s| s.len() > MAX_TARGET_TYPE_BYTES) {
+          return Err(rootcause::report!(AuditLogError::Validation("target_type exceeds 128 bytes".into())));
+      }
+      if e.target_display.as_ref().is_some_and(|s| s.len() > MAX_TARGET_DISPLAY_BYTES) {
+          return Err(rootcause::report!(AuditLogError::Validation("target_display exceeds 255 bytes".into())));
+      }
+      if e.target_id.as_ref().is_some_and(|s| s.len() > MAX_TARGET_ID_BYTES) {
+          return Err(rootcause::report!(AuditLogError::Validation("target_id exceeds 255 bytes".into())));
+      }
+      if e.request_id.as_ref().is_some_and(|s| s.len() > MAX_REQUEST_ID_BYTES) {
+          return Err(rootcause::report!(AuditLogError::Validation("request_id exceeds 255 bytes".into())));
+      }
+      if let Some(details) = &e.details_json {
+          let bytes = serde_json::to_vec(details).map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
+          if bytes.len() > MAX_DETAILS_JSON_BYTES {
+              return Err(rootcause::report!(AuditLogError::Validation("details_json exceeds 4096 bytes".into())));
+          }
+      }
       if let Some(s) = &e.before_snapshot {
           let bytes = serde_json::to_vec(s).map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
           if bytes.len() > MAX_SNAPSHOT_BYTES {
@@ -950,6 +1076,13 @@ This is a sizable single-file rewrite. The shape is:
       Ok(())
   }
   ```
+
+  > Note: the snapshot size check is the **final** validation step. Before
+  > calling `validate`, `.build()` invokes `apply_truncation_if_needed` on
+  > the snapshots (see Task 7a) — fields marked `#[audit(truncatable)]` are
+  > replaced with a sentinel and the projection is re-measured. Only if
+  > the post-truncation payload still exceeds the cap does `validate`
+  > return `Err`.
 
 - [ ] **Step 6: Migrate V1 in-file unit tests to the new API**
 
@@ -1040,19 +1173,27 @@ generates a no-argument method.
           let c = &a.action_const;
           let item = match a.kind.to_string().as_str() {
               "Event" => quote! {
-                  impl crate::entry::AuditEntry<crate::entry::Event> {
-                      pub fn #m() -> crate::entry::AuditEntryBuilder<crate::entry::Event> {
-                          Self::builder_event(crate::action_type::AuditActionType::from(crate::action_type::AuditActionType::#c))
+                  impl ::uptrakit_audit_log::AuditEntry<::uptrakit_audit_log::Event> {
+                      pub fn #m() -> ::uptrakit_audit_log::AuditEntryBuilder<::uptrakit_audit_log::Event> {
+                          <Self>::builder_event(
+                              ::uptrakit_audit_log::AuditActionType::from(::uptrakit_audit_log::AuditActionType::#c)
+                          )
                       }
                   }
               },
               "Stateful" => quote! {
-                  impl crate::entry::AuditEntry<crate::entry::Stateful> {
-                      pub fn #m<V: crate::entry::AuditView>(
-                          before: &V,
-                          after: &V,
-                      ) -> crate::entry::AuditEntryBuilder<crate::entry::Stateful, crate::entry::HasBefore, crate::entry::HasAfter> {
-                          Self::builder_stateful(crate::action_type::AuditActionType::from(crate::action_type::AuditActionType::#c))
+                  impl ::uptrakit_audit_log::AuditEntry<::uptrakit_audit_log::Stateful> {
+                      pub fn #m<B: ::uptrakit_audit_log::AuditView, A: ::uptrakit_audit_log::AuditView>(
+                          before: &B,
+                          after: &A,
+                      ) -> ::uptrakit_audit_log::AuditEntryBuilder<
+                          ::uptrakit_audit_log::Stateful,
+                          ::uptrakit_audit_log::HasBefore,
+                          ::uptrakit_audit_log::HasAfter,
+                      > {
+                          <Self>::builder_stateful(
+                              ::uptrakit_audit_log::AuditActionType::from(::uptrakit_audit_log::AuditActionType::#c)
+                          )
                               .before(before)
                               .after(after)
                       }
@@ -1229,6 +1370,7 @@ generates a no-argument method.
 - Create: `crates/shared/audit-log/tests/typestate_compile_fail/missing_after.rs`
 - Create: `crates/shared/audit-log/tests/typestate_compile_fail/event_with_before.rs`
 - Create: `crates/shared/audit-log/tests/typestate_compile_fail/wrong_kind_to_emit.rs`
+- Create: `crates/shared/audit-log/tests/typestate_compile_fail/truncatable_on_non_serialize.rs`
 
 - [ ] **Step 1: Add the trybuild runner**
 
@@ -1301,6 +1443,28 @@ generates a no-argument method.
   }
   ```
 
+  `tests/typestate_compile_fail/truncatable_on_non_serialize.rs`:
+
+  ```rust
+  use uptrakit_audit_log::AuditView;
+
+  /// A field type without `Serialize`. The derive's default projection path
+  /// calls `serde_json::to_value(&self.<field>)` which requires `Serialize`;
+  /// the `truncatable` harvest must not extend the field's lifetime past the
+  /// projection, so this must fail at the projection point.
+  struct NotSerialize;
+
+  #[derive(uptrakit_audit_log::AuditView)]
+  #[audit(target_type = "demo")]
+  struct Demo {
+      id: uuid::Uuid,
+      #[audit(truncatable)]
+      blob: NotSerialize,
+  }
+
+  fn main() {}
+  ```
+
 - [ ] **Step 3: Run**
 
   Run: `cargo test -p uptrakit-audit-log --test typestate`
@@ -1347,19 +1511,25 @@ generates a no-argument method.
           helpers::set_foreign_keys(m, true).await?;
           Ok(())
       }
+      // down() is intentionally destructive: it drops the V2 tables without
+      // recreating the V1 schema. The V2 design (spec §"Why drop V1 rows over
+      // an additive ALTER TABLE") accepts bounded audit-history loss; rolling
+      // back the migration is an emergency-only path that requires a separate
+      // pre-V2 backup if compliance retention is needed (see
+      // docs/security/audit-logs.md cutover section).
       async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
           m.drop_table(Table::drop().table(Alias::new("system_audit_logs")).if_exists().to_owned()).await?;
           m.drop_table(Table::drop().table(Alias::new("audit_logs")).if_exists().to_owned()).await
       }
   }
 
-  fn audit_kind_check(table: &str) -> Expr {
+  fn audit_kind_check() -> Expr {
       // CHECK ((action_kind = 'event' AND before_snapshot IS NULL AND after_snapshot IS NULL)
       //       OR (action_kind = 'stateful' AND before_snapshot IS NOT NULL AND after_snapshot IS NOT NULL))
-      Expr::cust(&format!(
+      Expr::cust(
           "((action_kind = 'event' AND before_snapshot IS NULL AND after_snapshot IS NULL) \
            OR (action_kind = 'stateful' AND before_snapshot IS NOT NULL AND after_snapshot IS NOT NULL))",
-      ))
+      )
   }
 
   fn build_audit_logs(name: &str) -> TableCreateStatement {
@@ -1382,13 +1552,31 @@ generates a no-argument method.
           .col(ColumnDef::new(Alias::new("after_snapshot")).json_binary())
           .col(ColumnDef::new(Alias::new("correlation_id")).uuid())
           .col(ColumnDef::new(Alias::new("request_id")).string_len(255))
-          .check(audit_kind_check(name))
+          .check(audit_kind_check())
           .to_owned()
   }
 
   fn build_system_audit_logs(name: &str) -> TableCreateStatement {
-      // identical to build_audit_logs minus tenant_id
-      // …
+      Table::create()
+          .table(Alias::new(name))
+          .col(ColumnDef::new(Alias::new("id")).uuid().not_null().primary_key())
+          .col(ColumnDef::new(Alias::new("occurred_at")).timestamp_with_time_zone().not_null())
+          .col(ColumnDef::new(Alias::new("actor_type")).string_len(32).not_null())
+          .col(ColumnDef::new(Alias::new("actor_id")).uuid())
+          .col(ColumnDef::new(Alias::new("actor_display")).string_len(255))
+          .col(ColumnDef::new(Alias::new("action_type")).string_len(128).not_null())
+          .col(ColumnDef::new(Alias::new("action_kind")).string_len(16).not_null())
+          .col(ColumnDef::new(Alias::new("target_type")).string_len(128))
+          .col(ColumnDef::new(Alias::new("target_id")).string_len(255))
+          .col(ColumnDef::new(Alias::new("target_display")).string_len(255))
+          .col(ColumnDef::new(Alias::new("outcome")).string_len(32).not_null())
+          .col(ColumnDef::new(Alias::new("details_json")).json_binary())
+          .col(ColumnDef::new(Alias::new("before_snapshot")).json_binary())
+          .col(ColumnDef::new(Alias::new("after_snapshot")).json_binary())
+          .col(ColumnDef::new(Alias::new("correlation_id")).uuid())
+          .col(ColumnDef::new(Alias::new("request_id")).string_len(255))
+          .check(audit_kind_check())
+          .to_owned()
   }
 
   async fn create_indexes(m: &SchemaManager) -> Result<(), DbErr> {
@@ -1575,8 +1763,27 @@ erased type. The erased type also carries `action_kind: AuditActionKind`.
           }
           assert_eq!(*count.lock(), 0);
       }
+
+      #[tokio::test]
+      async fn commit_hook_warns_on_drop_with_pending_entries() {
+          use tracing_test::traced_test;
+          // The Drop impl emits a tracing::warn! when the hook had entries
+          // enqueued but flush_after_commit was never called. Test asserts
+          // the warning is captured.
+          #[traced_test]
+          fn inner() {
+              let hook = AuditCommitHook::new(std::sync::Arc::new(NoopBackend));
+              hook.enqueue(make_stub_erased());
+              drop(hook);
+          }
+          inner();
+          assert!(logs_contain("AuditCommitHook dropped with un-flushed entries"));
+      }
   }
   ```
+
+  `tracing-test` is a workspace dev-dep; if absent add `tracing-test = "0.2"`
+  to `audit-log/Cargo.toml [dev-dependencies]`.
 
 - [ ] **Step 2: Run test (expected fail)**
 
@@ -1594,15 +1801,27 @@ erased type. The erased type also carries `action_kind: AuditActionKind`.
   /// Buffers stateful audit entries that have been written to the DB transaction
   /// but not yet mirrored to non-DB backends (e.g. journald). The caller flushes
   /// via [`flush_after_commit`] immediately after `tx.commit().await` succeeds.
-  /// Dropping without flushing discards the entries (e.g. on rollback).
+  /// Dropping without flushing discards the entries.
+  ///
+  /// `#[must_use]` ensures forgetting to bind the hook from `commit_hook()`
+  /// is a compile-time error under the workspace's `warnings = "deny"` policy.
+  /// The Drop impl emits a `tracing::warn!` if the caller bound the hook,
+  /// enqueued entries, and then dropped without calling `flush_after_commit` —
+  /// turning silent partial delivery into a visible operational signal.
+  #[must_use = "call flush_after_commit() after tx.commit() to mirror the audit entry to journald"]
   pub struct AuditCommitHook {
       mirror: Arc<dyn AuditLogBackend>,
       pending: parking_lot::Mutex<Vec<AuditEntryErased>>,
+      flushed: parking_lot::Mutex<bool>,
   }
 
   impl AuditCommitHook {
       pub fn new(mirror: Arc<dyn AuditLogBackend>) -> Self {
-          Self { mirror, pending: parking_lot::Mutex::new(Vec::new()) }
+          Self {
+              mirror,
+              pending: parking_lot::Mutex::new(Vec::new()),
+              flushed: parking_lot::Mutex::new(false),
+          }
       }
 
       pub fn enqueue(&self, entry: AuditEntryErased) {
@@ -1612,11 +1831,38 @@ erased type. The erased type also carries `action_kind: AuditActionKind`.
       /// Flush all enqueued entries to the mirror backend.
       /// Failures are logged at `error!` and do not propagate.
       pub async fn flush_after_commit(self) {
-          let pending = std::mem::take(&mut *self.pending.lock());
+          // Drain inside a braced block so the parking_lot guard is dropped
+          // before the loop. Holding a parking_lot::Mutex guard across `.await`
+          // is forbidden per workspace standards and would make the future !Send.
+          let pending = {
+              let mut guard = self.pending.lock();
+              std::mem::take(&mut *guard)
+          };
+          *self.flushed.lock() = true;
           for entry in pending {
               if let Err(error) = self.mirror.write(&entry).await {
                   tracing::error!(error = %error, action_type = %entry.action_type, "audit commit-hook flush failed");
               }
+          }
+      }
+  }
+
+  impl Drop for AuditCommitHook {
+      fn drop(&mut self) {
+          if *self.flushed.lock() { return; }
+          let pending_count = self.pending.lock().len();
+          if pending_count > 0 {
+              // The hook was used (entries enqueued via emit_stateful) but
+              // flush_after_commit was never called. Either the transaction
+              // rolled back (correct — discard is intentional) or the producer
+              // forgot to flush after a successful commit (incorrect — silent
+              // partial delivery, journald never sees these rows). We cannot
+              // tell from inside Drop which case applies; log a warning so the
+              // forgotten-flush case is at least visible in logs.
+              tracing::warn!(
+                  pending_count,
+                  "AuditCommitHook dropped with un-flushed entries; if the surrounding transaction committed, journald missed these rows"
+              );
           }
       }
   }
@@ -1823,6 +2069,17 @@ via the DB backend; enqueues the same erased entry on a returned `AuditCommitHoo
 
 ## Task 16: Quality gates + push
 
+> **Deployment ordering note:** Plan A's migration drops V1 audit rows and
+> introduces the V2 schema, but the `emit_best_effort` shim still routes V1
+> producer call sites through `emit_event` with no snapshot population.
+> Running Plan A in production without Plan B means stateful mutations
+> commit V2 rows tagged `action_kind = "event"` with null snapshots — a
+> bounded audit-coverage gap proportional to the wall-clock delay between
+> Plan A and Plan B. Land Plan A and Plan B in the same release window
+> (consecutive PRs in a single deploy), not as independent deployable
+> increments. If a gap is unavoidable, document it in `docs/security/
+audit-logs.md` cutover section.
+
 - [ ] **Step 1: Run the full quality gate suite**
 
   ```bash
@@ -1851,7 +2108,10 @@ via the DB backend; enqueues the same erased entry on a returned `AuditCommitHoo
 This plan delivers:
 
 - Spec §"Data model" — schema columns, `CHECK` constraints, indexes (Task 11).
-- Spec §"`AuditView` trait and derive macro" (Tasks 6, 7).
+- Spec §"`AuditView` trait and derive macro", including the
+  `#[audit(truncatable)]` field attribute, the `audit_truncatable_fields()`
+  trait method, and the two-pass truncation logic invoked from `.before()` /
+  `.after()` (Tasks 6, 7, 8).
 - Spec §"Action kind classification and typestate builder" (Tasks 4, 5, 8, 9, 10).
 - Spec §"Emitter API" — `emit_stateful`, `emit_event`, `AuditCommitHook`, scoped `with_correlation` (Tasks 13, 14).
 - Spec §"Initial catalog classification" — full sweep applied via the `audit_actions!` invocation (Task 9).
