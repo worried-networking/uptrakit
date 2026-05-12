@@ -95,7 +95,11 @@ pub async fn device_auth_start(
     Json(req): Json<DeviceAuthStartRequest>,
 ) -> Response {
     let has_client_name = req.client_name.is_some();
-    let (device_code, user_code) = match state.auth.device_flow_store.create(req.client_name).await
+    let (device_code, user_code) = match state
+        .auth
+        .device_flow_store
+        .create(req.client_name, None)
+        .await
     {
         Ok(result) => result,
         Err(e) => {
@@ -644,7 +648,7 @@ mod tests {
             .state
             .auth
             .device_flow_store
-            .create(Some("upk-cli".to_string()))
+            .create(Some("upk-cli".to_string()), None)
             .await
             .expect("create device flow");
         app.state
@@ -723,7 +727,7 @@ mod tests {
             .state
             .auth
             .device_flow_store
-            .create(None)
+            .create(None, None)
             .await
             .expect("create device flow");
         app.state

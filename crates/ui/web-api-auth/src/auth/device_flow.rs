@@ -1,12 +1,17 @@
 use rand::Rng;
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::entity::api_token;
 use uptrakit_shared_db::entity::pending_device_flow;
 use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::DeviceAuthStatus;
+use uptrakit_shared_types::{DeviceAuthStatus, SecretString};
+use uptrakit_web_api_types::oauth::OAuthErrorCode;
 use uuid::Uuid;
 
 use super::token::{generate_secure_token, generate_uuid, hash_token};
@@ -16,6 +21,18 @@ const DEVICE_CODE_TTL_SECONDS: i64 = 600;
 
 /// Consonant alphabet for user codes (avoids vowels to prevent offensive words).
 const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
+
+/// Hardcoded OAuth public-client identifier for the CLI. Future migration
+/// (Seam 3 in the spec): replace this constant with a lookup against an
+/// `oauth_clients` allowlist table.
+pub const CLIENT_ID: &str = "uptrakit-cli";
+
+/// Default polling interval (seconds) returned to clients on flow creation.
+pub const POLL_INTERVAL_SECONDS: i32 = 5;
+
+/// How many seconds to add to `interval` each time a `slow_down` is returned
+/// (per RFC 8628 §3.5 client-side bump rule).
+pub const POLL_INTERVAL_BUMP_SECONDS: i32 = 5;
 
 #[derive(Debug, Error)]
 pub enum DeviceFlowError {
@@ -55,7 +72,11 @@ impl DeviceFlowStore {
     }
 
     /// Create a new device flow session. Returns `(device_code, user_code)`.
-    pub async fn create(&self, client_name: Option<String>) -> Result<(String, String)> {
+    pub async fn create(
+        &self,
+        client_name: Option<String>,
+        scope: Option<String>,
+    ) -> Result<(String, String)> {
         let id = generate_uuid();
         let device_code = generate_secure_token()
             .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
@@ -72,7 +93,11 @@ impl DeviceFlowStore {
             user_code: Set(raw_user_code),
             status: Set(DeviceAuthStatus::Pending),
             user_id: Set(None),
+            denied_by: Set(None),
             client_name: Set(client_name),
+            scope: Set(scope),
+            interval: Set(POLL_INTERVAL_SECONDS),
+            last_polled_at: Set(None),
             created_at: Set(now),
             expires_at: Set(expires_at),
         };
@@ -255,6 +280,81 @@ impl DeviceFlowStore {
     }
 }
 
+/// Validate the OAuth `client_id` form parameter.
+///
+/// **Seam 3** — future migration replaces this function with a DB lookup
+/// against an `oauth_clients` allowlist. The call sites in the routes layer
+/// stay unchanged.
+///
+/// # Errors
+///
+/// Returns [`OAuthErrorCode::InvalidClient`] when `client_id` does not match
+/// the hardcoded [`CLIENT_ID`] constant.
+#[must_use]
+pub fn validate_client_id(client_id: &str) -> std::result::Result<(), OAuthErrorCode> {
+    if client_id == CLIENT_ID {
+        Ok(())
+    } else {
+        Err(OAuthErrorCode::InvalidClient)
+    }
+}
+
+/// Apply the requested `scope` parameter to a freshly-minted token.
+///
+/// **Seam 2** — today this is a no-op stub: scopes are recorded on the flow
+/// row and echoed in audit, but no Permission narrowing happens. A future
+/// migration replaces this body with a real scope→Permission map.
+pub fn apply_scope_to_token(_token_id: Uuid, _scope: Option<&str>) {
+    // intentional no-op
+}
+
+/// Mint a long-lived API access token for the given user inside the caller's
+/// transaction.
+///
+/// **Seam 1** — future migration replaces this single function with
+/// short-lived bearer + refresh-token issuance. Callers receive a
+/// [`SecretString`] today; the future signature returns a `TokenPair`.
+///
+/// The function takes `txn: &impl ConnectionTrait` (not a pool) because the
+/// row must land inside the same `BEGIN IMMEDIATE` transaction as the
+/// `pending_device_flows` delete that authorises it — otherwise on SQLite the
+/// pooled connection holding the txn would self-deadlock against a different
+/// pooled connection issuing the insert, and on Postgres the insert would
+/// fall outside the txn's atomicity envelope (orphan rows on crash between
+/// the insert and the txn commit).
+///
+/// # Errors
+///
+/// Returns [`DeviceFlowError::TokenGeneration`] on RNG failure, or
+/// [`DeviceFlowError::Database`] on a DB insert error.
+#[must_use = "minted token must be returned to the caller"]
+pub async fn issue_access_token<C: ConnectionTrait>(
+    txn: &C,
+    user_id: Uuid,
+    token_name: &str,
+) -> Result<SecretString> {
+    use sea_orm::Set;
+
+    let raw = generate_secure_token()
+        .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
+    let plaintext = format!("upk_{raw}");
+    let token_hash = hash_token(&plaintext);
+    let now = OffsetDateTime::now_utc();
+
+    let model = api_token::ActiveModel {
+        id: Set(generate_uuid()),
+        user_id: Set(user_id),
+        name: Set(token_name.to_string()),
+        token_hash: Set(token_hash),
+        created_at: Set(now),
+        last_used_at: Set(None),
+        revoked_at: Set(None),
+    };
+    model.insert(txn).await.context_to()?;
+
+    Ok(SecretString::new(plaintext))
+}
+
 /// Generate a user-friendly code: 8 uppercase consonants, formatted as XXXX-XXXX.
 fn generate_user_code() -> String {
     let mut rng = rand::rng();
@@ -296,7 +396,10 @@ mod tests {
     async fn test_create_flow() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, user_code) = store.create(Some("test-client".into())).await.unwrap();
+        let (device_code, user_code) = store
+            .create(Some("test-client".into()), None)
+            .await
+            .unwrap();
 
         assert!(!device_code.is_empty());
         assert_eq!(user_code.len(), 9); // XXXX-XXXX
@@ -315,7 +418,7 @@ mod tests {
     async fn test_status_pending() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, _) = store.create(None).await.unwrap();
+        let (device_code, _) = store.create(None, None).await.unwrap();
 
         let status = store.get_status(&device_code).await.unwrap();
         assert_eq!(status, DeviceFlowStatus::Pending);
@@ -325,7 +428,7 @@ mod tests {
     async fn test_approve_and_status() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, user_code) = store.create(None).await.unwrap();
+        let (device_code, user_code) = store.create(None, None).await.unwrap();
         let user_id = Uuid::now_v7();
 
         store.approve(&user_code, user_id).await.unwrap();
@@ -338,7 +441,7 @@ mod tests {
     async fn test_approve_normalizes_code() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (_device_code, user_code) = store.create(None).await.unwrap();
+        let (_device_code, user_code) = store.create(None, None).await.unwrap();
         let user_id = Uuid::now_v7();
 
         // Approve with lowercase and hyphen
@@ -350,7 +453,7 @@ mod tests {
     async fn test_approve_already_authorized() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (_device_code, user_code) = store.create(None).await.unwrap();
+        let (_device_code, user_code) = store.create(None, None).await.unwrap();
         let user_id = Uuid::now_v7();
 
         store.approve(&user_code, user_id).await.unwrap();
@@ -366,7 +469,10 @@ mod tests {
     async fn test_consume_one_time_use() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, user_code) = store.create(Some("cli-host-2026".into())).await.unwrap();
+        let (device_code, user_code) = store
+            .create(Some("cli-host-2026".into()), None)
+            .await
+            .unwrap();
         let user_id = Uuid::now_v7();
 
         store.approve(&user_code, user_id).await.unwrap();
@@ -384,7 +490,7 @@ mod tests {
     async fn test_consume_pending_fails() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, _) = store.create(None).await.unwrap();
+        let (device_code, _) = store.create(None, None).await.unwrap();
 
         let err = store.consume(&device_code).await.unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
@@ -411,7 +517,7 @@ mod tests {
         let store = DeviceFlowStore::new(db);
 
         // Create a flow and backdate it
-        let (device_code, _user_code) = store.create(None).await.unwrap();
+        let (device_code, _user_code) = store.create(None, None).await.unwrap();
         store.expire_flow(&device_code).await;
 
         store.cleanup_expired().await;
@@ -425,7 +531,7 @@ mod tests {
     async fn test_expired_flow_returns_expired_status() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
-        let (device_code, _) = store.create(None).await.unwrap();
+        let (device_code, _) = store.create(None, None).await.unwrap();
 
         // Backdate the flow
         store.expire_flow(&device_code).await;
