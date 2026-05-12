@@ -30,3 +30,21 @@ pub fn error_response_with_code(
     )
         .into_response()
 }
+
+/// Build an RFC 6749 §5.2 / RFC 8628 §3.5 OAuth error response.
+///
+/// The body is serialised as `application/json` with `error`, optional
+/// `error_description`, and optional `interval` (slow_down extension).
+pub fn oauth_error_response(
+    status: StatusCode,
+    error: uptrakit_web_api_types::oauth::OAuthErrorCode,
+    description: Option<String>,
+    interval: Option<i32>,
+) -> Response {
+    let body = uptrakit_web_api_types::oauth::OAuthErrorResponse {
+        error,
+        error_description: description,
+        interval,
+    };
+    (status, Json(body)).into_response()
+}
