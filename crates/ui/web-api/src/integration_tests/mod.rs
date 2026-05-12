@@ -5,6 +5,7 @@ mod error_cases;
 mod hosts;
 mod instance_plugins;
 mod notifications;
+mod oauth_master_switch_off;
 mod oidc_callback;
 mod plugin_configs;
 mod plugin_type_settings;
