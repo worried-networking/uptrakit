@@ -58,12 +58,6 @@ impl ResolvesClientCert for AgentClientCertResolver {
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::assertions_on_result_states,
-        clippy::unwrap_used,
-        reason = "test code — expect/unwrap are acceptable in unit tests"
-    )]
-
     use std::sync::Arc;
     use std::thread;
 
@@ -74,7 +68,7 @@ mod tests {
 
     /// Install the aws-lc-rs crypto provider (idempotent, safe to call multiple times).
     fn install_crypto_provider() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ignored = rustls::crypto::aws_lc_rs::default_provider().install_default();
     }
 
     /// Generate a throwaway [`CertifiedKey`] using rcgen + aws-lc-rs.
