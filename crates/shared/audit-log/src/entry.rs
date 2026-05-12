@@ -455,11 +455,10 @@ fn apply_truncation(mut value: Value, truncatable_keys: &[&str]) -> Result<Value
         let replaced = if let Value::Object(obj) = &mut value {
             if let Some(field) = obj.get_mut(*key) {
                 let serialised = serde_json::to_vec(field).unwrap_or_default();
-                let preview: String = serialised
-                    .iter()
-                    .take(TRUNCATED_PREVIEW_BYTES)
-                    .map(|b| char::from(*b))
-                    .collect();
+                let end = TRUNCATED_PREVIEW_BYTES.min(serialised.len());
+                let preview = serialised
+                    .get(..end)
+                    .map_or(String::new(), |s| String::from_utf8_lossy(s).into_owned());
                 *field = serde_json::json!({
                     "truncated": true,
                     "byte_count": serialised.len(),
