@@ -132,6 +132,8 @@ approve_consent = "full-state"
 deny_consent = "full-state"
 
 [routes."oauth/consents_api.rs"]
+list_consents = "full-state"
+revoke_consent = "full-state"
 
 [routes."oauth/metadata.rs"]
 get_as_metadata = "full-state"
