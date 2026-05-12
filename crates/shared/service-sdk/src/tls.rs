@@ -184,6 +184,29 @@ pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
     Ok(config)
 }
 
+/// Build an `Arc<ClientConfig>` for mTLS with a hot-swappable client certificate.
+///
+/// The resolver is polled on every TLS handshake, so calling
+/// [`AgentClientCertResolver::swap`](crate::cert_resolver::AgentClientCertResolver::swap)
+/// on the same instance will take effect for the next connection without
+/// rebuilding the `ClientConfig`.
+///
+/// Session resumption is enabled with a 256-entry in-memory cache.
+pub fn build_client_config_with_resolver(
+    ca_pem: &[u8],
+    resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
+) -> Result<Arc<rustls::ClientConfig>> {
+    let root_store = build_root_store(ca_pem)?;
+
+    let mut config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_cert_resolver(resolver);
+
+    config.resumption = rustls::client::Resumption::in_memory_sessions(256);
+
+    Ok(Arc::new(config))
+}
+
 /// Convenience wrapper: wrap a `ClientConfig` into a `TlsConnector`.
 pub fn tls_connector(config: rustls::ClientConfig) -> TlsConnector {
     TlsConnector::from(Arc::new(config))
