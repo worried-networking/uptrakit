@@ -34,8 +34,6 @@ pub(super) enum RenewalError {
     Signing(String),
     #[error("PEM parse error")]
     PemParse,
-    #[error("X.509 parse error")]
-    X509Parse,
     #[error("invalid timestamp: {0}")]
     Timestamp(String),
 }
@@ -92,18 +90,20 @@ async fn record_renewal_certificate(
     cert_pem: &str,
     ca_fingerprint: &str,
 ) -> Result<(), Report<RenewalError>> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
-        .map_err(|_| report!(RenewalError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(RenewalError::X509Parse))?;
-
-    let serial = cert.raw_serial_as_string();
-    let validity = cert.validity();
-    let not_before = time::OffsetDateTime::from_unix_timestamp(validity.not_before.timestamp())
-        .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
-    let not_after = time::OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
-        .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert =
+        Certificate::from_pem(cert_pem.as_bytes()).map_err(|_| report!(RenewalError::PemParse))?;
+    let tbs = &cert.tbs_certificate;
+    let serial = tbs.serial_number.to_string().to_lowercase();
+    let not_before = time::OffsetDateTime::from_unix_timestamp(
+        tbs.validity.not_before.to_unix_duration().as_secs() as i64,
+    )
+    .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
+    let not_after = time::OffsetDateTime::from_unix_timestamp(
+        tbs.validity.not_after.to_unix_duration().as_secs() as i64,
+    )
+    .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
 
     let record = service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fingerprint.to_string()),
@@ -150,18 +150,20 @@ pub(super) async fn sign_renewal_csr_system(
         .map_err(|e| report!(RenewalError::Signing(format!("failed to sign CSR: {e}"))))?;
 
     // Parse cert metadata.
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes())
+    use der::DecodePem;
+    use x509_cert::Certificate as X509Certificate;
+    let sys_cert = X509Certificate::from_pem(bundle.cert_pem.as_bytes())
         .map_err(|_| report!(RenewalError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(RenewalError::X509Parse))?;
-    let serial = cert.raw_serial_as_string();
-    let validity_meta = cert.validity();
-    let not_before =
-        time::OffsetDateTime::from_unix_timestamp(validity_meta.not_before.timestamp())
-            .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
-    let not_after = time::OffsetDateTime::from_unix_timestamp(validity_meta.not_after.timestamp())
-        .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
+    let sys_tbs = &sys_cert.tbs_certificate;
+    let serial = sys_tbs.serial_number.to_string().to_lowercase();
+    let not_before = time::OffsetDateTime::from_unix_timestamp(
+        sys_tbs.validity.not_before.to_unix_duration().as_secs() as i64,
+    )
+    .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
+    let not_after = time::OffsetDateTime::from_unix_timestamp(
+        sys_tbs.validity.not_after.to_unix_duration().as_secs() as i64,
+    )
+    .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
 
     let record = system_service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fp),

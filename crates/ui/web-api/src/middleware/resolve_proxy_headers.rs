@@ -145,16 +145,18 @@ fn try_info_header(
 
 /// Parse a Cert field value (URL-encoded PEM or base64-DER).
 fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<ServiceIdentity> {
+    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::pem::PemObject;
     let cert_decoded = percent_encoding::percent_decode_str(cert_field)
         .decode_utf8()
         .ok()?;
 
     // Try PEM first (Envoy sends URL-encoded PEM)
-    if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(cert_decoded.as_bytes()) {
-        let identity = crate::extract::service_identity_from_der(&pem_block.contents)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
-        let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
-        if !verify_issuer_cn_str(issuer_cn, state) {
+    if let Ok(cert_der) = CertificateDer::from_pem_slice(cert_decoded.as_bytes()) {
+        let der = cert_der.as_ref();
+        let identity = crate::extract::service_identity_from_der(der)?;
+        let issuer_cn = extract_issuer_cn_from_der(der)?;
+        if !verify_issuer_cn_str(&issuer_cn, state) {
             tracing::warn!(
                 issuer = issuer_cn,
                 "forwarded cert issuer CN does not match any known CA"
@@ -171,9 +173,8 @@ fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<ServiceIde
     )
     .ok()?;
     let identity = crate::extract::service_identity_from_der(&der)?;
-    let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
-    let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
-    if !verify_issuer_cn_str(issuer_cn, state) {
+    let issuer_cn = extract_issuer_cn_from_der(&der)?;
+    if !verify_issuer_cn_str(&issuer_cn, state) {
         tracing::warn!(
             issuer = issuer_cn,
             "forwarded cert issuer CN does not match any known CA"
@@ -192,6 +193,8 @@ fn try_pem_header(
     header_name: Option<&str>,
     state: &AppState,
 ) -> Option<ServiceIdentity> {
+    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::pem::PemObject;
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
     let decoded = percent_encoding::percent_decode_str(raw)
@@ -199,8 +202,8 @@ fn try_pem_header(
         .ok()?;
 
     // Try PEM first
-    let der = if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(decoded.as_bytes()) {
-        pem_block.contents
+    let der: Vec<u8> = if let Ok(cert_der) = CertificateDer::from_pem_slice(decoded.as_bytes()) {
+        cert_der.into_owned().to_vec()
     } else {
         // Fallback: base64-DER (Caddy certificate_der_base64)
         base64::Engine::decode(
@@ -213,9 +216,8 @@ fn try_pem_header(
     let identity = crate::extract::service_identity_from_der(&der)?;
 
     // Verify issuer CN from the parsed cert
-    let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
-    let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
-    if !verify_issuer_cn_str(issuer_cn, state) {
+    let issuer_cn = extract_issuer_cn_from_der(&der)?;
+    if !verify_issuer_cn_str(&issuer_cn, state) {
         tracing::warn!(
             issuer = issuer_cn,
             "forwarded PEM cert issuer CN does not match any known CA"
@@ -241,6 +243,35 @@ fn parse_info_fields(input: &str) -> std::collections::HashMap<String, String> {
         }
     }
     fields
+}
+
+/// Extract the Common Name from a DER-encoded certificate's issuer field.
+fn extract_issuer_cn_from_der(der: &[u8]) -> Option<String> {
+    use const_oid::db::rfc4519::COMMON_NAME;
+    use der::{
+        Decode,
+        asn1::{PrintableStringRef, Utf8StringRef},
+    };
+    use x509_cert::Certificate;
+    let cert = Certificate::from_der(der).ok()?;
+    cert.tbs_certificate
+        .issuer
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .filter(|atv| atv.oid == COMMON_NAME)
+        .find_map(|atv| {
+            atv.value
+                .decode_as::<Utf8StringRef<'_>>()
+                .map(|s| s.as_str().to_owned())
+                .ok()
+                .or_else(|| {
+                    atv.value
+                        .decode_as::<PrintableStringRef<'_>>()
+                        .map(|s| s.as_str().to_owned())
+                        .ok()
+                })
+        })
 }
 
 /// Verify that the issuer CN (from a DN string) matches a known CA CN.

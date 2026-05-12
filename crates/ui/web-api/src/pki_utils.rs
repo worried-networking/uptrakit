@@ -102,26 +102,37 @@ pub fn parse_san_list(sans: &[String]) -> SanCollection {
 
 /// Check if a certificate was signed by a given CA.
 ///
-/// Compares the certificate's issuer DN against the CA's subject DN.
-/// Returns `true` if they match.
+/// Parses both certificates from PEM, builds a trust store from the CA, and
+/// verifies the end-entity certificate against it.
+/// Returns `true` if the certificate chains to the CA.
 pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
-    let (_, cert_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+    use rustls::RootCertStore;
+    use rustls::pki_types::{CertificateDer, UnixTime, pem::PemObject};
+
+    let cert_der = CertificateDer::from_pem_slice(cert_pem.as_bytes())
         .map_err(|_| report!(PkiUtilError::PemParse))?;
-    let cert = cert_block
-        .parse_x509()
+    let ca_der = CertificateDer::from_pem_slice(ca_pem.as_bytes())
         .map_err(|_| report!(PkiUtilError::PemParse))?;
 
-    let (_, ca_block) = x509_parser::pem::parse_x509_pem(ca_pem.as_bytes())
-        .map_err(|_| report!(PkiUtilError::PemParse))?;
-    let ca = ca_block
-        .parse_x509()
+    let parsed = rustls::server::ParsedCertificate::try_from(&cert_der)
         .map_err(|_| report!(PkiUtilError::PemParse))?;
 
-    if cert.issuer() != ca.subject() {
-        return Ok(false);
-    }
+    let mut roots = RootCertStore::empty();
+    roots
+        .add(ca_der)
+        .map_err(|_| report!(PkiUtilError::PemParse))?;
 
-    match cert.verify_signature(Some(ca.public_key())) {
+    let algs = rustls::crypto::aws_lc_rs::default_provider()
+        .signature_verification_algorithms
+        .all;
+
+    match rustls::client::verify_server_cert_signed_by_trust_anchor(
+        &parsed,
+        &roots,
+        &[],
+        UnixTime::now(),
+        algs,
+    ) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }

@@ -28,9 +28,6 @@ enum OcspError {
     #[error("PEM parse error")]
     PemParse,
 
-    #[error("X.509 parse error")]
-    X509Parse,
-
     #[error("failed to compute key hash")]
     KeyHash,
 
@@ -247,16 +244,15 @@ fn build_responder_id(pub_key_bytes: &[u8]) -> OcspResult<ResponderId> {
 
 /// Extract the raw public key bytes (BIT STRING content) from a PEM-encoded certificate.
 fn extract_ca_public_key_bytes(ca_cert_pem: &str) -> OcspResult<Vec<u8>> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes())
-        .map_err(|_| report!(OcspError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(OcspError::X509Parse))?;
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert =
+        Certificate::from_pem(ca_cert_pem.as_bytes()).map_err(|_| report!(OcspError::PemParse))?;
     Ok(cert
         .tbs_certificate
-        .subject_pki
+        .subject_public_key_info
         .subject_public_key
-        .data
+        .raw_bytes()
         .to_vec())
 }
 

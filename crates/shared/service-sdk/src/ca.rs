@@ -8,6 +8,8 @@
 //! 5. Else: use system root certificates (return `None`)
 
 use rootcause::prelude::*;
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::pem::PemObject;
 use sha2::Digest;
 
 use crate::error::{CaError, EnrollmentError, Result, TlsError};
@@ -25,12 +27,12 @@ pub enum CaTlsMode<'a> {
 
 /// Compute the SHA-256 hex fingerprint of a PEM-encoded CA certificate's DER content.
 pub fn ca_pem_fingerprint(pem_bytes: &[u8]) -> Result<String> {
-    let (_, pem) = x509_parser::pem::parse_x509_pem(pem_bytes).map_err(|e| {
+    let der = CertificateDer::from_pem_slice(pem_bytes).map_err(|e| {
         report!(EnrollmentError::Tls(TlsError::CertificateParse(format!(
             "PEM parse failed: {e}"
         ))))
     })?;
-    let digest = sha2::Sha256::digest(&pem.contents);
+    let digest = sha2::Sha256::digest(der.as_ref());
     Ok(hex::encode(digest))
 }
 
