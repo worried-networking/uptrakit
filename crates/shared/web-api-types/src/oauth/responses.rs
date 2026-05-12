@@ -52,6 +52,7 @@ impl TokenResponse {
 /// Dynamic client registration request body (RFC 7591 §2).
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DcrRegistrationRequest {
     pub client_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,6 +148,7 @@ impl Validate for DcrRegistrationRequest {
 /// Dynamic client registration response body (RFC 7591 §3.2.1).
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DcrRegistrationResponse {
     pub client_id: String,
     pub client_id_issued_at: i64,

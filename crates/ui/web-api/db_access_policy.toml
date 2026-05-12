@@ -131,6 +131,11 @@ get_as_metadata = "full-state"
 [routes."oauth/mod.rs"]
 
 [routes."oauth/register.rs"]
+register = "full-state"
+get_client_registration = "full-state"
+update_client_registration = "full-state"
+delete_client_registration = "full-state"
+verify_registration_token = "ignore"
 
 [routes."oauth/token.rs"]
 token = "full-state"
