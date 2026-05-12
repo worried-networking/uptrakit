@@ -76,6 +76,7 @@ mod m20260513_000003_oauth_authorization_requests;
 mod m20260513_000004_oauth_authorization_codes;
 mod m20260513_000005_oauth_refresh_tokens;
 mod m20260513_000006_oauth_controller_instances;
+mod m20260514_000001_audit_logs_v2;
 
 pub struct Migrator;
 
@@ -156,6 +157,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000004_oauth_authorization_codes::Migration),
             Box::new(m20260513_000005_oauth_refresh_tokens::Migration),
             Box::new(m20260513_000006_oauth_controller_instances::Migration),
+            Box::new(m20260514_000001_audit_logs_v2::Migration),
         ]
     }
 }
@@ -420,15 +422,21 @@ mod tests {
         let tenant_indexes = sqlite_indexes(&db, "audit_logs").await;
         let system_indexes = sqlite_indexes(&db, "system_audit_logs").await;
 
+        // V2 columns present.
         assert!(tenant_table_sql.contains("action_type"));
+        assert!(tenant_table_sql.contains("action_kind"));
         assert!(tenant_table_sql.contains("outcome"));
+        assert!(tenant_table_sql.contains("before_snapshot"));
+        assert!(tenant_table_sql.contains("after_snapshot"));
+        assert!(tenant_table_sql.contains("correlation_id"));
+        // V1 HTTP-request columns must be gone.
         assert!(!tenant_table_sql.contains("http_method"));
         assert!(system_table_sql.contains("action_type"));
+        assert!(system_table_sql.contains("action_kind"));
         assert!(!system_table_sql.contains("http_path"));
-        assert!(tenant_indexes.contains(&"idx_audit_logs_tenant_outcome_occurred_at".to_string()));
-        assert!(
-            system_indexes.contains(&"idx_system_audit_logs_target_id_occurred_at".to_string())
-        );
+        // V2 index names (V1 names were dropped when tables were recreated).
+        assert!(tenant_indexes.contains(&"idx_audit_tenant_outcome_time".to_string()));
+        assert!(system_indexes.contains(&"idx_system_audit_target_id_time".to_string()));
     }
 
     #[tokio::test]
@@ -452,6 +460,72 @@ mod tests {
                 .expect("count should succeed"),
             0
         );
+    }
+
+    /// Verify that the V2 CHECK constraint rejects an `event` row that also
+    /// carries a `before_snapshot`.
+    ///
+    /// SQLite enforces CHECK constraints since version 3.25.0 (2018-09-15).
+    /// All supported platforms ship a newer version, so no special PRAGMA is
+    /// required — the constraint fires automatically on INSERT/UPDATE.
+    #[tokio::test]
+    async fn audit_v2_check_rejects_event_with_snapshots() {
+        let db = test_db().await;
+        Migrator::up(&db, None)
+            .await
+            .expect("migrations should run");
+
+        let res = db
+            .execute_unprepared(
+                "INSERT INTO audit_logs \
+                 (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome, before_snapshot) \
+                 VALUES \
+                 ('00000000-0000-0000-0000-000000000001', \
+                  '00000000-0000-0000-0000-000000000002', \
+                  CURRENT_TIMESTAMP, 'system', 'auth.login', 'event', 'success', '{}')",
+            )
+            .await;
+        assert!(
+            res.is_err(),
+            "CHECK constraint must reject an event row that has before_snapshot set"
+        );
+    }
+
+    /// Verify that the V2 CHECK constraint accepts a well-formed `event` row
+    /// (both snapshot columns NULL) and a well-formed `stateful` row (both
+    /// snapshot columns NOT NULL).
+    #[tokio::test]
+    async fn audit_v2_check_accepts_valid_event_and_stateful_rows() {
+        let db = test_db().await;
+        Migrator::up(&db, None)
+            .await
+            .expect("migrations should run");
+
+        // Valid event row: no snapshots.
+        db.execute_unprepared(
+            "INSERT INTO audit_logs \
+             (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome) \
+             VALUES \
+             ('00000000-0000-0000-0000-000000000010', \
+              '00000000-0000-0000-0000-000000000002', \
+              CURRENT_TIMESTAMP, 'system', 'auth.login', 'event', 'success')",
+        )
+        .await
+        .expect("valid event row must be accepted");
+
+        // Valid stateful row: both snapshots present.
+        db.execute_unprepared(
+            "INSERT INTO audit_logs \
+             (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome, \
+              before_snapshot, after_snapshot) \
+             VALUES \
+             ('00000000-0000-0000-0000-000000000011', \
+              '00000000-0000-0000-0000-000000000002', \
+              CURRENT_TIMESTAMP, 'system', 'host.update', 'stateful', 'success', \
+              '{}', '{}')",
+        )
+        .await
+        .expect("valid stateful row must be accepted");
     }
 
     #[tokio::test]
