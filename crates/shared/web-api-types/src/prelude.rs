@@ -10,7 +10,6 @@
 pub use crate::auth::{AuthResponse, LoginRequest, RegisterRequest, UserResponse};
 
 // ── Device auth ─────────────────────────────────────────────────────
-pub use crate::device_auth::DeviceAuthPollResponse;
 pub use uptrakit_shared_types::DeviceAuthStatus;
 
 // ── Services ─────────────────────────────────────────────────────────
