@@ -7232,6 +7232,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-audit-log-derive"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "uptrakit-backoff"
 version = "0.0.1"
 dependencies = [

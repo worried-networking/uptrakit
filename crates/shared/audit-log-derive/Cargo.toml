@@ -1,0 +1,19 @@
+[package]
+name = "uptrakit-audit-log-derive"
+description = "Proc-macros for uptrakit-audit-log (AuditView derive, audit_actions! registry macro)"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version = "0.0.1"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true
