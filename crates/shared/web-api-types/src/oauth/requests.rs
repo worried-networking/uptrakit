@@ -148,6 +148,7 @@ impl Validate for TokenRequest {
 /// no-op placeholder that keeps the type aligned with the project rule.
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ConsentDecision {
     /// Hostname the user typed for unverified-client confirmation. Required
     /// when the client's `trusted_at` is `NULL`; checked outside this struct.

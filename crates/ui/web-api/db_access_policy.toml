@@ -122,6 +122,9 @@ authorize = "full-state"
 [routes."oauth/clients_api.rs"]
 
 [routes."oauth/consent.rs"]
+consent_details = "full-state"
+approve_consent = "full-state"
+deny_consent = "full-state"
 
 [routes."oauth/consents_api.rs"]
 
