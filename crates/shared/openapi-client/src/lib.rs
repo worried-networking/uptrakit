@@ -368,10 +368,6 @@ impl UptrakitClient {
     /// fall through to `handle_response_bytes` (the shared status-dispatcher) so
     /// `RateLimited` (429), `NotAuthenticated` (401), `NotFound` (404), and
     /// generic `Api { status, message }` still flow through one place.
-    #[expect(
-        dead_code,
-        reason = "OAuth form POST helper — call sites added in device auth task 2"
-    )]
     async fn post_form_unauth<T: DeserializeOwned, F: Serialize + ?Sized>(
         &self,
         path: &str,
