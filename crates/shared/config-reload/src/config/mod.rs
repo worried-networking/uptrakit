@@ -20,23 +20,95 @@ pub use scope::Scope;
 pub use tls::TlsConfig;
 pub use zeroconf::ZeroconfConfig;
 
-// RuntimeConfig and cross-section validation added in Task 6.
-/// Placeholder — expanded in Task 6.
-pub struct RuntimeConfig;
+use rootcause::prelude::*;
+use serde::{Deserialize, Serialize};
+
+/// Top-level runtime configuration for the uptrakit Controller.
+///
+/// Parsed from a TOML file via [`crate::loader::TomlConfigLoader`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[non_exhaustive]
+pub struct RuntimeConfig {
+    /// Database connection and pool settings.
+    pub db: DbConfig,
+    /// Encryption master key settings.
+    pub master_key: MasterKeyConfig,
+    /// Network listener settings (HTTPS + PKI).
+    pub network: NetworkConfig,
+    /// TLS certificate and key settings.
+    pub tls: TlsConfig,
+    /// NATS messaging server settings.
+    pub nats: NatsConfig,
+    /// Audit log settings.
+    pub audit: AuditConfig,
+    /// Logging settings.
+    pub log: LogConfig,
+    /// Zero-configuration auto-discovery settings.
+    #[serde(default)]
+    pub zeroconf: ZeroconfConfig,
+    /// Which services run embedded inside the controller binary.
+    pub embedded_services: EmbeddedServicesConfig,
+}
 
 impl RuntimeConfig {
-    /// Placeholder validator.
+    /// Validate all config sections.
     ///
     /// # Errors
     ///
-    /// Returns an error if the configuration is invalid.
-    pub fn validate(&self) -> Result<(), rootcause::Report> {
+    /// Returns the first validation error encountered across all sections.
+    pub fn validate(&self) -> Result<(), Report> {
+        self.db.validate()?;
+        self.master_key.validate()?;
+        self.network.validate()?;
+        self.tls.validate()?;
+        self.nats.validate()?;
+        self.audit.validate()?;
+        self.log.validate()?;
+        self.zeroconf.validate()?;
+        self.embedded_services.validate()?;
         Ok(())
     }
 
-    /// Placeholder extras warning collector.
+    /// Collect warnings about unknown keys found in each config section.
+    ///
+    /// Returns one warning string per unknown key, formatted as
+    /// `"[section] unknown key `key` ignored"`.
     #[must_use]
     pub fn warn_about_extras(&self) -> Vec<String> {
-        Vec::new()
+        let mut out = Vec::new();
+        for key in self.db.extra.keys() {
+            out.push(format!("[db] unknown key `{key}` ignored"));
+        }
+        for key in self.master_key.extra.keys() {
+            out.push(format!("[master_key] unknown key `{key}` ignored"));
+        }
+        for key in self.network.extra.keys() {
+            out.push(format!("[network] unknown key `{key}` ignored"));
+        }
+        for key in self.network.https.extra.keys() {
+            out.push(format!("[network.https] unknown key `{key}` ignored"));
+        }
+        for key in self.network.pki.extra.keys() {
+            out.push(format!("[network.pki] unknown key `{key}` ignored"));
+        }
+        for key in self.tls.extra.keys() {
+            out.push(format!("[tls] unknown key `{key}` ignored"));
+        }
+        for key in self.nats.extra.keys() {
+            out.push(format!("[nats] unknown key `{key}` ignored"));
+        }
+        for key in self.audit.extra.keys() {
+            out.push(format!("[audit] unknown key `{key}` ignored"));
+        }
+        for key in self.log.extra.keys() {
+            out.push(format!("[log] unknown key `{key}` ignored"));
+        }
+        for key in self.zeroconf.extra.keys() {
+            out.push(format!("[zeroconf] unknown key `{key}` ignored"));
+        }
+        for key in self.embedded_services.extra.keys() {
+            out.push(format!("[embedded_services] unknown key `{key}` ignored"));
+        }
+        out
     }
 }

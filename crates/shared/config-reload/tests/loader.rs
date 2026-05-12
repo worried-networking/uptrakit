@@ -1,3 +1,4 @@
+use uptrakit_config_reload::RuntimeConfig;
 use uptrakit_config_reload::config::{
     AuditConfig, DbConfig, EmbeddedServicesConfig, NatsConfig, NetworkConfig, TlsConfig,
     ZeroconfConfig,
@@ -148,4 +149,74 @@ fn zeroconf_enabled_requires_url_and_pki_addr() {
     let raw = "enabled = true\nurl = \"\"\npki_addr = \"\"\n";
     let cfg: ZeroconfConfig = toml::from_str(raw).unwrap();
     assert!(cfg.validate().is_err());
+}
+
+// ── RuntimeConfig tests ─────────────────────────────────────────────────────
+
+fn minimal_toml() -> String {
+    r#"
+[db]
+url = "sqlite://var/lib/uptrakit/controller.db"
+pool_size = 16
+acquire_timeout_ms = 5000
+
+[master_key]
+path = "/etc/uptrakit/master.key"
+
+[network.https]
+addr = "0.0.0.0:8443"
+trusted_proxies = []
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header  = "x-fcc-pem"
+
+[network.pki]
+addr = "0.0.0.0:8444"
+
+[tls]
+cert_path = "/etc/uptrakit/tls/cert.pem"
+key_path  = "/etc/uptrakit/tls/key.pem"
+sans      = []
+
+[nats]
+url = "nats://localhost:4222"
+
+[audit]
+filter = "all"
+retention_days = 90
+
+[log]
+path  = "/var/log/uptrakit/controller.log"
+level = "info"
+
+[zeroconf]
+enabled = true
+url      = "https://controller.local:8443"
+pki_addr = "controller.local:8444"
+
+[embedded_services]
+agent = false
+agent_ssh = false
+mqtt = false
+scheduler = true
+"#
+    .to_string()
+}
+
+fn minimal_toml_with_typo() -> String {
+    minimal_toml().replace("pool_size = 16", "pool_size = 16\npoool_size = 32")
+}
+
+#[test]
+fn runtime_config_full_round_trip() {
+    let cfg: RuntimeConfig = toml::from_str(&minimal_toml()).unwrap();
+    cfg.validate().expect("full TOML must validate");
+    assert!(cfg.warn_about_extras().is_empty());
+}
+
+#[test]
+fn runtime_config_captures_unknown_keys() {
+    let cfg: RuntimeConfig = toml::from_str(&minimal_toml_with_typo()).unwrap();
+    let warnings = cfg.warn_about_extras();
+    assert!(warnings.iter().any(|w| w.contains("poool_size")));
 }
