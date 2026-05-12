@@ -384,6 +384,17 @@ impl AuditActionType {
     /// Returns `true` if the given string matches a registered V1 audit action.
     #[must_use]
     pub fn is_registered(value: &str) -> bool {
+        Self::lookup_registered(value).is_some()
+    }
+
+    /// Returns the [`AuditActionKind`] for this action type, or `None` if the
+    /// action type is not registered.
+    #[must_use]
+    pub fn kind(&self) -> Option<AuditActionKind> {
+        Self::lookup_registered(self.0.as_str()).map(|a| a.kind())
+    }
+
+    fn lookup_registered(value: &str) -> Option<RegisteredAuditAction> {
         const V1_ACTIONS: &[RegisteredAuditAction] = &[
             AuditActionType::AUTH_LOGIN,
             AuditActionType::AUTH_LOGOUT,
@@ -515,7 +526,7 @@ impl AuditActionType {
             AuditActionType::MCP_OAUTH_AUTHENTICATE,
         ];
 
-        V1_ACTIONS.iter().any(|action| action.as_str() == value)
+        V1_ACTIONS.iter().copied().find(|a| a.as_str() == value)
     }
 }
 
