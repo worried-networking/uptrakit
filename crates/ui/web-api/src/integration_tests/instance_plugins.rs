@@ -1,10 +1,16 @@
 //! Integration tests for `/api/v1/instance-plugins`.
 
-#![expect(
-    clippy::expect_used,
-    reason = "test code: panics on failure are acceptable"
+#![cfg_attr(
+    feature = "dashboard-icons",
+    expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )
 )]
-#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+#![cfg_attr(
+    feature = "dashboard-icons",
+    expect(clippy::panic, reason = "test code: panics on failure are acceptable")
+)]
 
 #[cfg(feature = "dashboard-icons")]
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};

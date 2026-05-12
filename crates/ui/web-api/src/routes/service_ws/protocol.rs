@@ -96,10 +96,6 @@ impl MessageRateLimiter {
     }
 
     #[cfg(test)]
-    #[expect(
-        dead_code,
-        reason = "used in test setup for rate limiter configuration"
-    )]
     pub(crate) fn set_window_start(&mut self, start: std::time::Instant) {
         self.window_start = start;
     }

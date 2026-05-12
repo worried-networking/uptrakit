@@ -8,11 +8,17 @@
 //! Token-exchange paths (requiring a real JWT / PKCE flow) are deferred to a
 //! future task.
 
-#![expect(
-    clippy::expect_used,
-    reason = "test code: panics on failure are acceptable"
+#![cfg_attr(
+    feature = "oidc",
+    expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )
 )]
-#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+#![cfg_attr(
+    feature = "oidc",
+    expect(clippy::panic, reason = "test code: panics on failure are acceptable")
+)]
 
 #[cfg(feature = "oidc")]
 use crate::test_harness::TestApp;
