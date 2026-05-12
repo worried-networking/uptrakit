@@ -13,6 +13,7 @@ db = ["dep:sea-orm", "dep:uptrakit-shared-db"]
 db-sqlite = ["db", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["db", "uptrakit-shared-db/db-postgres"]
 journald = ["dep:tracing-journald"]
+testing = []
 
 [dependencies]
 async-trait = { workspace = true }
