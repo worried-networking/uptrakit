@@ -93,7 +93,7 @@ pub struct CertState {
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
     /// Cached PEM-encoded CRL bundle, updated by the CRL manager.
-    pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
+    pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,
     /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
 }
@@ -362,7 +362,7 @@ pub struct AppStateBuilder {
     rate_limit_store: Option<RateLimitStore>,
     pki_path: Option<std::path::PathBuf>,
     rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
-    crl_pem_cache: Option<Arc<tokio::sync::RwLock<String>>>,
+    crl_pem_cache: Option<Arc<parking_lot::RwLock<String>>>,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
     default_tenant_id: Option<uuid::Uuid>,
     controller_id: Option<uuid::Uuid>,
@@ -537,7 +537,7 @@ impl AppStateBuilder {
         self
     }
 
-    pub fn crl_pem_cache(mut self, v: Arc<tokio::sync::RwLock<String>>) -> Self {
+    pub fn crl_pem_cache(mut self, v: Arc<parking_lot::RwLock<String>>) -> Self {
         self.crl_pem_cache = Some(v);
         self
     }

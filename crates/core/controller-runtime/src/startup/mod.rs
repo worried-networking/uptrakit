@@ -134,7 +134,7 @@ pub(crate) struct PkiRuntime {
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<tokio::sync::Notify>,
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
-    pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
+    pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,
     pub crl_manager: Arc<crate::crl_manager::CrlManager>,
     pub initial_ca_version: i64,
 }

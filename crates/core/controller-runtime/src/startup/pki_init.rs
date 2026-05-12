@@ -119,14 +119,14 @@ pub(crate) async fn init_pki_runtime(
     let ca_rotation_trigger = Arc::new(tokio::sync::Notify::const_new());
 
     // Build initial CRLs — tries DB cache first, generates fresh if missing/stale.
-    let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
+    let crl_pem_cache = Arc::new(parking_lot::RwLock::new(String::new()));
     let (initial_crls, initial_crl_pem, starting_crl_number) = {
         let ks = ca_key_store.read().await;
         crate::crl_manager::build_initial_crls(db, &ca_snapshot, &ks)
             .await
             .context(AppError::Pki)?
     };
-    *crl_pem_cache.write().await = initial_crl_pem;
+    *crl_pem_cache.write() = initial_crl_pem;
 
     // Build initial server config with CRLs
     let initial_server_config = pki::build_rustls_config_with_client_auth_and_crls(

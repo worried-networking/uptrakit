@@ -230,7 +230,7 @@ mod tests {
                 trusted_ca_keys: vec![],
             })),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+            crl_pem_cache: Arc::new(parking_lot::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
         }
     }
