@@ -75,6 +75,7 @@ mod m20260512_000002_oauth_consents;
 mod m20260512_000003_oauth_authorization_requests;
 mod m20260512_000004_oauth_authorization_codes;
 mod m20260512_000005_oauth_refresh_tokens;
+mod m20260512_000006_oauth_controller_instances;
 
 pub struct Migrator;
 
@@ -154,6 +155,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260512_000003_oauth_authorization_requests::Migration),
             Box::new(m20260512_000004_oauth_authorization_codes::Migration),
             Box::new(m20260512_000005_oauth_refresh_tokens::Migration),
+            Box::new(m20260512_000006_oauth_controller_instances::Migration),
         ]
     }
 }
