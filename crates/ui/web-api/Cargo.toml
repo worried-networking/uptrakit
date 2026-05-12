@@ -91,6 +91,7 @@ uptrakit-notification-delivery = { workspace = true }
 uptrakit-controller-core = { workspace = true, features = ["axum-integration"] }
 uptrakit-service-connections = { workspace = true }
 uptrakit-surface-proxy = { workspace = true }
+uptrakit-config-reload = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }
