@@ -21,3 +21,8 @@ pub use requests::{AuthorizeRequest, ConsentDecision, TokenRequest};
 pub use responses::{DcrRegistrationRequest, DcrRegistrationResponse, TokenResponse};
 pub use scope::McpScope;
 pub use tokens::{AuthorizationCode, McpAccessTokenClaims, OpaqueRefreshToken, TokenParseError};
+
+/// MCP Authorization spec revision this implementation targets. Emitted by the PRM
+/// endpoint as `x-uptrakit-mcp-auth-spec-revision` per spec §23.1 so downstream tooling
+/// can correlate behavior with the spec revision.
+pub const MCP_AUTH_SPEC_REVISION: &str = "2025-11-25";
