@@ -437,6 +437,7 @@ mod tests {
             master_key_config_rx: config_rx_for_settings_nats.master_key,
             embedded_services_config_rx: config_rx_for_settings_nats.embedded_services,
             zeroconf_config_rx: config_rx_for_settings_nats.zeroconf,
+            oauth: crate::oauth::OAuthState::disabled(),
         })
     }
 

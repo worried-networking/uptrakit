@@ -1181,6 +1181,7 @@ mod tests {
                 master_key_config_rx: config_rx_for_surfaces.master_key,
                 embedded_services_config_rx: config_rx_for_surfaces.embedded_services,
                 zeroconf_config_rx: config_rx_for_surfaces.zeroconf,
+                oauth: crate::oauth::OAuthState::disabled(),
             }),
             db,
             tenant_id,

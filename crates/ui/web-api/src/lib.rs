@@ -18,6 +18,7 @@ pub mod middleware;
 pub mod nats_transport;
 pub mod notification_service;
 pub mod notifications;
+pub mod oauth;
 pub mod ocsp;
 #[cfg(feature = "oidc")]
 pub(crate) mod oidc_http_client;
@@ -298,6 +299,7 @@ mod tests {
             master_key_config_rx: config_rx_for_lib_test.master_key,
             embedded_services_config_rx: config_rx_for_lib_test.embedded_services,
             zeroconf_config_rx: config_rx_for_lib_test.zeroconf,
+            oauth: crate::oauth::OAuthState::disabled(),
         })
     }
 

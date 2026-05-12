@@ -349,6 +349,12 @@ pub struct AppState {
     pub zeroconf_config_rx: tokio::sync::watch::Receiver<
         std::sync::Arc<uptrakit_config_reload::config::ZeroconfConfig>,
     >,
+    /// MCP OAuth 2.1 authorization-server state.
+    ///
+    /// When `oauth.enabled = false` (the default) this carries inert placeholder
+    /// values; all `/oauth/*` route handlers must guard on `state.oauth.enabled`
+    /// before doing any work.
+    pub oauth: crate::oauth::OAuthState,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -423,6 +429,7 @@ pub struct AppStateBuilder {
     coordinator_handle: Option<uptrakit_config_reload::ReloadCoordinatorHandle>,
     settings_version_cache: Option<uptrakit_config_reload::SettingsVersionCache>,
     config_receivers: Option<uptrakit_config_reload::RuntimeConfigReceivers>,
+    oauth: Option<crate::oauth::OAuthState>,
 }
 
 impl AppStateBuilder {
@@ -477,6 +484,7 @@ impl AppStateBuilder {
             coordinator_handle: None,
             settings_version_cache: None,
             config_receivers: None,
+            oauth: None,
         }
     }
 
@@ -816,6 +824,16 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the MCP OAuth 2.1 authorization-server state.
+    ///
+    /// Optional — defaults to [`crate::oauth::OAuthState::disabled()`] (all
+    /// `/oauth/*` routes return `404 Not Found`).  Pass a fully-constructed
+    /// [`crate::oauth::OAuthState`] at boot when `oauth.mcp_enabled = true`.
+    pub fn oauth(mut self, v: crate::oauth::OAuthState) -> Self {
+        self.oauth = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -1014,6 +1032,9 @@ impl AppStateBuilder {
             master_key_config_rx: config_receivers.master_key,
             embedded_services_config_rx: config_receivers.embedded_services,
             zeroconf_config_rx: config_receivers.zeroconf,
+            oauth: self
+                .oauth
+                .unwrap_or_else(crate::oauth::OAuthState::disabled),
         })
     }
 }
