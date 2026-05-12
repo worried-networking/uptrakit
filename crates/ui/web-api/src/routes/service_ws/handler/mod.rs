@@ -805,6 +805,21 @@ pub(super) async fn ingest_service_audit_event(
     service_app_name: Option<&str>,
     payload: AuditEventPayload,
 ) -> bool {
+    // Reject forwarded Stateful action types before general validation.
+    // Services must not emit Stateful events — those originate only from the controller.
+    if let Ok(parsed_action) = payload
+        .action_type
+        .parse::<uptrakit_audit_log::AuditActionType>()
+        && parsed_action.kind() == Some(uptrakit_audit_log::AuditActionKind::Stateful)
+    {
+        tracing::warn!(
+            %service_id,
+            action_type = %payload.action_type,
+            "rejecting forwarded Stateful audit event; service-side stateful emission is not supported"
+        );
+        return false;
+    }
+
     let (action_type, outcome, scope, details_json) = match validate_audit_event_payload(&payload) {
         Ok(parsed) => parsed,
         Err(error) => {
@@ -5010,6 +5025,69 @@ mod tests {
 
         assert!(response.replies.is_empty());
         assert!(matches!(response.action, ProcessorAction::Continue));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn forwarded_stateful_audit_event_is_rejected_with_warning() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent").await;
+        let mut processor = MessageProcessor {
+            state: Arc::clone(&state),
+            service_id,
+            cert: None,
+            is_system: false,
+            has_update_tracking: false,
+            has_software_discovery: false,
+            has_update_hooks: false,
+            has_ui_surfaces: false,
+            has_workload_claims: false,
+            runtime_instance_id: None,
+            service_app_name: Some("uptrakit-agent".to_string()),
+            service_tenant_id: Some(tenant_id),
+            linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            report_tracker: ReportTracker::new(),
+        };
+
+        let response = processor
+            .dispatch(
+                ServiceMessage::AuditEvent(AuditEventPayload {
+                    action_type: uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE
+                        .to_string(),
+                    tenant_id: Some(tenant_id.to_string()),
+                    target_type: Some("plugin_config".to_string()),
+                    target_id: Some(Uuid::now_v7().to_string()),
+                    target_display: None,
+                    outcome: uptrakit_audit_log::AuditOutcome::Success
+                        .as_str()
+                        .to_string(),
+                    details_json: None,
+                    request_id: None,
+                    correlation_id: None,
+                }),
+                None,
+            )
+            .await;
+
+        // Connection must stay alive
+        assert!(response.replies.is_empty());
+        assert!(matches!(response.action, ProcessorAction::Continue));
+
+        // No audit row must be written
+        let count: u64 = {
+            use sea_orm::PaginatorTrait;
+            uptrakit_shared_db::entity::audit_log::Entity::find()
+                .count(&db)
+                .await
+                .expect("count audit_log rows")
+        };
+        assert_eq!(
+            count, 0,
+            "no audit row should be written for forwarded Stateful event"
+        );
     }
 
     #[cfg(feature = "db-sqlite")]
