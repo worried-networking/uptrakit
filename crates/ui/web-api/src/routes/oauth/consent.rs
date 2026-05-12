@@ -13,28 +13,31 @@ use axum::response::{IntoResponse, Response};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uptrakit_audit_log::{AuditActorType, AuditEntry, AuditOutcome, Event};
 use uptrakit_shared_db::entity::{oauth_authorization_request, oauth_consent};
-use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api_types::oauth::ConsentDecision;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::extract::ClientIp;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter, check_rate_limit};
+use crate::oauth::rate_limit::EndpointKind;
 use crate::oauth::services::authorization_code::{
     MintAuthorizationCode, OAuthAuthorizationCodeService,
 };
 use crate::oauth::services::authorization_request::OAuthAuthorizationRequestService;
 use crate::oauth::services::client::OAuthClientService;
 use crate::oauth::services::consent::OAuthConsentService;
-use crate::routes::oauth::helpers::{oauth_400, oauth_500};
+use crate::routes::oauth::helpers::{
+    oauth_400, oauth_500, percent_encode, redirect_302, require_auth_and_rate_limit,
+};
 
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
 
 /// Returns `"localhost"` for loopback addresses, otherwise the lowercase host
-/// parsed from `redirect_uri`.
+/// parsed from `redirect_uri`. An unparseable URI returns an empty host, which
+/// cannot match any typed-confirmation value and will always fail the
+/// confirmation check.
 fn loopback_or_host(redirect_uri: &str) -> String {
     let host = url::Url::parse(redirect_uri)
         .ok()
@@ -45,21 +48,6 @@ fn loopback_or_host(redirect_uri: &str) -> String {
     } else {
         host
     }
-}
-
-/// Return a 302 redirect response.
-fn redirect_302(location: &str) -> Response {
-    (
-        StatusCode::FOUND,
-        [(axum::http::header::LOCATION, location)],
-    )
-        .into_response()
-}
-
-/// Percent-encode a string for safe use in query string values.
-fn percent_encode(s: &str) -> String {
-    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-    utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -97,23 +85,14 @@ pub async fn consent_details(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Require authentication.
-    let auth_user = match auth_user {
-        Some(Extension(u)) => u,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
+    let (auth_user, _ip_str) =
+        match require_auth_and_rate_limit(auth_user, &client_ip, &state, EndpointKind::Consent)
+            .await
+        {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
 
-    // Rate-limit check.
-    let ip_str = match &client_ip {
-        Some(Extension(ClientIp(ip))) => ip.to_string(),
-        None => "unknown".to_string(),
-    };
-    let limiter = OAuthRateLimiter::new(RateLimitStore::new(state.db().clone()));
-    if let Some(r) = check_rate_limit(EndpointKind::Consent, &limiter, &ip_str).await {
-        return r;
-    }
-
-    // Look up the authorization request row WITHOUT consuming it.
     let row = match oauth_authorization_request::Entity::find_by_id(request_id)
         .one(state.db())
         .await
@@ -126,18 +105,15 @@ pub async fn consent_details(
         }
     };
 
-    // 404 if already consumed or expired.
     let now = (state.oauth.clock)();
     if row.consumed_at.is_some() || row.expires_at < now {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Ownership check.
     if row.user_id != auth_user.user_id {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Look up the client.
     let client_svc = OAuthClientService::new(
         state.db().clone(),
         Arc::clone(&state.oauth.clock),
@@ -152,7 +128,6 @@ pub async fn consent_details(
         }
     };
 
-    // Check whether an existing active consent requires revalidation.
     let existing_consent = match oauth_consent::Entity::find()
         .filter(oauth_consent::Column::UserId.eq(row.user_id))
         .filter(oauth_consent::Column::ClientId.eq(row.client_id.as_str()))
@@ -171,7 +146,6 @@ pub async fn consent_details(
         .map(|c| c.revalidation_required_at.is_some())
         .unwrap_or(false);
 
-    // Derive redirect_uri_hostname and typed_confirmation_value.
     let redirect_hostname = url::Url::parse(&row.redirect_uri)
         .ok()
         .and_then(|u| u.host_str().map(str::to_lowercase))
@@ -182,7 +156,7 @@ pub async fn consent_details(
     let scopes: Vec<&str> = row.scope.split_whitespace().collect();
     let requires_typed_confirmation = client.trusted_at.is_none();
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "client_id": client.id,
         "client_name": client.client_name,
         "client_uri": client.client_uri,
@@ -191,8 +165,10 @@ pub async fn consent_details(
         "requires_typed_confirmation": requires_typed_confirmation,
         "typed_confirmation_value": typed_confirmation_value,
         "revalidation_required": revalidation_required,
-        "metadata_change_diff": null,  // populated when CIMD lands
     });
+    if revalidation_required && let Some(map) = body.as_object_mut() {
+        map.insert("metadata_change_diff".to_string(), serde_json::Value::Null);
+    }
 
     (StatusCode::OK, axum::Json(body)).into_response()
 }
@@ -230,23 +206,14 @@ pub async fn approve_consent(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Require authentication.
-    let auth_user = match auth_user {
-        Some(Extension(u)) => u,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
+    let (auth_user, _ip_str) =
+        match require_auth_and_rate_limit(auth_user, &client_ip, &state, EndpointKind::Consent)
+            .await
+        {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
 
-    // Rate-limit check.
-    let ip_str = match &client_ip {
-        Some(Extension(ClientIp(ip))) => ip.to_string(),
-        None => "unknown".to_string(),
-    };
-    let limiter = OAuthRateLimiter::new(RateLimitStore::new(state.db().clone()));
-    if let Some(r) = check_rate_limit(EndpointKind::Consent, &limiter, &ip_str).await {
-        return r;
-    }
-
-    // Pre-flight ownership check before consuming.
     let preflight = match oauth_authorization_request::Entity::find_by_id(request_id)
         .one(state.db())
         .await
@@ -267,7 +234,6 @@ pub async fn approve_consent(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Consume the authorization request atomically.
     let ar_svc =
         OAuthAuthorizationRequestService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
     let row = match ar_svc.consume(request_id).await {
@@ -289,7 +255,6 @@ pub async fn approve_consent(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Look up the client.
     let client_svc = OAuthClientService::new(
         state.db().clone(),
         Arc::clone(&state.oauth.clock),
@@ -306,7 +271,6 @@ pub async fn approve_consent(
         }
     };
 
-    // Typed-confirmation check for unverified clients.
     if client.trusted_at.is_none() {
         let expected_confirmation = loopback_or_host(&row.redirect_uri);
         let provided = body
@@ -322,20 +286,18 @@ pub async fn approve_consent(
         }
     }
 
-    // Grant (or refresh) consent.
     let consent_svc = OAuthConsentService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
-    let _consent_id = match consent_svc
+    match consent_svc
         .grant(row.user_id, &row.client_id, &row.scope, None)
         .await
     {
-        Ok(id) => id,
+        Ok(_) => {}
         Err(e) => {
             tracing::error!(error = %e, "failed to grant consent");
             return oauth_500();
         }
     };
 
-    // Mint the authorization code.
     let code_svc =
         OAuthAuthorizationCodeService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
     let code = match code_svc
@@ -358,7 +320,6 @@ pub async fn approve_consent(
         }
     };
 
-    // Emit OAUTH_CONSENT_GRANT audit entry.
     emit_consent_audit(
         &state,
         uptrakit_audit_log::AuditActionType::OAUTH_CONSENT_GRANT,
@@ -367,7 +328,6 @@ pub async fn approve_consent(
         &row.client_id,
     );
 
-    // Build the redirect URL with the authorization code.
     let sep = if row.redirect_uri.contains('?') {
         '&'
     } else {
@@ -414,23 +374,14 @@ pub async fn deny_consent(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Require authentication.
-    let auth_user = match auth_user {
-        Some(Extension(u)) => u,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
+    let (auth_user, _ip_str) =
+        match require_auth_and_rate_limit(auth_user, &client_ip, &state, EndpointKind::Consent)
+            .await
+        {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
 
-    // Rate-limit check.
-    let ip_str = match &client_ip {
-        Some(Extension(ClientIp(ip))) => ip.to_string(),
-        None => "unknown".to_string(),
-    };
-    let limiter = OAuthRateLimiter::new(RateLimitStore::new(state.db().clone()));
-    if let Some(r) = check_rate_limit(EndpointKind::Consent, &limiter, &ip_str).await {
-        return r;
-    }
-
-    // Consume the authorization request atomically (may already be expired/consumed).
     let ar_svc =
         OAuthAuthorizationRequestService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
     let row = match ar_svc.consume(request_id).await {
@@ -448,12 +399,10 @@ pub async fn deny_consent(
         }
     };
 
-    // Ownership check.
     if row.user_id != auth_user.user_id {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Emit OAUTH_CONSENT_DENY audit entry.
     emit_consent_audit(
         &state,
         uptrakit_audit_log::AuditActionType::OAUTH_CONSENT_DENY,
@@ -462,7 +411,6 @@ pub async fn deny_consent(
         &row.client_id,
     );
 
-    // Redirect with access_denied error.
     let sep = if row.redirect_uri.contains('?') {
         '&'
     } else {
@@ -848,6 +796,10 @@ mod tests {
         assert!(
             location.contains("code="),
             "redirect must contain authorization code, got: {location}"
+        );
+        assert!(
+            location.contains("state="),
+            "redirect must include state param, got: {location}"
         );
     }
 

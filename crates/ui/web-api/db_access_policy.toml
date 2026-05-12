@@ -115,6 +115,7 @@ forward_interactive_stdin = "ignore"
 device_authorization = "full-state"
 
 [routes."oauth/helpers.rs"]
+require_auth_and_rate_limit = "ignore"
 
 [routes."oauth/authorize.rs"]
 authorize = "full-state"
