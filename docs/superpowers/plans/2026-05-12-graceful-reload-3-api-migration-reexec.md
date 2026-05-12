@@ -646,19 +646,41 @@ use listenfd::ListenFd;
 use rootcause::Report;
 use tokio::net::TcpListener;
 
+/// Ordered slot enum for inherited sockets. Adding a new listener (metrics, gRPC admin,
+/// liveness probe, …) **requires** appending to this enum AND updating `INHERITED_SLOT_COUNT`
+/// AND the parent's pre-`exec()` FD-clearing logic in lockstep. Positional `take_tcp_listener(N)`
+/// alone is too easy to get wrong silently — a future PR that inserts a slot in the middle
+/// would swap PKI ↔ metrics and the test suite would not catch it.
+#[repr(usize)]
+#[non_exhaustive]
+pub enum ListenerSlot {
+    Https = 0,
+    Pki = 1,
+}
+
+pub const INHERITED_SLOT_COUNT: usize = 2;
+
+/// Compile-time sanity: if a contributor adds a variant to `ListenerSlot` without bumping the
+/// count, this assertion fails at build time. (Variant count check is best-effort — the real
+/// guarantee comes from the explicit `#[non_exhaustive]` discipline + ADR amendment.)
+const _: () = assert!(
+    INHERITED_SLOT_COUNT == 2,
+    "ListenerSlot count out of sync with INHERITED_SLOT_COUNT; update both together"
+);
+
 pub fn take_inherited_listeners() -> Result<Option<InheritedSockets>, Report> {
     let mut lf = ListenFd::from_env();
     if lf.len() == 0 {
         return Ok(None);
     }
-    let https = lf
-        .take_tcp_listener(0)
-        .map_err(|e| rootcause::report!("take_tcp_listener(0) failed: {e}"))?
-        .ok_or_else(|| rootcause::report!("LISTEN_FDS=>=1 but slot 0 empty"))?;
-    let pki = lf
-        .take_tcp_listener(1)
-        .map_err(|e| rootcause::report!("take_tcp_listener(1) failed: {e}"))?
-        .ok_or_else(|| rootcause::report!("LISTEN_FDS=>=2 but slot 1 empty"))?;
+    if lf.len() != INHERITED_SLOT_COUNT {
+        return Err(rootcause::report!(
+            "LISTEN_FDS={} but binary expects {INHERITED_SLOT_COUNT}",
+            lf.len()
+        ));
+    }
+    let https = take_one(&mut lf, ListenerSlot::Https)?;
+    let pki = take_one(&mut lf, ListenerSlot::Pki)?;
     https.set_nonblocking(true).ok();
     pki.set_nonblocking(true).ok();
     Ok(Some(InheritedSockets {
@@ -667,11 +689,31 @@ pub fn take_inherited_listeners() -> Result<Option<InheritedSockets>, Report> {
     }))
 }
 
+fn take_one(lf: &mut ListenFd, slot: ListenerSlot) -> Result<std::net::TcpListener, Report> {
+    let idx = slot as usize;
+    lf.take_tcp_listener(idx)
+        .map_err(|e| rootcause::report!("take_tcp_listener({idx}) failed: {e}"))?
+        .ok_or_else(|| rootcause::report!("LISTEN_FDS slot {idx} ({:?}) empty", slot_name(slot)))
+}
+
+fn slot_name(slot: ListenerSlot) -> &'static str {
+    match slot {
+        ListenerSlot::Https => "Https",
+        ListenerSlot::Pki => "Pki",
+    }
+}
+
+#[non_exhaustive]
 pub struct InheritedSockets {
     pub https: TcpListener,
     pub pki: TcpListener,
 }
 ```
+
+The parent's pre-`exec()` `FD_CLOEXEC` clearing loop (Task 13) iterates over the listeners in the same
+`ListenerSlot` enum order. Adding a future listener is a three-touch change: enum variant + `INHERITED_SLOT_COUNT`
+bump + parent loop. The compile-time assert plus `lf.len() != INHERITED_SLOT_COUNT` runtime guard catches
+desyncs in either direction.
 
 `startup` checks for inherited sockets and uses them in place of fresh `bind()`.
 

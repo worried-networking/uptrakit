@@ -101,10 +101,11 @@ Tasks in this plan exercise the following Binding Rules and Tooling Constraints 
   `TomlConfigLoader::validate_only` and exit 0/1.
 - `crates/core/controller-standalone/src/main.rs` — same `--config` / `--check-config` wiring.
 - `crates/core/controller-runtime/src/startup/mod.rs` — load TOML at boot, construct per-section
-  `watch::Sender`/`Receiver` pairs, build `ReloadCoordinator` with empty Reloadable list, spawn `ConfigReconciler`,
-  spawn SIGHUP + file-watch tasks. Wire receivers into `AppStateBuilder`.
-- `crates/core/controller-runtime/src/tasks.rs` — delete `spawn_settings_reload` + `SETTINGS_POLL_INTERVAL` (Plan 1
-  removes the function; consumers move to the per-section receivers in Plan 2).
+  `watch::Sender`/`Receiver` pairs seeded with the TOML values, build `ReloadCoordinator` with empty Reloadable
+  list, spawn `ConfigReconciler`, spawn SIGHUP + file-watch tasks. Wire receivers into `AppStateBuilder`.
+- `crates/core/controller-runtime/src/tasks.rs` — **untouched in Plan 1.** `spawn_settings_reload` +
+  `SETTINGS_POLL_INTERVAL` deletion ships in Plan 2 alongside the consumer migration to per-section receivers,
+  so Plan 1's PR cannot break a running controller mid-rollout.
 - `crates/ui/web-api/src/app_state.rs` — add per-section `watch::Receiver<Arc<…>>` fields; add
   `coordinator_handle: ReloadCoordinatorHandle` for state introspection (used by Plan 3 endpoint).
 
@@ -2093,12 +2094,14 @@ Modify `crates/shared/config-reload/src/coordinator/mod.rs`:
 
 ```rust
 impl ReloadCoordinatorHandle {
-    pub async fn clear_degraded(&self) -> Result<(), tokio::sync::mpsc::error::SendError<ReloadRequest>> {
-        // The handle has no direct access to reloadables; for now this is a stub.
-        // Plan 3 turns the handle's tx into a control channel carrying ControlMessage::ClearDegraded
-        // which the run loop dispatches into ReloadCoordinator::clear_degraded.
-        // For the foundation we only expose the state; clear-degraded ships in Plan 3.
-        Ok(())
+    /// Stub until Plan 3 wires the control channel. Returns `Err` so any premature integration
+    /// fails loudly rather than silently no-op'ing — Plan 3 replaces this with a real
+    /// `ControlMessage::ClearDegraded` dispatch through the coordinator's run loop.
+    pub async fn clear_degraded(&self) -> Result<(), rootcause::Report> {
+        Err(rootcause::report!(
+            "clear_degraded is not yet wired (Plan 3 follow-up); coordinator stuck in Degraded \
+             must be cleared via restart until that lands"
+        ))
     }
 }
 ```
@@ -2445,7 +2448,96 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 16: Wire foundation into `controller-runtime/startup`
+## Task 16: Per-section watch channels in `RuntimeConfigChannels`
+
+**Files:**
+
+- Create: `crates/shared/config-reload/src/channels.rs`
+- Modify: `crates/shared/config-reload/src/lib.rs`
+
+The coordinator's Reloadables (Plan 2) own their own `watch::Sender` for the slice of `RuntimeConfig` they
+control. But the receivers must reach consumers (handlers, background tasks, embedded services) that exist
+**before** Plan 2 lands. Solution: at boot, `RuntimeConfigChannels` constructs one `watch::Sender<Arc<…>>` per
+Config Section seeded with the loaded TOML values; receivers fan out into `AppState`. When Plan 2 lands, each
+Reloadable replaces the boot-time sender with its own (or, simpler, the Reloadable adopts the existing sender via
+a shared `Arc<watch::Sender<…>>` design — but holding a `Sender` per Reloadable is the simpler ownership story
+and what Plan 2 already specifies).
+
+For Plan 1, the channels are **read-only after boot** because no Reloadables exist yet to publish updates. The
+`AppState` consumers see only the boot value through `.borrow().clone()`. Plan 2 wires updates.
+
+- [ ] **Step 1: Define the channel bundle**
+
+```rust
+// crates/shared/config-reload/src/channels.rs
+use std::sync::Arc;
+use tokio::sync::watch;
+
+use crate::config::{
+    AuditConfig, DbConfig, EmbeddedServicesConfig, LogConfig, MasterKeyConfig, NatsConfig,
+    NetworkConfig, RuntimeConfig, TlsConfig, ZeroconfConfig,
+};
+
+/// Per-section `watch::Sender` bundle. The coordinator's Reloadables (Plan 2) borrow these
+/// senders for live updates; the matching receivers fan out into `AppState`.
+pub struct RuntimeConfigChannels {
+    pub db: watch::Sender<Arc<DbConfig>>,
+    pub network: watch::Sender<Arc<NetworkConfig>>,
+    pub nats: watch::Sender<Arc<NatsConfig>>,
+    pub tls: watch::Sender<Arc<TlsConfig>>,
+    pub audit: watch::Sender<Arc<AuditConfig>>,
+    pub log: watch::Sender<Arc<LogConfig>>,
+    pub master_key: watch::Sender<Arc<MasterKeyConfig>>,
+    pub embedded_services: watch::Sender<Arc<EmbeddedServicesConfig>>,
+    pub zeroconf: watch::Sender<Arc<ZeroconfConfig>>,
+}
+
+pub struct RuntimeConfigReceivers {
+    pub db: watch::Receiver<Arc<DbConfig>>,
+    pub network: watch::Receiver<Arc<NetworkConfig>>,
+    pub nats: watch::Receiver<Arc<NatsConfig>>,
+    pub tls: watch::Receiver<Arc<TlsConfig>>,
+    pub audit: watch::Receiver<Arc<AuditConfig>>,
+    pub log: watch::Receiver<Arc<LogConfig>>,
+    pub master_key: watch::Receiver<Arc<MasterKeyConfig>>,
+    pub embedded_services: watch::Receiver<Arc<EmbeddedServicesConfig>>,
+    pub zeroconf: watch::Receiver<Arc<ZeroconfConfig>>,
+}
+
+impl RuntimeConfigChannels {
+    /// Build the channel set from the boot TOML. Each channel is seeded with the loaded value.
+    pub fn from_runtime(runtime: &RuntimeConfig) -> (Self, RuntimeConfigReceivers) {
+        let (db_tx, db_rx) = watch::channel(Arc::new(runtime.db.clone()));
+        let (net_tx, net_rx) = watch::channel(Arc::new(runtime.network.clone()));
+        let (nats_tx, nats_rx) = watch::channel(Arc::new(runtime.nats.clone()));
+        let (tls_tx, tls_rx) = watch::channel(Arc::new(runtime.tls.clone()));
+        let (audit_tx, audit_rx) = watch::channel(Arc::new(runtime.audit.clone()));
+        let (log_tx, log_rx) = watch::channel(Arc::new(runtime.log.clone()));
+        let (mk_tx, mk_rx) = watch::channel(Arc::new(runtime.master_key.clone()));
+        let (emb_tx, emb_rx) = watch::channel(Arc::new(runtime.embedded_services.clone()));
+        let (zc_tx, zc_rx) = watch::channel(Arc::new(runtime.zeroconf.clone()));
+
+        let senders = Self {
+            db: db_tx, network: net_tx, nats: nats_tx, tls: tls_tx, audit: audit_tx,
+            log: log_tx, master_key: mk_tx, embedded_services: emb_tx, zeroconf: zc_tx,
+        };
+        let receivers = RuntimeConfigReceivers {
+            db: db_rx, network: net_rx, nats: nats_rx, tls: tls_rx, audit: audit_rx,
+            log: log_rx, master_key: mk_rx, embedded_services: emb_rx, zeroconf: zc_rx,
+        };
+        (senders, receivers)
+    }
+}
+```
+
+- [ ] **Step 2:** Re-export from `lib.rs`: `pub use channels::{RuntimeConfigChannels, RuntimeConfigReceivers};`
+- [ ] **Step 3: Unit test** in `tests/coordinator.rs` confirms that an initial receiver `.borrow()` returns the
+      seeded value.
+- [ ] **Step 4: Commit** — `feat(config-reload): RuntimeConfigChannels boot-seeded watch fan-out`
+
+---
+
+## Task 17: Wire foundation into `controller-runtime/startup`
 
 **Files:**
 
@@ -2487,6 +2579,9 @@ pub async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, rootcause
     for w in &loaded.warnings {
         tracing::warn!("config: {w}");
     }
+    // Seed per-section watch channels from the boot TOML. Receivers fan into AppState; senders
+    // stay with the coordinator until Plan 2's Reloadables claim them.
+    let (channels, receivers) = RuntimeConfigChannels::from_runtime(&loaded.config);
     // Audit channel — Plan 3 wires this to AuditEmitter; placeholder unbounded here.
     let (audit_tx, _audit_rx) = tokio::sync::mpsc::unbounded_channel();
     let settings_version_cache = uptrakit_config_reload::reconciler::SettingsVersionCache::new();
@@ -2505,17 +2600,23 @@ pub async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, rootcause
         runtime: loaded.config,
         coordinator_handle: handle,
         settings_version_cache,
+        channels,
+        receivers,
     })
 }
 ```
 
-`BootedConfig` carries the cache alongside the handle:
+`BootedConfig` carries the cache + channel set alongside the handle:
 
 ```rust
 pub struct BootedConfig {
     pub runtime: RuntimeConfig,
     pub coordinator_handle: ReloadCoordinatorHandle,
     pub settings_version_cache: SettingsVersionCache,
+    /// Senders the coordinator hands off to Plan 2 Reloadables. Plan 1 keeps the senders alive
+    /// (one per section) so receivers don't see channel-closed.
+    pub channels: RuntimeConfigChannels,
+    pub receivers: RuntimeConfigReceivers,
 }
 ```
 
@@ -2524,16 +2625,28 @@ that clones the inner `tx`. The raw field stays `pub(crate)` in the config-reloa
 
 - [ ] **Step 3: Wire into `AppState`**
 
-In `crates/ui/web-api/src/app_state.rs`, add two fields:
+In `crates/ui/web-api/src/app_state.rs`, add the coordinator handle, the version cache, and one receiver per
+Config Section:
 
 ```rust
 pub coordinator_handle: ReloadCoordinatorHandle,
 pub settings_version_cache: uptrakit_config_reload::reconciler::SettingsVersionCache,
+// Per-section receivers — handlers + background tasks read via `.borrow().clone()` per access.
+pub db_config_rx: watch::Receiver<Arc<DbConfig>>,
+pub network_config_rx: watch::Receiver<Arc<NetworkConfig>>,
+pub nats_config_rx: watch::Receiver<Arc<NatsConfig>>,
+pub tls_config_rx: watch::Receiver<Arc<TlsConfig>>,
+pub audit_config_rx: watch::Receiver<Arc<AuditConfig>>,
+pub log_config_rx: watch::Receiver<Arc<LogConfig>>,
+pub master_key_config_rx: watch::Receiver<Arc<MasterKeyConfig>>,
+pub embedded_services_config_rx: watch::Receiver<Arc<EmbeddedServicesConfig>>,
+pub zeroconf_config_rx: watch::Receiver<Arc<ZeroconfConfig>>,
 ```
 
-`settings_version_cache` is required by Plan 3's `IfMatch<SettingsVersion>` extractor (spec §14.3). Land it in the
-foundation so Plan 3 has somewhere to read from on day one. Add the corresponding setters on `AppStateBuilder`.
-Set both during boot from `BootedConfig`.
+`settings_version_cache` is required by Plan 3's `IfMatch<SettingsVersion>` extractor (spec §14.3). The
+section receivers exist so Plan 2 has somewhere to plug each Reloadable's publish-side without touching
+`AppState` mid-Plan-2. Add the corresponding setters on `AppStateBuilder`. Set everything during boot from
+`BootedConfig`.
 
 - [ ] **Step 4: Compile + workspace check**
 
@@ -2555,7 +2668,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 17: CLI `--config` + `--check-config` wiring
+## Task 18: CLI `--config` + `--check-config` wiring
 
 **Files:**
 
@@ -2666,7 +2779,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 18: Quality gates + final verification
+## Task 19: Quality gates + final verification
 
 - [ ] **Step 1: Workspace gates**
 

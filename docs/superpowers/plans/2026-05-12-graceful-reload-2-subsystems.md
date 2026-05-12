@@ -809,12 +809,14 @@ Capture both snake_case (Rust API), kebab-case (CLI flag), camelCase, and the PO
 
 ---
 
-## Task 13: `AppState` refactor — `watch::Receiver` everywhere
+## Task 13: `AppState` refactor + long-lived task migration
 
 **Files:**
 
 - Modify: `crates/ui/web-api/src/app_state.rs`
-- Modify: every consumer of `state.audit_log_filter`, `state.audit_log_dispatcher`, `state.audit_emitter` etc.
+- Modify: every consumer of `state.audit_log_filter`, `state.audit_log_dispatcher`, `state.audit_emitter`,
+  `state.db`
+- Modify: every `tokio::spawn` site that captures `DatabaseConnection` / audit handles at construction
 
 For each previously direct-owned field that the new design reloads:
 
@@ -822,12 +824,48 @@ For each previously direct-owned field that the new design reloads:
 - Update the builder.
 - At every call site, change `state.field` to `state.field.borrow().clone()` (`.clone()` is cheap on `Arc`).
 
-- [ ] **Step 1: List affected fields** — at minimum: `audit_log_filter`, `audit_log_dispatcher`, `audit_emitter`,
-      `service_connections` (no — already shared), `notification` (mostly via plugin registry — covered separately).
-      Walk `AppState` and pick the ones with reloadable config touch points.
-- [ ] **Step 2: Mechanical refactor**
-- [ ] **Step 3: Each PR commit covers one field group** so reviewers can follow the call-site diff
-- [ ] **Step 4: Run full quality gate suite after every commit**
+**Affected fields** (exhaustive — anything that flows through a Reloadable):
+
+- `db` — the `DatabaseConnection` field becomes `watch::Receiver<Arc<DbConnHandle>>` so the DB pool can swap
+  without leaking the old pool. **This is non-negotiable**: the prior plan revision implied "natural Drop drain"
+  but the existing codebase holds `DatabaseConnection` clones inside `move` closures of long-lived spawn sites
+  (CRL manager, audit enricher, denylist cleanup, zeroconf advertiser, embedded-service bridges, ca_reload,
+  pki_http — at least 7 known sites in `crates/core/controller-runtime/src/{lib,tasks}.rs`). Every one of those
+  pins the old pool forever unless converted.
+- `audit_log_filter`, `audit_log_dispatcher`, `audit_emitter` — driven by `AuditDispatcherReloadable` (Task 7).
+- `notification` (only the surfaces that flow through plugin reload — see plugin registry Task 6).
+
+**Long-lived task migration pattern.** Every `tokio::spawn` site that previously captured a fresh
+`DatabaseConnection` clone via `move` must adopt one of:
+
+1. **Re-read pattern** (preferred for tight inner loops): hold a `watch::Receiver<Arc<DbConnHandle>>` in the
+   captured set; call `let db = state.db_rx.borrow().clone()` at the top of every loop iteration. The receiver
+   keeps a weak ref on the latest pool; the old pool drops as soon as no live iteration holds an `Arc`.
+2. **Watch-driven re-spawn pattern** (for tasks that hold connection state across iterations, e.g. long-running
+   `LISTEN/NOTIFY` subscribers): the supervisor task `select!`s on `db_rx.changed()` and on the worker's own
+   handle; on pool change, abort the worker and spawn a fresh one against the new pool.
+
+Document both patterns in `docs/development/coding-standards.md` (Plan 4 Task 12). The cardinal rule: **no
+`DatabaseConnection` clone captured inside a `move` closure outside a per-iteration scope.**
+
+- [ ] **Step 1: grep every spawn site that captures `db`**
+
+  ```bash
+  rg -n 'tokio::spawn.*\bdb\b|tokio::spawn.*db_conn|tokio::spawn.*\.db\.' \
+     crates/core/controller-runtime/src crates/core/controller-standalone/src
+  ```
+
+  Expected output: every site that needs the migration. Cross-reference against the list above; pre-implementation
+  audit should find roughly 7 sites.
+
+- [ ] **Step 2: For each site, choose pattern (1) or (2) and convert.** One commit per logical site or group.
+- [ ] **Step 3: Mechanical refactor of `audit_log_filter`, `audit_log_dispatcher`, `audit_emitter`** to
+      `watch::Receiver<Arc<…>>`. Each PR commit covers one field group so reviewers can follow the call-site
+      diff.
+- [ ] **Step 4: Integration test** — boot controller, trigger a `db.pool_size` reload, assert that the old
+      `Arc<DbConnHandle>` drops within 5 s of the swap (use `Arc::strong_count` or a `tracing` instrumentation
+      counter on `DbConnHandle::drop`).
+- [ ] **Step 5: Run full quality gate suite after every commit**
 
 ---
 
