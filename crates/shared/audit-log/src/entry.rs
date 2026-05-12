@@ -817,6 +817,31 @@ pub trait AuditView {
     }
 }
 
+/// Adapter that borrows an `AuditView` for its target metadata but emits an
+/// empty snapshot (`{}`).
+///
+/// Use as the `before` view for CREATE operations (entity did not exist) or
+/// the `after` view for DELETE operations (entity no longer exists).  The
+/// underlying `V` provides `TARGET_TYPE`, `audit_target_id`, and
+/// `audit_target_display`; the snapshot itself is always `{}`.
+pub struct AbsentView<'a, V: AuditView>(pub &'a V);
+
+impl<V: AuditView> AuditView for AbsentView<'_, V> {
+    const TARGET_TYPE: &'static str = V::TARGET_TYPE;
+
+    fn audit_target_id(&self) -> String {
+        self.0.audit_target_id()
+    }
+
+    fn audit_target_display(&self) -> Option<String> {
+        self.0.audit_target_display()
+    }
+
+    fn audit_view(&self) -> serde_json::Value {
+        serde_json::Value::Object(Default::default())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Test stubs (available to external crates' test suites via `feature = "testing"`)
 // ---------------------------------------------------------------------------
