@@ -16,6 +16,7 @@ journald = ["dep:tracing-journald"]
 
 [dependencies]
 async-trait = { workspace = true }
+parking_lot = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

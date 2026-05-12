@@ -1,5 +1,6 @@
 pub mod action_type;
 pub mod backend;
+pub mod commit_hook;
 pub mod dispatcher;
 pub mod emitter;
 pub mod enricher;
@@ -8,6 +9,7 @@ pub mod error;
 pub mod filter;
 pub mod runtime_emitter;
 
+pub use commit_hook::AuditCommitHook;
 pub use uptrakit_audit_log_derive::AuditView;
 
 pub use action_type::{AuditActionType, RegisteredAuditAction};
