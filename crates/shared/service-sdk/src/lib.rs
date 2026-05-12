@@ -53,6 +53,7 @@ pub mod backoff;
 pub mod build_info;
 pub mod ca;
 pub mod cert_handler;
+pub mod cert_resolver;
 pub mod cli;
 pub mod config_proxy;
 pub mod connection;
