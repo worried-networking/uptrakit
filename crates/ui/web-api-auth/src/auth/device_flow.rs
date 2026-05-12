@@ -101,6 +101,10 @@ impl DeviceFlowStore {
     }
 
     /// Create a new device flow session. Returns `(device_code, user_code)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeviceFlowError::Database`] on a DB insert error.
     pub async fn create(
         &self,
         client_name: Option<String>,
@@ -203,7 +207,10 @@ impl DeviceFlowStore {
 
                 // Mint the API token inside the same txn so the consume-delete
                 // and the api_token insert commit atomically.
-                let token = issue_access_token(&txn, user_id, &token_name).await?;
+                let (token_id, token) = issue_access_token(&txn, user_id, &token_name).await?;
+                // Seam 2: scope enforcement. Today a no-op; future migration
+                // maps the scope string to a Permission subset on the token.
+                apply_scope_to_token(token_id, flow.scope.as_deref());
                 txn.commit().await.context_to()?;
                 Ok(PollOutcome::Authorized { token, token_name })
             }
@@ -330,6 +337,11 @@ impl DeviceFlowStore {
     }
 
     /// Look up the client name for a device code.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeviceFlowError::NotFound`] if no flow matches the device code,
+    /// or [`DeviceFlowError::Database`] on a DB error.
     pub async fn get_client_name(&self, device_code: &str) -> Result<Option<String>> {
         let hash = hash_token(device_code);
         let flow = PendingDeviceFlow::find()
@@ -343,14 +355,29 @@ impl DeviceFlowStore {
     }
 
     /// Approve a device flow by user code, setting the authorized user.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeviceFlowError::NotFound`] if the flow is missing or expired,
+    /// [`DeviceFlowError::AlreadyAuthorized`] if it was already approved or the
+    /// atomic update found 0 rows, or [`DeviceFlowError::Database`] on a DB error.
     pub async fn approve(&self, user_code: &str, user_id: Uuid) -> Result<()> {
         let normalized = user_code.replace('-', "").to_uppercase();
         let now = OffsetDateTime::now_utc();
 
+        let txn = self
+            .db
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await
+            .context_to()?;
+
         // Find the flow by user code
         let flow = PendingDeviceFlow::find()
             .filter(pending_device_flow::Column::UserCode.eq(&normalized))
-            .one(&self.db)
+            .one(&txn)
             .await
             .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
@@ -378,7 +405,7 @@ impl DeviceFlowStore {
             .filter(pending_device_flow::Column::Id.eq(flow.id))
             .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Pending.as_str()))
             .filter(pending_device_flow::Column::ExpiresAt.gt(now))
-            .exec(&self.db)
+            .exec(&txn)
             .await
             .context_to()?;
 
@@ -387,6 +414,7 @@ impl DeviceFlowStore {
             bail!(DeviceFlowError::AlreadyAuthorized);
         }
 
+        txn.commit().await.context_to()?;
         Ok(())
     }
 
@@ -456,6 +484,7 @@ impl DeviceFlowStore {
 ///
 /// Returns [`OAuthErrorCode::InvalidClient`] when `client_id` does not match
 /// the hardcoded [`CLIENT_ID`] constant.
+#[must_use = "discarding this Result silently skips client_id validation"]
 pub fn validate_client_id(client_id: &str) -> std::result::Result<(), OAuthErrorCode> {
     if client_id == CLIENT_ID {
         Ok(())
@@ -497,17 +526,18 @@ pub async fn issue_access_token<C: ConnectionTrait>(
     txn: &C,
     user_id: Uuid,
     token_name: &str,
-) -> Result<SecretString> {
+) -> Result<(Uuid, SecretString)> {
     use sea_orm::Set;
 
     let raw = generate_secure_token()
         .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
     let plaintext = format!("upk_{raw}");
     let token_hash = hash_token(&plaintext);
+    let token_id = generate_uuid();
     let now = OffsetDateTime::now_utc();
 
     let model = api_token::ActiveModel {
-        id: Set(generate_uuid()),
+        id: Set(token_id),
         user_id: Set(user_id),
         name: Set(token_name.to_string()),
         token_hash: Set(token_hash),
@@ -517,7 +547,7 @@ pub async fn issue_access_token<C: ConnectionTrait>(
     };
     model.insert(txn).await.context_to()?;
 
-    Ok(SecretString::new(plaintext))
+    Ok((token_id, SecretString::new(plaintext)))
 }
 
 /// Generate a user-friendly code: 8 uppercase consonants, formatted as XXXX-XXXX.
@@ -664,7 +694,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_device_code_returns_unknown() {
+    async fn unknown_device_code_returns_expired_token() {
         let db = test_db().await;
         let store = DeviceFlowStore::new(db);
         let outcome = store

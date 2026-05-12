@@ -1,7 +1,10 @@
 use http::StatusCode;
-use uptrakit_web_api_types::oauth::{
-    DeviceAuthDenyResponse, DeviceAuthLookupResponse, DeviceAuthorizationResponse,
-    OAuthAuthorizationServerMetadata, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
+use uptrakit_web_api_types::{
+    oauth::{
+        DeviceAuthDenyResponse, DeviceAuthLookupResponse, DeviceAuthorizationResponse,
+        OAuthAuthorizationServerMetadata, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
+    },
+    permissions::Permission,
 };
 
 use crate::test_harness::TestApp;
@@ -460,6 +463,84 @@ async fn lookup_unknown_user_code_returns_not_found() {
         .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// ── additional coverage (plan Task 13 requirements) ─────────────────────────
+
+/// Token endpoint must return `invalid_client` when `client_id` does not match
+/// the hardcoded constant, even for a real pending flow.
+#[tokio::test]
+async fn invalid_client_when_client_id_mismatches() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    let (flow_status, flow): (_, DeviceAuthorizationResponse) = client
+        .post_form(
+            "/api/v1/oauth/device_authorization",
+            &format!("client_id={CLIENT_ID}"),
+        )
+        .send_json()
+        .await;
+    assert_eq!(flow_status, StatusCode::OK);
+
+    let token_body = format!(
+        "grant_type={}&device_code={}&client_id=wrong-client",
+        urlencoded(DEVICE_CODE_GRANT),
+        flow.device_code
+    );
+    let (status, err): (_, OAuthErrorResponse) = client
+        .post_form("/api/v1/oauth/token", &token_body)
+        .send_json()
+        .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err.error, OAuthErrorCode::InvalidClient);
+}
+
+/// `POST /auth/device/deny` must return 403 when authenticated but lacking
+/// `CanViewServices` permission.
+#[tokio::test]
+async fn deny_requires_permission() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    // Mint a token with ViewSettings only (no CanViewServices).
+    let viewer_token = app
+        .jwt
+        .create_access_token(
+            uuid::Uuid::now_v7(),
+            &[Permission::ViewSettings],
+            "password",
+            None,
+        )
+        .expect("mint viewer token");
+
+    let status = client
+        .post_json(
+            "/api/v1/auth/device/deny",
+            &serde_json::json!({ "user_code": "ABCD-EFGH" }),
+        )
+        .bearer(&viewer_token)
+        .send_status()
+        .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// `GET /.well-known/oauth-authorization-server` must return 200 without any
+/// authentication headers.
+#[tokio::test]
+async fn discovery_doc_no_auth_required() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    // Deliberately omit the bearer token.
+    let status = client
+        .get("/.well-known/oauth-authorization-server")
+        .send_status()
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

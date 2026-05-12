@@ -160,7 +160,7 @@ fn emit_poll_audit(state: &AppState, device_code: &str, outcome: &PollOutcome) {
         PollOutcome::SlowDown { bumped_interval } => (
             Outcome::Failed,
             serde_json::json!({
-                "reason_code": "slow_down",
+                "slow_down": true,
                 "bumped_interval": bumped_interval,
             }),
         ),

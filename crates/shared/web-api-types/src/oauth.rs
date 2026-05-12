@@ -158,6 +158,27 @@ pub struct OAuthAuthorizationServerMetadata {
 
 // --- UI-internal: deny + lookup ---------------------------------------
 
+/// Validate that a `user_code` string matches the `XXXX-XXXX` format:
+/// exactly 9 characters, a dash at position 4, uppercase letters elsewhere.
+fn validate_user_code_format(user_code: &str) -> Result<(), ValidationError> {
+    let bytes = user_code.as_bytes();
+    let valid = bytes.len() == 9
+        && bytes.get(4).copied() == Some(b'-')
+        && bytes
+            .get(..4)
+            .is_some_and(|s| s.iter().all(|b| b.is_ascii_uppercase()))
+        && bytes
+            .get(5..)
+            .is_some_and(|s| s.iter().all(|b| b.is_ascii_uppercase()));
+    if !valid {
+        return Err(ValidationError {
+            field: "user_code",
+            message: "user_code must be in XXXX-XXXX format (uppercase letters)".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Request body for `POST /api/v1/auth/device/deny` (UI-internal).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -167,13 +188,7 @@ pub struct DeviceAuthDenyRequest {
 
 impl Validate for DeviceAuthDenyRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.user_code.trim().is_empty() {
-            return Err(ValidationError {
-                field: "user_code",
-                message: "user_code is required".to_string(),
-            });
-        }
-        Ok(())
+        validate_user_code_format(&self.user_code)
     }
 }
 
@@ -193,13 +208,7 @@ pub struct DeviceAuthLookupQuery {
 
 impl Validate for DeviceAuthLookupQuery {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.user_code.trim().is_empty() {
-            return Err(ValidationError {
-                field: "user_code",
-                message: "user_code is required".to_string(),
-            });
-        }
-        Ok(())
+        validate_user_code_format(&self.user_code)
     }
 }
 
