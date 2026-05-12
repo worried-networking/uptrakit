@@ -121,6 +121,10 @@ require_auth_and_rate_limit = "ignore"
 authorize = "full-state"
 
 [routes."oauth/clients_api.rs"]
+list_clients = "full-state"
+manual_register_client = "full-state"
+revoke_client = "full-state"
+trust_client = "full-state"
 
 [routes."oauth/consent.rs"]
 consent_details = "full-state"
