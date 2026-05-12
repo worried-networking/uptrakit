@@ -28,7 +28,10 @@ use uuid::Uuid;
 
 /// Audit snapshot for a tenant-wide discovery allowlist entry.
 #[derive(uptrakit_audit_log::AuditView)]
-#[audit(target_type = "discovery_allowlist_entry")]
+#[audit(
+    target_type = "discovery_allowlist_entry",
+    display_field = "plugin_type"
+)]
 pub struct TenantAllowlistView {
     id: Uuid,
     plugin_type: String,
@@ -54,7 +57,10 @@ impl From<&TenantDiscoveryAllowlistEntry> for TenantAllowlistView {
 
 /// Audit snapshot for a host-specific discovery allowlist entry.
 #[derive(uptrakit_audit_log::AuditView)]
-#[audit(target_type = "discovery_allowlist_entry")]
+#[audit(
+    target_type = "discovery_allowlist_entry",
+    display_field = "plugin_type"
+)]
 pub struct HostAllowlistView {
     id: Uuid,
     host_id: Uuid,
