@@ -2,6 +2,45 @@ use std::{fmt, str::FromStr};
 
 use crate::error::{AuditLogError, Result};
 
+/// Classifies a `RegisteredAuditAction` as either an entity-state mutation
+/// (snapshots required) or a discrete event (snapshots forbidden).
+///
+/// Intentionally closed: adding a third kind is a deliberate contract change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AuditActionKind {
+    Stateful,
+    Event,
+}
+
+impl AuditActionKind {
+    /// Returns the canonical lowercase string representation of this kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stateful => "stateful",
+            Self::Event => "event",
+        }
+    }
+}
+
+impl fmt::Display for AuditActionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for AuditActionKind {
+    type Err = ();
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value {
+            "stateful" => Ok(Self::Stateful),
+            "event" => Ok(Self::Event),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RegisteredAuditAction(&'static str);
 
@@ -505,7 +544,7 @@ mod tests {
         reason = "test assertions — assert!(result.is_ok/is_err()) is idiomatic in tests"
     )]
 
-    use super::AuditActionType;
+    use super::{AuditActionKind, AuditActionType};
     use std::str::FromStr;
 
     #[test]
@@ -669,5 +708,20 @@ mod tests {
     fn audit_action_type_from_str_validates_registry() {
         assert!(AuditActionType::from_str("auth.login").is_ok());
         assert!(AuditActionType::from_str("auth.login.failed").is_err());
+    }
+
+    #[test]
+    fn audit_action_kind_as_str_round_trip() {
+        assert_eq!(AuditActionKind::Stateful.as_str(), "stateful");
+        assert_eq!(AuditActionKind::Event.as_str(), "event");
+        assert_eq!(
+            AuditActionKind::from_str("stateful"),
+            Ok(AuditActionKind::Stateful)
+        );
+        assert_eq!(
+            AuditActionKind::from_str("event"),
+            Ok(AuditActionKind::Event)
+        );
+        assert!(AuditActionKind::from_str("other").is_err());
     }
 }
