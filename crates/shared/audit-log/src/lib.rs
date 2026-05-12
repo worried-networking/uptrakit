@@ -17,7 +17,7 @@ pub use backend::{AuditLogBackend, MultiplexBackend, NoopBackend};
 pub use dispatcher::AuditLogDispatcher;
 pub use emitter::AuditEmitter;
 pub use enricher::ActorEnricher;
-pub use entry::{AuditActorType, AuditEntry, AuditEntryBuilder, AuditOutcome};
+pub use entry::{AuditActorType, AuditEntry, AuditEntryBuilder, AuditOutcome, AuditView};
 pub use error::{AuditLogError, Result};
 pub use filter::{AuditFilter, FilterMode};
 pub use runtime_emitter::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
