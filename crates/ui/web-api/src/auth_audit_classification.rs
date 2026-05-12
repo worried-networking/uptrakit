@@ -42,6 +42,7 @@ pub(crate) trait DeviceFlowErrorAuditExt {
     fn poll_status_classification(&self) -> (AuditOutcome, &'static str);
     fn poll_consume_classification(&self) -> (AuditOutcome, &'static str);
     fn approval_classification(&self) -> (RegisteredAuditAction, AuditOutcome, &'static str);
+    fn denial_classification(&self) -> (AuditOutcome, &'static str);
 }
 
 impl DeviceFlowErrorAuditExt for DeviceFlowError {
@@ -89,6 +90,18 @@ impl DeviceFlowErrorAuditExt for DeviceFlowError {
                 AuditOutcome::Failed,
                 "device_flow_database_error",
             ),
+        }
+    }
+
+    fn denial_classification(&self) -> (AuditOutcome, &'static str) {
+        match self {
+            DeviceFlowError::NotFound => (AuditOutcome::Denied, "device_flow_not_found"),
+            DeviceFlowError::AlreadyAuthorized => {
+                (AuditOutcome::Denied, "device_flow_already_authorized")
+            }
+            DeviceFlowError::TokenGeneration(_) | DeviceFlowError::Database(_) => {
+                (AuditOutcome::Failed, "device_flow_deny_failed")
+            }
         }
     }
 }
