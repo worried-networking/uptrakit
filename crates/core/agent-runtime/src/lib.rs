@@ -62,6 +62,7 @@ fn runtime_audit_to_service_message(event: RuntimeAuditEvent) -> ServiceMessage 
         outcome: audit_outcome_for_level(event.level).to_string(),
         details_json,
         request_id: None,
+        correlation_id: None,
     })
 }
 

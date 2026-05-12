@@ -2178,6 +2178,7 @@ async fn emit_surface_mutation_audit(
                 .to_string(),
         ),
         request_id: Some(request_id.to_string()),
+        correlation_id: None,
     };
 
     if bg_tx
