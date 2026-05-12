@@ -237,6 +237,11 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     let base_url: &str = &base_url_owned;
     let pki_addr: Option<&str> = pki_addr_owned.as_deref();
 
+    // Remove any orphaned .tmp files left by a prior crashed write.
+    if let Err(e) = crate::identity::sweep_tmp_siblings(app_dirs.state_dir()) {
+        tracing::warn!(error = ?e, "tmp sweep failed; continuing");
+    }
+
     // Create and load identity state.
     let mut identity = ServiceIdentityState::new(app_dirs.config_dir(), app_dirs.state_dir());
     identity.load().await?;
