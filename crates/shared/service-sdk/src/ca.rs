@@ -520,10 +520,8 @@ mod tests {
 
         // save_ca_cert delegates to dirs::write_secure_file_str which calls
         // write_with_mode: write to `.ca.pem.tmp` then rename atomically.
-        let mut identity = crate::identity::ServiceIdentityState::new(
-            config_dir.path(),
-            state_dir.path(),
-        );
+        let mut identity =
+            crate::identity::ServiceIdentityState::new(config_dir.path(), state_dir.path());
         identity.save_ca_cert("NEW_CA").await.expect("save ok");
 
         let content = tokio::fs::read_to_string(&ca_path)
