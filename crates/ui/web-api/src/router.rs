@@ -874,6 +874,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/.well-known/oauth-authorization-server",
             get(crate::routes::oauth::metadata::get_as_metadata),
         )
+        // OAuth 2.1 §12.1 authorization endpoint — outside /api/v1 per MCP spec.
+        .route(
+            "/oauth/authorize",
+            get(crate::routes::oauth::authorize::authorize),
+        )
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",
             axum::routing::post(crate::routes::notifications::notification_callback),
