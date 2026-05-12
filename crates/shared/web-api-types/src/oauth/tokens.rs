@@ -112,6 +112,43 @@ pub struct McpAccessTokenClaims {
     pub tenant_id: String,
 }
 
+impl McpAccessTokenClaims {
+    /// Construct a claims envelope.
+    ///
+    /// Required because `#[non_exhaustive]` prevents struct-literal construction
+    /// outside this crate.
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all JWT spec claims are required"
+    )]
+    pub fn new(
+        iss: String,
+        sub: String,
+        aud: String,
+        client_id: String,
+        scope: String,
+        jti: String,
+        iat: i64,
+        nbf: i64,
+        exp: i64,
+        tenant_id: String,
+    ) -> Self {
+        Self {
+            iss,
+            sub,
+            aud,
+            client_id,
+            scope,
+            jti,
+            iat,
+            nbf,
+            exp,
+            tenant_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

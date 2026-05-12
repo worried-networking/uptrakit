@@ -71,8 +71,12 @@ impl OAuthState {
         Self {
             enabled: false,
             canonical: disabled_placeholder(),
-            signer: Arc::new(McpOAuthJwtSigner),
-            verifier: Arc::new(McpOAuthJwtVerifier),
+            signer: Arc::new(McpOAuthJwtSigner::new(b"disabled-placeholder-not-used")),
+            verifier: Arc::new(McpOAuthJwtVerifier::new(
+                b"disabled-placeholder-not-used",
+                "https://disabled.invalid".into(),
+                vec![],
+            )),
             clock: Arc::new(OffsetDateTime::now_utc),
             instance_id: uuid::Uuid::nil(),
             dcr_enabled: false,
