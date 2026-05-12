@@ -66,7 +66,7 @@ test.describe('Public entry shell', () => {
 	});
 
 	test('device uses semantic callouts in the shared shell', async ({ page }) => {
-		await page.goto('/device?code=AB12-1BAD');
+		await page.goto('/device?user_code=AB12-1BAD');
 
 		await expect(page.locator('[data-ui="public-entry-shell"]')).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Authorize Device' })).toBeVisible();
@@ -82,5 +82,99 @@ test.describe('Public entry shell', () => {
 		await expect(page.getByText('The requested page could not be loaded.')).toBeVisible();
 		await expect(page.locator('[data-ui="callout"][data-tone="danger"]')).toContainText('Error 404');
 		await expect(page.getByRole('button', { name: 'Go to Home' })).toBeVisible();
+	});
+
+	test('device shows client name when lookup succeeds', async ({ page }) => {
+		await page.route('**/api/v1/auth/refresh', (route) =>
+			route.fulfill({
+				status: 200,
+				json: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' }
+			})
+		);
+		await page.route('**/api/v1/auth/me', (route) =>
+			route.fulfill({
+				status: 200,
+				json: {
+					id: '00000000-0000-0000-0000-000000000001',
+					email: 'user@example.com',
+					first_name: 'Test',
+					last_name: 'User',
+					permissions: []
+				}
+			})
+		);
+		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+		await page.route('**/api/v1/auth/device/lookup*', (route) =>
+			route.fulfill({
+				json: { client_name: 'cli-laptop-2026-05-12', expires_at: '2026-05-12T12:00:00Z' }
+			})
+		);
+
+		await page.goto('/device?user_code=BCDF-GHJK');
+		await expect(page.locator('[data-ui="callout"]')).toContainText('cli-laptop-2026-05-12');
+	});
+
+	test('device approve succeeds', async ({ page }) => {
+		await page.route('**/api/v1/auth/refresh', (route) =>
+			route.fulfill({
+				status: 200,
+				json: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' }
+			})
+		);
+		await page.route('**/api/v1/auth/me', (route) =>
+			route.fulfill({
+				status: 200,
+				json: {
+					id: '00000000-0000-0000-0000-000000000001',
+					email: 'user@example.com',
+					first_name: 'Test',
+					last_name: 'User',
+					permissions: []
+				}
+			})
+		);
+		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+		await page.route('**/api/v1/auth/device/lookup*', (route) =>
+			route.fulfill({
+				json: { client_name: null, expires_at: '2026-05-12T12:00:00Z' }
+			})
+		);
+		await page.route('**/api/v1/auth/device/approve', (route) => route.fulfill({ json: { message: 'approved' } }));
+
+		await page.goto('/device?user_code=BCDF-GHJK');
+		await page.getByRole('button', { name: 'Approve' }).click();
+		await expect(page.locator('[data-ui="callout"][data-tone="success"]')).toContainText('CLI session approved');
+	});
+
+	test('device deny succeeds', async ({ page }) => {
+		await page.route('**/api/v1/auth/refresh', (route) =>
+			route.fulfill({
+				status: 200,
+				json: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' }
+			})
+		);
+		await page.route('**/api/v1/auth/me', (route) =>
+			route.fulfill({
+				status: 200,
+				json: {
+					id: '00000000-0000-0000-0000-000000000001',
+					email: 'user@example.com',
+					first_name: 'Test',
+					last_name: 'User',
+					permissions: []
+				}
+			})
+		);
+		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+		await page.route('**/api/v1/auth/device/lookup*', (route) =>
+			route.fulfill({
+				json: { client_name: null, expires_at: '2026-05-12T12:00:00Z' }
+			})
+		);
+		await page.route('**/api/v1/auth/device/deny', (route) => route.fulfill({ json: { message: 'denied' } }));
+
+		await page.goto('/device?user_code=BCDF-GHJK');
+		await page.getByRole('button', { name: 'Deny' }).click();
+		await expect(page.locator('[data-ui="callout"][data-tone="warning"]')).toContainText('CLI authorization denied');
 	});
 });
