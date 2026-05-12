@@ -23,14 +23,14 @@ header selection on software list).
 
 ## Migration rules (quick reference)
 
-| Legacy class | Button primitive |
-| --- | --- |
-| `preset-filled-primary-500` | `variant="primary"` |
-| `preset-filled-error-500` / `preset-tonal-error` | `variant="danger"` |
-| `preset-tonal-surface` | `variant="secondary"` (modal/wizard footers) or `variant="ghost"` (row actions) |
-| `preset-tonal` (context actions row) | `variant="ghost" size="sm"` |
-| `btn-sm` row action | add `size="sm"` |
-| default `btn` (modal footer) | default `size="md"` |
+| Legacy class                                     | Button primitive                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `preset-filled-primary-500`                      | `variant="primary"`                                                             |
+| `preset-filled-error-500` / `preset-tonal-error` | `variant="danger"`                                                              |
+| `preset-tonal-surface`                           | `variant="secondary"` (modal/wizard footers) or `variant="ghost"` (row actions) |
+| `preset-tonal` (context actions row)             | `variant="ghost" size="sm"`                                                     |
+| `btn-sm` row action                              | add `size="sm"`                                                                 |
+| default `btn` (modal footer)                     | default `size="md"`                                                             |
 
 Aggregate header "Update all" → `<UpdateAllButton state count onclick ariaLabel>`.
 Per-host single "Trigger update" → `<Button variant="primary" size="sm" loading={isTriggeringHostId === host.host_id}>`.
@@ -110,7 +110,7 @@ Read the file in full before editing. The `UpdateAllButton` import is already pr
 In the `<script lang="ts">` block, add after the `UpdateAllButton` import:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate "Add Software" button (header toolbar, line ~917)**
@@ -261,7 +261,7 @@ footer via `loading={updateTriggering}`.
 - [ ] **Step 1: Add `Button` import**
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate "Retry" button (error callout, line ~733)**
@@ -490,7 +490,7 @@ modal "Create" button uses `disabled={!ignoreForm.name.trim()}` only. Do NOT add
 - [ ] **Step 1: Add `Button` import**
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate "Add Ignore Rule" header button (line ~145)**
@@ -579,7 +579,7 @@ Cancel must remain enabled throughout the submit window.
 - [ ] **Step 1: Add `Button` import**
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate "Search" button in step-1 search panel (line ~270)**
@@ -745,7 +745,7 @@ the #2 §4.6 pattern.
 - [ ] **Step 1: Add `Button` import**
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate modal footer (lines ~103–108)**
@@ -807,30 +807,30 @@ Read `frontend/src/routes/software/software-trigger-status.test.ts` to understan
 it('"Add Software" button renders with primary variant and sm size', async () => {
   // Use the existing admin user fixture and mock setup from the file.
   // Render the page with canManage=true (admin with CreateSoftware permission).
-  const addBtn = screen.getByRole('button', { name: 'Add Software' });
-  expect(addBtn.className).toContain('h-[19px]'); // size="sm"
-  expect(addBtn.className).toContain('bg-[linear-gradient'); // variant="primary"
+  const addBtn = screen.getByRole("button", { name: "Add Software" });
+  expect(addBtn.className).toContain("h-[19px]"); // size="sm"
+  expect(addBtn.className).toContain("bg-[linear-gradient"); // variant="primary"
 });
 ```
 
 - [ ] **Step 2: Assert actions context-menu toggle renders `variant="ghost" size="sm"`**
 
 ```ts
-it('row context-menu toggle renders ghost sm button', async () => {
-  const actionsBtn = screen.getByRole('button', { name: /^Actions for /i });
-  expect(actionsBtn.className).toContain('h-[19px]');
-  expect(actionsBtn.className).toContain('bg-transparent'); // ghost
+it("row context-menu toggle renders ghost sm button", async () => {
+  const actionsBtn = screen.getByRole("button", { name: /^Actions for /i });
+  expect(actionsBtn.className).toContain("h-[19px]");
+  expect(actionsBtn.className).toContain("bg-transparent"); // ghost
 });
 ```
 
 - [ ] **Step 3: Assert `<UpdateAllButton>` renders for multi-host items (not raw `<Button>`)**
 
 ```ts
-it('header row aggregate trigger renders UpdateAllButton, not a raw Button', async () => {
+it("header row aggregate trigger renders UpdateAllButton, not a raw Button", async () => {
   // Confirm the trigger renders UpdateAllButton — it uses rgba(var(--accent-rgb)...)
   // bg in idle state and does NOT emit aria-busy.
-  const updateAllBtn = screen.getByRole('button', { name: /update all/i });
-  expect(updateAllBtn).not.toHaveAttribute('aria-busy');
+  const updateAllBtn = screen.getByRole("button", { name: /update all/i });
+  expect(updateAllBtn).not.toHaveAttribute("aria-busy");
 });
 ```
 
@@ -852,13 +852,17 @@ uses `btn btn-sm preset-tonal-surface` (or similar) for these links.
 it('plugin-link buttons render variant="ghost" size="sm"', async () => {
   // Use a host fixture with at least one plugin entry.
   // The plugin table renders one link-like button per plugin role.
-  render(SoftwareDetailPage, { /* mock props */ });
+  render(SoftwareDetailPage, {
+    /* mock props */
+  });
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /configure/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /configure/i }),
+    ).toBeInTheDocument(),
   );
-  const pluginBtn = screen.getByRole('button', { name: /configure/i });
-  expect(pluginBtn.className).toContain('h-[19px]'); // size="sm"
-  expect(pluginBtn.className).toContain('bg-transparent'); // ghost
+  const pluginBtn = screen.getByRole("button", { name: /configure/i });
+  expect(pluginBtn.className).toContain("h-[19px]"); // size="sm"
+  expect(pluginBtn.className).toContain("bg-transparent"); // ghost
 });
 ```
 
@@ -869,22 +873,22 @@ this assertion.
 - [ ] **Step 5: Assert Confirm Update modal footer uses Button primitives**
 
 ```ts
-it('Confirm Update modal Trigger Update renders primary loading during submit', async () => {
+it("Confirm Update modal Trigger Update renders primary loading during submit", async () => {
   vi.mocked(api.triggerSoftwareUpdate).mockReturnValue(new Promise(() => {}));
   // ... render + open confirm modal via ActionBadge click as per existing test pattern
-  const triggerBtn = screen.getByRole('button', { name: 'Trigger Update' });
-  expect(triggerBtn).not.toHaveAttribute('aria-busy');
+  const triggerBtn = screen.getByRole("button", { name: "Trigger Update" });
+  expect(triggerBtn).not.toHaveAttribute("aria-busy");
   await fireEvent.click(triggerBtn);
-  await waitFor(() => expect(triggerBtn).toHaveAttribute('aria-busy', 'true'));
+  await waitFor(() => expect(triggerBtn).toHaveAttribute("aria-busy", "true"));
 });
 ```
 
 - [ ] **Step 6: Assert header "Delete" button renders `variant="danger"`**
 
 ```ts
-it('Delete header button renders danger variant', async () => {
-  const deleteBtn = screen.getByRole('button', { name: 'Delete' });
-  expect(deleteBtn.className).toContain('var(--color-error-bg)');
+it("Delete header button renders danger variant", async () => {
+  const deleteBtn = screen.getByRole("button", { name: "Delete" });
+  expect(deleteBtn.className).toContain("var(--color-error-bg)");
 });
 ```
 
@@ -897,43 +901,49 @@ Read `frontend/src/routes/software/ignore-rules-tab.test.ts` in full, then exten
 ```ts
 it('"Add Ignore Rule" renders with primary variant and sm size', async () => {
   render(IgnoreRulesTab);
-  await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
-  const addBtn = screen.getByRole('button', { name: 'Add Ignore Rule' });
-  expect(addBtn.className).toContain('h-[19px]');
-  expect(addBtn.className).toContain('bg-[linear-gradient');
+  await waitFor(() => expect(screen.getByText("Plex")).toBeInTheDocument());
+  const addBtn = screen.getByRole("button", { name: "Add Ignore Rule" });
+  expect(addBtn.className).toContain("h-[19px]");
+  expect(addBtn.className).toContain("bg-[linear-gradient");
 });
 ```
 
 - [ ] **Step 7: Assert per-row "Delete" renders `danger size="sm"`**
 
 ```ts
-it('per-row Delete button renders danger variant and sm size', async () => {
+it("per-row Delete button renders danger variant and sm size", async () => {
   render(IgnoreRulesTab);
-  await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
-  const deleteBtn = screen.getByRole('button', { name: 'Delete' });
-  expect(deleteBtn.className).toContain('h-[19px]');
-  expect(deleteBtn.className).toContain('var(--color-error-bg)');
+  await waitFor(() => expect(screen.getByText("Plex")).toBeInTheDocument());
+  const deleteBtn = screen.getByRole("button", { name: "Delete" });
+  expect(deleteBtn.className).toContain("h-[19px]");
+  expect(deleteBtn.className).toContain("var(--color-error-bg)");
 });
 ```
 
 - [ ] **Step 8: Assert modal "Create" is disabled when name empty, no loading state**
 
 ```ts
-it('modal Create button is disabled when name field is empty', async () => {
+it("modal Create button is disabled when name field is empty", async () => {
   render(IgnoreRulesTab);
-  await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
-  await fireEvent.click(screen.getByRole('button', { name: 'Add Ignore Rule' }));
-  const createBtn = await screen.findByRole('button', { name: 'Create' });
+  await waitFor(() => expect(screen.getByText("Plex")).toBeInTheDocument());
+  await fireEvent.click(
+    screen.getByRole("button", { name: "Add Ignore Rule" }),
+  );
+  const createBtn = await screen.findByRole("button", { name: "Create" });
   expect(createBtn).toBeDisabled();
-  expect(createBtn).not.toHaveAttribute('aria-busy'); // no loading state
+  expect(createBtn).not.toHaveAttribute("aria-busy"); // no loading state
 });
 
-it('modal Create button is enabled when name field has content', async () => {
+it("modal Create button is enabled when name field has content", async () => {
   render(IgnoreRulesTab);
-  await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
-  await fireEvent.click(screen.getByRole('button', { name: 'Add Ignore Rule' }));
-  await fireEvent.input(screen.getByPlaceholderText(/FreshRSS/i), { target: { value: 'SomeApp' } });
-  const createBtn = screen.getByRole('button', { name: 'Create' });
+  await waitFor(() => expect(screen.getByText("Plex")).toBeInTheDocument());
+  await fireEvent.click(
+    screen.getByRole("button", { name: "Add Ignore Rule" }),
+  );
+  await fireEvent.input(screen.getByPlaceholderText(/FreshRSS/i), {
+    target: { value: "SomeApp" },
+  });
+  const createBtn = screen.getByRole("button", { name: "Create" });
   expect(createBtn).not.toBeDisabled();
 });
 ```
@@ -945,42 +955,57 @@ Create `frontend/src/lib/components/software-merge-wizard.test.ts`.
 - [ ] **Step 9: Create the test file with boilerplate**
 
 ```ts
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
 // Local type definitions (per .test.ts convention)
-type Candidate = { id: string; name: string; host_count: number; plugins: string[] };
+type Candidate = {
+  id: string;
+  name: string;
+  host_count: number;
+  plugins: string[];
+};
 
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$lib/notifications.svelte", () => ({
   showError: vi.fn(),
-  showSuccess: vi.fn()
+  showSuccess: vi.fn(),
 }));
 
-import SoftwareMergeWizard from './SoftwareMergeWizard.svelte';
-import * as notifications from '$lib/notifications.svelte';
+import SoftwareMergeWizard from "./SoftwareMergeWizard.svelte";
+import * as notifications from "$lib/notifications.svelte";
 
-const candidateA: Candidate = { id: 'a', name: 'Firefox', host_count: 3, plugins: ['apt'] };
-const candidateB: Candidate = { id: 'b', name: 'Firefox ESR', host_count: 1, plugins: ['apt'] };
+const candidateA: Candidate = {
+  id: "a",
+  name: "Firefox",
+  host_count: 3,
+  plugins: ["apt"],
+};
+const candidateB: Candidate = {
+  id: "b",
+  name: "Firefox ESR",
+  host_count: 1,
+  plugins: ["apt"],
+};
 
 function makeProps(overrides = {}) {
   return {
     candidates: [candidateA, candidateB],
-    seedItemId: 'a',
+    seedItemId: "a",
     searchCandidates: null,
-    initialSearchQuery: '',
+    initialSearchQuery: "",
     onclose: vi.fn(),
     onsuccess: vi.fn(),
     previewMerge: vi.fn().mockResolvedValue({
       candidate_count: 2,
       moved_link_count: 1,
       skipped_duplicate_link_count: 0,
-      survivor: { id: 'a', name: 'Firefox', host_count: 3 },
-      losers: [{ id: 'b', name: 'Firefox ESR', host_count: 1 }],
+      survivor: { id: "a", name: "Firefox", host_count: 3 },
+      losers: [{ id: "b", name: "Firefox ESR", host_count: 1 }],
       moved_links: [],
-      skipped_duplicate_links: []
+      skipped_duplicate_links: [],
     }),
-    executeMerge: vi.fn().mockResolvedValue({ merged_item_id: 'a' }),
-    ...overrides
+    executeMerge: vi.fn().mockResolvedValue({ merged_item_id: "a" }),
+    ...overrides,
   };
 }
 ```
@@ -988,65 +1013,69 @@ function makeProps(overrides = {}) {
 - [ ] **Step 10: Back renders secondary, Next/Merge renders primary with loading**
 
 ```ts
-it('step-1 Next button renders primary variant', async () => {
+it("step-1 Next button renders primary variant", async () => {
   render(SoftwareMergeWizard, makeProps());
-  const nextBtn = screen.getByRole('button', { name: 'Next' });
-  expect(nextBtn.className).toContain('bg-[linear-gradient');
-  expect(nextBtn).not.toHaveAttribute('aria-busy');
+  const nextBtn = screen.getByRole("button", { name: "Next" });
+  expect(nextBtn.className).toContain("bg-[linear-gradient");
+  expect(nextBtn).not.toHaveAttribute("aria-busy");
 });
 
-it('step-2 Back button renders secondary variant', async () => {
+it("step-2 Back button renders secondary variant", async () => {
   render(SoftwareMergeWizard, makeProps());
-  await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  const backBtn = await screen.findByRole('button', { name: 'Back' });
-  expect(backBtn.className).toContain('var(--bg-raised)'); // secondary
+  await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  const backBtn = await screen.findByRole("button", { name: "Back" });
+  expect(backBtn.className).toContain("var(--bg-raised)"); // secondary
 });
 
-it('step-2 Merge button renders primary variant', async () => {
+it("step-2 Merge button renders primary variant", async () => {
   render(SoftwareMergeWizard, makeProps());
-  await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  const mergeBtn = await screen.findByRole('button', { name: 'Merge' });
-  expect(mergeBtn.className).toContain('bg-[linear-gradient');
+  await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  const mergeBtn = await screen.findByRole("button", { name: "Merge" });
+  expect(mergeBtn.className).toContain("bg-[linear-gradient");
 });
 ```
 
 - [ ] **Step 11: Cancel stays enabled during submit**
 
 ```ts
-it('Cancel button remains enabled during merge submit', async () => {
+it("Cancel button remains enabled during merge submit", async () => {
   const executeMerge = vi.fn().mockReturnValue(new Promise(() => {}));
   render(SoftwareMergeWizard, makeProps({ executeMerge }));
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  const mergeBtn = await screen.findByRole('button', { name: 'Merge' });
+  await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  const mergeBtn = await screen.findByRole("button", { name: "Merge" });
   await fireEvent.click(mergeBtn);
 
   // Confirm in the ConfirmDialog that surfaces after clicking Merge
-  const confirmMergeBtn = await screen.findByRole('button', { name: 'Merge Items' });
+  const confirmMergeBtn = await screen.findByRole("button", {
+    name: "Merge Items",
+  });
   await fireEvent.click(confirmMergeBtn);
 
-  await waitFor(() => expect(mergeBtn).toHaveAttribute('aria-busy', 'true'));
+  await waitFor(() => expect(mergeBtn).toHaveAttribute("aria-busy", "true"));
 
-  const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+  const cancelBtn = screen.getByRole("button", { name: "Cancel" });
   expect(cancelBtn).not.toBeDisabled();
-  expect(cancelBtn).not.toHaveAttribute('aria-busy');
+  expect(cancelBtn).not.toHaveAttribute("aria-busy");
 });
 ```
 
 - [ ] **Step 12: On step-submit error, loading resets**
 
 ```ts
-it('Next loading resets to false on preview error, showError called', async () => {
-  const previewMerge = vi.fn().mockRejectedValue(new Error('Preview failed'));
+it("Next loading resets to false on preview error, showError called", async () => {
+  const previewMerge = vi.fn().mockRejectedValue(new Error("Preview failed"));
   render(SoftwareMergeWizard, makeProps({ previewMerge }));
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await waitFor(() =>
-    expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('Preview failed')
+    expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith(
+      "Preview failed",
+    ),
   );
 
-  const nextBtn = screen.getByRole('button', { name: 'Next' });
-  expect(nextBtn).not.toHaveAttribute('aria-busy');
+  const nextBtn = screen.getByRole("button", { name: "Next" });
+  expect(nextBtn).not.toHaveAttribute("aria-busy");
 });
 ```
 
@@ -1057,17 +1086,20 @@ Create `frontend/src/lib/components/add-software-modal.test.ts`.
 - [ ] **Step 13: Create the test file with boilerplate**
 
 ```ts
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({ createSoftwareItem: vi.fn() }));
-vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
-vi.mock('$lib/utils', () => ({
-  isValidLogoUrl: vi.fn((url: string) => url.startsWith('https://'))
+vi.mock("$lib/api", () => ({ createSoftwareItem: vi.fn() }));
+vi.mock("$lib/notifications.svelte", () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+}));
+vi.mock("$lib/utils", () => ({
+  isValidLogoUrl: vi.fn((url: string) => url.startsWith("https://")),
 }));
 
-import AddSoftwareModal from './AddSoftwareModal.svelte';
-import * as api from '$lib/api';
+import AddSoftwareModal from "./AddSoftwareModal.svelte";
+import * as api from "$lib/api";
 ```
 
 - [ ] **Step 14: Assert Register Software renders primary with loading, no text-swap**
@@ -1075,30 +1107,30 @@ import * as api from '$lib/api';
 ```ts
 it('"Register Software" button renders primary variant', () => {
   render(AddSoftwareModal, { onclose: vi.fn(), onsuccess: vi.fn() });
-  const submitBtn = screen.getByRole('button', { name: 'Register Software' });
-  expect(submitBtn.className).toContain('bg-[linear-gradient');
-  expect(submitBtn).not.toHaveAttribute('aria-busy');
+  const submitBtn = screen.getByRole("button", { name: "Register Software" });
+  expect(submitBtn.className).toContain("bg-[linear-gradient");
+  expect(submitBtn).not.toHaveAttribute("aria-busy");
 });
 
 it('shows aria-busy and no "Registering..." text during submit', async () => {
   vi.mocked(api.createSoftwareItem).mockReturnValue(new Promise(() => {}));
   render(AddSoftwareModal, { onclose: vi.fn(), onsuccess: vi.fn() });
 
-  await fireEvent.input(screen.getByRole('textbox', { name: /name/i }), {
-    target: { value: 'Firefox' }
+  await fireEvent.input(screen.getByRole("textbox", { name: /name/i }), {
+    target: { value: "Firefox" },
   });
-  const submitBtn = screen.getByRole('button', { name: 'Register Software' });
+  const submitBtn = screen.getByRole("button", { name: "Register Software" });
   await fireEvent.click(submitBtn);
 
-  await waitFor(() => expect(submitBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(document.body.textContent).not.toContain('Registering...');
-  expect(submitBtn.textContent?.trim()).toContain('Register Software');
+  await waitFor(() => expect(submitBtn).toHaveAttribute("aria-busy", "true"));
+  expect(document.body.textContent).not.toContain("Registering...");
+  expect(submitBtn.textContent?.trim()).toContain("Register Software");
 });
 
-it('Cancel renders secondary variant', () => {
+it("Cancel renders secondary variant", () => {
   render(AddSoftwareModal, { onclose: vi.fn(), onsuccess: vi.fn() });
-  const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-  expect(cancelBtn.className).toContain('var(--bg-raised)'); // secondary
+  const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+  expect(cancelBtn.className).toContain("var(--bg-raised)"); // secondary
 });
 ```
 
@@ -1158,12 +1190,36 @@ Extend the `mockAuthApi` pattern from `button-primitive.spec.ts` to also mock:
 
 ```ts
 const SNAPSHOTS = [
-  { name: 'software-list-dark', route: '/software?tab=all', theme: 'dark' as const },
-  { name: 'software-list-light', route: '/software?tab=all', theme: 'light' as const },
-  { name: 'software-ignores-dark', route: '/software?tab=ignores', theme: 'dark' as const },
-  { name: 'software-ignores-light', route: '/software?tab=ignores', theme: 'light' as const },
-  { name: 'software-detail-dark', route: '/software/test-item-id', theme: 'dark' as const },
-  { name: 'software-detail-light', route: '/software/test-item-id', theme: 'light' as const }
+  {
+    name: "software-list-dark",
+    route: "/software?tab=all",
+    theme: "dark" as const,
+  },
+  {
+    name: "software-list-light",
+    route: "/software?tab=all",
+    theme: "light" as const,
+  },
+  {
+    name: "software-ignores-dark",
+    route: "/software?tab=ignores",
+    theme: "dark" as const,
+  },
+  {
+    name: "software-ignores-light",
+    route: "/software?tab=ignores",
+    theme: "light" as const,
+  },
+  {
+    name: "software-detail-dark",
+    route: "/software/test-item-id",
+    theme: "dark" as const,
+  },
+  {
+    name: "software-detail-light",
+    route: "/software/test-item-id",
+    theme: "light" as const,
+  },
 ];
 ```
 
@@ -1226,12 +1282,12 @@ Expected: 0 failures. Existing snapshot suites (public-entry, button-primitive, 
 
 ## Commit summary
 
-| # | Commit message | Files |
-| --- | --- | --- |
-| 1 | `refactor(software): migrate +page.svelte button sites to Button primitive (#3f)` | `software/+page.svelte` |
-| 2 | `refactor(software): migrate [id]/+page.svelte button sites to Button primitive (#3f)` | `software/[id]/+page.svelte` |
-| 3 | `refactor(software): migrate IgnoreRulesTab.svelte button sites to Button primitive (#3f)` | `IgnoreRulesTab.svelte` |
-| 4 | `refactor(software): migrate SoftwareMergeWizard.svelte nav buttons to Button primitive (#3f)` | `SoftwareMergeWizard.svelte` |
-| 5 | `refactor(software): migrate AddSoftwareModal.svelte buttons to Button primitive (#3f)` | `AddSoftwareModal.svelte` |
-| 6 | `test(software): add Button primitive contract tests for #3f migration` | test files |
-| 7 | `test(e2e): add/re-baseline software-area snapshots after Button primitive migration (#3f)` | e2e spec + PNGs |
+| #   | Commit message                                                                                 | Files                        |
+| --- | ---------------------------------------------------------------------------------------------- | ---------------------------- |
+| 1   | `refactor(software): migrate +page.svelte button sites to Button primitive (#3f)`              | `software/+page.svelte`      |
+| 2   | `refactor(software): migrate [id]/+page.svelte button sites to Button primitive (#3f)`         | `software/[id]/+page.svelte` |
+| 3   | `refactor(software): migrate IgnoreRulesTab.svelte button sites to Button primitive (#3f)`     | `IgnoreRulesTab.svelte`      |
+| 4   | `refactor(software): migrate SoftwareMergeWizard.svelte nav buttons to Button primitive (#3f)` | `SoftwareMergeWizard.svelte` |
+| 5   | `refactor(software): migrate AddSoftwareModal.svelte buttons to Button primitive (#3f)`        | `AddSoftwareModal.svelte`    |
+| 6   | `test(software): add Button primitive contract tests for #3f migration`                        | test files                   |
+| 7   | `test(e2e): add/re-baseline software-area snapshots after Button primitive migration (#3f)`    | e2e spec + PNGs              |

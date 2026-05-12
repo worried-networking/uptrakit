@@ -19,14 +19,14 @@ calls `goto()` — it only fires the callback and locally mirrors state for inst
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `src/lib/components/surfaces/SurfaceTable.svelte` | Add `initialPage` + `onPageChange` props; update `handlePageChange`; add prop-sync `$effect` |
-| `src/lib/components/surfaces/SurfaceTable.test.ts` | Add 3 new tests covering prop init, callback, and back-nav sync |
-| `src/lib/components/surfaces/SurfaceRenderer.svelte` | Thread `pageBySource` + `onPageChange` through all recursive calls; pass `initialPage` to `SurfaceTable` |
-| `src/lib/components/surfaces/SurfaceReadPanel.svelte` | Add `pageBySource` + `onPageChange` optional props; pass to both `SurfaceRenderer` instances |
-| `src/routes/surfaces/[id]/+page.svelte` | Add `readPageParams`, `$derived pageBySource`, `handlePageChange`; pass to `SurfaceReadPanel` |
-| `src/routes/surfaces/surfaces-page.test.ts` | Mock `$app/navigation`; add 1 test for URL-initialised page rendering |
+| File                                                  | Change                                                                                                   |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `src/lib/components/surfaces/SurfaceTable.svelte`     | Add `initialPage` + `onPageChange` props; update `handlePageChange`; add prop-sync `$effect`             |
+| `src/lib/components/surfaces/SurfaceTable.test.ts`    | Add 3 new tests covering prop init, callback, and back-nav sync                                          |
+| `src/lib/components/surfaces/SurfaceRenderer.svelte`  | Thread `pageBySource` + `onPageChange` through all recursive calls; pass `initialPage` to `SurfaceTable` |
+| `src/lib/components/surfaces/SurfaceReadPanel.svelte` | Add `pageBySource` + `onPageChange` optional props; pass to both `SurfaceRenderer` instances             |
+| `src/routes/surfaces/[id]/+page.svelte`               | Add `readPageParams`, `$derived pageBySource`, `handlePageChange`; pass to `SurfaceReadPanel`            |
+| `src/routes/surfaces/surfaces-page.test.ts`           | Mock `$app/navigation`; add 1 test for URL-initialised page rendering                                    |
 
 ---
 
@@ -42,165 +42,186 @@ calls `goto()` — it only fires the callback and locally mirrors state for inst
 Append to the bottom of the `describe('SurfaceTable', ...)` block in `SurfaceTable.test.ts`:
 
 ```typescript
-it('loads from initialPage prop when provided', async () => {
+it("loads from initialPage prop when provided", async () => {
   vi.mocked(invokeSurfaceInteraction)
     .mockReset()
     .mockResolvedValueOnce({
-      items: [{ id: 'chan-1', name: 'Alpha' }],
+      items: [{ id: "chan-1", name: "Alpha" }],
       total: 40,
       page: 2,
       per_page: 20,
-      total_pages: 2
+      total_pages: 2,
     });
 
-  const node: Extract<SurfaceNode, { kind: 'table' }> = {
-    kind: 'table',
-    data_source_id: 'data.primary',
-    columns: [{ key: 'name', label: 'Name' }],
-    row_actions: []
+  const node: Extract<SurfaceNode, { kind: "table" }> = {
+    kind: "table",
+    data_source_id: "data.primary",
+    columns: [{ key: "name", label: "Name" }],
+    row_actions: [],
   };
   const dataSource: DataSourceDescriptor = {
-    data_source_id: 'data.primary',
-    kind: { kind: 'provider_query', operation_id: 'list' },
-    result_schema: 'array',
+    data_source_id: "data.primary",
+    kind: { kind: "provider_query", operation_id: "list" },
+    result_schema: "array",
     pagination: { default_page_size: 20, max_page_size: 200 },
-    refresh_policy: { type: 'manual' }
+    refresh_policy: { type: "manual" },
   };
   const interactions: InteractionDescriptor[] = [
-    { interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+    {
+      interaction_id: "list",
+      kind: "data_load",
+      label: "List",
+      transport: { mode: "controller_local" },
+    },
   ];
 
   render(SurfaceTable, {
-    surfaceId: 'notifications.email',
+    surfaceId: "notifications.email",
     node,
     dataSource,
     dataLoadInteraction: interactions[0],
     interactions,
-    initialPage: 2
+    initialPage: 2,
   });
 
-  expect(await screen.findByText('Alpha')).toBeInTheDocument();
+  expect(await screen.findByText("Alpha")).toBeInTheDocument();
   expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledOnce();
-  expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith('notifications.email', 'list', {
-    params: { page: 2, per_page: 20 },
-    target_provider_id: undefined,
-    timeout_seconds: undefined
-  });
+  expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
+    "notifications.email",
+    "list",
+    {
+      params: { page: 2, per_page: 20 },
+      target_provider_id: undefined,
+      timeout_seconds: undefined,
+    },
+  );
 });
 
-it('fires onPageChange callback with data_source_id and new page when page changes', async () => {
+it("fires onPageChange callback with data_source_id and new page when page changes", async () => {
   vi.mocked(invokeSurfaceInteraction)
     .mockReset()
     .mockResolvedValueOnce({
-      items: [{ id: 'chan-1', name: 'Alpha' }],
+      items: [{ id: "chan-1", name: "Alpha" }],
       total: 40,
       page: 1,
       per_page: 20,
-      total_pages: 2
+      total_pages: 2,
     })
     .mockResolvedValueOnce({
-      items: [{ id: 'chan-2', name: 'Beta' }],
+      items: [{ id: "chan-2", name: "Beta" }],
       total: 40,
       page: 2,
       per_page: 20,
-      total_pages: 2
+      total_pages: 2,
     });
 
   const onPageChange = vi.fn();
-  const node: Extract<SurfaceNode, { kind: 'table' }> = {
-    kind: 'table',
-    data_source_id: 'data.primary',
-    columns: [{ key: 'name', label: 'Name' }],
-    row_actions: []
+  const node: Extract<SurfaceNode, { kind: "table" }> = {
+    kind: "table",
+    data_source_id: "data.primary",
+    columns: [{ key: "name", label: "Name" }],
+    row_actions: [],
   };
   const dataSource: DataSourceDescriptor = {
-    data_source_id: 'data.primary',
-    kind: { kind: 'provider_query', operation_id: 'list' },
-    result_schema: 'array',
+    data_source_id: "data.primary",
+    kind: { kind: "provider_query", operation_id: "list" },
+    result_schema: "array",
     pagination: { default_page_size: 20, max_page_size: 200 },
-    refresh_policy: { type: 'manual' }
+    refresh_policy: { type: "manual" },
   };
   const interactions: InteractionDescriptor[] = [
-    { interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+    {
+      interaction_id: "list",
+      kind: "data_load",
+      label: "List",
+      transport: { mode: "controller_local" },
+    },
   ];
 
   render(SurfaceTable, {
-    surfaceId: 'notifications.email',
+    surfaceId: "notifications.email",
     node,
     dataSource,
     dataLoadInteraction: interactions[0],
     interactions,
-    onPageChange
+    onPageChange,
   });
 
-  expect(await screen.findByText('Alpha')).toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  expect(await screen.findByText("Alpha")).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
   await waitFor(() => {
     expect(onPageChange).toHaveBeenCalledOnce();
-    expect(onPageChange).toHaveBeenCalledWith('data.primary', 2);
+    expect(onPageChange).toHaveBeenCalledWith("data.primary", 2);
   });
 });
 
-it('syncs currentPage from initialPage prop when it changes (browser back simulation)', async () => {
+it("syncs currentPage from initialPage prop when it changes (browser back simulation)", async () => {
   vi.mocked(invokeSurfaceInteraction)
     .mockReset()
     .mockResolvedValue({
-      items: [{ id: 'chan-1', name: 'Alpha' }],
+      items: [{ id: "chan-1", name: "Alpha" }],
       total: 40,
       page: 1,
       per_page: 20,
-      total_pages: 2
+      total_pages: 2,
     });
 
-  const node: Extract<SurfaceNode, { kind: 'table' }> = {
-    kind: 'table',
-    data_source_id: 'data.primary',
-    columns: [{ key: 'name', label: 'Name' }],
-    row_actions: []
+  const node: Extract<SurfaceNode, { kind: "table" }> = {
+    kind: "table",
+    data_source_id: "data.primary",
+    columns: [{ key: "name", label: "Name" }],
+    row_actions: [],
   };
   const dataSource: DataSourceDescriptor = {
-    data_source_id: 'data.primary',
-    kind: { kind: 'provider_query', operation_id: 'list' },
-    result_schema: 'array',
+    data_source_id: "data.primary",
+    kind: { kind: "provider_query", operation_id: "list" },
+    result_schema: "array",
     pagination: { default_page_size: 20, max_page_size: 200 },
-    refresh_policy: { type: 'manual' }
+    refresh_policy: { type: "manual" },
   };
   const interactions: InteractionDescriptor[] = [
-    { interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+    {
+      interaction_id: "list",
+      kind: "data_load",
+      label: "List",
+      transport: { mode: "controller_local" },
+    },
   ];
 
   const view = render(SurfaceTable, {
-    surfaceId: 'notifications.email',
+    surfaceId: "notifications.email",
     node,
     dataSource,
     dataLoadInteraction: interactions[0],
     interactions,
-    initialPage: 2
+    initialPage: 2,
   });
 
   await waitFor(() => {
     expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-      'notifications.email', 'list',
-      expect.objectContaining({ params: expect.objectContaining({ page: 2 }) })
+      "notifications.email",
+      "list",
+      expect.objectContaining({ params: expect.objectContaining({ page: 2 }) }),
     );
   });
 
   vi.mocked(invokeSurfaceInteraction).mockClear();
 
   await view.rerender({
-    surfaceId: 'notifications.email',
+    surfaceId: "notifications.email",
     node,
     dataSource,
     dataLoadInteraction: interactions[0],
     interactions,
-    initialPage: 1
+    initialPage: 1,
   });
 
   await waitFor(() => {
     expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-      'notifications.email', 'list',
-      expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
+      "notifications.email",
+      "list",
+      expect.objectContaining({ params: expect.objectContaining({ page: 1 }) }),
     );
   });
 });
@@ -597,25 +618,25 @@ git commit -m "feat(surfaces): thread pageBySource and onPageChange through Surf
 Add a `vi.mock` for `$app/navigation` alongside the other `vi.mock(...)` calls near the top of the file (before `import SurfacesPage from './[id]/+page.svelte'`):
 
 ```typescript
-vi.mock('$app/navigation', () => ({
-  goto: vi.fn(async () => {})
+vi.mock("$app/navigation", () => ({
+  goto: vi.fn(async () => {}),
 }));
 ```
 
 Add a static import for `goto` immediately after the `vi.mock` blocks, before `import SurfacesPage from './[id]/+page.svelte'`:
 
 ```typescript
-import { goto } from '$app/navigation';
+import { goto } from "$app/navigation";
 ```
 
 Then add one new test at the bottom of the `describe` block:
 
 ```typescript
-it('renders normally when the page component is mounted (goto not called on mount)', () => {
+it("renders normally when the page component is mounted (goto not called on mount)", () => {
   // The $app/state mock at the top of this file has a URL without page params.
   // This verifies the route component does not spontaneously call goto on initial render.
   const surface = buildSurface({
-    root_node: { kind: 'text_block', text: 'surface content' }
+    root_node: { kind: "text_block", text: "surface content" },
   });
   const read = buildRead(surface);
   vi.mocked(getSurfaceById).mockReturnValue(surface);
@@ -623,7 +644,7 @@ it('renders normally when the page component is mounted (goto not called on moun
 
   render(SurfacesPage);
 
-  expect(screen.getByText('surface content')).toBeInTheDocument();
+  expect(screen.getByText("surface content")).toBeInTheDocument();
   expect(vi.mocked(goto)).not.toHaveBeenCalled();
 });
 ```
@@ -772,15 +793,15 @@ git commit -m "feat(surfaces): sync SurfaceTable pagination page to URL search p
 
 ### Spec coverage
 
-| Requirement | Task |
-| --- | --- |
-| Page survives reload | Task 4 — URL is source of truth via `$derived pageBySource` |
-| Multiple tables on same surface don't conflict | Task 2 — each table keyed by `data_source_id` |
-| Encoding safety for `data_source_id` values | `URLSearchParams` API used throughout — handles encoding transparently |
-| Browser Back restores page | Task 1 — prop-sync `$effect` reacts when `initialPage` prop changes |
-| No spontaneous `goto` on mount | Task 4 — `goto` only called inside `handlePageChange`, never in an `$effect` |
-| Existing callers unaffected (e.g. `SurfaceSlot`) | All new props are optional with safe defaults |
-| Merges with existing URL params | `handlePageChange` reads current `page.url.searchParams` and merges |
+| Requirement                                      | Task                                                                         |
+| ------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Page survives reload                             | Task 4 — URL is source of truth via `$derived pageBySource`                  |
+| Multiple tables on same surface don't conflict   | Task 2 — each table keyed by `data_source_id`                                |
+| Encoding safety for `data_source_id` values      | `URLSearchParams` API used throughout — handles encoding transparently       |
+| Browser Back restores page                       | Task 1 — prop-sync `$effect` reacts when `initialPage` prop changes          |
+| No spontaneous `goto` on mount                   | Task 4 — `goto` only called inside `handlePageChange`, never in an `$effect` |
+| Existing callers unaffected (e.g. `SurfaceSlot`) | All new props are optional with safe defaults                                |
+| Merges with existing URL params                  | `handlePageChange` reads current `page.url.searchParams` and merges          |
 
 ### Placeholder scan
 

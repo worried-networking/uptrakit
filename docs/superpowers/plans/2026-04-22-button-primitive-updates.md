@@ -19,23 +19,23 @@ wire `aria-label` to both render branches. `UpdateAllButton` requires no change 
 > segment). The plan below uses the correct paths. The spec also mentions `adapter-manifest.test.ts` — this file does not exist in the codebase; skip
 > that step.
 
-| Path | Change |
-| --- | --- |
-| `frontend/src/theme/tokens.ts` | Add `'--bg-hover'` to `TokenName` union and `tokens` record |
-| `frontend/src/theme/tokens.test.ts` | Add `'--bg-hover'` entry to `EXPECTED` constant |
-| `frontend/src/lib/components/Button.svelte` | Add `secondary` to `ButtonVariant`; add `ariaLabel?: string` to `CommonProps`; add `VARIANT_CLASSES.secondary`; wire `aria-label` to both render branches |
-| `frontend/src/lib/components/Button.test.ts` | Mirror updated types locally; add 6 new tests (secondary class fragments, secondary+disabled, secondary active, ariaLabel on button + link branches, omit when absent, `@ts-expect-error` for tertiary) |
-| `frontend/src/lib/components/UpdateAllButton.test.ts` | No change — `ariaLabel` non-regression test already exists at line 65; verify it still passes |
-| `frontend/src/routes/dev/button-preview/+page.svelte` | Add `'secondary'` to `VARIANTS`; add `<section data-testid="button-arialabel">` |
-| `frontend/tests/e2e/button-primitive.spec.ts` | Add `button-arialabel` to `SECTIONS`; re-baseline affected snapshots |
+| Path                                                  | Change                                                                                                                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/theme/tokens.ts`                        | Add `'--bg-hover'` to `TokenName` union and `tokens` record                                                                                                                                             |
+| `frontend/src/theme/tokens.test.ts`                   | Add `'--bg-hover'` entry to `EXPECTED` constant                                                                                                                                                         |
+| `frontend/src/lib/components/Button.svelte`           | Add `secondary` to `ButtonVariant`; add `ariaLabel?: string` to `CommonProps`; add `VARIANT_CLASSES.secondary`; wire `aria-label` to both render branches                                               |
+| `frontend/src/lib/components/Button.test.ts`          | Mirror updated types locally; add 6 new tests (secondary class fragments, secondary+disabled, secondary active, ariaLabel on button + link branches, omit when absent, `@ts-expect-error` for tertiary) |
+| `frontend/src/lib/components/UpdateAllButton.test.ts` | No change — `ariaLabel` non-regression test already exists at line 65; verify it still passes                                                                                                           |
+| `frontend/src/routes/dev/button-preview/+page.svelte` | Add `'secondary'` to `VARIANTS`; add `<section data-testid="button-arialabel">`                                                                                                                         |
+| `frontend/tests/e2e/button-primitive.spec.ts`         | Add `button-arialabel` to `SECTIONS`; re-baseline affected snapshots                                                                                                                                    |
 
 ## Commit plan
 
-| # | Files | Message |
-| --- | --- | --- |
-| 1 | `tokens.ts`, `tokens.test.ts` | `feat(tokens): add --bg-hover token for secondary button hover state` |
-| 2 | `Button.svelte`, `Button.test.ts` | `feat(button): add secondary variant and ariaLabel prop` |
-| 3 | `+page.svelte` (preview), `button-primitive.spec.ts`, snapshot PNGs | `feat(button-preview): add secondary row + arialabel section; re-baseline snapshots` |
+| #   | Files                                                               | Message                                                                              |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 1   | `tokens.ts`, `tokens.test.ts`                                       | `feat(tokens): add --bg-hover token for secondary button hover state`                |
+| 2   | `Button.svelte`, `Button.test.ts`                                   | `feat(button): add secondary variant and ariaLabel prop`                             |
+| 3   | `+page.svelte` (preview), `button-primitive.spec.ts`, snapshot PNGs | `feat(button-preview): add secondary row + arialabel section; re-baseline snapshots` |
 
 ---
 
@@ -77,13 +77,13 @@ In `frontend/src/theme/tokens.ts`:
 
 ```ts
 export type TokenName =
-  | '--bg-base'
-  | '--bg-surface'
-  | '--bg-raised'
-  | '--bg-hover'         // ← new
-  | '--border-subtle'
-  | '--border-default'
-  // ... rest unchanged
+  | "--bg-base"
+  | "--bg-surface"
+  | "--bg-raised"
+  | "--bg-hover" // ← new
+  | "--border-subtle"
+  | "--border-default";
+// ... rest unchanged
 ```
 
 **Change 2 — `tokens` record** (after the `'--bg-raised'` entry):
@@ -147,64 +147,76 @@ In `frontend/src/lib/components/Button.test.ts` make four changes:
 **A — Update local `ButtonVariant` type (line 10):**
 
 ```ts
-type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary';
+type ButtonVariant = "primary" | "ghost" | "danger" | "secondary";
 ```
 
 **B — Add `ariaLabel?: string` to local `CommonProps`** (before `children: Snippet`):
 
 ```ts
 type CommonProps = {
-	variant: ButtonVariant;
-	size?: ButtonSize;
-	disabled?: boolean;
-	loading?: boolean;
-	leadingIcon?: Snippet;
-	trailingIcon?: Snippet;
-	ariaLabel?: string;   // ← new
-	children: Snippet;
-	class?: string;
+  variant: ButtonVariant;
+  size?: ButtonSize;
+  disabled?: boolean;
+  loading?: boolean;
+  leadingIcon?: Snippet;
+  trailingIcon?: Snippet;
+  ariaLabel?: string; // ← new
+  children: Snippet;
+  class?: string;
 };
 ```
 
 **C — Add four new tests** at the end of the `describe` block, before the closing `});`:
 
 ```ts
-it('secondary variant uses bg-raised + bg-hover on hover', () => {
-	const { container } = render(Button, mdButton({ variant: 'secondary' }));
-	const cls = container.querySelector('button')!.className;
-	expect(cls).toContain('bg-[var(--bg-raised)]');
-	expect(cls).toContain('border-[var(--border-default)]');
-	expect(cls).toContain('text-[var(--text-primary)]');
-	expect(cls).toContain('hover:bg-[var(--bg-hover)]');
+it("secondary variant uses bg-raised + bg-hover on hover", () => {
+  const { container } = render(Button, mdButton({ variant: "secondary" }));
+  const cls = container.querySelector("button")!.className;
+  expect(cls).toContain("bg-[var(--bg-raised)]");
+  expect(cls).toContain("border-[var(--border-default)]");
+  expect(cls).toContain("text-[var(--text-primary)]");
+  expect(cls).toContain("hover:bg-[var(--bg-hover)]");
 });
 
-it('ariaLabel prop sets aria-label on the button branch', () => {
-	const { container } = render(Button, mdButton({ ariaLabel: 'Close dialog' }));
-	expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Close dialog');
+it("ariaLabel prop sets aria-label on the button branch", () => {
+  const { container } = render(Button, mdButton({ ariaLabel: "Close dialog" }));
+  expect(container.querySelector("button")!.getAttribute("aria-label")).toBe(
+    "Close dialog",
+  );
 });
 
-it('ariaLabel prop sets aria-label on the link branch', () => {
-	const { container } = render(Button, mdButton({ variant: 'ghost', href: '/x', ariaLabel: 'Go home' }));
-	expect(container.querySelector('a')!.getAttribute('aria-label')).toBe('Go home');
+it("ariaLabel prop sets aria-label on the link branch", () => {
+  const { container } = render(
+    Button,
+    mdButton({ variant: "ghost", href: "/x", ariaLabel: "Go home" }),
+  );
+  expect(container.querySelector("a")!.getAttribute("aria-label")).toBe(
+    "Go home",
+  );
 });
 
-it('omits aria-label when ariaLabel prop is not provided', () => {
-	const { container } = render(Button, mdButton());
-	expect(container.querySelector('button')!.hasAttribute('aria-label')).toBe(false);
+it("omits aria-label when ariaLabel prop is not provided", () => {
+  const { container } = render(Button, mdButton());
+  expect(container.querySelector("button")!.hasAttribute("aria-label")).toBe(
+    false,
+  );
 });
 
-it('secondary variant + disabled carries opacity-40 (no per-variant override sneaking in)', () => {
-	const { container } = render(Button, mdButton({ variant: 'secondary', disabled: true }));
-	const cls = container.querySelector('button')!.className;
-	expect(cls).toContain('disabled:opacity-40');
-	// Regression guard: secondary VARIANT_CLASSES must not add a conflicting disabled rule
-	expect(cls).not.toMatch(/disabled:opacity-(?!40)/);
+it("secondary variant + disabled carries opacity-40 (no per-variant override sneaking in)", () => {
+  const { container } = render(
+    Button,
+    mdButton({ variant: "secondary", disabled: true }),
+  );
+  const cls = container.querySelector("button")!.className;
+  expect(cls).toContain("disabled:opacity-40");
+  // Regression guard: secondary VARIANT_CLASSES must not add a conflicting disabled rule
+  expect(cls).not.toMatch(/disabled:opacity-(?!40)/);
 });
 
-it('secondary variant contains active:opacity-[0.88] class fragment', () => {
-	const { container } = render(Button, mdButton({ variant: 'secondary' }));
-	const cls = container.querySelector('button')!.className;
-	expect(cls).toContain('active:opacity-[0.88]');
+it("secondary variant contains active:opacity-[0.88] class fragment", () => {
+  const { container } = render(Button, mdButton({ variant: "secondary" }));
+  const cls = container.querySelector("button")!.className;
+  expect(cls).toContain("active:opacity-[0.88]");
 });
 ```
 
@@ -213,7 +225,7 @@ existing `@ts-expect-error` lines:
 
 ```ts
 // @ts-expect-error — 'tertiary' is not a valid ButtonVariant
-const _bad3: ButtonProps = { variant: 'tertiary', children };
+const _bad3: ButtonProps = { variant: "tertiary", children };
 void _bad3;
 ```
 
@@ -232,22 +244,22 @@ Make five changes to `frontend/src/lib/components/Button.svelte`:
 **Change 1 — `ButtonVariant` in module script:**
 
 ```ts
-export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary';
+export type ButtonVariant = "primary" | "ghost" | "danger" | "secondary";
 ```
 
 **Change 2 — `ariaLabel?: string` in `CommonProps`** (before `children: Snippet`):
 
 ```ts
 type CommonProps = {
-	variant: ButtonVariant;
-	size?: ButtonSize;
-	disabled?: boolean;
-	loading?: boolean;
-	leadingIcon?: Snippet;
-	trailingIcon?: Snippet;
-	ariaLabel?: string;   // ← new
-	children: Snippet;
-	class?: string;
+  variant: ButtonVariant;
+  size?: ButtonSize;
+  disabled?: boolean;
+  loading?: boolean;
+  leadingIcon?: Snippet;
+  trailingIcon?: Snippet;
+  ariaLabel?: string; // ← new
+  children: Snippet;
+  class?: string;
 };
 ```
 
@@ -255,25 +267,25 @@ type CommonProps = {
 
 ```ts
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-	primary:
-		'bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))] ' +
-		'text-[var(--text-inverted)] ' +
-		'hover:bg-[linear-gradient(90deg,var(--accent-dark),var(--accent-bright))]',
-	ghost:
-		'bg-transparent border border-[var(--border-default)] ' +
-		'text-[var(--text-primary)] ' +
-		'hover:bg-[var(--bg-raised)]',
-	danger:
-		'bg-[var(--color-error-bg)] ' +
-		'border border-[var(--color-error-border)] ' +
-		'text-[var(--color-error)] ' +
-		'hover:bg-[var(--color-error-bg-hover)] ' +
-		'hover:border-[var(--color-error-border-hover)]',
-	secondary:
-		'bg-[var(--bg-raised)] border border-[var(--border-default)] ' +
-		'text-[var(--text-primary)] ' +
-		'hover:bg-[var(--bg-hover)] ' +
-		'active:opacity-[0.88]'
+  primary:
+    "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))] " +
+    "text-[var(--text-inverted)] " +
+    "hover:bg-[linear-gradient(90deg,var(--accent-dark),var(--accent-bright))]",
+  ghost:
+    "bg-transparent border border-[var(--border-default)] " +
+    "text-[var(--text-primary)] " +
+    "hover:bg-[var(--bg-raised)]",
+  danger:
+    "bg-[var(--color-error-bg)] " +
+    "border border-[var(--color-error-border)] " +
+    "text-[var(--color-error)] " +
+    "hover:bg-[var(--color-error-bg-hover)] " +
+    "hover:border-[var(--color-error-border-hover)]",
+  secondary:
+    "bg-[var(--bg-raised)] border border-[var(--border-default)] " +
+    "text-[var(--text-primary)] " +
+    "hover:bg-[var(--bg-hover)] " +
+    "active:opacity-[0.88]",
 };
 ```
 
@@ -284,18 +296,18 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 
 ```ts
 let {
-	variant,
-	size = 'md',
-	disabled = false,
-	loading = false,
-	leadingIcon,
-	trailingIcon,
-	ariaLabel,      // ← new — before children, matching CommonProps order
-	children,
-	class: className = '',
-	href,
-	type,
-	onclick
+  variant,
+  size = "md",
+  disabled = false,
+  loading = false,
+  leadingIcon,
+  trailingIcon,
+  ariaLabel, // ← new — before children, matching CommonProps order
+  children,
+  class: className = "",
+  href,
+  type,
+  onclick,
 }: ButtonProps = $props();
 ```
 
@@ -373,7 +385,7 @@ git commit -m "feat(button): add secondary variant and ariaLabel prop"
 - [ ] **Step 1: Add `'secondary'` to `VARIANTS` (line 6 of +page.svelte)**
 
 ```ts
-const VARIANTS: ButtonVariant[] = ['primary', 'ghost', 'danger', 'secondary'];
+const VARIANTS: ButtonVariant[] = ["primary", "ghost", "danger", "secondary"];
 ```
 
 - [ ] **Step 2: Add `<section data-testid="button-arialabel">` after the `button-link` section**
@@ -395,11 +407,11 @@ In `frontend/tests/e2e/button-primitive.spec.ts`, add `button-arialabel` to the 
 
 ```ts
 const SECTIONS = [
-	{ id: 'button-variants', name: 'variants' },
-	{ id: 'button-states', name: 'states' },
-	{ id: 'button-link', name: 'link' },
-	{ id: 'button-arialabel', name: 'arialabel' },   // ← new
-	{ id: 'updateall-states', name: 'updateall' }
+  { id: "button-variants", name: "variants" },
+  { id: "button-states", name: "states" },
+  { id: "button-link", name: "link" },
+  { id: "button-arialabel", name: "arialabel" }, // ← new
+  { id: "updateall-states", name: "updateall" },
 ];
 ```
 

@@ -1,7 +1,7 @@
 # Select Migration — Leftover `<select>` Elements Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
-this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate the six remaining raw `<select>` elements in `frontend/src/` to the `Select` form primitive, extending the primitive with
 `<optgroup>` support, per-option `disabled`, a `width: 'full' | 'auto'` variant, and a `data-ui="select"` marker. Clean dead code in
@@ -22,7 +22,7 @@ pnpm workspace under `frontend/`.
 
 **Created:**
 
-- *(none — plan only modifies existing files)*
+- _(none — plan only modifies existing files)_
 
 **Modified:**
 
@@ -58,22 +58,28 @@ default `'full'`, (d) `data-ui="select"` marker on the inner `<select>`, (e) upd
 Append to `frontend/src/lib/components/forms/Select.test.ts` (do not touch existing tests; they must keep passing):
 
 ```ts
-it('renders <optgroup> with label and nested options', () => {
-    const { container } = render(Select, baseSelect({
-        options: [
-            { label: 'Group X', options: [
-                { value: 'x1', label: 'X One' },
-                { value: 'x2', label: 'X Two' }
-            ]}
-        ]
-    }));
-    const groups = container.querySelectorAll('optgroup');
-    expect(groups.length).toBe(1);
-    expect(groups[0].getAttribute('label')).toBe('Group X');
-    const opts = groups[0].querySelectorAll('option');
-    expect(opts.length).toBe(2);
-    expect(opts[0].value).toBe('x1');
-    expect(opts[1].textContent).toBe('X Two');
+it("renders <optgroup> with label and nested options", () => {
+  const { container } = render(
+    Select,
+    baseSelect({
+      options: [
+        {
+          label: "Group X",
+          options: [
+            { value: "x1", label: "X One" },
+            { value: "x2", label: "X Two" },
+          ],
+        },
+      ],
+    }),
+  );
+  const groups = container.querySelectorAll("optgroup");
+  expect(groups.length).toBe(1);
+  expect(groups[0].getAttribute("label")).toBe("Group X");
+  const opts = groups[0].querySelectorAll("option");
+  expect(opts.length).toBe(2);
+  expect(opts[0].value).toBe("x1");
+  expect(opts[1].textContent).toBe("X Two");
 });
 ```
 
@@ -85,20 +91,20 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
 type SelectGroup = { label: string; options: SelectOption[] };
 type SelectItem = SelectOption | SelectGroup;
 type SelectProps = {
-    id: string;
-    value: string;
-    options: SelectItem[];
-    width?: 'full' | 'auto';
-    name?: string;
-    placeholder?: string;
-    disabled?: boolean;
-    required?: boolean;
-    error?: string;
-    onchange?: (e: Event) => void;
-    onblur?: (e: FocusEvent) => void;
-    'aria-describedby'?: string;
-    'aria-label'?: string;
-    class?: string;
+  id: string;
+  value: string;
+  options: SelectItem[];
+  width?: "full" | "auto";
+  name?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  required?: boolean;
+  error?: string;
+  onchange?: (e: Event) => void;
+  onblur?: (e: FocusEvent) => void;
+  "aria-describedby"?: string;
+  "aria-label"?: string;
+  class?: string;
 };
 ```
 
@@ -115,16 +121,19 @@ Expected: new optgroup test fails (no `<optgroup>` rendered yet); existing tests
 Append to `Select.test.ts`:
 
 ```ts
-it('renders disabled option with disabled attribute', () => {
-    const { container } = render(Select, baseSelect({
-        options: [
-            { value: 'a', label: 'A' },
-            { value: 'b', label: 'B', disabled: true }
-        ]
-    }));
-    const opts = container.querySelectorAll('option');
-    expect(opts[0].disabled).toBe(false);
-    expect(opts[1].disabled).toBe(true);
+it("renders disabled option with disabled attribute", () => {
+  const { container } = render(
+    Select,
+    baseSelect({
+      options: [
+        { value: "a", label: "A" },
+        { value: "b", label: "B", disabled: true },
+      ],
+    }),
+  );
+  const opts = container.querySelectorAll("option");
+  expect(opts[0].disabled).toBe(false);
+  expect(opts[1].disabled).toBe(true);
 });
 ```
 
@@ -133,19 +142,22 @@ it('renders disabled option with disabled attribute', () => {
 Append:
 
 ```ts
-it('renders mixed flat and grouped options', () => {
-    const { container } = render(Select, baseSelect({
-        options: [
-            { value: '', label: 'Placeholder-ish' },
-            { label: 'Group A', options: [{ value: 'a1', label: 'A1' }] },
-            { value: 'flat', label: 'Flat option' }
-        ]
-    }));
-    const direct = container.querySelectorAll('select > option');
-    expect(direct.length).toBe(2);
-    expect(direct[0].textContent).toBe('Placeholder-ish');
-    expect(direct[1].textContent).toBe('Flat option');
-    expect(container.querySelectorAll('optgroup').length).toBe(1);
+it("renders mixed flat and grouped options", () => {
+  const { container } = render(
+    Select,
+    baseSelect({
+      options: [
+        { value: "", label: "Placeholder-ish" },
+        { label: "Group A", options: [{ value: "a1", label: "A1" }] },
+        { value: "flat", label: "Flat option" },
+      ],
+    }),
+  );
+  const direct = container.querySelectorAll("select > option");
+  expect(direct.length).toBe(2);
+  expect(direct[0].textContent).toBe("Placeholder-ish");
+  expect(direct[1].textContent).toBe("Flat option");
+  expect(container.querySelectorAll("optgroup").length).toBe(1);
 });
 ```
 
@@ -154,19 +166,20 @@ it('renders mixed flat and grouped options', () => {
 Append:
 
 ```ts
-it('renders placeholder before optgroups when both are provided', () => {
-    const { container } = render(Select, baseSelect({
-        placeholder: 'Pick',
-        options: [
-            { label: 'G', options: [{ value: 'g1', label: 'G1' }] }
-        ]
-    }));
-    const select = container.querySelector('select')!;
-    const firstChild = select.children[0] as HTMLOptionElement;
-    expect(firstChild.tagName).toBe('OPTION');
-    expect(firstChild.value).toBe('');
-    expect(firstChild.disabled).toBe(true);
-    expect(select.children[1].tagName).toBe('OPTGROUP');
+it("renders placeholder before optgroups when both are provided", () => {
+  const { container } = render(
+    Select,
+    baseSelect({
+      placeholder: "Pick",
+      options: [{ label: "G", options: [{ value: "g1", label: "G1" }] }],
+    }),
+  );
+  const select = container.querySelector("select")!;
+  const firstChild = select.children[0] as HTMLOptionElement;
+  expect(firstChild.tagName).toBe("OPTION");
+  expect(firstChild.value).toBe("");
+  expect(firstChild.disabled).toBe(true);
+  expect(select.children[1].tagName).toBe("OPTGROUP");
 });
 ```
 
@@ -176,10 +189,10 @@ Append:
 
 ```ts
 it('applies w-auto when width="auto"', () => {
-    const { container } = render(Select, baseSelect({ width: 'auto' }));
-    const cls = container.querySelector('select')!.className;
-    expect(cls).toContain('w-auto');
-    expect(cls).not.toContain('w-full');
+  const { container } = render(Select, baseSelect({ width: "auto" }));
+  const cls = container.querySelector("select")!.className;
+  expect(cls).toContain("w-auto");
+  expect(cls).not.toContain("w-full");
 });
 ```
 
@@ -193,8 +206,10 @@ Append:
 
 ```ts
 it('sets data-ui="select" on the inner select element', () => {
-    const { container } = render(Select, baseSelect());
-    expect(container.querySelector('select')!.getAttribute('data-ui')).toBe('select');
+  const { container } = render(Select, baseSelect());
+  expect(container.querySelector("select")!.getAttribute("data-ui")).toBe(
+    "select",
+  );
 });
 ```
 
@@ -203,23 +218,29 @@ it('sets data-ui="select" on the inner select element', () => {
 Append:
 
 ```ts
-it('bind:value round-trips through a grouped option', async () => {
-    const onchange = vi.fn();
-    const { container } = render(Select, baseSelect({
-        value: '',
-        placeholder: 'Pick',
-        options: [
-            { label: 'Saved', options: [
-                { value: 'cfg:1', label: 'Production' },
-                { value: 'cfg:2', label: 'Staging' }
-            ]}
-        ],
-        onchange
-    }));
-    const select = container.querySelector('select')! as HTMLSelectElement;
-    await fireEvent.change(select, { target: { value: 'cfg:2' } });
-    expect(onchange).toHaveBeenCalledTimes(1);
-    expect(select.value).toBe('cfg:2');
+it("bind:value round-trips through a grouped option", async () => {
+  const onchange = vi.fn();
+  const { container } = render(
+    Select,
+    baseSelect({
+      value: "",
+      placeholder: "Pick",
+      options: [
+        {
+          label: "Saved",
+          options: [
+            { value: "cfg:1", label: "Production" },
+            { value: "cfg:2", label: "Staging" },
+          ],
+        },
+      ],
+      onchange,
+    }),
+  );
+  const select = container.querySelector("select")! as HTMLSelectElement;
+  await fireEvent.change(select, { target: { value: "cfg:2" } });
+  expect(onchange).toHaveBeenCalledTimes(1);
+  expect(select.value).toBe("cfg:2");
 });
 ```
 
@@ -343,13 +364,18 @@ Replace line 16 of `frontend/src/lib/components/forms/index.ts`:
 Old:
 
 ```ts
-export type { SelectProps, SelectOption } from './Select.svelte';
+export type { SelectProps, SelectOption } from "./Select.svelte";
 ```
 
 New:
 
 ```ts
-export type { SelectProps, SelectOption, SelectGroup, SelectItem } from './Select.svelte';
+export type {
+  SelectProps,
+  SelectOption,
+  SelectGroup,
+  SelectItem,
+} from "./Select.svelte";
 ```
 
 - [ ] **Step 1.13: Add preview demo for grouped + disabled**
@@ -436,24 +462,24 @@ Record the exact `it(...)` block at line 333 (and any leading comment) so the re
 Replace the entire `it('select field renders raw <select> ...', ...)` block (and any stale "regression guard" comment immediately above it) with:
 
 ```ts
-it('select field renders Select primitive', async () => {
-    const loadInitialValues = vi.fn().mockResolvedValue({});
-    vi.mocked(apiGet).mockResolvedValue([]);
-    const { container } = render(SchemaForm, {
-        fields: [
-            {
-                key: 'region',
-                label: 'Region',
-                field_type: 'select',
-                required: false,
-                options: [{ value: 'eu', label: 'EU' }]
-            }
-        ] satisfies FormField[],
-        loadInitialValues,
-        onsubmit: vi.fn().mockResolvedValue(undefined)
-    });
-    await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
-    expect(container.querySelector('[data-ui="select"]')).toBeInTheDocument();
+it("select field renders Select primitive", async () => {
+  const loadInitialValues = vi.fn().mockResolvedValue({});
+  vi.mocked(apiGet).mockResolvedValue([]);
+  const { container } = render(SchemaForm, {
+    fields: [
+      {
+        key: "region",
+        label: "Region",
+        field_type: "select",
+        required: false,
+        options: [{ value: "eu", label: "EU" }],
+      },
+    ] satisfies FormField[],
+    loadInitialValues,
+    onsubmit: vi.fn().mockResolvedValue(undefined),
+  });
+  await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+  expect(container.querySelector('[data-ui="select"]')).toBeInTheDocument();
 });
 ```
 
@@ -505,7 +531,7 @@ grep -n "import.*Select" frontend/src/routes/services/+page.svelte
 If `Select` is not yet imported, add an import next to the existing form-primitive imports (or at the bottom of the import block):
 
 ```ts
-import { Select } from '$lib/components/forms';
+import { Select } from "$lib/components/forms";
 ```
 
 - [ ] **Step 3.2: Change `mergeTargetId` declaration**
@@ -521,7 +547,7 @@ let mergeTargetId: string | null = $state(null);
 New:
 
 ```ts
-let mergeTargetId = $state('');
+let mergeTargetId = $state("");
 ```
 
 - [ ] **Step 3.3: Update reset sites**
@@ -540,17 +566,17 @@ Find the `<script>` block where `mergeSource` and `services` are declared. After
 
 ```ts
 const mergeTargetOptions = $derived(
-    services
-        .filter(
-            (s) =>
-                s.status === 'approved' &&
-                s.capabilities.includes('software_discovery') &&
-                s.id !== mergeSource?.id
-        )
-        .map((t) => ({
-            value: t.id,
-            label: `${t.friendly_name} (${t.hostname})`
-        }))
+  services
+    .filter(
+      (s) =>
+        s.status === "approved" &&
+        s.capabilities.includes("software_discovery") &&
+        s.id !== mergeSource?.id,
+    )
+    .map((t) => ({
+      value: t.id,
+      label: `${t.friendly_name} (${t.hostname})`,
+    })),
 );
 ```
 
@@ -725,7 +751,7 @@ grep -n "import.*Select" frontend/src/lib/components/AssignToHostModal.svelte
 Ensure the file imports `Select` and `SelectOption` from the barrel:
 
 ```ts
-import { Select, type SelectOption } from '$lib/components/forms';
+import { Select, type SelectOption } from "$lib/components/forms";
 ```
 
 (If only `Select` is imported today, extend the existing import; do not add a duplicate line.)
@@ -736,13 +762,13 @@ In the `<script>` block (anywhere after the `StandardRoleKey` type declaration o
 
 ```ts
 function executionSiteOptions(role: StandardRoleKey): SelectOption[] {
-    return [
-        { value: 'auto', label: 'Auto' },
-        { value: 'agent', label: 'Agent' },
-        ...(role === 'fetch_releases'
-            ? [{ value: 'controller', label: 'Controller' }]
-            : [])
-    ];
+  return [
+    { value: "auto", label: "Auto" },
+    { value: "agent", label: "Agent" },
+    ...(role === "fetch_releases"
+      ? [{ value: "controller", label: "Controller" }]
+      : []),
+  ];
 }
 ```
 
@@ -850,7 +876,7 @@ forms barrel — `EditHostAssignmentModal.svelte` already imports a different `S
 identifier and TS would refuse to compile.
 
 ```ts
-import { Select, type SelectItem } from '$lib/components/forms';
+import { Select, type SelectItem } from "$lib/components/forms";
 ```
 
 (Combine into the existing forms import — do not add a new line. Leave the existing `SelectOption` import
@@ -871,34 +897,34 @@ In the `<script>` block, after `pluginSelection(...)` (line 277) and before `app
 
 ```ts
 function pluginConfigItems(
-    savedOpts: PluginConfigResponse[],
-    typeOpts: PluginTypeInfo[]
+  savedOpts: PluginConfigResponse[],
+  typeOpts: PluginTypeInfo[],
 ): SelectItem[] {
-    // Inline literal — do NOT annotate with `SelectOption`. The local `SelectOption` here
-    // is the `$lib/types` one (no `disabled` field); the forms barrel `SelectOption` is
-    // structurally compatible but is intentionally not imported (duplicate identifier).
-    const placeholder = { value: '', label: '— not configured —' };
-    const inlineOpts = typeOpts.map((pt) => ({
-        value: `type:${pt.plugin_type}`,
-        label: pt.display_name
-    }));
-    if (savedOpts.length === 0) {
-        return [placeholder, ...inlineOpts];
-    }
-    const items: SelectItem[] = [
-        placeholder,
-        {
-            label: 'Saved',
-            options: savedOpts.map((cfg) => ({
-                value: `cfg:${cfg.id}`,
-                label: cfg.name
-            }))
-        }
-    ];
-    if (inlineOpts.length > 0) {
-        items.push({ label: 'Inline', options: inlineOpts });
-    }
-    return items;
+  // Inline literal — do NOT annotate with `SelectOption`. The local `SelectOption` here
+  // is the `$lib/types` one (no `disabled` field); the forms barrel `SelectOption` is
+  // structurally compatible but is intentionally not imported (duplicate identifier).
+  const placeholder = { value: "", label: "— not configured —" };
+  const inlineOpts = typeOpts.map((pt) => ({
+    value: `type:${pt.plugin_type}`,
+    label: pt.display_name,
+  }));
+  if (savedOpts.length === 0) {
+    return [placeholder, ...inlineOpts];
+  }
+  const items: SelectItem[] = [
+    placeholder,
+    {
+      label: "Saved",
+      options: savedOpts.map((cfg) => ({
+        value: `cfg:${cfg.id}`,
+        label: cfg.name,
+      })),
+    },
+  ];
+  if (inlineOpts.length > 0) {
+    items.push({ label: "Inline", options: inlineOpts });
+  }
+  return items;
 }
 ```
 
@@ -1085,83 +1111,108 @@ Replace the entire body of `frontend/src/lib/components/ui/ProviderSelector.svel
 Replace the entire body of `frontend/src/lib/components/ui/ProviderSelector.test.ts` with:
 
 ```ts
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import ProviderSelector from './ProviderSelector.svelte';
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import ProviderSelector from "./ProviderSelector.svelte";
 
 afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+  cleanup();
+  vi.clearAllMocks();
 });
 
-describe('ProviderSelector', () => {
-    it('renders providers with semantic labels and reports selection changes', async () => {
-        const onSelect = vi.fn();
+describe("ProviderSelector", () => {
+  it("renders providers with semantic labels and reports selection changes", async () => {
+    const onSelect = vi.fn();
 
-        const view = render(ProviderSelector, {
-            id: 'test-provider',
-            label: 'Provider',
-            selectedId: 'provider-a',
-            providers: [
-                { id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
-                { id: 'provider-b', label: 'Provider B', description: 'Connected remotely' }
-            ],
-            onSelect
-        });
-
-        const select = screen.getByLabelText('Provider');
-        expect(screen.getByText('Connected locally')).toBeInTheDocument();
-
-        await fireEvent.change(select, { target: { value: 'provider-b' } });
-
-        expect(onSelect).toHaveBeenCalledWith('provider-b');
-        await view.rerender({
-            id: 'test-provider',
-            label: 'Provider',
-            selectedId: 'provider-b',
-            providers: [
-                { id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
-                { id: 'provider-b', label: 'Provider B', description: 'Connected remotely' }
-            ],
-            onSelect
-        });
-        expect(screen.getByText('Connected remotely')).toBeInTheDocument();
+    const view = render(ProviderSelector, {
+      id: "test-provider",
+      label: "Provider",
+      selectedId: "provider-a",
+      providers: [
+        {
+          id: "provider-a",
+          label: "Provider A",
+          description: "Connected locally",
+        },
+        {
+          id: "provider-b",
+          label: "Provider B",
+          description: "Connected remotely",
+        },
+      ],
+      onSelect,
     });
 
-    it('renders disabled providers with the disabled attribute on their option', () => {
-        render(ProviderSelector, {
-            id: 'test-provider',
-            label: 'Provider',
-            selectedId: 'provider-a',
-            providers: [
-                { id: 'provider-a', label: 'Provider A' },
-                { id: 'provider-b', label: 'Provider B', disabled: true }
-            ]
-        });
-        const opts = (screen.getByLabelText('Provider') as HTMLSelectElement).options;
-        expect(opts[0].disabled).toBe(false);
-        expect(opts[1].disabled).toBe(true);
+    const select = screen.getByLabelText("Provider");
+    expect(screen.getByText("Connected locally")).toBeInTheDocument();
+
+    await fireEvent.change(select, { target: { value: "provider-b" } });
+
+    expect(onSelect).toHaveBeenCalledWith("provider-b");
+    await view.rerender({
+      id: "test-provider",
+      label: "Provider",
+      selectedId: "provider-b",
+      providers: [
+        {
+          id: "provider-a",
+          label: "Provider A",
+          description: "Connected locally",
+        },
+        {
+          id: "provider-b",
+          label: "Provider B",
+          description: "Connected remotely",
+        },
+      ],
+      onSelect,
+    });
+    expect(screen.getByText("Connected remotely")).toBeInTheDocument();
+  });
+
+  it("renders disabled providers with the disabled attribute on their option", () => {
+    render(ProviderSelector, {
+      id: "test-provider",
+      label: "Provider",
+      selectedId: "provider-a",
+      providers: [
+        { id: "provider-a", label: "Provider A" },
+        { id: "provider-b", label: "Provider B", disabled: true },
+      ],
+    });
+    const opts = (screen.getByLabelText("Provider") as HTMLSelectElement)
+      .options;
+    expect(opts[0].disabled).toBe(false);
+    expect(opts[1].disabled).toBe(true);
+  });
+
+  it("supports uncontrolled selection changes when selectedId is omitted", async () => {
+    render(ProviderSelector, {
+      id: "test-provider",
+      label: "Provider",
+      providers: [
+        {
+          id: "provider-a",
+          label: "Provider A",
+          description: "Connected locally",
+        },
+        {
+          id: "provider-b",
+          label: "Provider B",
+          description: "Connected remotely",
+        },
+      ],
     });
 
-    it('supports uncontrolled selection changes when selectedId is omitted', async () => {
-        render(ProviderSelector, {
-            id: 'test-provider',
-            label: 'Provider',
-            providers: [
-                { id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
-                { id: 'provider-b', label: 'Provider B', description: 'Connected remotely' }
-            ]
-        });
+    const select = screen.getByLabelText("Provider") as HTMLSelectElement;
+    expect(select.value).toBe("provider-a");
+    expect(screen.getByText("Connected locally")).toBeInTheDocument();
 
-        const select = screen.getByLabelText('Provider') as HTMLSelectElement;
-        expect(select.value).toBe('provider-a');
-        expect(screen.getByText('Connected locally')).toBeInTheDocument();
+    await fireEvent.change(select, { target: { value: "provider-b" } });
 
-        await fireEvent.change(select, { target: { value: 'provider-b' } });
-
-        expect(select.value).toBe('provider-b');
-        expect(screen.getByText('Connected remotely')).toBeInTheDocument();
-    });
+    expect(select.value).toBe("provider-b");
+    expect(screen.getByText("Connected remotely")).toBeInTheDocument();
+  });
 });
 ```
 
@@ -1272,7 +1323,7 @@ with the hack it was guarding."
 
 ## Task 8: Repo-wide acceptance verification
 
-**Files:** *(verification only — no edits expected)*
+**Files:** _(verification only — no edits expected)_
 
 - [ ] **Step 8.1: Confirm no raw `<select>` outside the primitive**
 
@@ -1336,4 +1387,4 @@ Stop the dev server.
 - **TDD coverage**: Primitive extension (Task 1) is fully TDD'd — seven new failing tests before implementation. Migration tasks (3–7) are pure
   refactors of UI markup; the existing page-level / component-level tests act as regression nets, augmented by the manual eyeball steps.
 - **Caveman-mode commit messages**: `chore`/`feat`/`refactor`/`test` prefixes match the repo's recent commit style (`feat(forms): ...`, `fix(forms):
-  ...`).
+...`).

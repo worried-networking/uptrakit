@@ -18,57 +18,57 @@ end once every reference is confirmed clean.
 
 ## Files modified
 
-| File | Change |
-| --- | --- |
-| `frontend/src/theme/tokens.ts` | `errorBase` → `dangerBase`; 5 `TokenName` entries; 5 `tokens` object keys |
-| `frontend/src/theme/tokens.test.ts` | 5 keys in `EXPECTED` object |
-| `frontend/src/lib/theme/design-token-values.test.ts` | 5 keys in `SPEC`; 2 inline snapshot strings |
-| `frontend/vite-plugins/theme-tokens.test.ts` | 10 lines in golden `expected` array |
-| `frontend/src/app.css` | 1 line — aria-invalid rule |
-| `frontend/src/lib/theme/css-contract.test.ts` | 1 regex string in `toMatch()` |
-| `frontend/src/lib/components/ui/ActionBadge.svelte` | CSS var references |
-| `frontend/src/lib/components/ui/Callout.svelte` | CSS var references |
-| `frontend/src/lib/components/ui/ContextMenuItem.svelte` | CSS var references |
-| `frontend/src/lib/components/ui/ContextMenuItem.test.ts` | expected string assertions |
-| `frontend/src/lib/components/ui/FormFieldRow.svelte` | CSS var references |
-| `frontend/src/lib/components/ui/StatCard.svelte` | `toneTokens` map `danger` entry |
-| `frontend/src/lib/components/ui/StatCard.test.ts` | expected token assertion |
-| `frontend/src/lib/components/ui/StatusBadge.svelte` | CSS var references |
-| `frontend/src/lib/components/Button.svelte` | CSS var references |
-| `frontend/src/lib/components/Button.test.ts` | expected class string assertions |
-| `frontend/src/lib/components/Input.svelte` | CSS var references |
-| `frontend/src/lib/components/Input.test.ts` | expected string assertions |
-| `frontend/src/lib/components/Link.svelte` | CSS var references |
-| `frontend/src/lib/components/Link.test.ts` | expected string assertions; bare `color-error` in test description |
-| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | bare `color-error` in `toContain()` assertion |
-| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts` | bare `color-error` in `toContain()` assertion + comment |
-| `frontend/src/lib/components/surfaces/SurfaceWorkflow.test.ts` | bare `color-error` in `toContain()` assertion |
-| `frontend/src/lib/components/Textarea.svelte` | CSS var references |
-| `frontend/src/lib/components/Textarea.test.ts` | expected string assertions |
-| `frontend/src/lib/components/ToastNotifications.svelte` | CSS var references |
-| `frontend/src/lib/components/EditHostAssignmentModal.svelte` | CSS var references (8 occurrences) |
-| `frontend/src/lib/components/AssignToHostModal.svelte` | CSS var references |
-| `frontend/src/lib/components/BatchResultDialog.svelte` | CSS var references |
-| `frontend/src/routes/history/+page.svelte` | CSS var references |
-| `frontend/src/routes/hosts/+page.svelte` | CSS var references |
-| `frontend/src/routes/hosts/hosts.test.ts` | expected string assertions |
-| `frontend/src/routes/layout-button-migration.test.ts` | expected string assertions |
-| `frontend/src/routes/profile/profile.test.ts` | expected string assertions |
-| `frontend/src/routes/settings/EnrollmentTokenSettings.test.ts` | expected string assertions |
-| `frontend/src/routes/settings/NotificationLogView.svelte` | CSS var references |
-| `frontend/src/routes/settings/NotificationRulesSettings.svelte` | CSS var references |
-| `frontend/src/routes/settings/NotificationRulesSettings.test.ts` | expected string assertions |
-| `frontend/src/routes/settings/OidcProvidersSettings.svelte` | CSS var references |
-| `frontend/src/routes/settings/OidcProvidersSettings.test.ts` | expected string assertions |
-| `frontend/src/routes/settings/PluginConfigsTab.svelte` | CSS var references |
-| `frontend/src/routes/settings/GlobalSettingsTab.test.ts` | bare `color-error` in `toContain()` assertions and it() descriptions |
-| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | bare `color-error` in `toMatch(/color-error/)` assertion |
-| `frontend/src/routes/settings/SchedulerTab.svelte` | CSS var references |
-| `frontend/src/routes/settings/SystemServicesSettings.test.ts` | expected string assertions |
-| `frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts` | expected string assertions |
-| `frontend/src/routes/software/ignore-rules-tab.test.ts` | expected string assertions |
-| `docs/development/ui/tokens.md` | 10 token name cells + 10 role label cells + 1 adapter cell |
-| `docs/development/ui/primitives.md` | 7 token references across 6 component sections |
+| File                                                                       | Change                                                                    |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `frontend/src/theme/tokens.ts`                                             | `errorBase` → `dangerBase`; 5 `TokenName` entries; 5 `tokens` object keys |
+| `frontend/src/theme/tokens.test.ts`                                        | 5 keys in `EXPECTED` object                                               |
+| `frontend/src/lib/theme/design-token-values.test.ts`                       | 5 keys in `SPEC`; 2 inline snapshot strings                               |
+| `frontend/vite-plugins/theme-tokens.test.ts`                               | 10 lines in golden `expected` array                                       |
+| `frontend/src/app.css`                                                     | 1 line — aria-invalid rule                                                |
+| `frontend/src/lib/theme/css-contract.test.ts`                              | 1 regex string in `toMatch()`                                             |
+| `frontend/src/lib/components/ui/ActionBadge.svelte`                        | CSS var references                                                        |
+| `frontend/src/lib/components/ui/Callout.svelte`                            | CSS var references                                                        |
+| `frontend/src/lib/components/ui/ContextMenuItem.svelte`                    | CSS var references                                                        |
+| `frontend/src/lib/components/ui/ContextMenuItem.test.ts`                   | expected string assertions                                                |
+| `frontend/src/lib/components/ui/FormFieldRow.svelte`                       | CSS var references                                                        |
+| `frontend/src/lib/components/ui/StatCard.svelte`                           | `toneTokens` map `danger` entry                                           |
+| `frontend/src/lib/components/ui/StatCard.test.ts`                          | expected token assertion                                                  |
+| `frontend/src/lib/components/ui/StatusBadge.svelte`                        | CSS var references                                                        |
+| `frontend/src/lib/components/Button.svelte`                                | CSS var references                                                        |
+| `frontend/src/lib/components/Button.test.ts`                               | expected class string assertions                                          |
+| `frontend/src/lib/components/Input.svelte`                                 | CSS var references                                                        |
+| `frontend/src/lib/components/Input.test.ts`                                | expected string assertions                                                |
+| `frontend/src/lib/components/Link.svelte`                                  | CSS var references                                                        |
+| `frontend/src/lib/components/Link.test.ts`                                 | expected string assertions; bare `color-error` in test description        |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts`    | bare `color-error` in `toContain()` assertion                             |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts`            | bare `color-error` in `toContain()` assertion + comment                   |
+| `frontend/src/lib/components/surfaces/SurfaceWorkflow.test.ts`             | bare `color-error` in `toContain()` assertion                             |
+| `frontend/src/lib/components/Textarea.svelte`                              | CSS var references                                                        |
+| `frontend/src/lib/components/Textarea.test.ts`                             | expected string assertions                                                |
+| `frontend/src/lib/components/ToastNotifications.svelte`                    | CSS var references                                                        |
+| `frontend/src/lib/components/EditHostAssignmentModal.svelte`               | CSS var references (8 occurrences)                                        |
+| `frontend/src/lib/components/AssignToHostModal.svelte`                     | CSS var references                                                        |
+| `frontend/src/lib/components/BatchResultDialog.svelte`                     | CSS var references                                                        |
+| `frontend/src/routes/history/+page.svelte`                                 | CSS var references                                                        |
+| `frontend/src/routes/hosts/+page.svelte`                                   | CSS var references                                                        |
+| `frontend/src/routes/hosts/hosts.test.ts`                                  | expected string assertions                                                |
+| `frontend/src/routes/layout-button-migration.test.ts`                      | expected string assertions                                                |
+| `frontend/src/routes/profile/profile.test.ts`                              | expected string assertions                                                |
+| `frontend/src/routes/settings/EnrollmentTokenSettings.test.ts`             | expected string assertions                                                |
+| `frontend/src/routes/settings/NotificationLogView.svelte`                  | CSS var references                                                        |
+| `frontend/src/routes/settings/NotificationRulesSettings.svelte`            | CSS var references                                                        |
+| `frontend/src/routes/settings/NotificationRulesSettings.test.ts`           | expected string assertions                                                |
+| `frontend/src/routes/settings/OidcProvidersSettings.svelte`                | CSS var references                                                        |
+| `frontend/src/routes/settings/OidcProvidersSettings.test.ts`               | expected string assertions                                                |
+| `frontend/src/routes/settings/PluginConfigsTab.svelte`                     | CSS var references                                                        |
+| `frontend/src/routes/settings/GlobalSettingsTab.test.ts`                   | bare `color-error` in `toContain()` assertions and it() descriptions      |
+| `frontend/src/routes/hosts/[id]/host-detail.test.ts`                       | bare `color-error` in `toMatch(/color-error/)` assertion                  |
+| `frontend/src/routes/settings/SchedulerTab.svelte`                         | CSS var references                                                        |
+| `frontend/src/routes/settings/SystemServicesSettings.test.ts`              | expected string assertions                                                |
+| `frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts` | expected string assertions                                                |
+| `frontend/src/routes/software/ignore-rules-tab.test.ts`                    | expected string assertions                                                |
+| `docs/development/ui/tokens.md`                                            | 10 token name cells + 10 role label cells + 1 adapter cell                |
+| `docs/development/ui/primitives.md`                                        | 7 token references across 6 component sections                            |
 
 ---
 
@@ -127,12 +127,12 @@ Modified table above.
 
   Pattern `color-error` → `color-danger` replaces:
 
-  | Site | Before | After |
-  | --- | --- | --- |
+  | Site                                 | Before              | After                |
+  | ------------------------------------ | ------------------- | -------------------- |
   | CSS custom property (all 5 variants) | `--color-error[-*]` | `--color-danger[-*]` |
-  | Test assertion strings | `'color-error'` | `'color-danger'` |
-  | Test assertion regex | `/color-error/` | `/color-danger/` |
-  | Comments / descriptions | `color-error token` | `color-danger token` |
+  | Test assertion strings               | `'color-error'`     | `'color-danger'`     |
+  | Test assertion regex                 | `/color-error/`     | `/color-danger/`     |
+  | Comments / descriptions              | `color-error token` | `color-danger token` |
 
   Affected files include:
   - `tokens.ts` (`TokenName` union string literals + `tokens` object keys)
@@ -217,13 +217,13 @@ Two kinds of change:
 
   This matches all five role label patterns:
 
-  | Before | After |
-  | --- | --- |
-  | `\| Error \|` | `\| Danger \|` |
-  | `\| Error background tint \|` | `\| Danger background tint \|` |
-  | `\| Error border \|` | `\| Danger border \|` |
+  | Before                                | After                                  |
+  | ------------------------------------- | -------------------------------------- |
+  | `\| Error \|`                         | `\| Danger \|`                         |
+  | `\| Error background tint \|`         | `\| Danger background tint \|`         |
+  | `\| Error border \|`                  | `\| Danger border \|`                  |
   | `\| Error background tint (hover) \|` | `\| Danger background tint (hover) \|` |
-  | `\| Error border (hover) \|` | `\| Danger border (hover) \|` |
+  | `\| Error border (hover) \|`          | `\| Danger border (hover) \|`          |
 
   Each label appears twice — once in the dark theme table (rows 38–42) and once in the light
   theme table (rows 74–78). The sed replaces both in one pass.
@@ -254,7 +254,6 @@ Two kinds of change:
   Expected: no output.
 
   Spot-check the following locations to confirm correctness:
-
   - Callout tone table (formerly line 178): `danger` row should read
     `| danger | --color-danger | --color-danger-bg | --color-danger-border |`
   - StatusBadge tone table (formerly line 249): same pattern.
@@ -296,7 +295,6 @@ Two kinds of change:
   ```
 
   Expected: all tests pass. Key tests that exercise the rename:
-
   - `src/theme/tokens.test.ts` — pins all 32 token name/value pairs; `--color-danger*` names must match.
   - `src/lib/theme/design-token-values.test.ts` — inline snapshot assertions for `cssForTheme('light')` and `cssForTheme('dark')`; both must contain `--color-danger*`.
   - `vite-plugins/theme-tokens.test.ts` — golden CSS string; both `:root {}` and `.dark {}` blocks must emit `--color-danger*`.

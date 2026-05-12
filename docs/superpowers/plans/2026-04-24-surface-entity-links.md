@@ -19,19 +19,19 @@ tests.
 
 ## File Map
 
-| Path | Action | Responsibility |
-| --- | --- | --- |
-| `crates/shared/surfaces/src/surface.rs` | Modify | Add `cell_type`, new types, `Capability::EntityLinkColumn`; patch all struct literal sites |
-| `crates/ui/web-api/src/surface_proxy.rs` | Modify | Declare `pub(crate) mod entity_enrichment` |
-| `crates/ui/web-api/src/surface_proxy/entity_enrichment.rs` | Create | `enrich_entity_links`, `resolve_host_labels`, `collect_entity_link_columns` |
-| `crates/ui/web-api/src/routes/surfaces.rs` | Modify | Call `enrich_entity_links` after `invoke()` succeeds |
-| `crates/plugins/infrastructure/proxmox/src/plugin.rs` | Modify | Add `cell_type` to `matched_host` column + `Capability::EntityLinkColumn` |
-| `crates/plugins/infrastructure/proxmox/src/surfaces.rs` | Modify | Emit `SurfaceEntityRef::unresolved` for `matched_host` + tests |
-| `frontend/src/lib/surfaces/contract.ts` | Modify | Add `cell_type`, `SurfaceEntityRef`, `'entity_link_column'` capability |
-| `frontend/src/lib/surfaces/entity-routes.ts` | Create | `SurfaceEntityType`, `entityRoute()` |
-| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Modify | Entity-link cell rendering (5-state table) |
-| `frontend/src/lib/test-fixtures/ui-parity.ts` | Modify | Add `entityLink` fixture to `SharedVisualParityFixture` |
-| `frontend/tests/e2e/ui-parity.test.ts` | Modify | Add entity-link parity test |
+| Path                                                       | Action | Responsibility                                                                             |
+| ---------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
+| `crates/shared/surfaces/src/surface.rs`                    | Modify | Add `cell_type`, new types, `Capability::EntityLinkColumn`; patch all struct literal sites |
+| `crates/ui/web-api/src/surface_proxy.rs`                   | Modify | Declare `pub(crate) mod entity_enrichment`                                                 |
+| `crates/ui/web-api/src/surface_proxy/entity_enrichment.rs` | Create | `enrich_entity_links`, `resolve_host_labels`, `collect_entity_link_columns`                |
+| `crates/ui/web-api/src/routes/surfaces.rs`                 | Modify | Call `enrich_entity_links` after `invoke()` succeeds                                       |
+| `crates/plugins/infrastructure/proxmox/src/plugin.rs`      | Modify | Add `cell_type` to `matched_host` column + `Capability::EntityLinkColumn`                  |
+| `crates/plugins/infrastructure/proxmox/src/surfaces.rs`    | Modify | Emit `SurfaceEntityRef::unresolved` for `matched_host` + tests                             |
+| `frontend/src/lib/surfaces/contract.ts`                    | Modify | Add `cell_type`, `SurfaceEntityRef`, `'entity_link_column'` capability                     |
+| `frontend/src/lib/surfaces/entity-routes.ts`               | Create | `SurfaceEntityType`, `entityRoute()`                                                       |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Modify | Entity-link cell rendering (5-state table)                                                 |
+| `frontend/src/lib/test-fixtures/ui-parity.ts`              | Modify | Add `entityLink` fixture to `SharedVisualParityFixture`                                    |
+| `frontend/tests/e2e/ui-parity.test.ts`                     | Modify | Add entity-link parity test                                                                |
 
 **Struct literal patch sites** (all need `cell_type: None` added — 32 total across 9 files):
 
@@ -1041,8 +1041,8 @@ Replace the `SurfaceTableColumn` interface:
 
 ```ts
 export interface SurfaceTableColumn {
-    key: string;
-    label: string;
+  key: string;
+  label: string;
 }
 ```
 
@@ -1050,15 +1050,15 @@ with:
 
 ```ts
 export interface SurfaceTableColumn {
-    key: string;
-    label: string;
-    cell_type?: { kind: 'entity_link'; entity_type: SurfaceEntityType };
+  key: string;
+  label: string;
+  cell_type?: { kind: "entity_link"; entity_type: SurfaceEntityType };
 }
 
 export interface SurfaceEntityRef {
-    entity_id: string;
-    label?: string;
-    found?: boolean;
+  entity_id: string;
+  label?: string;
+  found?: boolean;
 }
 ```
 
@@ -1067,7 +1067,7 @@ Add a temporary inline type for `SurfaceEntityType` (will be replaced in Step 3)
 ```ts
 // Forward-compatible entity type string. Known variants have autocomplete;
 // unknown variants from newer backends are accepted without error.
-export type SurfaceEntityType = 'host' | (string & {});
+export type SurfaceEntityType = "host" | (string & {});
 ```
 
 - [ ] **Step 2: Create `entity-routes.ts`**
@@ -1081,7 +1081,7 @@ Create `frontend/src/lib/surfaces/entity-routes.ts`:
  * `string & {}` keeps autocomplete for known values while accepting unknown
  * types from newer backend versions (forward-compatible).
  */
-export type SurfaceEntityType = 'host' | (string & {});
+export type SurfaceEntityType = "host" | (string & {});
 
 /**
  * Returns the frontend route for a given entity type and ID, or `null` if
@@ -1091,15 +1091,15 @@ export type SurfaceEntityType = 'host' | (string & {});
  * a TypeScript exhaustiveness error here.
  */
 export function entityRoute(
-    entityType: SurfaceEntityType,
-    entityId: string,
+  entityType: SurfaceEntityType,
+  entityId: string,
 ): string | null {
-    switch (entityType) {
-        case 'host':
-            return `/hosts/${entityId}`;
-        default:
-            return null;
-    }
+  switch (entityType) {
+    case "host":
+      return `/hosts/${entityId}`;
+    default:
+      return null;
+  }
 }
 ```
 
@@ -1108,7 +1108,7 @@ export function entityRoute(
 In `contract.ts`, replace the inline `SurfaceEntityType` declaration with:
 
 ```ts
-export type { SurfaceEntityType } from './entity-routes';
+export type { SurfaceEntityType } from "./entity-routes";
 ```
 
 - [ ] **Step 4: TypeScript check**
@@ -1139,9 +1139,9 @@ git commit -m "feat(frontend): add entity-link types to contract and entity-rout
 At the top of the `<script>` block in `SurfaceTable.svelte`, add imports:
 
 ```ts
-import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-import { entityRoute } from '$lib/surfaces/entity-routes';
-import type { SurfaceEntityRef } from '$lib/surfaces/contract';
+import StatusBadge from "$lib/components/ui/StatusBadge.svelte";
+import { entityRoute } from "$lib/surfaces/entity-routes";
+import type { SurfaceEntityRef } from "$lib/surfaces/contract";
 ```
 
 - [ ] **Step 2: Derive `hasEntityLinkColumns`**
@@ -1150,7 +1150,7 @@ Add after the existing `$derived` declarations:
 
 ```ts
 const hasEntityLinkColumns = $derived(
-    resolvedColumns.some((col) => col.cell_type?.kind === 'entity_link'),
+  resolvedColumns.some((col) => col.cell_type?.kind === "entity_link"),
 );
 ```
 
@@ -1359,16 +1359,16 @@ In `frontend/src/lib/test-fixtures/ui-parity.ts`, add a new export interface and
 
 ```ts
 export interface SharedEntityLinkParityFixture {
-    surface: SurfaceResponse;
-    readModel: SurfaceReadResponse;
-    dataLoadInteractionId: string;
-    dataLoadResponse: {
-        items: Array<Record<string, unknown>>;
-        total: number;
-        page: number;
-        per_page: number;
-        total_pages: number;
-    };
+  surface: SurfaceResponse;
+  readModel: SurfaceReadResponse;
+  dataLoadInteractionId: string;
+  dataLoadResponse: {
+    items: Array<Record<string, unknown>>;
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  };
 }
 ```
 
@@ -1376,11 +1376,11 @@ Add `entityLink: SharedEntityLinkParityFixture;` to `SharedVisualParityFixture`:
 
 ```ts
 export interface SharedVisualParityFixture {
-    actionBadge: SharedActionBadgeParityFixture;
-    pillBadge: SharedPillBadgeParityFixture;
-    contextMenu: SharedContextMenuParityFixture;
-    tableFooter: SharedTableFooterParityFixture;
-    entityLink: SharedEntityLinkParityFixture;
+  actionBadge: SharedActionBadgeParityFixture;
+  pillBadge: SharedPillBadgeParityFixture;
+  contextMenu: SharedContextMenuParityFixture;
+  tableFooter: SharedTableFooterParityFixture;
+  entityLink: SharedEntityLinkParityFixture;
 }
 ```
 
@@ -1389,133 +1389,133 @@ statement. Two entity-link columns cover all five rendering states: `host_col` (
 `'host'`, has a known route) and `future_col` (type `'future_entity'`, no route).
 
 ```ts
-    const entityLinkDataLoadInteractionId = 'entity-link.load';
-    const entityLinkDataSourceId = 'entity-link.data';
-    const entityLinkSurface = buildParitySurfaceTab(
-        'surface.entity-link',
-        'Entity Link Surface',
+const entityLinkDataLoadInteractionId = "entity-link.load";
+const entityLinkDataSourceId = "entity-link.data";
+const entityLinkSurface = buildParitySurfaceTab(
+  "surface.entity-link",
+  "Entity Link Surface",
+  {
+    slot: "surface.page",
+    provider_kind: "service",
+    root_node: {
+      kind: "table",
+      data_source_id: entityLinkDataSourceId,
+      columns: [
+        { key: "label_col", label: "State", cell_type: undefined },
         {
-            slot: 'surface.page',
-            provider_kind: 'service',
-            root_node: {
-                kind: 'table',
-                data_source_id: entityLinkDataSourceId,
-                columns: [
-                    { key: 'label_col', label: 'State', cell_type: undefined },
-                    {
-                        key: 'host_col',
-                        label: 'Host (known route)',
-                        cell_type: { kind: 'entity_link', entity_type: 'host' },
-                    },
-                    {
-                        key: 'future_col',
-                        label: 'Future (no route)',
-                        cell_type: {
-                            kind: 'entity_link',
-                            entity_type: 'future_entity',
-                        },
-                    },
-                ],
-            },
+          key: "host_col",
+          label: "Host (known route)",
+          cell_type: { kind: "entity_link", entity_type: "host" },
         },
-    );
-
-    const entityLinkInteractions: InteractionDescriptor[] = [
         {
-            interaction_id: entityLinkDataLoadInteractionId,
-            kind: 'data_load',
-            label: 'Load entity link parity data',
-            input_schema: 'object',
-            result_schema: 'object',
-            transport: { mode: 'provider_proxied' },
+          key: "future_col",
+          label: "Future (no route)",
+          cell_type: {
+            kind: "entity_link",
+            entity_type: "future_entity",
+          },
         },
-    ];
+      ],
+    },
+  },
+);
 
-    const entityLinkDataSources: DataSourceDescriptor[] = [
-        {
-            data_source_id: entityLinkDataSourceId,
-            kind: {
-                kind: 'provider_query',
-                operation_id: entityLinkDataLoadInteractionId,
-            },
-            result_schema: 'object',
-            pagination: { default_page_size: 10, max_page_size: 10 },
-            refresh_policy: { type: 'manual' },
-            empty_state: { title: 'No rows', description: undefined },
-        },
-    ];
+const entityLinkInteractions: InteractionDescriptor[] = [
+  {
+    interaction_id: entityLinkDataLoadInteractionId,
+    kind: "data_load",
+    label: "Load entity link parity data",
+    input_schema: "object",
+    result_schema: "object",
+    transport: { mode: "provider_proxied" },
+  },
+];
 
-    const { provider_count: _elpc, ...entityLinkDescriptor } = entityLinkSurface;
-    const entityLinkReadModel: SurfaceReadResponse = {
-        descriptor: entityLinkDescriptor,
-        interactions: entityLinkInteractions,
-        data_sources: entityLinkDataSources,
-    };
+const entityLinkDataSources: DataSourceDescriptor[] = [
+  {
+    data_source_id: entityLinkDataSourceId,
+    kind: {
+      kind: "provider_query",
+      operation_id: entityLinkDataLoadInteractionId,
+    },
+    result_schema: "object",
+    pagination: { default_page_size: 10, max_page_size: 10 },
+    refresh_policy: { type: "manual" },
+    empty_state: { title: "No rows", description: undefined },
+  },
+];
 
-    // Five states across two columns:
-    // Row 1: host found + known route → link
-    // Row 2: future entity found + no route → plain label
-    // Row 3: not found → warning badge
-    // Row 4: unenriched (found absent) → plain entity_id
-    // Row 5: null cell → —
-    const entityLinkDataLoadResponse = {
-        items: [
-            {
-                label_col: 'found – link',
-                host_col: {
-                    entity_id: '00000000-0000-0000-0000-000000000001',
-                    label: 'web-01',
-                    found: true,
-                },
-                future_col: null,
-            },
-            {
-                label_col: 'found – no route',
-                host_col: null,
-                future_col: {
-                    entity_id: '00000000-0000-0000-0000-000000000002',
-                    label: 'node-02',
-                    found: true,
-                },
-            },
-            {
-                label_col: 'not found',
-                host_col: {
-                    entity_id: '00000000-0000-0000-0000-000000000003',
-                    found: false,
-                },
-                future_col: null,
-            },
-            {
-                label_col: 'unenriched',
-                host_col: { entity_id: '00000000-0000-0000-0000-000000000004' },
-                future_col: null,
-            },
-            {
-                label_col: 'null cell',
-                host_col: null,
-                future_col: null,
-            },
-        ],
-        total: 5,
-        page: 1,
-        per_page: 10,
-        total_pages: 1,
-    };
+const { provider_count: _elpc, ...entityLinkDescriptor } = entityLinkSurface;
+const entityLinkReadModel: SurfaceReadResponse = {
+  descriptor: entityLinkDescriptor,
+  interactions: entityLinkInteractions,
+  data_sources: entityLinkDataSources,
+};
+
+// Five states across two columns:
+// Row 1: host found + known route → link
+// Row 2: future entity found + no route → plain label
+// Row 3: not found → warning badge
+// Row 4: unenriched (found absent) → plain entity_id
+// Row 5: null cell → —
+const entityLinkDataLoadResponse = {
+  items: [
+    {
+      label_col: "found – link",
+      host_col: {
+        entity_id: "00000000-0000-0000-0000-000000000001",
+        label: "web-01",
+        found: true,
+      },
+      future_col: null,
+    },
+    {
+      label_col: "found – no route",
+      host_col: null,
+      future_col: {
+        entity_id: "00000000-0000-0000-0000-000000000002",
+        label: "node-02",
+        found: true,
+      },
+    },
+    {
+      label_col: "not found",
+      host_col: {
+        entity_id: "00000000-0000-0000-0000-000000000003",
+        found: false,
+      },
+      future_col: null,
+    },
+    {
+      label_col: "unenriched",
+      host_col: { entity_id: "00000000-0000-0000-0000-000000000004" },
+      future_col: null,
+    },
+    {
+      label_col: "null cell",
+      host_col: null,
+      future_col: null,
+    },
+  ],
+  total: 5,
+  page: 1,
+  per_page: 10,
+  total_pages: 1,
+};
 ```
 
 Then add `entityLink` to the returned object:
 
 ```ts
-    return {
-        // ...existing fields...
-        entityLink: {
-            surface: entityLinkSurface,
-            readModel: entityLinkReadModel,
-            dataLoadInteractionId: entityLinkDataLoadInteractionId,
-            dataLoadResponse: entityLinkDataLoadResponse,
-        },
-    };
+return {
+  // ...existing fields...
+  entityLink: {
+    surface: entityLinkSurface,
+    readModel: entityLinkReadModel,
+    dataLoadInteractionId: entityLinkDataLoadInteractionId,
+    dataLoadResponse: entityLinkDataLoadResponse,
+  },
+};
 ```
 
 - [ ] **Step 2: Update `buildDefaultReadModels` in `ui-parity.test.ts`**
@@ -1523,8 +1523,8 @@ Then add `entityLink` to the returned object:
 In `ui-parity.test.ts`, find `buildDefaultReadModels` and add the entity link read model:
 
 ```ts
-    models[sharedVisualParity.entityLink.surface.surface_id] =
-        sharedVisualParity.entityLink.readModel;
+models[sharedVisualParity.entityLink.surface.surface_id] =
+  sharedVisualParity.entityLink.readModel;
 ```
 
 - [ ] **Step 3: Add surface invoke mock for entity link surface**
@@ -1533,10 +1533,10 @@ In the `mockParityApi` route handler, add a case for the entity link fixture:
 
 ```ts
 if (
-    surfaceId === sharedVisualParity.entityLink.surface.surface_id &&
-    interactionId === sharedVisualParity.entityLink.dataLoadInteractionId
+  surfaceId === sharedVisualParity.entityLink.surface.surface_id &&
+  interactionId === sharedVisualParity.entityLink.dataLoadInteractionId
 ) {
-    return json(sharedVisualParity.entityLink.dataLoadResponse);
+  return json(sharedVisualParity.entityLink.dataLoadResponse);
 }
 ```
 
@@ -1546,29 +1546,40 @@ After the `'shared primitive ui parity: table footer totals and pagination align
 add:
 
 ```ts
-test('shared primitive ui parity: entity link cell rendering states', async ({ page }) => {
-    if (!isCanonicalUiParityHost) {
-        test.skip(true, canonicalUiParityReason);
-    }
+test("shared primitive ui parity: entity link cell rendering states", async ({
+  page,
+}) => {
+  if (!isCanonicalUiParityHost) {
+    test.skip(true, canonicalUiParityReason);
+  }
 
-    const entityLinkSurfaces = [...paritySurfaces, sharedVisualParity.entityLink.surface];
-    const entityLinkReadModels = buildDefaultReadModels(entityLinkSurfaces);
-    await mockParityApi(page, {
-        surfaces: entityLinkSurfaces,
-        readModels: entityLinkReadModels,
-    });
+  const entityLinkSurfaces = [
+    ...paritySurfaces,
+    sharedVisualParity.entityLink.surface,
+  ];
+  const entityLinkReadModels = buildDefaultReadModels(entityLinkSurfaces);
+  await mockParityApi(page, {
+    surfaces: entityLinkSurfaces,
+    readModels: entityLinkReadModels,
+  });
 
-    await page.goto(`/surfaces/${sharedVisualParity.entityLink.surface.surface_id}`);
+  await page.goto(
+    `/surfaces/${sharedVisualParity.entityLink.surface.surface_id}`,
+  );
 
-    const dataTable = page.locator('[data-ui="data-table"]');
-    await expect(dataTable).toBeVisible();
+  const dataTable = page.locator('[data-ui="data-table"]');
+  await expect(dataTable).toBeVisible();
 
-    // Wait for entity link cells to render (found link visible)
-    await expect(
-        dataTable.locator('a[href="/hosts/00000000-0000-0000-0000-000000000001"]'),
-    ).toBeVisible();
+  // Wait for entity link cells to render (found link visible)
+  await expect(
+    dataTable.locator('a[href="/hosts/00000000-0000-0000-0000-000000000001"]'),
+  ).toBeVisible();
 
-    await captureParityScreenshot(page, dataTable, 'ui-parity-entity-link-cells.png');
+  await captureParityScreenshot(
+    page,
+    dataTable,
+    "ui-parity-entity-link-cells.png",
+  );
 });
 ```
 

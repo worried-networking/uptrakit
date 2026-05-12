@@ -21,45 +21,45 @@ Bootstrap (manual `cargo publish` for all 7) happens post-merge.
 
 ### Task 1 (Commit 1) — 5 shared crates
 
-| Action | Path |
-| ------ | ---- |
-| Modify | `crates/shared/macros/Cargo.toml` |
-| Modify | `crates/shared/surfaces/Cargo.toml` |
-| Modify | `crates/shared/types/Cargo.toml` |
-| Modify | `crates/shared/wire/Cargo.toml` |
+| Action | Path                                     |
+| ------ | ---------------------------------------- |
+| Modify | `crates/shared/macros/Cargo.toml`        |
+| Modify | `crates/shared/surfaces/Cargo.toml`      |
+| Modify | `crates/shared/types/Cargo.toml`         |
+| Modify | `crates/shared/wire/Cargo.toml`          |
 | Modify | `crates/shared/web-api-types/Cargo.toml` |
 
 ### Task 2 (Commit 2) — service-sdk
 
-| Action | Path |
-| ------ | ---- |
-| Modify | `crates/shared/service-sdk/Cargo.toml` |
-| Modify | `crates/shared/service-sdk/src/lib.rs` |
+| Action | Path                                       |
+| ------ | ------------------------------------------ |
+| Modify | `crates/shared/service-sdk/Cargo.toml`     |
+| Modify | `crates/shared/service-sdk/src/lib.rs`     |
 | Delete | `crates/shared/service-sdk/src/generated/` |
 
 ### Task 3 (Commit 3) — openapi-client
 
-| Action | Path |
-| ------ | ---- |
-| Modify | `crates/shared/openapi-client/Cargo.toml` |
-| Modify | `crates/shared/openapi-client/src/lib.rs` |
-| Modify | `crates/shared/openapi-client/src/error.rs` |
-| Delete | `crates/shared/openapi-client/src/macros.rs` |
+| Action | Path                                          |
+| ------ | --------------------------------------------- |
+| Modify | `crates/shared/openapi-client/Cargo.toml`     |
+| Modify | `crates/shared/openapi-client/src/lib.rs`     |
+| Modify | `crates/shared/openapi-client/src/error.rs`   |
+| Delete | `crates/shared/openapi-client/src/macros.rs`  |
 | Delete | `crates/shared/openapi-client/src/generated/` |
 
 ### Task 4 (Commit 4) — sync infrastructure
 
-| Action | Path |
-| ------ | ---- |
-| Delete | `xtask/` (entire directory) |
+| Action | Path                                                    |
+| ------ | ------------------------------------------------------- |
+| Delete | `xtask/` (entire directory)                             |
 | Modify | `Cargo.toml` (workspace root — remove `"xtask"` member) |
-| Modify | `.husky/pre-commit` |
-| Delete | `.github/workflows/generated-check.yml` |
+| Modify | `.husky/pre-commit`                                     |
+| Delete | `.github/workflows/generated-check.yml`                 |
 
 ### Task 5 (Commit 5) — release-plz
 
-| Action | Path |
-| ------ | ---- |
+| Action | Path               |
+| ------ | ------------------ |
 | Modify | `release-plz.toml` |
 
 ---
@@ -327,7 +327,6 @@ stub features with real forwarding features, delete the vendored `src/generated/
   ```
 
   In `[dependencies]`, make these changes:
-
   - Remove: `sea-orm = { workspace = true, optional = true }`
   - Remove: `utoipa = { workspace = true, optional = true }`
   - Change: `uptrakit-wire = { workspace = true, optional = true }` → `uptrakit-wire = { workspace = true }`
@@ -508,7 +507,6 @@ is `src/error.rs` — update that file to import the macro explicitly.
   ```
 
   In `[dependencies]`, make these changes:
-
   - Remove: `uptrakit-web-api-types = { workspace = true, optional = true }`
   - Remove: `uptrakit-shared-types = { workspace = true, optional = true }`
   - Add: `uptrakit-web-api-types = { workspace = true }`
@@ -976,26 +974,26 @@ the workspace-level `publish = false` default). Remove `git_only = true` from th
 
 **Spec coverage:**
 
-| Spec requirement | Task covering it |
-| --- | --- |
-| 5 crates: `version = "0.0.1"` explicit + `publish = true` | Task 1 |
-| `rootcause` moved to dev-deps in macros | Task 1 step 1 |
-| service-sdk: remove `workspace-internal`, hard deps, forward features | Task 2 step 1 |
-| workspace Cargo.toml: remove `features = ["workspace-internal"]` for service-sdk | Task 2 step 2 |
-| service-sdk: replace alternating cfg blocks in `lib.rs` | Task 2 step 3 |
-| service-sdk: delete `src/generated/` | Task 2 step 4 |
-| openapi-client: remove `workspace-internal`, hard deps, forward features | Task 3 step 1 |
-| openapi-client: add `uptrakit-shared-macros` dep | Task 3 step 1 |
-| workspace Cargo.toml: remove `features = ["workspace-internal"]` for openapi-client | Task 3 step 2 |
-| openapi-client: update `error.rs` call site for `impl_report_conversion!` | Task 3 step 3 |
-| openapi-client: replace alternating cfg blocks in `lib.rs` | Task 3 step 4 |
-| openapi-client: delete `src/macros.rs` and `src/generated/` | Task 3 step 5 |
-| Delete xtask sync files + remove xtask from workspace | Task 4 step 1–2 |
-| Remove sync blocks from `.husky/pre-commit` | Task 4 step 3 |
-| Delete `.github/workflows/generated-check.yml` | Task 4 step 4 |
-| Add 5 `[[package]]` entries to `release-plz.toml` | Task 5 step 1 |
-| Remove `git_only = true` from openapi-client + service-sdk entries | Task 5 step 1 |
-| Bootstrap script (idempotent, polling) | Task 6 step 3 |
-| Post-bootstrap `cargo package --dry-run` for all 7 | Task 6 step 4 |
-| `http-ssrf` and `test-support` stubs removed | Task 2 step 1 / Task 3 step 1 |
-| `sea-orm` and `openapi` become real forwarding features | Task 2 step 1 / Task 3 step 1 |
+| Spec requirement                                                                    | Task covering it              |
+| ----------------------------------------------------------------------------------- | ----------------------------- |
+| 5 crates: `version = "0.0.1"` explicit + `publish = true`                           | Task 1                        |
+| `rootcause` moved to dev-deps in macros                                             | Task 1 step 1                 |
+| service-sdk: remove `workspace-internal`, hard deps, forward features               | Task 2 step 1                 |
+| workspace Cargo.toml: remove `features = ["workspace-internal"]` for service-sdk    | Task 2 step 2                 |
+| service-sdk: replace alternating cfg blocks in `lib.rs`                             | Task 2 step 3                 |
+| service-sdk: delete `src/generated/`                                                | Task 2 step 4                 |
+| openapi-client: remove `workspace-internal`, hard deps, forward features            | Task 3 step 1                 |
+| openapi-client: add `uptrakit-shared-macros` dep                                    | Task 3 step 1                 |
+| workspace Cargo.toml: remove `features = ["workspace-internal"]` for openapi-client | Task 3 step 2                 |
+| openapi-client: update `error.rs` call site for `impl_report_conversion!`           | Task 3 step 3                 |
+| openapi-client: replace alternating cfg blocks in `lib.rs`                          | Task 3 step 4                 |
+| openapi-client: delete `src/macros.rs` and `src/generated/`                         | Task 3 step 5                 |
+| Delete xtask sync files + remove xtask from workspace                               | Task 4 step 1–2               |
+| Remove sync blocks from `.husky/pre-commit`                                         | Task 4 step 3                 |
+| Delete `.github/workflows/generated-check.yml`                                      | Task 4 step 4                 |
+| Add 5 `[[package]]` entries to `release-plz.toml`                                   | Task 5 step 1                 |
+| Remove `git_only = true` from openapi-client + service-sdk entries                  | Task 5 step 1                 |
+| Bootstrap script (idempotent, polling)                                              | Task 6 step 3                 |
+| Post-bootstrap `cargo package --dry-run` for all 7                                  | Task 6 step 4                 |
+| `http-ssrf` and `test-support` stubs removed                                        | Task 2 step 1 / Task 3 step 1 |
+| `sea-orm` and `openapi` become real forwarding features                             | Task 2 step 1 / Task 3 step 1 |

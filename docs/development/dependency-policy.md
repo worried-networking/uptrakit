@@ -37,7 +37,7 @@ inside any crate's own `Cargo.toml`.
 ## Feature specification strategy
 
 The workspace root pins each crate's version and sets a baseline of features (or `default-features
-= false`). Individual crates declare only the *additional* features they need. This applies
+= false`). Individual crates declare only the _additional_ features they need. This applies
 uniformly to all workspace dependencies, not just tokio.
 
 For example, tokio:
@@ -63,15 +63,15 @@ Rules:
 Heavy dependencies that are only needed for specific functionality are gated behind Cargo
 features so builds that do not need them avoid the compile-time and binary-size cost:
 
-| Feature | Crate | Dependency gated | Default |
-| --- | --- | --- | --- |
-| `oidc` | `uptrakit-web-api` | `openidconnect` (+ transitive `oauth2`, RSA/EC crypto) | enabled |
-| `oidc` | `uptrakit-controller` | Propagates `uptrakit-web-api/oidc` | enabled |
-| `embed-frontend` | `uptrakit-controller` | `rust-embed` + embedded SvelteKit build | disabled |
-| `swagger-ui` | `uptrakit-web-api` | `utoipa-swagger-ui` | disabled |
-| `email` | `uptrakit-plugin-infrastructure-registry` | `mail-send` (SMTP client) via `uptrakit-notification-plugin-email` | disabled |
-| `mock` | `uptrakit-openapi-client` | `httpmock` (HTTP mocking) | disabled |
-| `daemon` | `uptrakit-plugin-releases-docker` | `bollard` (Docker daemon API) | enabled |
+| Feature          | Crate                                     | Dependency gated                                                   | Default  |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------ | -------- |
+| `oidc`           | `uptrakit-web-api`                        | `openidconnect` (+ transitive `oauth2`, RSA/EC crypto)             | enabled  |
+| `oidc`           | `uptrakit-controller`                     | Propagates `uptrakit-web-api/oidc`                                 | enabled  |
+| `embed-frontend` | `uptrakit-controller`                     | `rust-embed` + embedded SvelteKit build                            | disabled |
+| `swagger-ui`     | `uptrakit-web-api`                        | `utoipa-swagger-ui`                                                | disabled |
+| `email`          | `uptrakit-plugin-infrastructure-registry` | `mail-send` (SMTP client) via `uptrakit-notification-plugin-email` | disabled |
+| `mock`           | `uptrakit-openapi-client`                 | `httpmock` (HTTP mocking)                                          | disabled |
+| `daemon`         | `uptrakit-plugin-releases-docker`         | `bollard` (Docker daemon API)                                      | enabled  |
 
 When adding a new optional dependency, gate it with `dep:crate_name` in the feature definition
 and use `#[cfg(feature = "...")]` on all code paths that reference it (imports, struct fields,

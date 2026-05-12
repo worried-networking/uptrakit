@@ -1,11 +1,11 @@
 # ATK-13: JWT and Session Token Attacks
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Authentication (JWT, refresh tokens, API tokens) |
-| Prerequisites | Network position to intercept tokens, or database read access |
-| STRIDE | Spoofing, Repudiation |
+| Field          | Value                                                         |
+| -------------- | ------------------------------------------------------------- |
+| Severity       | Medium                                                        |
+| Attack surface | Authentication (JWT, refresh tokens, API tokens)              |
+| Prerequisites  | Network position to intercept tokens, or database read access |
+| STRIDE         | Spoofing, Repudiation                                         |
 
 ## Attack description
 
@@ -73,7 +73,7 @@
 - **Refresh token rotation.** Refresh tokens are rotated atomically in a database
   transaction on every use. The old token is revoked and cannot be replayed.
 - **Secure cookie attributes.** Refresh tokens are delivered in `HttpOnly; Secure;
-  SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing XSS-based theft
+SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing XSS-based theft
   and cross-site request forgery.
 - **SHA-256 hashed refresh tokens.** Refresh tokens are stored as SHA-256 hashes,
   not plaintext. Database access alone does not yield usable tokens.

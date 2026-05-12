@@ -29,8 +29,16 @@ List all users with their assigned roles.
         { "id": "019...", "name": "viewer" },
         { "id": "019...", "name": "service_manager" }
       ],
-      "permissions": ["view_services", "view_software", "view_hosts", "view_settings",
-                       "approve_services", "reject_services", "remove_services", "update_services"]
+      "permissions": [
+        "view_services",
+        "view_software",
+        "view_hosts",
+        "view_settings",
+        "approve_services",
+        "reject_services",
+        "remove_services",
+        "update_services"
+      ]
     }
   ],
   "total": 1,
@@ -164,27 +172,40 @@ List all access presets with their role compositions.
   {
     "name": "administrator",
     "description": "Tenant administrators with full management",
-    "roles": ["viewer", "service_manager", "software_manager", "host_manager",
-              "settings_manager", "command_manager"]
+    "roles": [
+      "viewer",
+      "service_manager",
+      "software_manager",
+      "host_manager",
+      "settings_manager",
+      "command_manager"
+    ]
   },
   {
     "name": "owner",
     "description": "System owner with full control",
-    "roles": ["viewer", "operator", "service_manager", "software_manager",
-              "host_manager", "settings_manager", "command_manager",
-              "system_administrator"]
+    "roles": [
+      "viewer",
+      "operator",
+      "service_manager",
+      "software_manager",
+      "host_manager",
+      "settings_manager",
+      "command_manager",
+      "system_administrator"
+    ]
   }
 ]
 ```
 
 ## Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/users.rs` | User and role route handlers |
-| `crates/ui/web-api/src/routes/access_presets.rs` | Preset route handlers |
-| `crates/shared/web-api-types/src/users.rs` | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`, `ApplyPresetRequest` |
-| `crates/shared/web-api-types/src/access_presets.rs` | `AccessPresetResponse` |
-| `crates/shared/types/src/permissions.rs` | `Permission` enum (32 variants) |
-| `crates/shared/types/src/access_preset.rs` | `AccessPreset` enum (5 variants) |
-| `crates/ui/web-api/src/middleware/permission.rs` | `CanManageUsers` extractor |
+| File                                                | Purpose                                                                                            |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/users.rs`             | User and role route handlers                                                                       |
+| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers                                                                              |
+| `crates/shared/web-api-types/src/users.rs`          | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`, `ApplyPresetRequest` |
+| `crates/shared/web-api-types/src/access_presets.rs` | `AccessPresetResponse`                                                                             |
+| `crates/shared/types/src/permissions.rs`            | `Permission` enum (32 variants)                                                                    |
+| `crates/shared/types/src/access_preset.rs`          | `AccessPreset` enum (5 variants)                                                                   |
+| `crates/ui/web-api/src/middleware/permission.rs`    | `CanManageUsers` extractor                                                                         |

@@ -18,12 +18,12 @@ snippet (no icon component import).
 
 ## Files
 
-| File | Action | Responsibility |
-| --- | --- | --- |
-| `frontend/src/routes/history/+page.svelte` | Modify | Replace all raw `<button>` elements with `<Button>` primitive |
-| `frontend/src/routes/history/history.test.ts` | Modify | Add Button migration assertions (filter chips, expand toggle, row text matrix) |
-| `frontend/src/routes/history/history-trigger-status.test.ts` | Modify | Add modal Cancel/Submit Button assertions |
-| `frontend/tests/e2e/history.spec.ts` | Create | Visual parity baseline for history route post-migration |
+| File                                                         | Action | Responsibility                                                                 |
+| ------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------ |
+| `frontend/src/routes/history/+page.svelte`                   | Modify | Replace all raw `<button>` elements with `<Button>` primitive                  |
+| `frontend/src/routes/history/history.test.ts`                | Modify | Add Button migration assertions (filter chips, expand toggle, row text matrix) |
+| `frontend/src/routes/history/history-trigger-status.test.ts` | Modify | Add modal Cancel/Submit Button assertions                                      |
+| `frontend/tests/e2e/history.spec.ts`                         | Create | Visual parity baseline for history route post-migration                        |
 
 ---
 
@@ -50,39 +50,45 @@ snippet (no icon component import).
 Add this `describe` block inside the existing `describe('History Route', ...)` in `frontend/src/routes/history/history.test.ts`:
 
 ```typescript
-describe('filter chips', () => {
-  it('renders inactive filter chip as ghost sm with no active class', async () => {
+describe("filter chips", () => {
+  it("renders inactive filter chip as ghost sm with no active class", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
     // 'Completed' chip should be inactive — statusFilter defaults to 'all'
-    const completedChip = screen.getByRole('button', { name: 'Completed' });
+    const completedChip = screen.getByRole("button", { name: "Completed" });
     expect(completedChip).toBeInTheDocument();
     // ghost variant: has border border-[var(--border-default)]
-    expect(completedChip.className).toContain('border-[var(--border-default)]');
+    expect(completedChip.className).toContain("border-[var(--border-default)]");
     // no active override
-    expect(completedChip.className).not.toContain('text-[var(--accent)]');
-    expect(completedChip.className).not.toContain('bg-[var(--bg-hover)]');
+    expect(completedChip.className).not.toContain("text-[var(--accent)]");
+    expect(completedChip.className).not.toContain("bg-[var(--bg-hover)]");
   });
 
-  it('renders active filter chip with accent + bg-hover class override', async () => {
+  it("renders active filter chip with accent + bg-hover class override", async () => {
     // Pre-set URL to status=completed so the chip renders active on mount
-    page.url.search = '?status=completed';
+    page.url.search = "?status=completed";
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
-    const completedChip = screen.getByRole('button', { name: 'Completed' });
-    expect(completedChip.className).toContain('text-[var(--accent)]');
-    expect(completedChip.className).toContain('bg-[var(--bg-hover)]');
+    const completedChip = screen.getByRole("button", { name: "Completed" });
+    expect(completedChip.className).toContain("text-[var(--accent)]");
+    expect(completedChip.className).toContain("bg-[var(--bg-hover)]");
   });
 
-  it('renders All chip as active by default', async () => {
+  it("renders All chip as active by default", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
-    const allChip = screen.getByRole('button', { name: 'All' });
-    expect(allChip.className).toContain('text-[var(--accent)]');
-    expect(allChip.className).toContain('bg-[var(--bg-hover)]');
+    const allChip = screen.getByRole("button", { name: "All" });
+    expect(allChip.className).toContain("text-[var(--accent)]");
+    expect(allChip.className).toContain("bg-[var(--bg-hover)]");
   });
 });
 ```
@@ -180,97 +186,135 @@ git commit -m "feat(frontend): migrate history filter chips to Button primitive 
 Add this `describe` block inside `describe('History Route', ...)` in `frontend/src/routes/history/history.test.ts`:
 
 ```typescript
-describe('per-row expand toggle', () => {
-  it('renders View logs for non-interactive idle row', async () => {
+describe("per-row expand toggle", () => {
+  it("renders View logs for non-interactive idle row", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
     // completedItem: interactive=false, status=completed, not expanded
-    const viewButtons = screen.getAllByRole('button', { name: /view logs/i });
+    const viewButtons = screen.getAllByRole("button", { name: /view logs/i });
     expect(viewButtons.length).toBeGreaterThan(0);
   });
 
-  it('renders Attach terminal for interactive in_progress row when collapsed', async () => {
+  it("renders Attach terminal for interactive in_progress row when collapsed", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
     // inProgressItem: interactive=true, status=in_progress
-    const attachButton = screen.getByRole('button', { name: /attach terminal/i });
+    const attachButton = screen.getByRole("button", {
+      name: /attach terminal/i,
+    });
     expect(attachButton).toBeInTheDocument();
   });
 
-  it('renders Hide logs after expanding a non-interactive row', async () => {
+  it("renders Hide logs after expanding a non-interactive row", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
     // Click expand on completedItem
-    const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-    const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+    const grafanaEntry = screen
+      .getByText("grafana on prod-05")
+      .closest("article")!;
+    const viewBtn = grafanaEntry.querySelector(
+      'button[aria-expanded="false"]',
+    ) as HTMLElement;
     expect(viewBtn).not.toBeNull();
     await fireEvent.click(viewBtn);
 
     await waitFor(() => {
-      const hideBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+      const hideBtn = grafanaEntry.querySelector(
+        'button[aria-expanded="true"]',
+      ) as HTMLElement;
       expect(hideBtn).not.toBeNull();
-      expect(hideBtn.textContent).toContain('Hide logs');
+      expect(hideBtn.textContent).toContain("Hide logs");
     });
   });
 
-  it('renders Close terminal after expanding interactive in_progress row', async () => {
+  it("renders Close terminal after expanding interactive in_progress row", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
-    const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-    const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+    const pgEntry = screen
+      .getByText("postgresql on prod-03")
+      .closest("article")!;
+    const attachBtn = pgEntry.querySelector(
+      'button[aria-expanded="false"]',
+    ) as HTMLElement;
     expect(attachBtn).not.toBeNull();
     await fireEvent.click(attachBtn);
     vi.runOnlyPendingTimers();
 
     await waitFor(() => {
-      const closeBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+      const closeBtn = pgEntry.querySelector(
+        'button[aria-expanded="true"]',
+      ) as HTMLElement;
       expect(closeBtn).not.toBeNull();
-      expect(closeBtn.textContent).toContain('Close terminal');
+      expect(closeBtn.textContent).toContain("Close terminal");
     });
   });
 
-  it('shows aria-busy=true while wsState=connecting on interactive row', async () => {
-    const { connectInteractiveSession } = await import('$lib/interactive');
+  it("shows aria-busy=true while wsState=connecting on interactive row", async () => {
+    const { connectInteractiveSession } = await import("$lib/interactive");
     // Mock: do not call onStateChange — leave wsState at 'connecting'
     vi.mocked(connectInteractiveSession).mockImplementation(() => ({
       disconnect: vi.fn(),
       sendSignal: vi.fn(),
-      sendInput: vi.fn()
+      sendInput: vi.fn(),
     }));
 
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
-    const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-    const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+    const pgEntry = screen
+      .getByText("postgresql on prod-03")
+      .closest("article")!;
+    const attachBtn = pgEntry.querySelector(
+      'button[aria-expanded="false"]',
+    ) as HTMLElement;
     await fireEvent.click(attachBtn);
     vi.runOnlyPendingTimers();
 
     await waitFor(() => {
-      const expandedBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+      const expandedBtn = pgEntry.querySelector(
+        'button[aria-expanded="true"]',
+      ) as HTMLElement;
       expect(expandedBtn).not.toBeNull();
-      expect(expandedBtn).toHaveAttribute('aria-busy', 'true');
+      expect(expandedBtn).toHaveAttribute("aria-busy", "true");
     });
   });
 
-  it('renders chevron-down SVG path when row is expanded', async () => {
+  it("renders chevron-down SVG path when row is expanded", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Update History")).toBeInTheDocument(),
+    );
 
-    const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-    const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+    const grafanaEntry = screen
+      .getByText("grafana on prod-05")
+      .closest("article")!;
+    const viewBtn = grafanaEntry.querySelector(
+      'button[aria-expanded="false"]',
+    ) as HTMLElement;
     await fireEvent.click(viewBtn);
 
     await waitFor(() => {
-      const expandedBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
-      const path = expandedBtn.querySelector('path');
+      const expandedBtn = grafanaEntry.querySelector(
+        'button[aria-expanded="true"]',
+      ) as HTMLElement;
+      const path = expandedBtn.querySelector("path");
       expect(path).not.toBeNull();
       // chevron-down path (16×16 filled)
-      expect(path!.getAttribute('d')).toBe('M4 6l4 4 4-4');
+      expect(path!.getAttribute("d")).toBe("M4 6l4 4 4-4");
     });
   });
 });
@@ -332,48 +376,54 @@ children text "View logs". Update that test's `findByRole` query too:
 In `history.test.ts`, replace (line 199):
 
 ```typescript
-const viewLogButton = await screen.findByRole('button', {
-  name: 'Expand output for nginx on prod-01'
+const viewLogButton = await screen.findByRole("button", {
+  name: "Expand output for nginx on prod-01",
 });
 ```
 
 with:
 
 ```typescript
-const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-const viewLogButton = nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+const nginxEntry = screen.getByText("nginx on prod-01").closest("article")!;
+const viewLogButton = nginxEntry.querySelector(
+  'button[aria-expanded="false"]',
+) as HTMLElement;
 expect(viewLogButton).not.toBeNull();
 ```
 
 And replace (line 215):
 
 ```typescript
-const viewLogButton = await screen.findByRole('button', {
-  name: 'Expand output for postgresql on prod-03'
+const viewLogButton = await screen.findByRole("button", {
+  name: "Expand output for postgresql on prod-03",
 });
 ```
 
 with:
 
 ```typescript
-const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-const viewLogButton = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+const pgEntry = screen.getByText("postgresql on prod-03").closest("article")!;
+const viewLogButton = pgEntry.querySelector(
+  'button[aria-expanded="false"]',
+) as HTMLElement;
 expect(viewLogButton).not.toBeNull();
 ```
 
 Similarly in `history-trigger-status.test.ts`, replace (line 226):
 
 ```typescript
-const viewLogButton = screen.getByRole('button', {
-  name: 'Expand output for Demo App on Host One'
+const viewLogButton = screen.getByRole("button", {
+  name: "Expand output for Demo App on Host One",
 });
 ```
 
 with:
 
 ```typescript
-const demoEntry = screen.getByText('Demo App on Host One').closest('article')!;
-const viewLogButton = demoEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+const demoEntry = screen.getByText("Demo App on Host One").closest("article")!;
+const viewLogButton = demoEntry.querySelector(
+  'button[aria-expanded="false"]',
+) as HTMLElement;
 expect(viewLogButton).not.toBeNull();
 ```
 
@@ -425,81 +475,130 @@ Add this `describe` block to `frontend/src/routes/history/history-trigger-status
 inside the existing `describe('History Trigger Update Modal', ...)`:
 
 ```typescript
-describe('modal button variants', () => {
-  it('Trigger Update header launcher renders primary sm, no loading', async () => {
+describe("modal button variants", () => {
+  it("Trigger Update header launcher renders primary sm, no loading", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Update History" }),
+      ).toBeInTheDocument(),
+    );
 
     // There is exactly one "Trigger Update" button visible before modal opens
-    const launcherBtn = screen.getByRole('button', { name: 'Trigger Update' });
+    const launcherBtn = screen.getByRole("button", { name: "Trigger Update" });
     // primary variant: has gradient background class
-    expect(launcherBtn.className).toContain('bg-[linear-gradient');
+    expect(launcherBtn.className).toContain("bg-[linear-gradient");
     // sm size
-    expect(launcherBtn.className).toContain('h-[19px]');
+    expect(launcherBtn.className).toContain("h-[19px]");
     // no aria-busy
-    expect(launcherBtn).not.toHaveAttribute('aria-busy');
+    expect(launcherBtn).not.toHaveAttribute("aria-busy");
   });
 
-  it('modal Cancel renders secondary variant', async () => {
+  it("modal Cancel renders secondary variant", async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
-    await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Update History" }),
+      ).toBeInTheDocument(),
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Trigger Update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Trigger Software Update" }),
+      ).toBeInTheDocument(),
+    );
 
-    const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     // secondary variant: bg-[var(--bg-raised)]
-    expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+    expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
     // md size (default)
-    expect(cancelBtn.className).toContain('h-[23px]');
+    expect(cancelBtn.className).toContain("h-[23px]");
   });
 
   it('modal Submit renders primary md, static children "Trigger Update"', async () => {
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
-    await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Update History" }),
+      ).toBeInTheDocument(),
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Trigger Update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Trigger Software Update" }),
+      ).toBeInTheDocument(),
+    );
 
     // Two "Trigger Update" buttons now: launcher (hidden behind modal) + submit
-    const allTriggerBtns = screen.getAllByRole('button', { name: 'Trigger Update' });
+    const allTriggerBtns = screen.getAllByRole("button", {
+      name: "Trigger Update",
+    });
     const submitBtn = allTriggerBtns[allTriggerBtns.length - 1];
     // primary variant
-    expect(submitBtn.className).toContain('bg-[linear-gradient');
+    expect(submitBtn.className).toContain("bg-[linear-gradient");
     // md size
-    expect(submitBtn.className).toContain('h-[23px]');
+    expect(submitBtn.className).toContain("h-[23px]");
     // static children — no "Triggering..." text present
-    expect(submitBtn.textContent).not.toContain('Triggering');
+    expect(submitBtn.textContent).not.toContain("Triggering");
   });
 
-  it('modal Submit shows spinner via aria-busy when triggering, text stays static', async () => {
+  it("modal Submit shows spinner via aria-busy when triggering, text stays static", async () => {
     // Stall the trigger call so we can inspect mid-flight state
-    let resolveTrigger!: (v: { update_history_id: string; status: string }) => void;
+    let resolveTrigger!: (v: {
+      update_history_id: string;
+      status: string;
+    }) => void;
     vi.mocked(api.triggerSoftwareUpdate).mockReturnValue(
-      new Promise((res) => { resolveTrigger = res; })
+      new Promise((res) => {
+        resolveTrigger = res;
+      }),
     );
 
     render(HistoryPage);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
-    await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Update History" }),
+      ).toBeInTheDocument(),
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Trigger Update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Trigger Software Update" }),
+      ).toBeInTheDocument(),
+    );
 
-    const selects = screen.getAllByRole('combobox');
-    await fireEvent.change(selects[0], { target: { value: 'software-1' } });
-    await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
-    await fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'host-1' } });
-    await fireEvent.input(screen.getByPlaceholderText('e.g. 1.2.3'), { target: { value: '1.1.0' } });
+    const selects = screen.getAllByRole("combobox");
+    await fireEvent.change(selects[0], { target: { value: "software-1" } });
+    await waitFor(() =>
+      expect(screen.getAllByRole("combobox")).toHaveLength(2),
+    );
+    await fireEvent.change(screen.getAllByRole("combobox")[1], {
+      target: { value: "host-1" },
+    });
+    await fireEvent.input(screen.getByPlaceholderText("e.g. 1.2.3"), {
+      target: { value: "1.1.0" },
+    });
 
-    const allTriggerBtns = screen.getAllByRole('button', { name: 'Trigger Update' });
+    const allTriggerBtns = screen.getAllByRole("button", {
+      name: "Trigger Update",
+    });
     const submitBtn = allTriggerBtns[allTriggerBtns.length - 1];
     await fireEvent.click(submitBtn);
 
     // Mid-flight: aria-busy=true, children text still "Trigger Update" (no text swap)
     await waitFor(() => {
-      expect(submitBtn).toHaveAttribute('aria-busy', 'true');
-      expect(submitBtn.textContent).not.toContain('Triggering');
+      expect(submitBtn).toHaveAttribute("aria-busy", "true");
+      expect(submitBtn.textContent).not.toContain("Triggering");
     });
 
     // Resolve so test cleanup works
-    resolveTrigger({ update_history_id: 'h-1', status: 'pending' });
+    resolveTrigger({ update_history_id: "h-1", status: "pending" });
   });
 });
 ```
@@ -651,136 +750,154 @@ Expected: all PASS.
 Create `frontend/tests/e2e/history.spec.ts`:
 
 ```typescript
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 import {
   PARITY_DYNAMIC_MASK_SELECTOR,
   PARITY_VIEWPORT_PRESETS,
-  expectParityScreenshot
-} from './parity-config';
+  expectParityScreenshot,
+} from "./parity-config";
 
-const isCanonicalUiParityHost = process.platform === 'darwin';
+const isCanonicalUiParityHost = process.platform === "darwin";
 const canonicalUiParityReason =
-  'ui parity screenshot baselines are canonicalized on macOS Chromium to avoid cross-OS rasterization drift';
+  "ui parity screenshot baselines are canonicalized on macOS Chromium to avoid cross-OS rasterization drift";
 
 const mockUser = {
-  id: '00000000-0000-0000-0000-000000000201',
-  email: 'admin@example.com',
-  first_name: 'Admin',
-  last_name: 'User',
+  id: "00000000-0000-0000-0000-000000000201",
+  email: "admin@example.com",
+  first_name: "Admin",
+  last_name: "User",
   permissions: [
-    'view_software',
-    'trigger_updates',
-    'view_services',
-    'approve_services',
-    'reject_services',
-    'remove_services',
-    'update_services',
-    'view_hosts',
-    'manage_hosts',
-    'update_hosts',
-    'deactivate_hosts',
-    'create_software',
-    'update_software',
-    'delete_software',
-    'trigger_checks',
-    'manage_scheduler',
-    'view_settings',
-    'manage_auth_settings',
-    'manage_enrollment_tokens',
-    'manage_agent_certs',
-    'manage_global_settings',
-    'view_notifications',
-    'update_system_services',
-    'view_system_services',
-    'view_audit_logs'
-  ]
+    "view_software",
+    "trigger_updates",
+    "view_services",
+    "approve_services",
+    "reject_services",
+    "remove_services",
+    "update_services",
+    "view_hosts",
+    "manage_hosts",
+    "update_hosts",
+    "deactivate_hosts",
+    "create_software",
+    "update_software",
+    "delete_software",
+    "trigger_checks",
+    "manage_scheduler",
+    "view_settings",
+    "manage_auth_settings",
+    "manage_enrollment_tokens",
+    "manage_agent_certs",
+    "manage_global_settings",
+    "view_notifications",
+    "update_system_services",
+    "view_system_services",
+    "view_audit_logs",
+  ],
 };
 
 const baseHistoryItem = {
-  host_id: 'host-001',
-  software_item_id: 'sw-001',
-  actor_type: 'user',
-  actor_id: 'actor-1',
-  output: '',
+  host_id: "host-001",
+  software_item_id: "sw-001",
+  actor_type: "user",
+  actor_id: "actor-1",
+  output: "",
   output_truncated: false,
   interactive: false,
   pre_update_protection_status: null,
   pre_update_protection_summary: null,
   recovery_hint: null,
-  created_at: '2026-01-15T08:00:00Z'
+  created_at: "2026-01-15T08:00:00Z",
 };
 
 const historyItems = [
   {
     ...baseHistoryItem,
-    id: 'hist-001',
-    host_name: 'prod-01',
-    software_item_name: 'nginx',
-    from_version: '1.24.0',
-    to_version: '1.25.0',
-    status: 'completed',
-    started_at: '2026-01-15T08:00:00Z',
-    completed_at: '2026-01-15T08:05:00Z',
-    output: 'Update completed successfully.'
+    id: "hist-001",
+    host_name: "prod-01",
+    software_item_name: "nginx",
+    from_version: "1.24.0",
+    to_version: "1.25.0",
+    status: "completed",
+    started_at: "2026-01-15T08:00:00Z",
+    completed_at: "2026-01-15T08:05:00Z",
+    output: "Update completed successfully.",
   },
   {
     ...baseHistoryItem,
-    id: 'hist-002',
-    host_name: 'prod-02',
-    software_item_name: 'redis',
-    from_version: '7.0.0',
-    to_version: '7.2.0',
-    status: 'failed',
-    started_at: '2026-01-15T07:00:00Z',
-    completed_at: '2026-01-15T07:10:00Z'
+    id: "hist-002",
+    host_name: "prod-02",
+    software_item_name: "redis",
+    from_version: "7.0.0",
+    to_version: "7.2.0",
+    status: "failed",
+    started_at: "2026-01-15T07:00:00Z",
+    completed_at: "2026-01-15T07:10:00Z",
   },
   {
     ...baseHistoryItem,
-    id: 'hist-003',
-    host_name: 'prod-03',
-    software_item_name: 'postgresql',
-    from_version: '16.1',
-    to_version: '16.2',
-    status: 'in_progress',
+    id: "hist-003",
+    host_name: "prod-03",
+    software_item_name: "postgresql",
+    from_version: "16.1",
+    to_version: "16.2",
+    status: "in_progress",
     interactive: true,
-    started_at: '2026-01-15T09:00:00Z',
-    completed_at: null
-  }
+    started_at: "2026-01-15T09:00:00Z",
+    completed_at: null,
+  },
 ];
 
-async function mockHistoryApi(page: import('@playwright/test').Page, scenario: 'default' | 'filter-completed' | 'in-progress-interactive' = 'default') {
-  await page.route('**/api/v1/**', async (route) => {
+async function mockHistoryApi(
+  page: import("@playwright/test").Page,
+  scenario:
+    | "default"
+    | "filter-completed"
+    | "in-progress-interactive" = "default",
+) {
+  await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
     const json = (body: unknown, status = 200) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
 
-    if (method === 'POST' && path === '/api/v1/auth/refresh') {
+    if (method === "POST" && path === "/api/v1/auth/refresh") {
       return json({
-        access_token: 'test-token',
-        refresh_token: 'test-refresh',
+        access_token: "test-token",
+        refresh_token: "test-refresh",
         expires_in: 3600,
-        token_type: 'Bearer',
-        user: mockUser
+        token_type: "Bearer",
+        user: mockUser,
       });
     }
-    if (method === 'GET' && path === '/api/v1/auth/me') return json(mockUser);
-    if (method === 'GET' && path === '/api/v1/system/alerts') return json({ alerts: [] });
-    if (method === 'GET' && path === '/api/v1/surfaces') return json([]);
+    if (method === "GET" && path === "/api/v1/auth/me") return json(mockUser);
+    if (method === "GET" && path === "/api/v1/system/alerts")
+      return json({ alerts: [] });
+    if (method === "GET" && path === "/api/v1/surfaces") return json([]);
 
-    if (method === 'GET' && path === '/api/v1/update-history') {
-      const status = url.searchParams.get('status');
-      const items = scenario === 'filter-completed'
-        ? historyItems.filter(i => i.status === 'completed')
-        : scenario === 'in-progress-interactive'
-        ? historyItems.filter(i => i.status === 'in_progress')
-        : historyItems;
-      return json({ items, total: items.length, page: 1, per_page: 25, total_pages: 1 });
+    if (method === "GET" && path === "/api/v1/update-history") {
+      const status = url.searchParams.get("status");
+      const items =
+        scenario === "filter-completed"
+          ? historyItems.filter((i) => i.status === "completed")
+          : scenario === "in-progress-interactive"
+            ? historyItems.filter((i) => i.status === "in_progress")
+            : historyItems;
+      return json({
+        items,
+        total: items.length,
+        page: 1,
+        per_page: 25,
+        total_pages: 1,
+      });
     }
 
     // Block SSE connection
-    if (method === 'GET' && path === '/api/v1/admin/events') {
+    if (method === "GET" && path === "/api/v1/admin/events") {
       return route.abort();
     }
 
@@ -788,122 +905,137 @@ async function mockHistoryApi(page: import('@playwright/test').Page, scenario: '
   });
 }
 
-async function setTheme(page: import('@playwright/test').Page, theme: 'dark' | 'light') {
+async function setTheme(
+  page: import("@playwright/test").Page,
+  theme: "dark" | "light",
+) {
   await page.addInitScript((t) => {
-    if (t === 'dark') document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-    try { localStorage.setItem('theme', t); } catch { /* ignore */ }
+    if (t === "dark") document.documentElement.classList.add("dark");
+    else document.documentElement.classList.remove("dark");
+    try {
+      localStorage.setItem("theme", t);
+    } catch {
+      /* ignore */
+    }
   }, theme);
 }
 
 test.use({
   viewport: PARITY_VIEWPORT_PRESETS.desktop,
-  locale: 'en-US',
-  timezoneId: 'UTC'
+  locale: "en-US",
+  timezoneId: "UTC",
 });
 
-test.describe('history route visual parity', () => {
+test.describe("history route visual parity", () => {
   test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
 
-  test('default feed — light', async ({ page }) => {
-    await setTheme(page, 'light');
-    await mockHistoryApi(page, 'default');
-    await page.goto('/history');
+  test("default feed — light", async ({ page }) => {
+    await setTheme(page, "light");
+    await mockHistoryApi(page, "default");
+    await page.goto("/history");
     await page.waitForSelector('[data-ui="history-feed-list"]');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState("networkidle");
 
     await expectParityScreenshot({
       page,
       target: page,
-      name: 'history-default-light.png',
-      viewport: 'desktop',
-      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR]
+      name: "history-default-light.png",
+      viewport: "desktop",
+      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR],
     });
   });
 
-  test('default feed — dark', async ({ page }) => {
-    await setTheme(page, 'dark');
-    await mockHistoryApi(page, 'default');
-    await page.goto('/history');
+  test("default feed — dark", async ({ page }) => {
+    await setTheme(page, "dark");
+    await mockHistoryApi(page, "default");
+    await page.goto("/history");
     await page.waitForSelector('[data-ui="history-feed-list"]');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState("networkidle");
 
     await expectParityScreenshot({
       page,
       target: page,
-      name: 'history-default-dark.png',
-      viewport: 'desktop',
-      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR]
+      name: "history-default-dark.png",
+      viewport: "desktop",
+      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR],
     });
   });
 
-  test('filter active — completed chip selected, light', async ({ page }) => {
-    await setTheme(page, 'light');
-    await mockHistoryApi(page, 'filter-completed');
-    await page.goto('/history?status=completed');
+  test("filter active — completed chip selected, light", async ({ page }) => {
+    await setTheme(page, "light");
+    await mockHistoryApi(page, "filter-completed");
+    await page.goto("/history?status=completed");
     await page.waitForSelector('[data-ui="history-feed-list"]');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState("networkidle");
 
     await expectParityScreenshot({
       page,
       target: page,
-      name: 'history-filter-completed-light.png',
-      viewport: 'desktop',
-      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR]
+      name: "history-filter-completed-light.png",
+      viewport: "desktop",
+      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR],
     });
   });
 
-  test('in-progress interactive row — light', async ({ page }) => {
-    await setTheme(page, 'light');
-    await mockHistoryApi(page, 'in-progress-interactive');
-    await page.goto('/history?status=in_progress');
+  test("in-progress interactive row — light", async ({ page }) => {
+    await setTheme(page, "light");
+    await mockHistoryApi(page, "in-progress-interactive");
+    await page.goto("/history?status=in_progress");
     await page.waitForSelector('[data-ui="history-feed-list"]');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState("networkidle");
 
     await expectParityScreenshot({
       page,
       target: page,
-      name: 'history-in-progress-interactive-light.png',
-      viewport: 'desktop',
-      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR]
+      name: "history-in-progress-interactive-light.png",
+      viewport: "desktop",
+      maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR],
     });
   });
 });
 
-test.describe('history route button contract smoke', () => {
-  test('filter chips have correct active/inactive classes', async ({ page }) => {
-    await mockHistoryApi(page, 'filter-completed');
-    await page.goto('/history?status=completed');
+test.describe("history route button contract smoke", () => {
+  test("filter chips have correct active/inactive classes", async ({
+    page,
+  }) => {
+    await mockHistoryApi(page, "filter-completed");
+    await page.goto("/history?status=completed");
     await page.waitForSelector('[data-ui="history-feed-list"]');
 
     // Active chip: Completed
-    const completedChip = page.getByRole('button', { name: 'Completed' });
-    const completedClass = await completedChip.getAttribute('class');
-    expect(completedClass).toContain('text-[var(--accent)]');
-    expect(completedClass).toContain('bg-[var(--bg-hover)]');
+    const completedChip = page.getByRole("button", { name: "Completed" });
+    const completedClass = await completedChip.getAttribute("class");
+    expect(completedClass).toContain("text-[var(--accent)]");
+    expect(completedClass).toContain("bg-[var(--bg-hover)]");
 
     // Inactive chip: Failed
-    const failedChip = page.getByRole('button', { name: 'Failed' });
-    const failedClass = await failedChip.getAttribute('class');
-    expect(failedClass).not.toContain('text-[var(--accent)]');
+    const failedChip = page.getByRole("button", { name: "Failed" });
+    const failedClass = await failedChip.getAttribute("class");
+    expect(failedClass).not.toContain("text-[var(--accent)]");
   });
 
-  test('expand toggle shows Attach terminal for interactive in-progress row', async ({ page }) => {
-    await mockHistoryApi(page, 'in-progress-interactive');
-    await page.goto('/history?status=in_progress');
+  test("expand toggle shows Attach terminal for interactive in-progress row", async ({
+    page,
+  }) => {
+    await mockHistoryApi(page, "in-progress-interactive");
+    await page.goto("/history?status=in_progress");
     await page.waitForSelector('[data-ui="history-feed-list"]');
 
-    const attachBtn = page.getByRole('button', { name: /attach terminal/i });
+    const attachBtn = page.getByRole("button", { name: /attach terminal/i });
     await expect(attachBtn).toBeVisible();
-    await expect(attachBtn).toHaveAttribute('aria-expanded', 'false');
+    await expect(attachBtn).toHaveAttribute("aria-expanded", "false");
   });
 
-  test('no preset-filled-* or preset-tonal-* classes in history DOM', async ({ page }) => {
-    await mockHistoryApi(page, 'default');
-    await page.goto('/history');
+  test("no preset-filled-* or preset-tonal-* classes in history DOM", async ({
+    page,
+  }) => {
+    await mockHistoryApi(page, "default");
+    await page.goto("/history");
     await page.waitForSelector('[data-ui="history-feed-list"]');
 
-    const presetElements = page.locator('[class*="preset-filled-"],[class*="preset-tonal-"]');
+    const presetElements = page.locator(
+      '[class*="preset-filled-"],[class*="preset-tonal-"]',
+    );
     await expect(presetElements).toHaveCount(0);
   });
 });

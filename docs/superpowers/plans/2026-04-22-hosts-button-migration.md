@@ -17,36 +17,36 @@ Ellipsis context-menu triggers use inline Unicode snippet.
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `frontend/src/routes/hosts/+page.svelte` | Replace 3 raw buttons with Button primitive |
-| `frontend/src/routes/hosts/[id]/+page.svelte` | Replace 9 raw buttons with Button primitive |
-| `frontend/src/routes/hosts/hosts.test.ts` | Extend with Button contract assertions |
-| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | Extend; Button contract assertions |
+| File                                                 | Change                                      |
+| ---------------------------------------------------- | ------------------------------------------- |
+| `frontend/src/routes/hosts/+page.svelte`             | Replace 3 raw buttons with Button primitive |
+| `frontend/src/routes/hosts/[id]/+page.svelte`        | Replace 9 raw buttons with Button primitive |
+| `frontend/src/routes/hosts/hosts.test.ts`            | Extend with Button contract assertions      |
+| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | Extend; Button contract assertions          |
 
 ### Buttons to migrate in `hosts/+page.svelte`
 
-| Location | Current | Target |
-| --- | --- | --- |
+| Location                                      | Current                                                                     | Target                                                                       |
+| --------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Line 469–478: actions column ellipsis trigger | `<button class="btn btn-sm preset-tonal" aria-label="...">&#8943;</button>` | `<Button variant="ghost" size="sm" ariaLabel="...">` + `leadingIcon` snippet |
-| Line 484: errorActions Retry | `<button class="btn preset-filled-primary-500">Retry</button>` | `<Button variant="primary" loading={isRetrying}>Retry</Button>` |
-| Lines 583–585: Edit modal Cancel | `<button class="btn preset-tonal-surface">Cancel</button>` | `<Button variant="secondary">Cancel</Button>` |
-| Lines 583–585: Edit modal Save | `<button class="btn preset-filled-primary-500" disabled={submitting}>` | `<Button variant="primary" loading={submitting}>Save</Button>` |
+| Line 484: errorActions Retry                  | `<button class="btn preset-filled-primary-500">Retry</button>`              | `<Button variant="primary" loading={isRetrying}>Retry</Button>`              |
+| Lines 583–585: Edit modal Cancel              | `<button class="btn preset-tonal-surface">Cancel</button>`                  | `<Button variant="secondary">Cancel</Button>`                                |
+| Lines 583–585: Edit modal Save                | `<button class="btn preset-filled-primary-500" disabled={submitting}>`      | `<Button variant="primary" loading={submitting}>Save</Button>`               |
 
 ### Buttons to migrate in `hosts/[id]/+page.svelte`
 
-| Location | Current | Target |
-| --- | --- | --- |
-| Line 399: error Retry | `<button class="btn preset-filled-primary-500">Retry</button>` | `<Button variant="primary" loading={isRetrying}>Retry</Button>` |
-| Line 410: Edit Name | `<button class="btn preset-tonal-surface">Edit Name</button>` | `<Button variant="secondary">Edit Name</Button>` |
-| Lines 411–415: Deactivate launcher | `<button class="btn preset-filled-error-500">Deactivate</button>` | `<Button variant="danger">Deactivate</Button>` |
-| Line 420–422: Trigger Discovery | `<button class="btn preset-tonal-surface" disabled={discovering}>` | `<Button variant="secondary" loading={discovering}>Trigger Discovery</Button>` |
-| Line 487: Set Tags | `<button class="btn btn-sm preset-tonal-surface">Set Tags</button>` | `<Button variant="secondary" size="sm">Set Tags</Button>` |
-| Line 614: Add Plugin Type | `<button class="btn btn-sm preset-filled-primary-500">Add Plugin Type</button>` | `<Button variant="primary" size="sm">Add Plugin Type</Button>` |
-| Lines 646–650: allowlist Remove | `<button class="btn btn-sm preset-tonal-error">Remove</button>` | `<Button variant="danger" size="sm">Remove</Button>` |
-| Lines 730–735: Edit modal footer | `preset-tonal-surface` Cancel + `preset-filled-primary-500` Save | `<Button variant="secondary">` + `<Button variant="primary" loading={submitting}>Save</Button>` |
-| Lines 755–763: Allowlist modal footer | same pattern | same migration |
-| Lines 777–782: Set Tags modal footer | same pattern | same migration |
+| Location                              | Current                                                                         | Target                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Line 399: error Retry                 | `<button class="btn preset-filled-primary-500">Retry</button>`                  | `<Button variant="primary" loading={isRetrying}>Retry</Button>`                                 |
+| Line 410: Edit Name                   | `<button class="btn preset-tonal-surface">Edit Name</button>`                   | `<Button variant="secondary">Edit Name</Button>`                                                |
+| Lines 411–415: Deactivate launcher    | `<button class="btn preset-filled-error-500">Deactivate</button>`               | `<Button variant="danger">Deactivate</Button>`                                                  |
+| Line 420–422: Trigger Discovery       | `<button class="btn preset-tonal-surface" disabled={discovering}>`              | `<Button variant="secondary" loading={discovering}>Trigger Discovery</Button>`                  |
+| Line 487: Set Tags                    | `<button class="btn btn-sm preset-tonal-surface">Set Tags</button>`             | `<Button variant="secondary" size="sm">Set Tags</Button>`                                       |
+| Line 614: Add Plugin Type             | `<button class="btn btn-sm preset-filled-primary-500">Add Plugin Type</button>` | `<Button variant="primary" size="sm">Add Plugin Type</Button>`                                  |
+| Lines 646–650: allowlist Remove       | `<button class="btn btn-sm preset-tonal-error">Remove</button>`                 | `<Button variant="danger" size="sm">Remove</Button>`                                            |
+| Lines 730–735: Edit modal footer      | `preset-tonal-surface` Cancel + `preset-filled-primary-500` Save                | `<Button variant="secondary">` + `<Button variant="primary" loading={submitting}>Save</Button>` |
+| Lines 755–763: Allowlist modal footer | same pattern                                                                    | same migration                                                                                  |
+| Lines 777–782: Set Tags modal footer  | same pattern                                                                    | same migration                                                                                  |
 
 ---
 
@@ -209,82 +209,94 @@ Expected: no output (zero errors).
 Add a new `describe` block at the bottom of `frontend/src/routes/hosts/hosts.test.ts`:
 
 ```typescript
-describe('Button primitive contract — hosts/+page.svelte', () => {
-  it('ellipsis trigger uses Button primitive with ghost/sm classes and ariaLabel', async () => {
+describe("Button primitive contract — hosts/+page.svelte", () => {
+  it("ellipsis trigger uses Button primitive with ghost/sm classes and ariaLabel", async () => {
     vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
     render(HostsPage);
-    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Production Server")).toBeInTheDocument(),
+    );
 
-    const btn = screen.getByRole('button', { name: /actions for production server/i });
+    const btn = screen.getByRole("button", {
+      name: /actions for production server/i,
+    });
     // sm size → h-[19px]
-    expect(btn).toHaveClass('h-[19px]');
+    expect(btn).toHaveClass("h-[19px]");
     // ghost → has border class
     expect(btn.className).toMatch(/border/);
     // aria-label present
-    expect(btn).toHaveAttribute('aria-label', 'Actions for Production Server');
+    expect(btn).toHaveAttribute("aria-label", "Actions for Production Server");
     // no legacy preset classes
     expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('Retry button uses Button primitive with primary variant and aria-busy during retry', async () => {
-    vi.mocked(api.getHosts).mockRejectedValue(new Error('fail'));
+  it("Retry button uses Button primitive with primary variant and aria-busy during retry", async () => {
+    vi.mocked(api.getHosts).mockRejectedValue(new Error("fail"));
     render(HostsPage);
-    await waitFor(() => screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => screen.getByRole("button", { name: /retry/i }));
 
-    const btn = screen.getByRole('button', { name: /retry/i });
+    const btn = screen.getByRole("button", { name: /retry/i });
     // primary → gradient background class
     expect(btn.className).toMatch(/bg-\[linear-gradient/);
     // md size → h-[23px]
-    expect(btn).toHaveClass('h-[23px]');
+    expect(btn).toHaveClass("h-[23px]");
     // no legacy preset classes
     expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('Edit modal Save uses Button primitive — no text swap', async () => {
+  it("Edit modal Save uses Button primitive — no text swap", async () => {
     vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
     render(HostsPage);
-    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Production Server")).toBeInTheDocument(),
+    );
 
     // Open edit dialog via context menu
-    fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
-    await waitFor(() => screen.getByRole('menuitem', { name: 'Edit Name' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for production server/i }),
+    );
+    await waitFor(() => screen.getByRole("menuitem", { name: "Edit Name" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Name" }));
 
-    await waitFor(() => screen.getByRole('button', { name: /^save$/i }));
-    const saveBtn = screen.getByRole('button', { name: /^save$/i });
-    expect(saveBtn).toHaveClass('h-[23px]');
+    await waitFor(() => screen.getByRole("button", { name: /^save$/i }));
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn).toHaveClass("h-[23px]");
     expect(saveBtn.className).toMatch(/bg-\[linear-gradient/);
     // Static label — no "Saving..." text
-    expect(saveBtn.textContent?.trim()).toBe('Save');
+    expect(saveBtn.textContent?.trim()).toBe("Save");
     expect(saveBtn.className).not.toMatch(/preset-filled/);
   });
 
-  it('Edit modal Cancel uses secondary variant', async () => {
+  it("Edit modal Cancel uses secondary variant", async () => {
     vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
     render(HostsPage);
-    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Production Server")).toBeInTheDocument(),
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
-    await waitFor(() => screen.getByRole('menuitem', { name: 'Edit Name' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for production server/i }),
+    );
+    await waitFor(() => screen.getByRole("menuitem", { name: "Edit Name" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Name" }));
 
-    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
-    const cancelBtn = screen.getByRole('button', { name: /^cancel$/i });
-    expect(cancelBtn).toHaveClass('h-[23px]');
+    await waitFor(() => screen.getByRole("button", { name: /^cancel$/i }));
+    const cancelBtn = screen.getByRole("button", { name: /^cancel$/i });
+    expect(cancelBtn).toHaveClass("h-[23px]");
     // secondary → bg-raised border
     expect(cancelBtn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
     expect(cancelBtn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('source contains no preset-filled-* or preset-tonal-* in hosts/+page.svelte', () => {
+  it("source contains no preset-filled-* or preset-tonal-* in hosts/+page.svelte", () => {
     // This test fails if the migration is incomplete — raw legacy classes still in file.
     // It passes once all buttons are migrated. Implemented as a static scan via import.
     // We verify by checking the rendered DOM has no such classes anywhere.
     vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
     const { container } = render(HostsPage);
-    const allClasses = Array.from(container.querySelectorAll('*'))
+    const allClasses = Array.from(container.querySelectorAll("*"))
       .map((el) => el.className)
-      .join(' ');
+      .join(" ");
     expect(allClasses).not.toMatch(/preset-filled-|preset-tonal-/);
   });
 });
@@ -580,20 +592,27 @@ Extend `frontend/src/routes/hosts/[id]/host-detail.test.ts` — add a new
 `describe('Button primitive contract — hosts/[id]/+page.svelte', ...)` block:
 
 ```typescript
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { HostResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import type {
+  HostResponse,
+  UpdateHistoryResponse,
+  PaginatedResponse,
+} from "$lib/types";
+import { Permission } from "$lib/types";
 
-vi.mock('$app/state', () => ({
-  page: { params: { id: 'host-001' }, url: new URL('http://localhost/hosts/host-001') }
+vi.mock("$app/state", () => ({
+  page: {
+    params: { id: "host-001" },
+    url: new URL("http://localhost/hosts/host-001"),
+  },
 }));
 
-vi.mock('$app/navigation', () => ({
-  goto: vi.fn()
+vi.mock("$app/navigation", () => ({
+  goto: vi.fn(),
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   getHost: vi.fn(),
   listUpdateHistory: vi.fn(),
   updateHost: vi.fn(),
@@ -605,42 +624,42 @@ vi.mock('$lib/api', () => ({
   listPluginTypes: vi.fn(),
   getHostTags: vi.fn(),
   setHostTags: vi.fn(),
-  getSoftwareItems: vi.fn()
+  getSoftwareItems: vi.fn(),
 }));
 
-vi.mock('$lib/auth.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({
   getUser: vi.fn(() => null),
-  getAccessToken: vi.fn(() => null)
+  getAccessToken: vi.fn(() => null),
 }));
 
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$lib/notifications.svelte", () => ({
   showSuccess: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
 }));
 
-vi.mock('$lib/stores/events.svelte', () => ({
-  subscribeToEvent: vi.fn(() => () => {})
+vi.mock("$lib/stores/events.svelte", () => ({
+  subscribeToEvent: vi.fn(() => () => {}),
 }));
 
-vi.mock('$lib/surfaces/registry.svelte', () => ({
+vi.mock("$lib/surfaces/registry.svelte", () => ({
   getSurfaceReadModel: vi.fn(() => undefined),
   getSurfacesBySlot: vi.fn(() => []),
-  loadSurfaceReadModels: vi.fn()
+  loadSurfaceReadModels: vi.fn(),
 }));
 
-import HostDetailPage from './+page.svelte';
-import * as api from '$lib/api';
-import * as auth from '$lib/auth.svelte';
+import HostDetailPage from "./+page.svelte";
+import * as api from "$lib/api";
+import * as auth from "$lib/auth.svelte";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const adminUser = {
-  id: '00000000-0000-0000-0000-000000000002',
-  email: 'admin@example.com',
-  first_name: 'Admin',
-  last_name: 'User',
+  id: "00000000-0000-0000-0000-000000000002",
+  email: "admin@example.com",
+  first_name: "Admin",
+  last_name: "User",
   permissions: [
     Permission.UpdateHosts,
     Permission.DeactivateHosts,
@@ -649,25 +668,25 @@ const adminUser = {
     Permission.UpdateSoftware,
     Permission.DeleteSoftware,
     Permission.TriggerChecks,
-    Permission.TriggerUpdates
-  ]
+    Permission.TriggerUpdates,
+  ],
 };
 
 const sampleHost: HostResponse = {
-  id: 'host-001',
-  machine_id: 'machine-abc',
-  hostname: 'prod-server',
-  friendly_name: 'Production Server',
-  os_type: 'Linux',
-  os_version: 'Ubuntu 24.04',
-  architecture: 'x86_64',
-  ip_address: '10.0.0.5',
-  last_seen_at: '2024-06-01T12:00:00Z',
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
+  id: "host-001",
+  machine_id: "machine-abc",
+  hostname: "prod-server",
+  friendly_name: "Production Server",
+  os_type: "Linux",
+  os_version: "Ubuntu 24.04",
+  architecture: "x86_64",
+  ip_address: "10.0.0.5",
+  last_seen_at: "2024-06-01T12:00:00Z",
+  created_at: "2024-01-01T00:00:00Z",
+  updated_at: "2024-01-01T00:00:00Z",
   agents: [],
   tags: [],
-  software_status: { known: true, update_count: 0, error_count: 0 }
+  software_status: { known: true, update_count: 0, error_count: 0 },
 } as unknown as HostResponse;
 
 function makeHistoryPage(): PaginatedResponse<UpdateHistoryResponse> {
@@ -679,15 +698,27 @@ function setupApis() {
   vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage());
   vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
   vi.mocked(api.listPluginTypes).mockResolvedValue([]);
-  vi.mocked(api.getHostTags).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100, total_pages: 1 });
-  vi.mocked(api.getSoftwareItems).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, total_pages: 1 });
+  vi.mocked(api.getHostTags).mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    per_page: 100,
+    total_pages: 1,
+  });
+  vi.mocked(api.getSoftwareItems).mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    per_page: 20,
+    total_pages: 1,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Host Detail Page — Button primitive contract', () => {
+describe("Host Detail Page — Button primitive contract", () => {
   beforeEach(() => {
     vi.mocked(auth.getUser).mockReturnValue(adminUser);
     setupApis();
@@ -697,127 +728,148 @@ describe('Host Detail Page — Button primitive contract', () => {
     vi.clearAllMocks();
   });
 
-  it('Edit Name uses secondary variant (md size, bg-raised border)', async () => {
+  it("Edit Name uses secondary variant (md size, bg-raised border)", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+    await waitFor(() => screen.getByRole("button", { name: /edit name/i }));
 
-    const btn = screen.getByRole('button', { name: /edit name/i });
-    expect(btn).toHaveClass('h-[23px]');
+    const btn = screen.getByRole("button", { name: /edit name/i });
+    expect(btn).toHaveClass("h-[23px]");
     expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
     expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('Deactivate uses danger variant (error colors)', async () => {
+  it("Deactivate uses danger variant (error colors)", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /^deactivate$/i }));
+    await waitFor(() => screen.getByRole("button", { name: /^deactivate$/i }));
 
-    const btn = screen.getByRole('button', { name: /^deactivate$/i });
-    expect(btn).toHaveClass('h-[23px]');
+    const btn = screen.getByRole("button", { name: /^deactivate$/i });
+    expect(btn).toHaveClass("h-[23px]");
     expect(btn.className).toMatch(/color-error/);
     expect(btn.className).not.toMatch(/preset-filled-error/);
   });
 
-  it('Trigger Discovery uses secondary variant and aria-busy while discovering', async () => {
-    let resolveTrigger!: (v: { plugins_queued: number; message: string }) => void;
+  it("Trigger Discovery uses secondary variant and aria-busy while discovering", async () => {
+    let resolveTrigger!: (v: {
+      plugins_queued: number;
+      message: string;
+    }) => void;
     vi.mocked(api.triggerHostDiscovery).mockReturnValue(
-      new Promise((res) => { resolveTrigger = res; })
+      new Promise((res) => {
+        resolveTrigger = res;
+      }),
     );
 
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /trigger discovery/i }));
+    await waitFor(() =>
+      screen.getByRole("button", { name: /trigger discovery/i }),
+    );
 
-    const btn = screen.getByRole('button', { name: /trigger discovery/i });
-    expect(btn).toHaveClass('h-[23px]');
+    const btn = screen.getByRole("button", { name: /trigger discovery/i });
+    expect(btn).toHaveClass("h-[23px]");
     expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
     expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
 
     fireEvent.click(btn);
-    await waitFor(() => expect(screen.getByRole('button', { name: /trigger discovery/i })).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /trigger discovery/i }),
+      ).toHaveAttribute("aria-busy", "true"),
+    );
 
     // Static label — no text swap
     expect(btn.textContent).toMatch(/trigger discovery/i);
 
-    resolveTrigger({ plugins_queued: 0, message: 'ok' });
-    await waitFor(() => expect(screen.getByRole('button', { name: /trigger discovery/i })).not.toHaveAttribute('aria-busy'));
+    resolveTrigger({ plugins_queued: 0, message: "ok" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /trigger discovery/i }),
+      ).not.toHaveAttribute("aria-busy"),
+    );
   });
 
-  it('Set Tags uses secondary sm variant', async () => {
+  it("Set Tags uses secondary sm variant", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /set tags/i }));
+    await waitFor(() => screen.getByRole("button", { name: /set tags/i }));
 
-    const btn = screen.getByRole('button', { name: /set tags/i });
-    expect(btn).toHaveClass('h-[19px]');
+    const btn = screen.getByRole("button", { name: /set tags/i });
+    expect(btn).toHaveClass("h-[19px]");
     expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
     expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('Add Plugin Type uses primary sm variant', async () => {
+  it("Add Plugin Type uses primary sm variant", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /add plugin type/i }));
+    await waitFor(() =>
+      screen.getByRole("button", { name: /add plugin type/i }),
+    );
 
-    const btn = screen.getByRole('button', { name: /add plugin type/i });
-    expect(btn).toHaveClass('h-[19px]');
+    const btn = screen.getByRole("button", { name: /add plugin type/i });
+    expect(btn).toHaveClass("h-[19px]");
     expect(btn.className).toMatch(/bg-\[linear-gradient/);
     expect(btn.className).not.toMatch(/preset-filled/);
   });
 
-  it('error Retry uses primary variant with aria-busy during retry', async () => {
-    vi.mocked(api.getHost).mockRejectedValue(new Error('Network error'));
+  it("error Retry uses primary variant with aria-busy during retry", async () => {
+    vi.mocked(api.getHost).mockRejectedValue(new Error("Network error"));
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => screen.getByRole("button", { name: /retry/i }));
 
-    const btn = screen.getByRole('button', { name: /retry/i });
-    expect(btn).toHaveClass('h-[23px]');
+    const btn = screen.getByRole("button", { name: /retry/i });
+    expect(btn).toHaveClass("h-[23px]");
     expect(btn.className).toMatch(/bg-\[linear-gradient/);
     expect(btn.className).not.toMatch(/preset-filled/);
   });
 
-  it('Edit modal Save has static label and loading wires to aria-busy', async () => {
+  it("Edit modal Save has static label and loading wires to aria-busy", async () => {
     let resolveUpdate!: (v: HostResponse) => void;
-    vi.mocked(api.updateHost).mockReturnValue(new Promise((res) => { resolveUpdate = res; }));
+    vi.mocked(api.updateHost).mockReturnValue(
+      new Promise((res) => {
+        resolveUpdate = res;
+      }),
+    );
 
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
-    fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+    await waitFor(() => screen.getByRole("button", { name: /edit name/i }));
+    fireEvent.click(screen.getByRole("button", { name: /edit name/i }));
 
-    await waitFor(() => screen.getByRole('button', { name: /^save$/i }));
-    const saveBtn = screen.getByRole('button', { name: /^save$/i });
+    await waitFor(() => screen.getByRole("button", { name: /^save$/i }));
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
 
     // Static label
-    expect(saveBtn.textContent?.trim()).toBe('Save');
+    expect(saveBtn.textContent?.trim()).toBe("Save");
 
     fireEvent.click(saveBtn);
-    await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(saveBtn).toHaveAttribute("aria-busy", "true"));
     // Label stays static during submission
-    expect(saveBtn.textContent?.trim()).toBe('Save');
+    expect(saveBtn.textContent?.trim()).toBe("Save");
 
     resolveUpdate(sampleHost);
-    await waitFor(() => expect(saveBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(saveBtn).not.toHaveAttribute("aria-busy"));
   });
 
-  it('Edit modal Cancel uses secondary variant', async () => {
+  it("Edit modal Cancel uses secondary variant", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
-    fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+    await waitFor(() => screen.getByRole("button", { name: /edit name/i }));
+    fireEvent.click(screen.getByRole("button", { name: /edit name/i }));
 
-    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
-    const cancelBtn = screen.getByRole('button', { name: /^cancel$/i });
-    expect(cancelBtn).toHaveClass('h-[23px]');
+    await waitFor(() => screen.getByRole("button", { name: /^cancel$/i }));
+    const cancelBtn = screen.getByRole("button", { name: /^cancel$/i });
+    expect(cancelBtn).toHaveClass("h-[23px]");
     expect(cancelBtn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
     expect(cancelBtn.className).not.toMatch(/preset-tonal|preset-filled/);
   });
 
-  it('source has no preset-filled-* or preset-tonal-* classes in rendered DOM', async () => {
+  it("source has no preset-filled-* or preset-tonal-* classes in rendered DOM", async () => {
     render(HostDetailPage);
-    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+    await waitFor(() => screen.getByRole("button", { name: /edit name/i }));
 
     // Open the allowlist modal to render its footer too
-    fireEvent.click(screen.getByRole('button', { name: /add plugin type/i }));
-    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add plugin type/i }));
+    await waitFor(() => screen.getByRole("button", { name: /^cancel$/i }));
 
-    const allClasses = Array.from(document.querySelectorAll('*'))
+    const allClasses = Array.from(document.querySelectorAll("*"))
       .map((el) => el.className)
-      .join(' ');
+      .join(" ");
     expect(allClasses).not.toMatch(/preset-filled-|preset-tonal-/);
   });
 });

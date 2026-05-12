@@ -93,8 +93,12 @@ the layout.
 Use an assertion shaped like:
 
 ```ts
-expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain("Software");
-expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain("Settings");
+expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain(
+  "Software",
+);
+expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain(
+  "Settings",
+);
 ```
 
 Add one explicit order assertion covering a built-in item and a `surface.page` item with equal labels but different stable IDs.

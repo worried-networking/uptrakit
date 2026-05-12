@@ -18,42 +18,42 @@ No logic changes, no API changes. Work file by file; no ordering constraints wit
 
 ## Token substitution reference
 
-| Skeleton class | Replace with |
-| --- | --- |
-| `text-surface-400`, `text-surface-500` | `text-[var(--text-muted)]` |
-| `text-surface-600 dark:text-surface-400`, `text-surface-600`, `text-surface-700` | `text-[var(--text-secondary)]` |
-| `text-surface-900 dark:text-surface-100` | `text-[var(--text-primary)]` |
-| `text-surface-700 dark:text-surface-200` | `text-[var(--text-primary)]` |
-| `bg-surface-50 dark:bg-surface-900` | `bg-[var(--bg-surface)]` |
-| `bg-surface-100 dark:bg-surface-800`, `bg-surface-100/800` | `bg-[var(--bg-raised)]` |
-| `border-surface-200 dark:border-surface-700`, `border border-surface-200 dark:border-surface-700` | `border-[var(--border-default)]` |
-| `dark:border-surface-600`, `dark:border-surface-700` (standalone) | drop — `--border-default` handles both themes |
-| `divide-surface-200 dark:divide-surface-700` | `divide-[var(--border-subtle)]` |
-| `hover:bg-surface-100-800-token` | `hover:bg-[var(--bg-hover)]` |
-| `hover:bg-surface-200 dark:hover:bg-surface-800` | `hover:bg-[var(--bg-hover)]` |
-| `hover:text-surface-700 dark:hover:text-surface-300` | (migrate element to `<Button variant="ghost">`) |
-| `rounded-container-token` | `rounded-[3px]` |
-| `border-surface-300-600-token` | `border-[var(--border-default)]` |
-| `text-error-500` | `text-[var(--color-danger)]` |
-| `text-success-500` | `text-[var(--color-success)]` |
-| `border-t-primary-500` | `border-t-[var(--accent)]` |
-| `border-primary-500` | `border-[var(--accent)]` |
-| `bg-primary-100 dark:bg-primary-900/40` | `bg-[rgba(var(--accent-rgb),0.12)]` |
-| `text-primary-700 dark:text-primary-200` | `text-[var(--accent-bright)]` |
-| `preset-filled-error-500` on `<aside>` | `<Callout tone="danger">` |
-| `preset-tonal-surface` on `<aside>` | `<Callout tone="info">` |
-| `preset-filled-warning-500` on `<aside>` | `<Callout tone="warning">` |
-| `preset-filled-error-500` on `<p>` (inline error) | `bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]` |
-| `preset-filled-surface-400-600` | `bg-[var(--bg-raised)]` |
-| `badge preset-tonal` | `<StatusBadge tone="info">` |
-| `badge preset-tonal-warning` | `<StatusBadge tone="warning">` |
-| `badge preset-tonal-error` | `<StatusBadge tone="danger">` |
-| `badge preset-tonal-surface` | `<StatusBadge tone="info">` |
-| `badge preset-filled-primary-500` | `<StatusBadge tone="info">` |
-| `card preset-tonal-primary p-4` | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4` |
-| `card preset-tonal-surface` | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` |
-| `card` (standalone Skeleton utility) | `bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)]` |
-| `btn btn-sm preset-tonal` on `<a>` | `<Button variant="ghost" size="sm" href=...>` |
+| Skeleton class                                                                                    | Replace with                                                                                        |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `text-surface-400`, `text-surface-500`                                                            | `text-[var(--text-muted)]`                                                                          |
+| `text-surface-600 dark:text-surface-400`, `text-surface-600`, `text-surface-700`                  | `text-[var(--text-secondary)]`                                                                      |
+| `text-surface-900 dark:text-surface-100`                                                          | `text-[var(--text-primary)]`                                                                        |
+| `text-surface-700 dark:text-surface-200`                                                          | `text-[var(--text-primary)]`                                                                        |
+| `bg-surface-50 dark:bg-surface-900`                                                               | `bg-[var(--bg-surface)]`                                                                            |
+| `bg-surface-100 dark:bg-surface-800`, `bg-surface-100/800`                                        | `bg-[var(--bg-raised)]`                                                                             |
+| `border-surface-200 dark:border-surface-700`, `border border-surface-200 dark:border-surface-700` | `border-[var(--border-default)]`                                                                    |
+| `dark:border-surface-600`, `dark:border-surface-700` (standalone)                                 | drop — `--border-default` handles both themes                                                       |
+| `divide-surface-200 dark:divide-surface-700`                                                      | `divide-[var(--border-subtle)]`                                                                     |
+| `hover:bg-surface-100-800-token`                                                                  | `hover:bg-[var(--bg-hover)]`                                                                        |
+| `hover:bg-surface-200 dark:hover:bg-surface-800`                                                  | `hover:bg-[var(--bg-hover)]`                                                                        |
+| `hover:text-surface-700 dark:hover:text-surface-300`                                              | (migrate element to `<Button variant="ghost">`)                                                     |
+| `rounded-container-token`                                                                         | `rounded-[3px]`                                                                                     |
+| `border-surface-300-600-token`                                                                    | `border-[var(--border-default)]`                                                                    |
+| `text-error-500`                                                                                  | `text-[var(--color-danger)]`                                                                        |
+| `text-success-500`                                                                                | `text-[var(--color-success)]`                                                                       |
+| `border-t-primary-500`                                                                            | `border-t-[var(--accent)]`                                                                          |
+| `border-primary-500`                                                                              | `border-[var(--accent)]`                                                                            |
+| `bg-primary-100 dark:bg-primary-900/40`                                                           | `bg-[rgba(var(--accent-rgb),0.12)]`                                                                 |
+| `text-primary-700 dark:text-primary-200`                                                          | `text-[var(--accent-bright)]`                                                                       |
+| `preset-filled-error-500` on `<aside>`                                                            | `<Callout tone="danger">`                                                                           |
+| `preset-tonal-surface` on `<aside>`                                                               | `<Callout tone="info">`                                                                             |
+| `preset-filled-warning-500` on `<aside>`                                                          | `<Callout tone="warning">`                                                                          |
+| `preset-filled-error-500` on `<p>` (inline error)                                                 | `bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]` |
+| `preset-filled-surface-400-600`                                                                   | `bg-[var(--bg-raised)]`                                                                             |
+| `badge preset-tonal`                                                                              | `<StatusBadge tone="info">`                                                                         |
+| `badge preset-tonal-warning`                                                                      | `<StatusBadge tone="warning">`                                                                      |
+| `badge preset-tonal-error`                                                                        | `<StatusBadge tone="danger">`                                                                       |
+| `badge preset-tonal-surface`                                                                      | `<StatusBadge tone="info">`                                                                         |
+| `badge preset-filled-primary-500`                                                                 | `<StatusBadge tone="info">`                                                                         |
+| `card preset-tonal-primary p-4`                                                                   | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4`  |
+| `card preset-tonal-surface`                                                                       | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]`                          |
+| `card` (standalone Skeleton utility)                                                              | `bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)]`                         |
+| `btn btn-sm preset-tonal` on `<a>`                                                                | `<Button variant="ghost" size="sm" href=...>`                                                       |
 
 ---
 

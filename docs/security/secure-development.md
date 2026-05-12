@@ -67,10 +67,10 @@ own argument parsing:
 
 Validation rules per plugin:
 
-| Plugin | Allowed characters | Rejected patterns |
-| :--- | :--- | :--- |
-| npm | `[a-zA-Z0-9._+-]` | Empty, >256 chars, `file:`, `git+`, `http:`, `https:` prefixes |
-| apt | `[a-zA-Z0-9.+~:-]` | Empty, >256 chars, leading `-` (flag injection) |
+| Plugin | Allowed characters | Rejected patterns                                              |
+| :----- | :----------------- | :------------------------------------------------------------- |
+| npm    | `[a-zA-Z0-9._+-]`  | Empty, >256 chars, `file:`, `git+`, `http:`, `https:` prefixes |
+| apt    | `[a-zA-Z0-9.+~:-]` | Empty, >256 chars, leading `-` (flag injection)                |
 
 See [Plugin Guidelines — Version string validation](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the implementation pattern and testing requirements.
@@ -132,7 +132,7 @@ provides operational visibility for hook execution flow.
 
 Wire protocol payloads are validated after deserialization via the
 `WireValidate` trait (`crates/shared/wire/src/limits.rs`). Per-collection and
-per-string size limits prevent O(N) and O(N*M) processing attacks within the
+per-string size limits prevent O(N) and O(N\*M) processing attacks within the
 1 MB WebSocket frame limit.
 
 `AuditEventPayload` is an intentional exception: `ServiceMessage::AuditEvent`

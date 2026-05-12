@@ -30,16 +30,16 @@ When submitted, all three files go to ProxmoxVED. ProxmoxVE has no `json/` direc
 Sources PVEHS `misc/build.func` from the upstream raw URL. Declares all required variables,
 delegates entirely to PVEHS framework functions — no custom logic.
 
-| Variable          | Value                        |
-| ----------------- | ---------------------------- |
-| `APP`             | `uptrakit`                   |
-| `var_disk`        | `4` (GB)                     |
-| `var_cpu`         | `1`                          |
-| `var_ram`         | `1024` (MB)                  |
-| `var_os`          | `debian`                     |
-| `var_version`     | `13`                         |
-| `var_unprivileged`| `${var_unprivileged:-1}`     |
-| `var_tags`        | `monitoring`                 |
+| Variable           | Value                    |
+| ------------------ | ------------------------ |
+| `APP`              | `uptrakit`               |
+| `var_disk`         | `4` (GB)                 |
+| `var_cpu`          | `1`                      |
+| `var_ram`          | `1024` (MB)              |
+| `var_os`           | `debian`                 |
+| `var_version`      | `13`                     |
+| `var_unprivileged` | `${var_unprivileged:-1}` |
+| `var_tags`         | `monitoring`             |
 
 Call sequence: `start` → `build_container` → `description`.
 `description` takes no arguments; it reads `$APP` and CT IP from the environment.

@@ -26,15 +26,15 @@ Playwright config)
 
 ## File Map
 
-| File | Action |
-| --- | --- |
-| `frontend/src/lib/test-fixtures/ui-parity.ts` | Verify only (update if assertions changed) |
-| `frontend/src/lib/test-fixtures/ui-parity.test.ts` | Verify only (update if fixture shape changed) |
-| `frontend/tests/e2e/ui-parity.test.ts-snapshots/` | Delete all 19 PNGs; regenerate 19 |
-| `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` | Delete all 6 PNGs; regenerate 6 |
-| `frontend/tests/e2e/surface-preview.spec.ts-snapshots/` | Delete 2 PNGs; regenerate 2 |
-| `frontend/tests/e2e/form-primitive.spec.ts-snapshots/` | Delete 12 PNGs; regenerate 12 |
-| `frontend/tests/e2e/button-primitive.spec.ts-snapshots/` | Delete 10 PNGs; regenerate 10 |
+| File                                                         | Action                                        |
+| ------------------------------------------------------------ | --------------------------------------------- |
+| `frontend/src/lib/test-fixtures/ui-parity.ts`                | Verify only (update if assertions changed)    |
+| `frontend/src/lib/test-fixtures/ui-parity.test.ts`           | Verify only (update if fixture shape changed) |
+| `frontend/tests/e2e/ui-parity.test.ts-snapshots/`            | Delete all 19 PNGs; regenerate 19             |
+| `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` | Delete all 6 PNGs; regenerate 6               |
+| `frontend/tests/e2e/surface-preview.spec.ts-snapshots/`      | Delete 2 PNGs; regenerate 2                   |
+| `frontend/tests/e2e/form-primitive.spec.ts-snapshots/`       | Delete 12 PNGs; regenerate 12                 |
+| `frontend/tests/e2e/button-primitive.spec.ts-snapshots/`     | Delete 10 PNGs; regenerate 10                 |
 
 **Do not touch:**
 

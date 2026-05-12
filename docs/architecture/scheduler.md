@@ -20,10 +20,10 @@ Key properties:
 
 The scheduler engine (`uptrakit-scheduler-engine`) is a shared library crate used in two modes:
 
-| Mode | Binary | Feature | How it runs |
-| --- | --- | --- | --- |
-| Embedded | `uptrakit-controller` | `embedded-scheduler` (not default) | Spawned inside the controller process |
-| External | `uptrakit-scheduler` | Always | Standalone binary, enrolls as a service via WebSocket |
+| Mode     | Binary                | Feature                            | How it runs                                           |
+| -------- | --------------------- | ---------------------------------- | ----------------------------------------------------- |
+| Embedded | `uptrakit-controller` | `embedded-scheduler` (not default) | Spawned inside the controller process                 |
+| External | `uptrakit-scheduler`  | Always                             | Standalone binary, enrolls as a service via WebSocket |
 
 ### Embedded scheduler
 
@@ -54,16 +54,16 @@ because they require in-process controller resources.
 
 Tasks are categorised based on whether they require direct in-process access to controller resources:
 
-| Task | Category | Rationale |
-| --- | --- | --- |
-| `CrlRenewal` | Internal | Direct `revocation_notify` + NATS publish via `ControllerSchedulerNotifier` |
-| `CaRotationCheck` | Internal | In-process `watch::Receiver<CaSnapshot>` + `ca_rotation_trigger` |
-| `ServiceCertCheck` | Internal | `RequestCertRenewal` via `NotificationService` to connected services |
-| `AuthCleanup` | External | Pure DB cleanup |
-| `StaleLeaseCleanup` | External | Pure DB cleanup |
-| `FetchReleases` | External | HTTP + DB + agent dispatch |
-| `DetectVersion` | External | DB + agent dispatch |
-| `DiscoverSoftware` | External | DB + agent dispatch (periodic software rediscovery) |
+| Task                | Category | Rationale                                                                   |
+| ------------------- | -------- | --------------------------------------------------------------------------- |
+| `CrlRenewal`        | Internal | Direct `revocation_notify` + NATS publish via `ControllerSchedulerNotifier` |
+| `CaRotationCheck`   | Internal | In-process `watch::Receiver<CaSnapshot>` + `ca_rotation_trigger`            |
+| `ServiceCertCheck`  | Internal | `RequestCertRenewal` via `NotificationService` to connected services        |
+| `AuthCleanup`       | External | Pure DB cleanup                                                             |
+| `StaleLeaseCleanup` | External | Pure DB cleanup                                                             |
+| `FetchReleases`     | External | HTTP + DB + agent dispatch                                                  |
+| `DetectVersion`     | External | DB + agent dispatch                                                         |
+| `DiscoverSoftware`  | External | DB + agent dispatch (periodic software rediscovery)                         |
 
 The `ScheduledTaskType::is_internal()` method encodes this categorisation. The `Scheduler` struct
 accepts a `should_yield_external: Box<dyn Fn() -> bool + Send + Sync>` closure in its constructor.
@@ -82,45 +82,45 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 
 ### `scheduled_tasks` table
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID (PK, v7) | Task identifier |
-| `tenant_id` | UUID FK | References `tenants.id` — scopes the *configuration* (interval, enabled flag, task config) to a specific tenant. Does **not** restrict which scheduler instance processes the task; the external scheduler queries across all tenants. |
-| `task_type` | TEXT | Enum discriminant (see below) |
-| `interval_seconds` | INTEGER | How often the task runs (in seconds). Must be > 0. |
-| `jitter_seconds` | INTEGER | Random jitter added to the interval to spread load (in seconds). Must be >= 0. |
-| `enabled` | BOOLEAN | Whether the task is active |
-| `task_config` | JSON (nullable) | Per-task configuration |
-| `last_run_at` | TIMESTAMP (nullable) | Last successful execution |
-| `next_run_at` | TIMESTAMP | Next scheduled execution |
-| `locked_by` | UUID (nullable) | Controller ID holding the claim |
-| `locked_at` | TIMESTAMP (nullable) | When the claim was acquired |
-| `last_error` | TEXT (nullable) | Error message from last failed run |
-| `run_count` | BIGINT | Total successful executions |
-| `created_at` | TIMESTAMP | Row creation time |
-| `updated_at` | TIMESTAMP | Last modification time |
+| Column             | Type                 | Description                                                                                                                                                                                                                            |
+| ------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | UUID (PK, v7)        | Task identifier                                                                                                                                                                                                                        |
+| `tenant_id`        | UUID FK              | References `tenants.id` — scopes the _configuration_ (interval, enabled flag, task config) to a specific tenant. Does **not** restrict which scheduler instance processes the task; the external scheduler queries across all tenants. |
+| `task_type`        | TEXT                 | Enum discriminant (see below)                                                                                                                                                                                                          |
+| `interval_seconds` | INTEGER              | How often the task runs (in seconds). Must be > 0.                                                                                                                                                                                     |
+| `jitter_seconds`   | INTEGER              | Random jitter added to the interval to spread load (in seconds). Must be >= 0.                                                                                                                                                         |
+| `enabled`          | BOOLEAN              | Whether the task is active                                                                                                                                                                                                             |
+| `task_config`      | JSON (nullable)      | Per-task configuration                                                                                                                                                                                                                 |
+| `last_run_at`      | TIMESTAMP (nullable) | Last successful execution                                                                                                                                                                                                              |
+| `next_run_at`      | TIMESTAMP            | Next scheduled execution                                                                                                                                                                                                               |
+| `locked_by`        | UUID (nullable)      | Controller ID holding the claim                                                                                                                                                                                                        |
+| `locked_at`        | TIMESTAMP (nullable) | When the claim was acquired                                                                                                                                                                                                            |
+| `last_error`       | TEXT (nullable)      | Error message from last failed run                                                                                                                                                                                                     |
+| `run_count`        | BIGINT               | Total successful executions                                                                                                                                                                                                            |
+| `created_at`       | TIMESTAMP            | Row creation time                                                                                                                                                                                                                      |
+| `updated_at`       | TIMESTAMP            | Last modification time                                                                                                                                                                                                                 |
 
 ### Indexes
 
-| Name | Columns | Purpose |
-| --- | --- | --- |
-| `idx_scheduled_tasks_next_run` | `next_run_at` | Efficient due-task lookup |
-| `idx_scheduled_tasks_tenant_id` | `tenant_id` | Tenant-scoped queries |
+| Name                                  | Columns                         | Purpose                      |
+| ------------------------------------- | ------------------------------- | ---------------------------- |
+| `idx_scheduled_tasks_next_run`        | `next_run_at`                   | Efficient due-task lookup    |
+| `idx_scheduled_tasks_tenant_id`       | `tenant_id`                     | Tenant-scoped queries        |
 | `uq_scheduled_tasks_tenant_task_type` | `tenant_id, task_type` (UNIQUE) | One task per type per tenant |
 
 ### Task types
 
-| Value | Default interval | Default jitter | Description |
-| --- | --- | --- | --- |
-| `auth_cleanup` | 300 s (5 min) | 30 s | Clean expired auth flow state from DB |
-| `stale_lease_cleanup` | 300 s (5 min) | 30 s | Release stale MQTT client leases |
-| `ca_rotation_check` | 86 400 s (24 h) | 300 s | Check if managed CA needs rotation |
-| `fetch_releases` | 21 600 s (6 h) | 300 s | Fetch latest available versions (controller-side API calls + agent-side package index queries). Replaces the old `version_check` task. |
-| `detect_version` | 86 400 s (24 h) | 300 s | Detect currently installed versions on all agent hosts. |
-| `service_cert_check` | 43 200 s (12 h) | 300 s | Proactive certificate renewal for services |
-| `crl_renewal` | 14 400 s (4 h) | 120 s | Trigger CRL rebuild on all controller instances |
-| `audit_log_cleanup` | 86 400 s (24 h) | 300 s | Delete audit log entries older than the retention period (disabled by default) |
-| `discover_software` | 21 600 s (6 h) | 300 s | Periodically rediscover installed software on all active hosts. Items that disappear from the agent's report are automatically soft-deleted. |
+| Value                 | Default interval | Default jitter | Description                                                                                                                                  |
+| --------------------- | ---------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth_cleanup`        | 300 s (5 min)    | 30 s           | Clean expired auth flow state from DB                                                                                                        |
+| `stale_lease_cleanup` | 300 s (5 min)    | 30 s           | Release stale MQTT client leases                                                                                                             |
+| `ca_rotation_check`   | 86 400 s (24 h)  | 300 s          | Check if managed CA needs rotation                                                                                                           |
+| `fetch_releases`      | 21 600 s (6 h)   | 300 s          | Fetch latest available versions (controller-side API calls + agent-side package index queries). Replaces the old `version_check` task.       |
+| `detect_version`      | 86 400 s (24 h)  | 300 s          | Detect currently installed versions on all agent hosts.                                                                                      |
+| `service_cert_check`  | 43 200 s (12 h)  | 300 s          | Proactive certificate renewal for services                                                                                                   |
+| `crl_renewal`         | 14 400 s (4 h)   | 120 s          | Trigger CRL rebuild on all controller instances                                                                                              |
+| `audit_log_cleanup`   | 86 400 s (24 h)  | 300 s          | Delete audit log entries older than the retention period (disabled by default)                                                               |
+| `discover_software`   | 21 600 s (6 h)   | 300 s          | Periodically rediscover installed software on all active hosts. Items that disappear from the agent's report are automatically soft-deleted. |
 
 All rows are seeded during migrations with `next_run_at = now`. The `detect_version` row is
 seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames
@@ -312,47 +312,47 @@ sent, so they never appear in the software list.
 
 ### Moved to the scheduler (runs on exactly one controller at a time)
 
-| Task | Previously | Now |
-| --- | --- | --- |
-| Auth state cleanup | Inline 5-min interval in `main.rs` | `AuthCleanupExecutor` |
-| MQTT stale lease cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` |
-| CA rotation check | Inline 24h interval in `main.rs` | `CaRotationCheckExecutor` |
-| Release fetching | Not implemented | `FetchReleasesExecutor` |
-| Installed-version detection | Not implemented | `DetectVersionExecutor` |
-| Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
-| CRL periodic renewal | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
-| Periodic software rediscovery | Not implemented | `DiscoverSoftwareExecutor` |
+| Task                          | Previously                                 | Now                                      |
+| ----------------------------- | ------------------------------------------ | ---------------------------------------- |
+| Auth state cleanup            | Inline 5-min interval in `main.rs`         | `AuthCleanupExecutor`                    |
+| MQTT stale lease cleanup      | No dedicated loop                          | `StaleLeaseCleanupExecutor`              |
+| CA rotation check             | Inline 24h interval in `main.rs`           | `CaRotationCheckExecutor`                |
+| Release fetching              | Not implemented                            | `FetchReleasesExecutor`                  |
+| Installed-version detection   | Not implemented                            | `DetectVersionExecutor`                  |
+| Service cert renewal check    | Not implemented                            | `ServiceCertCheckExecutor`               |
+| CRL periodic renewal          | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
+| Periodic software rediscovery | Not implemented                            | `DiscoverSoftwareExecutor`               |
 
 ### Stays as per-controller intervals (must run on every controller)
 
-| Task | Reason |
-| --- | --- |
-| Settings version check (30s) | In-memory cache sync |
-| CA state reload (30s) | CA cache sync |
-| CRL rebuild (event-driven) | Fires on `revocation_notify` — triggered by local revocation, NATS `RequestCrlRenewal`, or `CrlRenewalExecutor` |
-| NATS consumer (when configured) | Cross-controller messaging backbone |
-| Server cert renewal (24h) | Per-controller disk cert |
-| Token denylist purge (5min) | In-memory, per-instance |
-| Ping/pong (agent/MQTT) | Connection keepalive |
-| CA rotation execution | Listens on `ca_rotation_trigger`, needs local key store |
+| Task                            | Reason                                                                                                          |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Settings version check (30s)    | In-memory cache sync                                                                                            |
+| CA state reload (30s)           | CA cache sync                                                                                                   |
+| CRL rebuild (event-driven)      | Fires on `revocation_notify` — triggered by local revocation, NATS `RequestCrlRenewal`, or `CrlRenewalExecutor` |
+| NATS consumer (when configured) | Cross-controller messaging backbone                                                                             |
+| Server cert renewal (24h)       | Per-controller disk cert                                                                                        |
+| Token denylist purge (5min)     | In-memory, per-instance                                                                                         |
+| Ping/pong (agent/MQTT)          | Connection keepalive                                                                                            |
+| CA rotation execution           | Listens on `ca_rotation_trigger`, needs local key store                                                         |
 
 ## REST API
 
 See [HTTP Web API](../api/http-web-api.md#scheduler-endpoints) for endpoint details.
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/scheduler/tasks` | List all tasks for the tenant |
-| GET | `/api/v1/scheduler/tasks/{id}` | Get task details |
-| PUT | `/api/v1/scheduler/tasks/{id}` | Update interval/jitter/enabled/config |
-| POST | `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution |
+| Method | Path                                   | Description                           |
+| ------ | -------------------------------------- | ------------------------------------- |
+| GET    | `/api/v1/scheduler/tasks`              | List all tasks for the tenant         |
+| GET    | `/api/v1/scheduler/tasks/{id}`         | Get task details                      |
+| PUT    | `/api/v1/scheduler/tasks/{id}`         | Update interval/jitter/enabled/config |
+| POST   | `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution           |
 
 All endpoints require the `ManageSoftware` permission.
 
 ## Security Considerations
 
 - The scheduler never runs automatic updates. It triggers release fetching, installed-version
-  detection, and certificate *renewal requests* only. Update execution always requires explicit
+  detection, and certificate _renewal requests_ only. Update execution always requires explicit
   user action.
 - Optimistic locking prevents concurrent execution of the same task across controllers.
 - Task claims have a 10-minute stale timeout to prevent permanent locking if a controller crashes.

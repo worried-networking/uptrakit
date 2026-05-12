@@ -23,10 +23,10 @@ variant="..." ...>` using the same event handlers and reactive variables already
 
 ## Migration rules (quick reference)
 
-| Legacy class | Button variant |
-| --- | --- |
-| `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` / `preset-filled-primary-500` | `primary` |
-| `PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS` / `preset-tonal-surface` | `ghost` |
+| Legacy class                                                      | Button variant |
+| ----------------------------------------------------------------- | -------------- |
+| `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` / `preset-filled-primary-500` | `primary`      |
+| `PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS` / `preset-tonal-surface`    | `ghost`        |
 
 Every migrated button passes `class="w-full justify-center"` via Button's `class` prop.
 
@@ -121,7 +121,7 @@ Read the file before editing to confirm exact button markup and surrounding cont
 In the `<script lang="ts">` block, add:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 Remove `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` and `PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS` from the `PublicEntryShell` destructured import. Keep
@@ -340,7 +340,7 @@ Read the file first to confirm exact button markup.
 - [ ] **Step 1: Add `Button` import and trim named imports**
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 Remove `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` from the `PublicEntryShell` import.
@@ -423,20 +423,20 @@ Read the file first to confirm exact button markup and imports.
 Remove:
 
 ```ts
-import { goto } from '$app/navigation';
+import { goto } from "$app/navigation";
 ```
 
 Add:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 Remove `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` from the `PublicEntryShell` destructured import. After this change the `PublicEntryShell` import line has
 no named imports left — simplify to:
 
 ```ts
-import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
+import PublicEntryShell from "$lib/components/ui/PublicEntryShell.svelte";
 ```
 
 - [ ] **Step 2: Migrate the "Go to Home" button**
@@ -487,15 +487,17 @@ equivalent coverage strength. For each migrated **primary** button, assert both 
 expect(btn.className).toContain(PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS);
 
 // After — assert size AND primary variant gradient so coverage is equivalent
-expect(btn.className).toContain('h-[23px]');
-expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+expect(btn.className).toContain("h-[23px]");
+expect(btn.className).toContain(
+  "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+);
 ```
 
 For each migrated **ghost** button, assert size and ghost variant:
 
 ```ts
-expect(btn.className).toContain('h-[23px]');
-expect(btn.className).toContain('bg-transparent'); // unique to ghost
+expect(btn.className).toContain("h-[23px]");
+expect(btn.className).toContain("bg-transparent"); // unique to ghost
 ```
 
 Also assert:
@@ -511,20 +513,26 @@ Also assert:
 login function to never resolve and click the OIDC provider button:
 
 ```ts
-it('OIDC provider button shows aria-busy and no Redirecting text when loading', async () => {
+it("OIDC provider button shows aria-busy and no Redirecting text when loading", async () => {
   // Read the existing test file to find the mock for the OIDC login API call
   // (the login page likely calls an auth function that sets oidcLoading).
   // Pattern: mock the OIDC call to return a never-resolving Promise, render, click the button.
   // Example (adjust the mock target to match the existing test file's import and render setup):
   vi.mocked(auth.initiateOidcLogin).mockReturnValue(new Promise(() => {}));
   // Use the same authMethods fixture the existing test file uses to show OIDC providers:
-  render(LoginPage, { /* same props/mock as existing OIDC tests */ });
-  await waitFor(() => expect(screen.getByRole('button', { name: /Login with/i })).toBeInTheDocument());
+  render(LoginPage, {
+    /* same props/mock as existing OIDC tests */
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /Login with/i }),
+    ).toBeInTheDocument(),
+  );
 
-  const oidcBtn = screen.getByRole('button', { name: /Login with/i });
+  const oidcBtn = screen.getByRole("button", { name: /Login with/i });
   await fireEvent.click(oidcBtn);
-  await waitFor(() => expect(oidcBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(oidcBtn).not.toHaveTextContent('Redirecting...');
+  await waitFor(() => expect(oidcBtn).toHaveAttribute("aria-busy", "true"));
+  expect(oidcBtn).not.toHaveTextContent("Redirecting...");
 });
 ```
 
@@ -536,17 +544,21 @@ it('OIDC provider button shows aria-busy and no Redirecting text when loading', 
 `approving` is internal `$state` set when `onApprove()` starts. Mock the approve API to never resolve and click the button:
 
 ```ts
-it('Approve button shows aria-busy and no Authorizing text when loading', async () => {
+it("Approve button shows aria-busy and no Authorizing text when loading", async () => {
   // Read the existing test file for the approve API mock target (e.g. api.approveDevice).
   vi.mocked(api.approveDevice).mockReturnValue(new Promise(() => {}));
   // Use the same render setup the existing device tests use (route params, mock setup):
-  render(DevicePage, { /* same props as existing device approved-state tests */ });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument());
+  render(DevicePage, {
+    /* same props as existing device approved-state tests */
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument(),
+  );
 
-  const approveBtn = screen.getByRole('button', { name: 'Approve' });
+  const approveBtn = screen.getByRole("button", { name: "Approve" });
   await fireEvent.click(approveBtn);
-  await waitFor(() => expect(approveBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(approveBtn).not.toHaveTextContent('Authorizing...');
+  await waitFor(() => expect(approveBtn).toHaveAttribute("aria-busy", "true"));
+  expect(approveBtn).not.toHaveTextContent("Authorizing...");
 });
 ```
 
@@ -561,21 +573,27 @@ it('+error Go to Home renders as <a href="/"> with Button md-size class', () => 
   // Button href branch renders <a role="button"> — role-based locator doesn't expose href
   const anchor = document.querySelector('a[href="/"]') as HTMLElement;
   expect(anchor).not.toBeNull();
-  expect(anchor.className).toContain('h-[23px]');
-  expect(anchor.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+  expect(anchor.className).toContain("h-[23px]");
+  expect(anchor.className).toContain(
+    "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+  );
 });
 ```
 
 **Offline-state test (all submit buttons disabled when `getIsOnline()` returns false):**
 
 ```ts
-it('submit buttons carry disabled attribute when offline', async () => {
+it("submit buttons carry disabled attribute when offline", async () => {
   // Mock getIsOnline to return false — read existing test for how to wire this
   vi.mocked(getIsOnline).mockReturnValue(false);
-  render(LoginPage, { /* standard setup */ });
-  await waitFor(() => expect(screen.getByRole('button', { name: /login/i })).toBeInTheDocument());
+  render(LoginPage, {
+    /* standard setup */
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /login/i })).toBeInTheDocument(),
+  );
 
-  const loginBtn = screen.getByRole('button', { name: /^login$/i });
+  const loginBtn = screen.getByRole("button", { name: /^login$/i });
   expect(loginBtn).toBeDisabled();
 });
 ```
@@ -583,26 +601,42 @@ it('submit buttons carry disabled attribute when offline', async () => {
 **Text-swap removal guards (neither 'Redirecting...' nor 'Authorizing...' appears in any rendered state):**
 
 ```ts
-it('no Redirecting... text appears anywhere in login DOM during loading', async () => {
+it("no Redirecting... text appears anywhere in login DOM during loading", async () => {
   vi.mocked(auth.initiateOidcLogin).mockReturnValue(new Promise(() => {}));
-  render(LoginPage, { /* OIDC provider setup */ });
-  await waitFor(() => expect(screen.getByRole('button', { name: /Login with/i })).toBeInTheDocument());
-  await fireEvent.click(screen.getByRole('button', { name: /Login with/i }));
+  render(LoginPage, {
+    /* OIDC provider setup */
+  });
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /Login with/i })).toHaveAttribute('aria-busy', 'true')
+    expect(
+      screen.getByRole("button", { name: /Login with/i }),
+    ).toBeInTheDocument(),
   );
-  expect(document.body.textContent).not.toContain('Redirecting...');
+  await fireEvent.click(screen.getByRole("button", { name: /Login with/i }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /Login with/i })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    ),
+  );
+  expect(document.body.textContent).not.toContain("Redirecting...");
 });
 
-it('no Authorizing... text appears anywhere in device DOM during loading', async () => {
+it("no Authorizing... text appears anywhere in device DOM during loading", async () => {
   vi.mocked(api.approveDevice).mockReturnValue(new Promise(() => {}));
-  render(DevicePage, { /* standard setup */ });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument());
-  await fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  render(DevicePage, {
+    /* standard setup */
+  });
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument(),
   );
-  expect(document.body.textContent).not.toContain('Authorizing...');
+  await fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    ),
+  );
+  expect(document.body.textContent).not.toContain("Authorizing...");
 });
 ```
 
@@ -701,12 +735,12 @@ Expected: 0 failures. All other snapshot suites unaffected (this migration only 
 
 ## Commit summary
 
-| # | Commit | Files |
-| --- | --- | --- |
-| 1 | Delete 2 button-class exports | `PublicEntryShell.svelte` |
-| 2 | Migrate 5 sites | `login/+page.svelte` |
-| 3 | Migrate 1 site | `register/+page.svelte` |
-| 4 | Migrate 2 sites | `device/+page.svelte` |
-| 5 | Migrate 1 site + drop goto | `+error.svelte` |
-| 6 | Update tests | `public-entry.test.ts` |
-| 7 | E2e baselines | `public-entry.spec.ts` + PNGs |
+| #   | Commit                        | Files                         |
+| --- | ----------------------------- | ----------------------------- |
+| 1   | Delete 2 button-class exports | `PublicEntryShell.svelte`     |
+| 2   | Migrate 5 sites               | `login/+page.svelte`          |
+| 3   | Migrate 1 site                | `register/+page.svelte`       |
+| 4   | Migrate 2 sites               | `device/+page.svelte`         |
+| 5   | Migrate 1 site + drop goto    | `+error.svelte`               |
+| 6   | Update tests                  | `public-entry.test.ts`        |
+| 7   | E2e baselines                 | `public-entry.spec.ts` + PNGs |

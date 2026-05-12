@@ -213,7 +213,7 @@ Button sites enumerated exhaustively against current source. Adding buttons not 
   ```
 
 - Line 74 (Next): `<Button variant="ghost" size="sm" class="h-8 min-h-8 px-3 text-[10px]" trailingIcon={ChevronRight}
-  disabled={currentPage >= totalPages} onclick={() => onPageChange(currentPage + 1)}>Next</Button>`.
+disabled={currentPage >= totalPages} onclick={() => onPageChange(currentPage + 1)}>Next</Button>`.
 - No new primitive props introduced; `class` override is how every migrated consumer handles non-standard sizing.
 
 ### `frontend/src/lib/components/ToastNotifications.svelte`

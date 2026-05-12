@@ -32,10 +32,10 @@ CRL refresh.
 
 `PUT /api/v1/services/{id}` accepts an `UpdateServiceRequest` body with the following optional fields:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `ping_interval_seconds` | `u32` (optional) | Custom ping interval in seconds. `0` clears the override; minimum positive value is `5`. Omit to keep current value. |
-| `cert_lifetime_hours` | `u32` (optional) | Per-service certificate lifetime in hours. `0` clears the per-service override and reverts to the global default. Valid positive range: `1`–`17520`. Omit to keep current value. |
+| Field                   | Type             | Description                                                                                                                                                                      |
+| ----------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ping_interval_seconds` | `u32` (optional) | Custom ping interval in seconds. `0` clears the override; minimum positive value is `5`. Omit to keep current value.                                                             |
+| `cert_lifetime_hours`   | `u32` (optional) | Per-service certificate lifetime in hours. `0` clears the per-service override and reverts to the global default. Valid positive range: `1`–`17520`. Omit to keep current value. |
 
 When `cert_lifetime_hours` is set, it takes precedence over the global agent certificate lifetime setting
 (`PUT /api/v1/settings/agent-certificates`) at certificate signing time — both during initial enrollment
@@ -99,16 +99,16 @@ the credential guard, enrollment token mechanics, and the two-tier service model
 
 ### Endpoints
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/system-services` | List system services (requires `view_system_services`). Filterable by `capability` and `status`. Paginated. |
-| GET | `/api/v1/system-services/{id}` | Get a single system service by UUID (requires `view_system_services`). |
-| PUT | `/api/v1/system-services/{id}` | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `manage_system_services`). |
-| POST | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `manage_system_services`). |
-| POST | `/api/v1/system-services/{id}/reject` | Reject a pending system service (requires `manage_system_services`). |
-| DELETE | `/api/v1/system-services/{id}` | Deactivate a system service (requires `manage_system_services`). |
-| GET | `/api/v1/settings/system-services` | Get the global enrollment token (requires `manage_system_services`). |
-| PUT | `/api/v1/settings/system-services` | Set or clear the global enrollment token (requires `manage_system_services`). |
+| Method | Path                                   | Description                                                                                                       |
+| ------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/system-services`              | List system services (requires `view_system_services`). Filterable by `capability` and `status`. Paginated.       |
+| GET    | `/api/v1/system-services/{id}`         | Get a single system service by UUID (requires `view_system_services`).                                            |
+| PUT    | `/api/v1/system-services/{id}`         | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `manage_system_services`). |
+| POST   | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `manage_system_services`).                                             |
+| POST   | `/api/v1/system-services/{id}/reject`  | Reject a pending system service (requires `manage_system_services`).                                              |
+| DELETE | `/api/v1/system-services/{id}`         | Deactivate a system service (requires `manage_system_services`).                                                  |
+| GET    | `/api/v1/settings/system-services`     | Get the global enrollment token (requires `manage_system_services`).                                              |
+| PUT    | `/api/v1/settings/system-services`     | Set or clear the global enrollment token (requires `manage_system_services`).                                     |
 
 ### Deactivation
 
@@ -128,13 +128,13 @@ does not exist. The two revocation reasons in `system_service_certificates` are
 
 ### Contrasting with tenant services
 
-| Property | Tenant services (`/api/v1/services`) | System services (`/api/v1/system-services`) |
-| --- | --- | --- |
-| Scoped to tenant | Yes | No |
-| Enrollment token | Per-tenant, Argon2id | Single global, plaintext (encrypted at rest) |
-| Certificate table | `service_certificates` | `system_service_certificates` |
-| Merge | Supported | Not supported |
-| Typical members | Agents, SSH agents | MQTT bridge, external scheduler |
+| Property          | Tenant services (`/api/v1/services`) | System services (`/api/v1/system-services`)  |
+| ----------------- | ------------------------------------ | -------------------------------------------- |
+| Scoped to tenant  | Yes                                  | No                                           |
+| Enrollment token  | Per-tenant, Argon2id                 | Single global, plaintext (encrypted at rest) |
+| Certificate table | `service_certificates`               | `system_service_certificates`                |
+| Merge             | Supported                            | Not supported                                |
+| Typical members   | Agents, SSH agents                   | MQTT bridge, external scheduler              |
 
 ## Embedded Services
 
@@ -144,10 +144,10 @@ These rows carry `is_embedded: true` in the response.
 
 ### Response fields
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `is_embedded` | `bool` | `true` when the service runs inside the controller process. |
-| `yielded_to` | `Uuid[]?` | List of external service IDs that caused this embedded service to yield its responsibilities. `null` or absent when not yielded. Refreshed on a 30-second interval. |
+| Field         | Type      | Description                                                                                                                                                         |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `is_embedded` | `bool`    | `true` when the service runs inside the controller process.                                                                                                         |
+| `yielded_to`  | `Uuid[]?` | List of external service IDs that caused this embedded service to yield its responsibilities. `null` or absent when not yielded. Refreshed on a 30-second interval. |
 
 ### Constraints
 

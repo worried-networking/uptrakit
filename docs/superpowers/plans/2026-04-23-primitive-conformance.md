@@ -17,20 +17,20 @@ regeneration; all other changes are invisible to existing Vitest tests.
 
 ## Files modified
 
-| File | Change |
-| --- | --- |
-| `frontend/src/lib/components/ui/Callout.svelte:28` | `rounded-xl` → `rounded-[4px]` |
-| `frontend/src/lib/components/ui/EmptyState.svelte:16` | `rounded-2xl` → `rounded-[3px]` |
-| `frontend/src/lib/components/ui/SectionCard.svelte:18` | `rounded-2xl` → `rounded-[3px]` |
-| `frontend/src/lib/components/ui/ProviderSelector.svelte:56` | `rounded-xl` → `rounded-[3px]` |
-| `frontend/src/lib/components/ui/DataTable.svelte:76,85` | `px-4` → `px-[10px]` (two header cell locations) |
-| `frontend/src/lib/components/ui/TabStrip.svelte:101,107-112` | outer `rounded-xl` → `rounded-[4px]`; button `rounded-lg` → `rounded-[3px]`; active state tint |
-| `frontend/src/lib/components/ui/PageShell.svelte:25` | `text-3xl font-semibold tracking-tight` → `text-[20px] font-bold` |
-| `frontend/src/lib/components/Modal.svelte:30` | `h3` class → explicit token class |
-| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte:89` | `h3` class → explicit token class |
-| `frontend/src/lib/components/surfaces/SurfaceSlot.svelte:38-39` | `card` utility + `h3` class → token classes; add `data-ui` attr |
-| `frontend/src/lib/components/surfaces/SurfaceSlot.test.ts:45` | update `section.card` selector to `data-ui` attr |
-| `frontend/src/lib/components/SoftwareMergeWizard.svelte:237,356,367,382,401` | `h4` class → explicit token class |
+| File                                                                         | Change                                                                                         |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `frontend/src/lib/components/ui/Callout.svelte:28`                           | `rounded-xl` → `rounded-[4px]`                                                                 |
+| `frontend/src/lib/components/ui/EmptyState.svelte:16`                        | `rounded-2xl` → `rounded-[3px]`                                                                |
+| `frontend/src/lib/components/ui/SectionCard.svelte:18`                       | `rounded-2xl` → `rounded-[3px]`                                                                |
+| `frontend/src/lib/components/ui/ProviderSelector.svelte:56`                  | `rounded-xl` → `rounded-[3px]`                                                                 |
+| `frontend/src/lib/components/ui/DataTable.svelte:76,85`                      | `px-4` → `px-[10px]` (two header cell locations)                                               |
+| `frontend/src/lib/components/ui/TabStrip.svelte:101,107-112`                 | outer `rounded-xl` → `rounded-[4px]`; button `rounded-lg` → `rounded-[3px]`; active state tint |
+| `frontend/src/lib/components/ui/PageShell.svelte:25`                         | `text-3xl font-semibold tracking-tight` → `text-[20px] font-bold`                              |
+| `frontend/src/lib/components/Modal.svelte:30`                                | `h3` class → explicit token class                                                              |
+| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte:89`             | `h3` class → explicit token class                                                              |
+| `frontend/src/lib/components/surfaces/SurfaceSlot.svelte:38-39`              | `card` utility + `h3` class → token classes; add `data-ui` attr                                |
+| `frontend/src/lib/components/surfaces/SurfaceSlot.test.ts:45`                | update `section.card` selector to `data-ui` attr                                               |
+| `frontend/src/lib/components/SoftwareMergeWizard.svelte:237,356,367,382,401` | `h4` class → explicit token class                                                              |
 
 ---
 
@@ -479,13 +479,15 @@ vacuously pass (0 matches = expected 0), but we update it to be meaningful using
 In `frontend/src/lib/components/surfaces/SurfaceSlot.test.ts` line 45, change:
 
 ```ts
-		expect(container.querySelectorAll('section.card')).toHaveLength(0);
+expect(container.querySelectorAll("section.card")).toHaveLength(0);
 ```
 
 to:
 
 ```ts
-		expect(container.querySelectorAll('[data-ui="surface-slot-item"]')).toHaveLength(0);
+expect(
+  container.querySelectorAll('[data-ui="surface-slot-item"]'),
+).toHaveLength(0);
 ```
 
 - [ ] **Step 2: Run the test to confirm it fails (test now checks for data-ui attr that doesn't exist yet)**

@@ -77,6 +77,7 @@ Shared components embedded in these files are migrated by other sub- specs and a
   - Use an `MoreIcon` SVG/component import. Rejected — no icon system exists in `frontend/src`; there is no
     importable `MoreIcon` component anywhere in the codebase.
   - Migrate menu items here. Rejected — `ContextMenuShell` internals are a shared concern and belong to #3k.
+
 - Reasoning: trigger is a row affordance (#3h territory); list items are shell chrome (#3k). Inline snippet matches
   the established canary pattern from sub-spec #2 PR2 and avoids introducing an icon system dependency not yet spec'd.
 

@@ -434,23 +434,23 @@ Update the history-route fixtures so the intended actor-name behavior is represe
 
 ```ts
 const queuedItem = {
-  id: 'hist-queued',
-  host_id: 'host-1',
-  host_name: 'prod-01',
-  software_item_id: 'software-1',
-  software_item_name: 'nginx',
-  from_version: '1.24.0',
-  to_version: '1.25.0',
-  status: 'queued',
-  started_at: '2026-02-01T10:00:00Z',
+  id: "hist-queued",
+  host_id: "host-1",
+  host_name: "prod-01",
+  software_item_id: "software-1",
+  software_item_name: "nginx",
+  from_version: "1.24.0",
+  to_version: "1.25.0",
+  status: "queued",
+  started_at: "2026-02-01T10:00:00Z",
   completed_at: null,
-  output: '',
+  output: "",
   output_truncated: true,
   interactive: false,
-  actor_type: 'user',
-  actor_id: 'actor-1',
-  actor_name: 'Alice Smith',
-  created_at: '2026-02-01T10:00:00Z'
+  actor_type: "user",
+  actor_id: "actor-1",
+  actor_name: "Alice Smith",
+  created_at: "2026-02-01T10:00:00Z",
 } satisfies UpdateHistoryResponse;
 ```
 
@@ -460,29 +460,31 @@ still depend on `aria-expanded` with role/name queries scoped to the relevant
 history entry:
 
 ```ts
-function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): UpdateHistoryResponse {
+function makeHistoryEntry(
+  overrides: Partial<UpdateHistoryResponse> = {},
+): UpdateHistoryResponse {
   return {
-    id: 'history-1',
-    host_id: 'host-1',
-    host_name: 'Host One',
-    software_item_id: 'software-1',
-    software_item_name: 'Demo App',
-    from_version: '1.0.0',
-    to_version: '1.1.0',
-    status: 'completed',
-    actor_type: 'user',
+    id: "history-1",
+    host_id: "host-1",
+    host_name: "Host One",
+    software_item_id: "software-1",
+    software_item_name: "Demo App",
+    from_version: "1.0.0",
+    to_version: "1.1.0",
+    status: "completed",
+    actor_type: "user",
     actor_id: adminUser.id,
-    actor_name: 'History User',
-    started_at: '2024-01-01T00:00:00Z',
-    completed_at: '2024-01-01T00:05:00Z',
-    output: 'Update finished.',
-    created_at: '2024-01-01T00:00:00Z',
+    actor_name: "History User",
+    started_at: "2024-01-01T00:00:00Z",
+    completed_at: "2024-01-01T00:05:00Z",
+    output: "Update finished.",
+    created_at: "2024-01-01T00:00:00Z",
     interactive: false,
     output_truncated: false,
     pre_update_protection_status: null,
     pre_update_protection_summary: null,
     recovery_hint: null,
-    ...overrides
+    ...overrides,
   };
 }
 ```
@@ -490,13 +492,17 @@ function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): Updat
 For the existing “Additional details” regression, replace:
 
 ```ts
-const viewLogButton = demoEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+const viewLogButton = demoEntry.querySelector(
+  'button[aria-expanded="false"]',
+) as HTMLElement;
 ```
 
 with a stable accessible query such as:
 
 ```ts
-const viewLogButton = within(demoEntry).getByRole('button', { name: 'View logs' });
+const viewLogButton = within(demoEntry).getByRole("button", {
+  name: "View logs",
+});
 ```
 
 - [ ] **Step 2: Run the focused frontend tests to verify the type mismatch fails**
@@ -569,91 +575,112 @@ git commit -m "test: align history frontend types with actor names"
 Add/replace assertions in `frontend/src/routes/history/history.test.ts` for the approved behavior:
 
 ```ts
-it('renders the summary strip only on page 1 with the all filter', async () => {
+it("renders the summary strip only on page 1 with the all filter", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  expect(screen.getByText('Running')).toBeInTheDocument();
-  expect(screen.getByText('Waiting')).toBeInTheDocument();
-  expect(screen.getByText('Failed')).toBeInTheDocument();
-  expect(screen.getByText('Completed')).toBeInTheDocument();
+  expect(screen.getByText("Running")).toBeInTheDocument();
+  expect(screen.getByText("Waiting")).toBeInTheDocument();
+  expect(screen.getByText("Failed")).toBeInTheDocument();
+  expect(screen.getByText("Completed")).toBeInTheDocument();
 });
 
-it('hides the summary strip for non-all filters and later pages', async () => {
-  page.url.search = '?status=completed&page=2';
+it("hides the summary strip for non-all filters and later pages", async () => {
+  page.url.search = "?status=completed&page=2";
   vi.mocked(api.listUpdateHistory).mockResolvedValue({
     items: [completedItem],
     total: 5,
     page: 2,
     per_page: 25,
-    total_pages: 2
+    total_pages: 2,
   });
 
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  expect(document.querySelector('[data-ui="history-summary-strip"]')).toBeNull();
+  expect(
+    document.querySelector('[data-ui="history-summary-strip"]'),
+  ).toBeNull();
 });
 
-it('does not render the summary strip while the page-1 all-results load is pending', async () => {
+it("does not render the summary strip while the page-1 all-results load is pending", async () => {
   vi.mocked(api.listUpdateHistory).mockImplementation(
-    () => new Promise(() => undefined) as ReturnType<typeof api.listUpdateHistory>
+    () =>
+      new Promise(() => undefined) as ReturnType<typeof api.listUpdateHistory>,
   );
 
   render(HistoryPage);
-  expect(screen.getByText('Loading update history…')).toBeInTheDocument();
-  expect(document.querySelector('[data-ui="history-summary-strip"]')).toBeNull();
+  expect(screen.getByText("Loading update history…")).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="history-summary-strip"]'),
+  ).toBeNull();
 });
 
-it('renders actor display names in collapsed row metadata', async () => {
+it("renders actor display names in collapsed row metadata", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-  expect(nginxEntry).toHaveTextContent('Triggered by user Alice Smith');
+  const nginxEntry = screen.getByText("nginx on prod-01").closest("article")!;
+  expect(nginxEntry).toHaveTextContent("Triggered by user Alice Smith");
 });
 
-it('does not render the Input Required badge in the feed', async () => {
+it("does not render the Input Required badge in the feed", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
   expect(screen.queryByText(/input required/i)).not.toBeInTheDocument();
 });
 
-it('falls back to trigger source unknown when actor type is missing', async () => {
+it("falls back to trigger source unknown when actor type is missing", async () => {
   vi.mocked(api.listUpdateHistory).mockResolvedValue({
-    items: [{ ...queuedItem, actor_type: '', actor_name: null }],
+    items: [{ ...queuedItem, actor_type: "", actor_name: null }],
     total: 1,
     page: 1,
     per_page: 25,
-    total_pages: 1
+    total_pages: 1,
   });
 
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  expect(screen.getByText('Trigger source unknown')).toBeInTheDocument();
+  expect(screen.getByText("Trigger source unknown")).toBeInTheDocument();
 });
 
-it('keeps stable visible row action labels after opening the modal', async () => {
+it("keeps stable visible row action labels after opening the modal", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-  const attachBtn = screen.getByRole('button', { name: 'Attach terminal' });
+  const pgEntry = screen.getByText("postgresql on prod-03").closest("article")!;
+  const attachBtn = screen.getByRole("button", { name: "Attach terminal" });
   await fireEvent.click(attachBtn);
   vi.runOnlyPendingTimers();
 
-  expect(pgEntry).toHaveTextContent('Attach terminal');
-  expect(screen.queryByRole('button', { name: /close terminal/i })).not.toBeInTheDocument();
+  expect(pgEntry).toHaveTextContent("Attach terminal");
+  expect(
+    screen.queryByRole("button", { name: /close terminal/i }),
+  ).not.toBeInTheDocument();
 });
 
-it('does not render aria-expanded on row actions', async () => {
+it("does not render aria-expanded on row actions", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  const action = screen.getByRole('button', { name: 'Attach terminal' });
-  expect(action).not.toHaveAttribute('aria-expanded');
+  const action = screen.getByRole("button", { name: "Attach terminal" });
+  expect(action).not.toHaveAttribute("aria-expanded");
 });
 ```
 
@@ -677,51 +704,58 @@ Script additions:
 
 ```ts
 type SummaryBucket = {
-  label: 'Running' | 'Waiting' | 'Failed' | 'Completed';
+  label: "Running" | "Waiting" | "Failed" | "Completed";
   value: number;
-  tone: 'warning' | 'info' | 'danger' | 'success';
+  tone: "warning" | "info" | "danger" | "success";
 };
 
 const showSummaryStrip = $derived(
-  statusFilter === 'all' && currentPage === 1 && !loading && !error
+  statusFilter === "all" && currentPage === 1 && !loading && !error,
 );
 
 const summaryBuckets = $derived.by<SummaryBucket[]>(() => {
   const counts = {
-    running: items.filter((item) => item.status === 'in_progress').length,
-    waiting: items.filter((item) => item.status === 'queued' || item.status === 'pending').length,
-    failed: items.filter((item) => item.status === 'failed').length,
-    completed: items.filter((item) => item.status === 'completed').length
+    running: items.filter((item) => item.status === "in_progress").length,
+    waiting: items.filter(
+      (item) => item.status === "queued" || item.status === "pending",
+    ).length,
+    failed: items.filter((item) => item.status === "failed").length,
+    completed: items.filter((item) => item.status === "completed").length,
   };
   return [
-    { label: 'Running', value: counts.running, tone: 'warning' },
-    { label: 'Waiting', value: counts.waiting, tone: 'info' },
-    { label: 'Failed', value: counts.failed, tone: 'danger' },
-    { label: 'Completed', value: counts.completed, tone: 'success' }
+    { label: "Running", value: counts.running, tone: "warning" },
+    { label: "Waiting", value: counts.waiting, tone: "info" },
+    { label: "Failed", value: counts.failed, tone: "danger" },
+    { label: "Completed", value: counts.completed, tone: "success" },
   ];
 });
 
-function historySummaryValueClass(tone: SummaryBucket['tone']): string {
+function historySummaryValueClass(tone: SummaryBucket["tone"]): string {
   switch (tone) {
-    case 'warning':
-      return 'text-[var(--color-warning)]';
-    case 'info':
-      return 'text-[var(--color-info)]';
-    case 'danger':
-      return 'text-[var(--color-danger)]';
-    case 'success':
-      return 'text-[var(--color-success)]';
+    case "warning":
+      return "text-[var(--color-warning)]";
+    case "info":
+      return "text-[var(--color-info)]";
+    case "danger":
+      return "text-[var(--color-danger)]";
+    case "success":
+      return "text-[var(--color-success)]";
   }
 }
 
 function historyActorLabel(item: UpdateHistoryResponse): string {
-  const normalizedType = item.actor_type?.replaceAll(/[_-]+/g, ' ').trim().toLowerCase();
+  const normalizedType = item.actor_type
+    ?.replaceAll(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
   const actorName = item.actor_name?.trim();
-  if (normalizedType === 'user' && actorName) return `Triggered by user ${actorName}`;
-  if (normalizedType === 'scheduler' && actorName) return `Triggered by scheduler ${actorName}`;
+  if (normalizedType === "user" && actorName)
+    return `Triggered by user ${actorName}`;
+  if (normalizedType === "scheduler" && actorName)
+    return `Triggered by scheduler ${actorName}`;
   if (actorName) return `Triggered by service ${actorName}`;
   if (normalizedType) return `Triggered by ${normalizedType}`;
-  return 'Trigger source unknown';
+  return "Trigger source unknown";
 }
 
 function closeHistoryModal() {
@@ -832,34 +866,52 @@ git commit -m "feat: redesign history page layout"
 Add two explicit behavior tests:
 
 ```ts
-it('does not close the modal when clicking the action for the already-open row', async () => {
+it("does not close the modal when clicking the action for the already-open row", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  const attachBtn = screen.getByRole('button', { name: 'Attach terminal' });
+  const attachBtn = screen.getByRole("button", { name: "Attach terminal" });
   await fireEvent.click(attachBtn);
   vi.runOnlyPendingTimers();
-  expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-shell"]'),
+  ).toBeInTheDocument();
 
   await fireEvent.click(attachBtn);
-  expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-shell"]'),
+  ).toBeInTheDocument();
 });
 
-it('retargets the existing modal when clicking a different row action', async () => {
+it("retargets the existing modal when clicking a different row action", async () => {
   render(HistoryPage);
-  await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-  const grafanaButton = screen.getByText('grafana on prod-05').closest('article')!
-    .querySelector('button') as HTMLElement;
+  const grafanaButton = screen
+    .getByText("grafana on prod-05")
+    .closest("article")!
+    .querySelector("button") as HTMLElement;
   await fireEvent.click(grafanaButton);
-  expect(await screen.findByRole('dialog', { name: 'grafana on prod-05' })).toBeInTheDocument();
+  expect(
+    await screen.findByRole("dialog", { name: "grafana on prod-05" }),
+  ).toBeInTheDocument();
 
-  const secondButton = screen.getByText('nginx on prod-01').closest('article')!
-    .querySelector('button') as HTMLElement;
+  const secondButton = screen
+    .getByText("nginx on prod-01")
+    .closest("article")!
+    .querySelector("button") as HTMLElement;
   await fireEvent.click(secondButton);
 
-  expect(await screen.findByRole('dialog', { name: 'nginx on prod-01' })).toBeInTheDocument();
-  expect(screen.queryByRole('dialog', { name: 'grafana on prod-05' })).not.toBeInTheDocument();
+  expect(
+    await screen.findByRole("dialog", { name: "nginx on prod-01" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "grafana on prod-05" }),
+  ).not.toBeInTheDocument();
 });
 ```
 

@@ -132,9 +132,9 @@ Dashboard Icons is now gated by generic **plugin type settings**, not by a bespo
 
 The plugin exposes a type-settings model in `crates/plugins/enhancements/dashboard-icons/src/config.rs`:
 
-| Type setting | Location | Default |
-| --- | --- | --- |
-| `enabled` | `DashboardIconsConfig` | `true` when no tenant override exists |
+| Type setting | Location               | Default                               |
+| ------------ | ---------------------- | ------------------------------------- |
+| `enabled`    | `DashboardIconsConfig` | `true` when no tenant override exists |
 
 The tenant override is stored in the shared `plugin_type_settings` table under plugin type
 `enhancement_dashboard_icons`.
@@ -143,11 +143,11 @@ The tenant override is stored in the shared `plugin_type_settings` table under p
 
 Dashboard Icons uses the generic plugin type settings endpoints:
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons |
-| `PUT` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings` | Upserts `{ "config": { "enabled": bool } }` |
-| `DELETE` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings` | Deletes the tenant override and reverts to the built-in default |
+| Method   | Path                                                       | Permission                                  | Description                                                     |
+| -------- | ---------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| `GET`    | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons         |
+| `PUT`    | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings`                    | Upserts `{ "config": { "enabled": bool } }`                     |
+| `DELETE` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings`                    | Deletes the tenant override and reverts to the built-in default |
 
 The generic request/response types live under `crates/shared/web-api-types/src/plugin_type_settings.rs`.
 
@@ -220,22 +220,22 @@ other plugins from running.
 
 ## Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/plugins/enhancements/dashboard-icons/src/lib.rs` | Crate root, re-exports `DashboardIconCache` and `DashboardIconsPlugin` |
-| `crates/plugins/enhancements/dashboard-icons/src/config.rs` | `DashboardIconsConfig` type settings model and schema |
-| `crates/plugins/enhancements/dashboard-icons/src/plugin.rs` | `DashboardIconsPlugin` declared via `declare_plugin!` with `SoftwareItemLifecycle` role |
-| `crates/plugins/enhancements/dashboard-icons/src/cache.rs` | `DashboardIconCache` with refresh loop and CDN URL construction |
-| `crates/plugins/enhancements/dashboard-icons/src/slugify.rs` | Name-to-slug conversion function |
-| `crates/plugins/enhancements/dashboard-icons/src/error.rs` | `DashboardIconsError` enum |
-| `crates/plugins/infrastructure/core/src/roles.rs` | `SoftwareItemLifecycle` role trait, `SoftwareItemCreatedEvent`, `SoftwareItemLifecycleContext`, `SoftwareItemPatch` |
-| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps::on_software_item_created()` default impl |
-| `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` construction, lifecycle dispatch impl |
-| `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::on_software_item_created()` override with merge logic |
-| `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs` | Preloads lifecycle plugin type settings into `SoftwareItemLifecycleContext` |
-| `crates/ui/web-api/src/routes/software_items/mod.rs` | `fire_software_item_lifecycle()` for manual creation |
-| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | Post-autodiscovery enrichment loop |
-| `crates/ui/web-api/src/routes/plugin_type_settings.rs` | Generic plugin type settings handlers used by Dashboard Icons |
+| File                                                            | Purpose                                                                                                             |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `crates/plugins/enhancements/dashboard-icons/src/lib.rs`        | Crate root, re-exports `DashboardIconCache` and `DashboardIconsPlugin`                                              |
+| `crates/plugins/enhancements/dashboard-icons/src/config.rs`     | `DashboardIconsConfig` type settings model and schema                                                               |
+| `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`     | `DashboardIconsPlugin` declared via `declare_plugin!` with `SoftwareItemLifecycle` role                             |
+| `crates/plugins/enhancements/dashboard-icons/src/cache.rs`      | `DashboardIconCache` with refresh loop and CDN URL construction                                                     |
+| `crates/plugins/enhancements/dashboard-icons/src/slugify.rs`    | Name-to-slug conversion function                                                                                    |
+| `crates/plugins/enhancements/dashboard-icons/src/error.rs`      | `DashboardIconsError` enum                                                                                          |
+| `crates/plugins/infrastructure/core/src/roles.rs`               | `SoftwareItemLifecycle` role trait, `SoftwareItemCreatedEvent`, `SoftwareItemLifecycleContext`, `SoftwareItemPatch` |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs`          | `PluginOps::on_software_item_created()` default impl                                                                |
+| `crates/plugins/infrastructure/registry/src/registry.rs`        | `PluginCatalog` construction, lifecycle dispatch impl                                                               |
+| `crates/plugins/infrastructure/registry/src/lib.rs`             | `PluginOps::on_software_item_created()` override with merge logic                                                   |
+| `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs` | Preloads lifecycle plugin type settings into `SoftwareItemLifecycleContext`                                         |
+| `crates/ui/web-api/src/routes/software_items/mod.rs`            | `fire_software_item_lifecycle()` for manual creation                                                                |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`   | Post-autodiscovery enrichment loop                                                                                  |
+| `crates/ui/web-api/src/routes/plugin_type_settings.rs`          | Generic plugin type settings handlers used by Dashboard Icons                                                       |
 
 ## Testing
 

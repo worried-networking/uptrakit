@@ -5,10 +5,10 @@ services share the same `ServiceMessage`/`ControllerMessage` enums, with variant
 
 ## Connection Types
 
-| Type | Authentication | Purpose |
-| --- | --- | --- |
-| Anonymous | None | Enrollment (initial handshake). |
-| Enrolled | Bearer token | Certificate request (`request_certificate`). |
+| Type          | Authentication   | Purpose                                        |
+| ------------- | ---------------- | ---------------------------------------------- |
+| Anonymous     | None             | Enrollment (initial handshake).                |
+| Enrolled      | Bearer token     | Certificate request (`request_certificate`).   |
 | Authenticated | mTLS client cert | Normal operation (heartbeats, commands, data). |
 
 Agents and SSH agents initiate outbound-only connections and never accept inbound traffic. MQTT services and SSH agents
@@ -149,11 +149,11 @@ that role on this host-software pair.
 
 **`PluginAssignment` fields:**
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `plugin_type` | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"releases_github"`) |
-| `package_identifier` | string | Plugin-specific package identifier |
-| `config` | object | Merged plugin configuration (base config + override) |
+| Field                | Type   | Description                                                            |
+| -------------------- | ------ | ---------------------------------------------------------------------- |
+| `plugin_type`        | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"releases_github"`) |
+| `package_identifier` | string | Plugin-specific package identifier                                     |
+| `config`             | object | Merged plugin configuration (base config + override)                   |
 
 The `fetch_releases` field is only included for agent-side plugins (those without the
 `ControllerSideFetchReleases` capability, or with `execution_site = "agent"`). Controller-side
@@ -205,20 +205,20 @@ and is not sent to the agent.
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `host_machine_id` | string | Target host's machine ID |
-| `update_history_id` | UUID | Update history record ID |
-| `software_item_id` | UUID | Software item being updated |
-| `software_item_name` | string | Display name for logging |
-| `to_version` | string | Target version |
-| `detect_version_plugin` | `PluginAssignment?` | Plugin for before/after installed-version detection. Absent when no `detect_version` plugin is configured. |
-| `execute_update_plugin` | `PluginAssignment` | Plugin for the `execute_update` role (required) |
-| `pre_update_hook_plugins` | `Vec<PluginAssignment>` | Pre-update hook plugin assignments (role `pre_update_hook`) |
-| `post_update_hook_plugins` | `Vec<PluginAssignment>` | Post-update hook plugin assignments (role `post_update_hook`) |
-| `release_info` | `ReleaseInfo?` | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields). |
-| `timeout_seconds` | `Duration` | Maximum execution time for the entire update (including hook plugins). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted. |
-| `interactive` | bool | When `true`, the agent allocates a PTY and keeps stdin open for forwarding. Defaults to `false`. Only honoured when the agent advertises `InteractiveUpdates`. See [Interactive Updates](interactive-updates.md). |
+| Field                      | Type                    | Description                                                                                                                                                                                                       |
+| -------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host_machine_id`          | string                  | Target host's machine ID                                                                                                                                                                                          |
+| `update_history_id`        | UUID                    | Update history record ID                                                                                                                                                                                          |
+| `software_item_id`         | UUID                    | Software item being updated                                                                                                                                                                                       |
+| `software_item_name`       | string                  | Display name for logging                                                                                                                                                                                          |
+| `to_version`               | string                  | Target version                                                                                                                                                                                                    |
+| `detect_version_plugin`    | `PluginAssignment?`     | Plugin for before/after installed-version detection. Absent when no `detect_version` plugin is configured.                                                                                                        |
+| `execute_update_plugin`    | `PluginAssignment`      | Plugin for the `execute_update` role (required)                                                                                                                                                                   |
+| `pre_update_hook_plugins`  | `Vec<PluginAssignment>` | Pre-update hook plugin assignments (role `pre_update_hook`)                                                                                                                                                       |
+| `post_update_hook_plugins` | `Vec<PluginAssignment>` | Post-update hook plugin assignments (role `post_update_hook`)                                                                                                                                                     |
+| `release_info`             | `ReleaseInfo?`          | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields).                                                                               |
+| `timeout_seconds`          | `Duration`              | Maximum execution time for the entire update (including hook plugins). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted.                   |
+| `interactive`              | bool                    | When `true`, the agent allocates a PTY and keeps stdin open for forwarding. Defaults to `false`. Only honoured when the agent advertises `InteractiveUpdates`. See [Interactive Updates](interactive-updates.md). |
 
 #### `ReleaseInfo` fields
 
@@ -226,20 +226,20 @@ and is not sent to the agent.
 controller from `latest_release_metadata` at update-trigger time and is used by the agent for
 attestation verification and by update plugins for download URL resolution.
 
-| Field | Type | Serde | Description |
-| --- | --- | --- | --- |
-| `tag` | `string` | required | Release tag name (e.g. `"v1.24.0"`) |
-| `release_url` | `string` | required | URL of the release page (e.g. `"https://github.com/owner/repo/releases/tag/v1.24.0"`) |
-| `assets` | `ReleaseAsset[]` | `#[serde(default, skip_serializing_if = "Vec::is_empty")]` | Release assets available for download |
-| `attestation_status` | `AttestationStatus?` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | GitHub Actions attestation status determined at fetch time. Only set for GitHub Releases items when `verify_attestation = true`. See [`AttestationStatus`](#attestationstatus). |
-| `require_attestation` | `bool` | `#[serde(default)]` | When `true`, the agent aborts the update if `attestation_status` is `NotFound` after independent re-verification. Set by the controller from `GitHubConfig.require_attestation`. |
+| Field                 | Type                 | Serde                                                        | Description                                                                                                                                                                      |
+| --------------------- | -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tag`                 | `string`             | required                                                     | Release tag name (e.g. `"v1.24.0"`)                                                                                                                                              |
+| `release_url`         | `string`             | required                                                     | URL of the release page (e.g. `"https://github.com/owner/repo/releases/tag/v1.24.0"`)                                                                                            |
+| `assets`              | `ReleaseAsset[]`     | `#[serde(default, skip_serializing_if = "Vec::is_empty")]`   | Release assets available for download                                                                                                                                            |
+| `attestation_status`  | `AttestationStatus?` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | GitHub Actions attestation status determined at fetch time. Only set for GitHub Releases items when `verify_attestation = true`. See [`AttestationStatus`](#attestationstatus).  |
+| `require_attestation` | `bool`               | `#[serde(default)]`                                          | When `true`, the agent aborts the update if `attestation_status` is `NotFound` after independent re-verification. Set by the controller from `GitHubConfig.require_attestation`. |
 
 #### `ReleaseAsset` fields
 
-| Field | Type | Serde | Description |
-| --- | --- | --- | --- |
-| `name` | `string` | required | Asset filename (e.g. `"nginx_1.24.0_linux_amd64.tar.gz"`) |
-| `download_url` | `string` | required | Direct download URL for the asset |
+| Field           | Type      | Serde                                                        | Description                                                                                                                                        |
+| --------------- | --------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`          | `string`  | required                                                     | Asset filename (e.g. `"nginx_1.24.0_linux_amd64.tar.gz"`)                                                                                          |
+| `download_url`  | `string`  | required                                                     | Direct download URL for the asset                                                                                                                  |
 | `sha256_digest` | `string?` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | SHA-256 hex digest parsed from the release checksums file. Exactly 64 lowercase hex characters. Used by the agent for attestation re-verification. |
 
 #### `AttestationStatus`
@@ -249,10 +249,10 @@ Describes the result of querying the GitHub Attestations API for the release. On
 
 The enum is `#[non_exhaustive]` — consumers must include a wildcard match arm.
 
-| Value | Description |
-| --- | --- |
-| `Verified` | At least one attestation was found for the release asset digest via the GitHub Attestations API. |
-| `NotFound` | The GitHub Attestations API returned no attestations (404 or empty array) for the digest. |
+| Value        | Description                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `Verified`   | At least one attestation was found for the release asset digest via the GitHub Attestations API.                 |
+| `NotFound`   | The GitHub Attestations API returned no attestations (404 or empty array) for the digest.                        |
 | `Unverified` | The check was skipped or inconclusive (no checksums file found, network error, or `verify_attestation = false`). |
 
 See [GitHub Actions Attestation Verification](../security/github-attestation.md) for the full
@@ -335,25 +335,25 @@ Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery
 
 #### `DiscoveredSoftware` fields
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `package_identifier` | string | Yes | Plugin-specific package identifier |
-| `name` | string | Yes | Human-readable display name |
-| `installed_version` | string | Yes | Currently installed version |
-| `targets` | `DiscoveryTarget[]` | No | Structured targets for plugin config creation (empty = use discovering plugin's config) |
-| `extra` | object | No | Informational metadata only (e.g. Docker's container names). Not used for config synthesis. |
+| Field                | Type                | Required | Description                                                                                 |
+| -------------------- | ------------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `package_identifier` | string              | Yes      | Plugin-specific package identifier                                                          |
+| `name`               | string              | Yes      | Human-readable display name                                                                 |
+| `installed_version`  | string              | Yes      | Currently installed version                                                                 |
+| `targets`            | `DiscoveryTarget[]` | No       | Structured targets for plugin config creation (empty = use discovering plugin's config)     |
+| `extra`              | object              | No       | Informational metadata only (e.g. Docker's container names). Not used for config synthesis. |
 
 #### `DiscoveryTarget` fields
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `plugin_type` | string | Yes | Target plugin type (may differ from discovering plugin) |
-| `plugin_config` | object | Yes | Config JSON for find-or-create of the target plugin config |
-| `plugin_config_name` | string | Yes | Display name for auto-created plugin config |
-| `roles` | `string[]` | Yes | Which roles this target covers (e.g. `["detect_version", "fetch_releases", "execute_update"]`) |
-| `package_identifier` | string | No | Package identifier override (default: same as parent item) |
-| `config_override` | object | No | Per-assignment config override |
-| `execution_site` | string | No | Execution site hint (`"auto"`, `"agent"`, `"controller"`; default: `"auto"`) |
+| Field                | Type       | Required | Description                                                                                    |
+| -------------------- | ---------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `plugin_type`        | string     | Yes      | Target plugin type (may differ from discovering plugin)                                        |
+| `plugin_config`      | object     | Yes      | Config JSON for find-or-create of the target plugin config                                     |
+| `plugin_config_name` | string     | Yes      | Display name for auto-created plugin config                                                    |
+| `roles`              | `string[]` | Yes      | Which roles this target covers (e.g. `["detect_version", "fetch_releases", "execute_update"]`) |
+| `package_identifier` | string     | No       | Package identifier override (default: same as parent item)                                     |
+| `config_override`    | object     | No       | Per-assignment config override                                                                 |
+| `execution_site`     | string     | No       | Execution site hint (`"auto"`, `"agent"`, `"controller"`; default: `"auto"`)                   |
 
 See [docs/api/autodiscovery.md](autodiscovery.md#plugin-driven-discovery-targets) for the full
 processing rules and plugin-specific target patterns.
@@ -377,10 +377,10 @@ messages. When `false`, the agent removes the file and resumes normal operation.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `enabled` | `bool` | Yes | `true` to create the freeze file, `false` to remove it. |
-| `reason` | `string` | No | Optional human-readable reason (logged by the agent). |
+| Field     | Type     | Required | Description                                             |
+| --------- | -------- | -------- | ------------------------------------------------------- |
+| `enabled` | `bool`   | Yes      | `true` to create the freeze file, `false` to remove it. |
+| `reason`  | `string` | No       | Optional human-readable reason (logged by the agent).   |
 
 This message is safe for NATS publication (no credentials in the payload).
 
@@ -401,11 +401,11 @@ direct WebSocket connection between the controller and the agent.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `update_history_id` | UUID | Yes | The in-flight update to target. |
-| `data` | string | Yes | Base64-encoded raw bytes to write to stdin. May be empty when `signal` is set. Max 64 KB. |
-| `signal` | integer | No | When set, sends this signal to the process group instead of writing stdin. `2` = SIGINT, `15` = SIGTERM. |
+| Field               | Type    | Required | Description                                                                                              |
+| ------------------- | ------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `update_history_id` | UUID    | Yes      | The in-flight update to target.                                                                          |
+| `data`              | string  | Yes      | Base64-encoded raw bytes to write to stdin. May be empty when `signal` is set. Max 64 KB.                |
+| `signal`            | integer | No       | When set, sends this signal to the process group instead of writing stdin. `2` = SIGINT, `15` = SIGTERM. |
 
 The controller only sends this message to agents that advertise the `InteractiveUpdates`
 capability. See [Interactive Updates](interactive-updates.md) for the full flow.
@@ -444,10 +444,10 @@ no output for 10 seconds while the process is still running).
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `update_history_id` | UUID | Yes | The update that is waiting for input. |
-| `hint` | string | No | Optional context about what the process might be waiting for. |
+| Field               | Type   | Required | Description                                                   |
+| ------------------- | ------ | -------- | ------------------------------------------------------------- |
+| `update_history_id` | UUID   | Yes      | The update that is waiting for input.                         |
+| `hint`              | string | No       | Optional context about what the process might be waiting for. |
 
 The controller broadcasts this as a `stdin_attention` SSE event and dispatches a
 notification (if rules are configured for the `StdinAttention` event type).
@@ -472,24 +472,24 @@ sent over the direct WebSocket connection between the controller and the agent.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `request_id` | string | Yes | Unique correlation ID (UUID v7) for matching the `test_plugin_config_result` response. |
-| `host_machine_id` | string | Yes | Target host's machine ID on the agent. |
-| `test_kind` | `ConfigTestKind` | Yes | What to test. See `ConfigTestKind` values below. |
-| `plugin_type` | string | Yes | Plugin type to test (e.g. `"generic_shell"`, `"package_manager_apt"`). |
-| `config` | object | Yes | Merged plugin configuration JSON. |
-| `package_identifier` | string | No | Package identifier for testing (required for version detection). |
+| Field                | Type             | Required | Description                                                                            |
+| -------------------- | ---------------- | :------: | -------------------------------------------------------------------------------------- |
+| `request_id`         | string           |   Yes    | Unique correlation ID (UUID v7) for matching the `test_plugin_config_result` response. |
+| `host_machine_id`    | string           |   Yes    | Target host's machine ID on the agent.                                                 |
+| `test_kind`          | `ConfigTestKind` |   Yes    | What to test. See `ConfigTestKind` values below.                                       |
+| `plugin_type`        | string           |   Yes    | Plugin type to test (e.g. `"generic_shell"`, `"package_manager_apt"`).                 |
+| `config`             | object           |   Yes    | Merged plugin configuration JSON.                                                      |
+| `package_identifier` | string           |    No    | Package identifier for testing (required for version detection).                       |
 
 **`ConfigTestKind` values:**
 
-| Value | Description |
-| --- | --- |
-| `version_detection` | Execute `detect_installed_version()` and return output + detected version. |
-| `update_command_validation` | Validate update command syntax (e.g. `sh -n` check) without executing. |
-| `pre_update_hook` | Execute a pre-update hook with a mock context. |
-| `post_update_hook` | Execute a post-update hook with a mock context. |
-| `connectivity` | Test upstream API connectivity (controller-side only; not sent to agents). |
+| Value                       | Description                                                                |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `version_detection`         | Execute `detect_installed_version()` and return output + detected version. |
+| `update_command_validation` | Validate update command syntax (e.g. `sh -n` check) without executing.     |
+| `pre_update_hook`           | Execute a pre-update hook with a mock context.                             |
+| `post_update_hook`          | Execute a post-update hook with a mock context.                            |
+| `connectivity`              | Test upstream API connectivity (controller-side only; not sent to agents). |
 
 #### `test_plugin_config_result` payload (agent -> controller)
 
@@ -509,14 +509,14 @@ with the original request.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `request_id` | string | Yes | Correlation ID matching the original `test_plugin_config` request. |
-| `success` | boolean | Yes | Whether the test passed. |
-| `output` | string | No | Command output or connectivity response. |
-| `error` | string | No | Error message when the test failed. |
-| `detected_version` | string | No | Detected version string (only for `version_detection` tests). |
-| `duration_ms` | integer | Yes | Test duration in milliseconds. |
+| Field              | Type    | Required | Description                                                        |
+| ------------------ | ------- | :------: | ------------------------------------------------------------------ |
+| `request_id`       | string  |   Yes    | Correlation ID matching the original `test_plugin_config` request. |
+| `success`          | boolean |   Yes    | Whether the test passed.                                           |
+| `output`           | string  |    No    | Command output or connectivity response.                           |
+| `error`            | string  |    No    | Error message when the test failed.                                |
+| `detected_version` | string  |    No    | Detected version string (only for `version_detection` tests).      |
+| `duration_ms`      | integer |   Yes    | Test duration in milliseconds.                                     |
 
 ### Update-tracking service (controller -> service)
 
@@ -553,19 +553,19 @@ on behalf of the affected tenant.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `tenant_id` | UUID | Yes | Tenant the affected hosts belong to |
-| `updates` | `HostConnectivityUpdate[]` | Yes | One entry per affected host |
+| Field       | Type                       | Required | Description                         |
+| ----------- | -------------------------- | :------: | ----------------------------------- |
+| `tenant_id` | UUID                       |   Yes    | Tenant the affected hosts belong to |
+| `updates`   | `HostConnectivityUpdate[]` |   Yes    | One entry per affected host         |
 
 **`HostConnectivityUpdate` fields:**
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `host_id` | UUID | Yes | Host UUID |
-| `online` | boolean | Yes | `true` when the agent connected, `false` when disconnected |
-| `last_seen_at` | string? | No | ISO 8601 timestamp of the connect/disconnect event |
-| `agent_version` | string? | No | Agent version string (present on connect; absent on disconnect) |
+| Field           | Type    | Required | Description                                                     |
+| --------------- | ------- | :------: | --------------------------------------------------------------- |
+| `host_id`       | UUID    |   Yes    | Host UUID                                                       |
+| `online`        | boolean |   Yes    | `true` when the agent connected, `false` when disconnected      |
+| `last_seen_at`  | string? |    No    | ISO 8601 timestamp of the connect/disconnect event              |
+| `agent_version` | string? |    No    | Agent version string (present on connect; absent on disconnect) |
 
 This message is safe for NATS publication (`is_nats_publishable() = true`): it contains no
 credentials, no PEM data, and no plugin configuration.
@@ -602,12 +602,12 @@ the same `service_app_name`.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `request_id` | UUID | Yes | Correlation ID for the matching `service_config_ack` |
-| `key` | string | Yes | Config entry key (max 512 chars, namespaced by convention e.g. `"clients/{id}"`) |
-| `value` | string | Yes | JSON-serialized config value (max 65,536 chars) |
-| `tenant_id` | UUID? | No | When present, stored in `tenant_service_config`; when absent, stored in `global_service_config` |
+| Field        | Type   | Required | Description                                                                                     |
+| ------------ | ------ | :------: | ----------------------------------------------------------------------------------------------- |
+| `request_id` | UUID   |   Yes    | Correlation ID for the matching `service_config_ack`                                            |
+| `key`        | string |   Yes    | Config entry key (max 512 chars, namespaced by convention e.g. `"clients/{id}"`)                |
+| `value`      | string |   Yes    | JSON-serialized config value (max 65,536 chars)                                                 |
+| `tenant_id`  | UUID?  |    No    | When present, stored in `tenant_service_config`; when absent, stored in `global_service_config` |
 
 ### `delete_service_config` (service -> controller)
 
@@ -626,11 +626,11 @@ other connected instances.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `request_id` | UUID | Yes | Correlation ID for the matching `service_config_ack` |
-| `key` | string | Yes | Config entry key to delete |
-| `tenant_id` | UUID? | No | Scopes the lookup to `tenant_service_config` or `global_service_config` |
+| Field        | Type   | Required | Description                                                             |
+| ------------ | ------ | :------: | ----------------------------------------------------------------------- |
+| `request_id` | UUID   |   Yes    | Correlation ID for the matching `service_config_ack`                    |
+| `key`        | string |   Yes    | Config entry key to delete                                              |
+| `tenant_id`  | UUID?  |    No    | Scopes the lookup to `tenant_service_config` or `global_service_config` |
 
 ### `service_config_ack` (controller -> service)
 
@@ -648,11 +648,11 @@ the instance that initiated the request (not broadcast).
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `request_id` | UUID | Yes | Matches the `request_id` from the originating request |
-| `success` | boolean | Yes | `true` when the operation completed successfully |
-| `error` | string? | No | Human-readable error message when `success` is `false` |
+| Field        | Type    | Required | Description                                            |
+| ------------ | ------- | :------: | ------------------------------------------------------ |
+| `request_id` | UUID    |   Yes    | Matches the `request_id` from the originating request  |
+| `success`    | boolean |   Yes    | `true` when the operation completed successfully       |
+| `error`      | string? |    No    | Human-readable error message when `success` is `false` |
 
 ### `service_config_delivery` (controller -> service)
 
@@ -674,17 +674,17 @@ for the service (both tenant-scoped and global).
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `entries` | `ServiceConfigEntry[]` | Yes | All stored config entries for this service |
+| Field     | Type                   | Required | Description                                |
+| --------- | ---------------------- | :------: | ------------------------------------------ |
+| `entries` | `ServiceConfigEntry[]` |   Yes    | All stored config entries for this service |
 
 **`ServiceConfigEntry` fields:**
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `key` | string | Yes | Config entry key |
-| `value` | string | Yes | JSON-serialized config value (decrypted by controller before delivery) |
-| `tenant_id` | UUID? | No | Present for tenant-scoped entries; absent for global entries |
+| Field       | Type   | Required | Description                                                            |
+| ----------- | ------ | :------: | ---------------------------------------------------------------------- |
+| `key`       | string |   Yes    | Config entry key                                                       |
+| `value`     | string |   Yes    | JSON-serialized config value (decrypted by controller before delivery) |
+| `tenant_id` | UUID?  |    No    | Present for tenant-scoped entries; absent for global entries           |
 
 ### `service_config_updated` (controller -> service)
 
@@ -703,12 +703,12 @@ or deletes a config entry. Allows multi-instance deployments to stay in sync wit
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `key` | string | Yes | Config entry key that changed |
-| `value` | string? | No | New value (absent when `deleted` is `true`) |
-| `tenant_id` | UUID? | No | Present for tenant-scoped entries; absent for global entries |
-| `deleted` | boolean | Yes | `true` when the entry was deleted; `false` when it was stored or updated |
+| Field       | Type    | Required | Description                                                              |
+| ----------- | ------- | :------: | ------------------------------------------------------------------------ |
+| `key`       | string  |   Yes    | Config entry key that changed                                            |
+| `value`     | string? |    No    | New value (absent when `deleted` is `true`)                              |
+| `tenant_id` | UUID?   |    No    | Present for tenant-scoped entries; absent for global entries             |
+| `deleted`   | boolean |   Yes    | `true` when the entry was deleted; `false` when it was stored or updated |
 
 ## `host_machine_id` Field
 
@@ -784,23 +784,23 @@ See [Tracing Conventions](../development/tracing.md) for the full tracing guide.
 
 ## Connection Limits
 
-| Limit | Value | Description |
-| --- | --- | --- |
-| Maximum incoming message size | 1 MB (1,048,576 bytes) | Messages exceeding this limit are rejected and the connection is closed. |
-| Message rate limit | 50 messages/second | Sliding-window-counter algorithm prevents boundary burst attacks. |
-| Consecutive unknown messages | 10 | Connection is closed after 10 consecutive `Unknown` messages. |
-| Anonymous connection timeout | 30 seconds | An anonymous connection that does not send `Enroll` within 30 seconds is closed. |
-| Update output cap | 1 MB | The controller caps accumulated `update_history.output`. Further `UpdateOutput` messages are silently dropped. |
-| Approval polling interval | 5 seconds | The controller polls the database for approval status changes at a fixed 5-second interval. |
-| TCP connect timeout (client) | 30 seconds | The enrollment client aborts the TCP connection if it cannot be established within 30 seconds. |
-| Response timeout (client) | 60 seconds | The `Enroll` and `RequestCertificate` request-response exchanges time out after 60 seconds. |
-| Approval timeout (client) | 30 minutes | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout. |
-| Per-hook plugin timeout (agent) | 5 minutes | Individual pre/post-update hook plugin executions are killed after 300 seconds. |
-| Update cooldown (agent) | 5 seconds | Agents reject consecutive updates within the cooldown period. |
-| Report pagination total timeout | 5 minutes | All pages of a paginated report must arrive within 5 minutes of the first page. |
-| Report pagination idle timeout | 15 seconds | Consecutive pages must arrive within 15 seconds of each other. |
-| Maximum report pages | 50 | A single paginated report can have at most 50 pages. |
-| Maximum pending reports | 10 | At most 10 paginated reports can be in-flight per connection. |
+| Limit                           | Value                  | Description                                                                                                    |
+| ------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Maximum incoming message size   | 1 MB (1,048,576 bytes) | Messages exceeding this limit are rejected and the connection is closed.                                       |
+| Message rate limit              | 50 messages/second     | Sliding-window-counter algorithm prevents boundary burst attacks.                                              |
+| Consecutive unknown messages    | 10                     | Connection is closed after 10 consecutive `Unknown` messages.                                                  |
+| Anonymous connection timeout    | 30 seconds             | An anonymous connection that does not send `Enroll` within 30 seconds is closed.                               |
+| Update output cap               | 1 MB                   | The controller caps accumulated `update_history.output`. Further `UpdateOutput` messages are silently dropped. |
+| Approval polling interval       | 5 seconds              | The controller polls the database for approval status changes at a fixed 5-second interval.                    |
+| TCP connect timeout (client)    | 30 seconds             | The enrollment client aborts the TCP connection if it cannot be established within 30 seconds.                 |
+| Response timeout (client)       | 60 seconds             | The `Enroll` and `RequestCertificate` request-response exchanges time out after 60 seconds.                    |
+| Approval timeout (client)       | 30 minutes             | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout.    |
+| Per-hook plugin timeout (agent) | 5 minutes              | Individual pre/post-update hook plugin executions are killed after 300 seconds.                                |
+| Update cooldown (agent)         | 5 seconds              | Agents reject consecutive updates within the cooldown period.                                                  |
+| Report pagination total timeout | 5 minutes              | All pages of a paginated report must arrive within 5 minutes of the first page.                                |
+| Report pagination idle timeout  | 15 seconds             | Consecutive pages must arrive within 15 seconds of each other.                                                 |
+| Maximum report pages            | 50                     | A single paginated report can have at most 50 pages.                                                           |
+| Maximum pending reports         | 10                     | At most 10 paginated reports can be in-flight per connection.                                                  |
 
 ### Payload Size Limits
 
@@ -810,31 +810,31 @@ deserialization failures (hard fail, connection close).
 
 #### Collection limits
 
-| Constant | Value | Applies to |
-| --- | --- | --- |
-| `MAX_REPORT_HOSTS` | 500 | `ReportHostsPayload.hosts` |
-| `MAX_VERSION_CHECK_ASSIGNMENTS` | 2,000 | `CheckVersionsPayload.assignments` |
-| `MAX_VERSION_CHECK_RESULTS` | 2,000 | `VersionCheckResultsPayload.results` |
-| `MAX_UPDATE_HOOKS` | 50 | `pre_update_hook_plugins`, `post_update_hook_plugins` |
-| `MAX_BATCH_UPDATES` | 500 | `ExecuteBatchUpdatePayload.updates` |
-| `MAX_BATCH_UPDATE_RESULTS` | 500 | `BatchUpdateResultPayload.results` |
-| `MAX_DISCOVERY_PLUGINS` | 50 | `DiscoverSoftwarePayload.plugins` |
-| `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
-| `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
-| `MAX_RELEASE_ASSETS` | 500 | `ReleaseInfo.assets` |
-| `MAX_MQTT_HOSTS` | 5,000 | `SoftwareStatesPayload.hosts` (host metadata entries) |
-| `MAX_HOST_TAGS` | 100 | `HostStateMetadata.tags` (tags per host) |
-| `MAX_CONNECTIVITY_UPDATES` | 500 | `HostConnectivityUpdatedPayload.updates` |
+| Constant                        | Value | Applies to                                            |
+| ------------------------------- | ----- | ----------------------------------------------------- |
+| `MAX_REPORT_HOSTS`              | 500   | `ReportHostsPayload.hosts`                            |
+| `MAX_VERSION_CHECK_ASSIGNMENTS` | 2,000 | `CheckVersionsPayload.assignments`                    |
+| `MAX_VERSION_CHECK_RESULTS`     | 2,000 | `VersionCheckResultsPayload.results`                  |
+| `MAX_UPDATE_HOOKS`              | 50    | `pre_update_hook_plugins`, `post_update_hook_plugins` |
+| `MAX_BATCH_UPDATES`             | 500   | `ExecuteBatchUpdatePayload.updates`                   |
+| `MAX_BATCH_UPDATE_RESULTS`      | 500   | `BatchUpdateResultPayload.results`                    |
+| `MAX_DISCOVERY_PLUGINS`         | 50    | `DiscoverSoftwarePayload.plugins`                     |
+| `MAX_DISCOVERY_PLUGIN_RESULTS`  | 50    | `DiscoveryResultsPayload.results`                     |
+| `MAX_DISCOVERIES_PER_PLUGIN`    | 1,000 | `DiscoveryPluginResult.discoveries`                   |
+| `MAX_RELEASE_ASSETS`            | 500   | `ReleaseInfo.assets`                                  |
+| `MAX_MQTT_HOSTS`                | 5,000 | `SoftwareStatesPayload.hosts` (host metadata entries) |
+| `MAX_HOST_TAGS`                 | 100   | `HostStateMetadata.tags` (tags per host)              |
+| `MAX_CONNECTIVITY_UPDATES`      | 500   | `HostConnectivityUpdatedPayload.updates`              |
 
 #### String length limits
 
-| Constant | Value | Applies to |
-| --- | --- | --- |
-| `MAX_SHORT_STRING_LEN` | 1,024 | Identifiers, names, versions, hostnames |
-| `MAX_MEDIUM_STRING_LEN` | 4,096 | Error messages, URLs |
-| `MAX_LONG_STRING_LEN` | 65,536 | PEM certificates, CSRs, release notes |
-| `MAX_OUTPUT_STRING_LEN` | 1,048,576 | Command output (matches 1 MB frame limit) |
-| `SHA256_DIGEST_LEN` | 64 | `ReleaseAsset.sha256_digest` (must be exactly 64 lowercase hex characters) |
+| Constant                | Value     | Applies to                                                                 |
+| ----------------------- | --------- | -------------------------------------------------------------------------- |
+| `MAX_SHORT_STRING_LEN`  | 1,024     | Identifiers, names, versions, hostnames                                    |
+| `MAX_MEDIUM_STRING_LEN` | 4,096     | Error messages, URLs                                                       |
+| `MAX_LONG_STRING_LEN`   | 65,536    | PEM certificates, CSRs, release notes                                      |
+| `MAX_OUTPUT_STRING_LEN` | 1,048,576 | Command output (matches 1 MB frame limit)                                  |
+| `SHA256_DIGEST_LEN`     | 64        | `ReleaseAsset.sha256_digest` (must be exactly 64 lowercase hex characters) |
 
 All limits are defined in `crates/shared/wire/src/limits.rs`. Implementations
 are in `crates/shared/wire/src/wire_validate_impls.rs`.
@@ -879,21 +879,21 @@ reports):
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `report_id` | UUID | Groups all pages of the same logical report. |
-| `page` | u32 | 1-based page number. |
-| `total_pages` | u32 | Total number of pages (known upfront by the sender). |
+| Field         | Type | Description                                          |
+| ------------- | ---- | ---------------------------------------------------- |
+| `report_id`   | UUID | Groups all pages of the same logical report.         |
+| `page`        | u32  | 1-based page number.                                 |
+| `total_pages` | u32  | Total number of pages (known upfront by the sender). |
 
 ### Pagination Limits
 
-| Constant | Value | Description |
-| --- | --- | --- |
-| `PAGINATION_SIZE_THRESHOLD` | 786,432 (768 KB) | Payloads above this size are split into pages. |
-| `MAX_REPORT_PAGES` | 50 | Maximum pages per report. |
-| `MAX_PENDING_REPORTS_PER_CONNECTION` | 10 | Maximum concurrent in-flight paginated reports per connection. |
-| `REPORT_TOTAL_TIMEOUT` | 300 seconds | Maximum wall-clock time for all pages of a report. |
-| `REPORT_IDLE_TIMEOUT` | 15 seconds | Maximum time between consecutive pages. |
+| Constant                             | Value            | Description                                                    |
+| ------------------------------------ | ---------------- | -------------------------------------------------------------- |
+| `PAGINATION_SIZE_THRESHOLD`          | 786,432 (768 KB) | Payloads above this size are split into pages.                 |
+| `MAX_REPORT_PAGES`                   | 50               | Maximum pages per report.                                      |
+| `MAX_PENDING_REPORTS_PER_CONNECTION` | 10               | Maximum concurrent in-flight paginated reports per connection. |
+| `REPORT_TOTAL_TIMEOUT`               | 300 seconds      | Maximum wall-clock time for all pages of a report.             |
+| `REPORT_IDLE_TIMEOUT`                | 15 seconds       | Maximum time between consecutive pages.                        |
 
 All limits are defined in `crates/shared/wire/src/limits.rs`.
 
@@ -935,26 +935,26 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
 
 ### Paginatable Payload Types
 
-| Payload type | Splittable field | Into `ServiceMessage` variant |
-| --- | --- | --- |
-| `DiscoveryResultsPayload` | `results: Vec<DiscoveryPluginResult>` | `discovery_results` |
-| `VersionCheckResultsPayload` | `results: Vec<VersionCheckResult>` | `version_check_results` |
-| `ReportHostsPayload` | `hosts: Vec<HostInfo>` | `report_hosts` |
-| `BatchUpdateResultPayload` | `results: Vec<BatchUpdateResult>` | `batch_update_result` |
+| Payload type                 | Splittable field                      | Into `ServiceMessage` variant |
+| ---------------------------- | ------------------------------------- | ----------------------------- |
+| `DiscoveryResultsPayload`    | `results: Vec<DiscoveryPluginResult>` | `discovery_results`           |
+| `VersionCheckResultsPayload` | `results: Vec<VersionCheckResult>`    | `version_check_results`       |
+| `ReportHostsPayload`         | `hosts: Vec<HostInfo>`                | `report_hosts`                |
+| `BatchUpdateResultPayload`   | `results: Vec<BatchUpdateResult>`     | `batch_update_result`         |
 
 ## Error Codes
 
 The `ErrorCode` enum is marked `#[non_exhaustive]` — new codes may be added in future protocol versions. Consumers should include a wildcard match arm.
 
-| Code | Description |
-| --- | --- |
-| `bad_request` | Malformed or invalid message. |
-| `enrollment_failed` | Enrollment could not be completed. |
-| `not_approved` | Service has not been approved yet. |
-| `forbidden` | Service is not authorized for this action. |
-| `certificate_error` | CSR validation or certificate issuance failed. |
-| `internal_error` | Unexpected server-side error. |
-| `sequence_error` | Incoming sequence number does not match the expected value. Connection is closed. |
+| Code                | Description                                                                       |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `bad_request`       | Malformed or invalid message.                                                     |
+| `enrollment_failed` | Enrollment could not be completed.                                                |
+| `not_approved`      | Service has not been approved yet.                                                |
+| `forbidden`         | Service is not authorized for this action.                                        |
+| `certificate_error` | CSR validation or certificate issuance failed.                                    |
+| `internal_error`    | Unexpected server-side error.                                                     |
+| `sequence_error`    | Incoming sequence number does not match the expected value. Connection is closed. |
 
 ## WebSocket Close Reasons
 
@@ -964,20 +964,20 @@ module. The enum provides `Display` (for sending) and `FromStr` (for receiving) 
 produce and parse the same wire strings. An `Unknown(String)` variant provides forward compatibility
 for strings not yet recognized by the receiver.
 
-| Variant | Wire String | Description |
-| --- | --- | --- |
-| `CloseReason::CertificateRotated` | `"certificate rotated"` | Service certificate was rotated; reconnect with new cert. |
-| `CloseReason::CertificateRevoked` | `"certificate revoked"` | Service certificate was revoked; re-enrollment required. |
-| `CloseReason::NoValidCertificate` | `"no valid certificate"` | No valid client certificate presented. |
-| `CloseReason::InternalError` | `"internal error"` | Unexpected server-side error. |
-| `CloseReason::CertificateNotRecognized` | `"certificate not recognized"` | Client certificate not recognized by the controller. |
-| `CloseReason::ServiceDeactivated` | `"service deactivated"` | Service has been deactivated by an administrator. |
-| `CloseReason::ServiceNotApproved` | `"service not approved"` | Service has not been approved for connection. |
-| `CloseReason::ServiceNotFound` | `"service not found"` | Service ID not found in the database. |
-| `CloseReason::EnrollmentTimeout` | `"enrollment timeout"` | Enrollment did not complete within the allowed time. |
-| `CloseReason::Superseded` | `"superseded by new connection"` | Another instance connected with the same service ID. |
-| `CloseReason::RateLimitExceeded` | `"rate limit exceeded"` | Connection rate limit exceeded. |
-| `CloseReason::Unknown(String)` | *(any other string)* | Forward-compatible catch-all for unrecognized reasons. |
+| Variant                                 | Wire String                      | Description                                               |
+| --------------------------------------- | -------------------------------- | --------------------------------------------------------- |
+| `CloseReason::CertificateRotated`       | `"certificate rotated"`          | Service certificate was rotated; reconnect with new cert. |
+| `CloseReason::CertificateRevoked`       | `"certificate revoked"`          | Service certificate was revoked; re-enrollment required.  |
+| `CloseReason::NoValidCertificate`       | `"no valid certificate"`         | No valid client certificate presented.                    |
+| `CloseReason::InternalError`            | `"internal error"`               | Unexpected server-side error.                             |
+| `CloseReason::CertificateNotRecognized` | `"certificate not recognized"`   | Client certificate not recognized by the controller.      |
+| `CloseReason::ServiceDeactivated`       | `"service deactivated"`          | Service has been deactivated by an administrator.         |
+| `CloseReason::ServiceNotApproved`       | `"service not approved"`         | Service has not been approved for connection.             |
+| `CloseReason::ServiceNotFound`          | `"service not found"`            | Service ID not found in the database.                     |
+| `CloseReason::EnrollmentTimeout`        | `"enrollment timeout"`           | Enrollment did not complete within the allowed time.      |
+| `CloseReason::Superseded`               | `"superseded by new connection"` | Another instance connected with the same service ID.      |
+| `CloseReason::RateLimitExceeded`        | `"rate limit exceeded"`          | Connection rate limit exceeded.                           |
+| `CloseReason::Unknown(String)`          | _(any other string)_             | Forward-compatible catch-all for unrecognized reasons.    |
 
 Services should match on enum variants (not raw strings) to determine reconnection behavior:
 
@@ -990,15 +990,15 @@ Services should match on enum variants (not raw strings) to determine reconnecti
 The `ServiceSettingsPayload` struct is sent by the controller as a `service_settings` message after an
 authenticated connection is established. It carries runtime configuration for the connected service.
 
-| Field | Type | Serde | Description |
-| --- | --- | --- | --- |
-| `renewal_window_hours` | `u16` | required | Hours before certificate expiry to initiate renewal |
-| `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
-| `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
-| `report_page_limits` | `ReportPageLimits` | `#[serde(default, skip_serializing_if = "ReportPageLimits::is_default")]` | Per-page item-count caps for paginated `report_hosts`, `discovery_results`, `version_check_results`, and `batch_update_result` payloads |
-| `shutdown_timeout_seconds` | `Option<Duration>` | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for `Agent`/`Unknown` (120 s) and `Scheduler` (30 s); absent for `UpdateTracker`/MQTT |
-| `tenant_id` | `Option<Uuid>` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler) |
-| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (15 s `UpdateTracker`/MQTT, 60 s `Scheduler`, 300 s `Agent`/`Unknown`) |
+| Field                      | Type                   | Serde                                                                                                           | Description                                                                                                                                                                                          |
+| -------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `renewal_window_hours`     | `u16`                  | required                                                                                                        | Hours before certificate expiry to initiate renewal                                                                                                                                                  |
+| `ca_bundle_hash`           | `String`               | `#[serde(default)]`                                                                                             | Hash of the current CA bundle for staleness detection                                                                                                                                                |
+| `capabilities`             | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]`                                                 | Set of capabilities advertised by the controller; used for capability negotiation                                                                                                                    |
+| `report_page_limits`       | `ReportPageLimits`     | `#[serde(default, skip_serializing_if = "ReportPageLimits::is_default")]`                                       | Per-page item-count caps for paginated `report_hosts`, `discovery_results`, `version_check_results`, and `batch_update_result` payloads                                                              |
+| `shutdown_timeout_seconds` | `Option<Duration>`     | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for `Agent`/`Unknown` (120 s) and `Scheduler` (30 s); absent for `UpdateTracker`/MQTT |
+| `tenant_id`                | `Option<Uuid>`         | `#[serde(default, skip_serializing_if = "Option::is_none")]`                                                    | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler)                                                      |
+| `ping_interval`            | `Duration`             | `#[serde(with = "duration_seconds")]`                                                                           | Controller-managed ping interval; derived from per-service DB override or service-profile default (15 s `UpdateTracker`/MQTT, 60 s `Scheduler`, 300 s `Agent`/`Unknown`)                             |
 
 The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
 using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
@@ -1007,12 +1007,12 @@ for each service and falls back to `ServiceProfile` defaults when no override is
 `report_page_limits` lets the controller define the current per-page item caps that services must apply when
 splitting paginated reports. The current fields are:
 
-| Field | Meaning |
-| --- | --- |
-| `report_hosts` | Max `hosts` entries per `report_hosts` page |
+| Field                   | Meaning                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `report_hosts`          | Max `hosts` entries per `report_hosts` page            |
 | `version_check_results` | Max `results` entries per `version_check_results` page |
-| `discovery_results` | Max `results` entries per `discovery_results` page |
-| `batch_update_results` | Max `results` entries per `batch_update_result` page |
+| `discovery_results`     | Max `results` entries per `discovery_results` page     |
+| `batch_update_results`  | Max `results` entries per `batch_update_result` page   |
 
 Services apply these caps together with the byte threshold. A page must satisfy both constraints. For the initial
 host report, agents wait for the first `service_settings` message before sending `report_hosts`, ensuring the first
@@ -1028,14 +1028,14 @@ functions for converting `std::time::Duration` to/from a `u32` number of seconds
 
 The `HostInfo` struct (used inside `ReportHostsPayload.hosts`) contains:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `machine_id` | `String` | Persistent system identifier (required) |
-| `os_type` | `Option<String>` | Operating system type (e.g. `linux`, `macos`) |
-| `os_version` | `Option<String>` | OS version or pretty name |
-| `architecture` | `Option<String>` | CPU architecture (e.g. `x86_64`, `aarch64`) |
-| `hostname` | `Option<String>` | Machine hostname |
-| `ip_address` | `Option<String>` | IP address or hostname used to reach the host |
+| Field          | Type             | Description                                   |
+| -------------- | ---------------- | --------------------------------------------- |
+| `machine_id`   | `String`         | Persistent system identifier (required)       |
+| `os_type`      | `Option<String>` | Operating system type (e.g. `linux`, `macos`) |
+| `os_version`   | `Option<String>` | OS version or pretty name                     |
+| `architecture` | `Option<String>` | CPU architecture (e.g. `x86_64`, `aarch64`)   |
+| `hostname`     | `Option<String>` | Machine hostname                              |
+| `ip_address`   | `Option<String>` | IP address or hostname used to reach the host |
 
 The `hostname` and `ip_address` fields were added as part of the SSH agent host reporting feature.
 They use `#[serde(default)]` for backward compatibility — agents that do not send these fields
@@ -1064,34 +1064,34 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 
 ### Defined Capabilities
 
-| Capability | Wire String | Description |
-| --- | --- | --- |
-| `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
-| `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent. |
-| `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
-| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `software_states`, `host_connectivity_updated`, `service_config_delivery`, `service_trigger_update`, etc. Maps to `ServiceProfile::UpdateTracker`. |
-| `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
-| `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `update_tracking`. See [System Services Architecture](../architecture/system-services.md). |
-| `Scheduler` | `scheduler` | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`. |
-| `DatabaseAccess` | `database_access` | Service requires direct database access credentials. Requires `system_service`. |
-| `NatsAccess` | `nats_access` | Service requires NATS connection details. Requires `system_service`. |
-| `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key. Requires `system_service`. |
-| `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
-| `UiSurfaces` | `ui_surfaces` | Service has shared surfaces to register via `SurfaceRegistration`. The controller gates `SurfaceRegistration` processing on this capability. See [Shared Surface Runtime Architecture](../architecture/surfaces.md). |
-| `InteractiveUpdates` | `interactive_updates` | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
-| `ResetData` | `reset_data` | Service supports the reset-data protocol: truncates local data stores when the controller broadcasts a data reset. Only advertised when compiled with the `reset-data` feature. |
-| `WorkloadClaims` | `workload_claims` | Service supports the exclusive workload claim protocol: sends `workload_claim` to request ownership of config keys, receives `workload_claim_result` with grant/reject decisions. Required for tenant-scoped SoftwareStates delivery. |
-| `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
+| Capability           | Wire String            | Description                                                                                                                                                                                                                                                                           |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SoftwareDiscovery`  | `software_discovery`   | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability.                                                                                                                                                          |
+| `UpdateHooks`        | `update_hooks`         | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent.                                                                                                                                                             |
+| `GracefulShutdown`   | `graceful_shutdown`    | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`.                                                                                                                                                                                               |
+| `UpdateTracking`     | `update_tracking`      | Service is an update-tracking service: handles `software_states`, `host_connectivity_updated`, `service_config_delivery`, `service_trigger_update`, etc. Maps to `ServiceProfile::UpdateTracker`.                                                                                     |
+| `SshRemote`          | `ssh_remote`           | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label.                                                                                                                                                             |
+| `SystemService`      | `system_service`       | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `update_tracking`. See [System Services Architecture](../architecture/system-services.md).                 |
+| `Scheduler`          | `scheduler`            | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`.                                                                                                                                                                                                   |
+| `DatabaseAccess`     | `database_access`      | Service requires direct database access credentials. Requires `system_service`.                                                                                                                                                                                                       |
+| `NatsAccess`         | `nats_access`          | Service requires NATS connection details. Requires `system_service`.                                                                                                                                                                                                                  |
+| `MasterKeyAccess`    | `master_key_access`    | Service requires the master encryption key. Requires `system_service`.                                                                                                                                                                                                                |
+| `CaManagement`       | `ca_management`        | Service can request CA certificate rotation. Requires `system_service`.                                                                                                                                                                                                               |
+| `UiSurfaces`         | `ui_surfaces`          | Service has shared surfaces to register via `SurfaceRegistration`. The controller gates `SurfaceRegistration` processing on this capability. See [Shared Surface Runtime Architecture](../architecture/surfaces.md).                                                                  |
+| `InteractiveUpdates` | `interactive_updates`  | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
+| `ResetData`          | `reset_data`           | Service supports the reset-data protocol: truncates local data stores when the controller broadcasts a data reset. Only advertised when compiled with the `reset-data` feature.                                                                                                       |
+| `WorkloadClaims`     | `workload_claims`      | Service supports the exclusive workload claim protocol: sends `workload_claim` to request ownership of config keys, receives `workload_claim_result` with grant/reject decisions. Required for tenant-scoped SoftwareStates delivery.                                                 |
+| `Other(String)`      | _(any unknown string)_ | Forward-compatible catch-all. Never participates in intersection.                                                                                                                                                                                                                     |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_surfaces` | `interactive_updates` | `reset_data` | `workload_claims` |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — | — |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* | ✓\*\* | — |
-| Update Tracker | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | ✓ | — | — | ✓ |
-| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
+| Component          | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_surfaces` | `interactive_updates` | `reset_data` | `workload_claims` |
+| ------------------ | :------------------: | :------------: | :-----------------: | :---------------: | :----------: | :--------------: | :---------: | :---------------: | :-----------: | :-----------------: | :-------------: | :-----------: | :-------------------: | :----------: | :---------------: |
+| Controller         |          ✓           |       ✓        |          ✓          |         ✓         |      ✓       |        ✓         |      ✓      |         ✓         |       ✓       |          ✓          |        ✓        |       ✓       |           ✓           |      ✓       |         ✓         |
+| Agent              |          ✓           |       ✓        |          ✓          |         —         |      —       |        —         |      —      |         —         |       —       |          —          |        —        |       —       |          ✓\*          |      —       |         —         |
+| SSH Agent          |          ✓           |       ✓        |          ✓          |         —         |      ✓       |        —         |      —      |         —         |       —       |          —          |        —        |       ✓       |          ✓\*          |    ✓\*\*     |         —         |
+| Update Tracker     |          —           |       —        |          ✓          |         ✓         |      —       |        ✓         |      —      |         —         |       —       |          —          |        —        |       ✓       |           —           |      —       |         ✓         |
+| External Scheduler |          —           |       —        |          ✓          |         —         |      —       |        ✓         |      ✓      |         ✓         |       ✓       |          ✓          |        ✓        |       —       |           —           |      —       |         —         |
 
 \* Only when compiled with the `interactive` Cargo feature.
 
@@ -1105,13 +1105,13 @@ The controller derives a `ServiceProfile` from each service's persisted capabili
 behavioral defaults (ping interval, shutdown timeout, human-readable label). `ServiceProfile` is never
 stored -- it is always computed from capabilities.
 
-| Capability set | `ServiceProfile` | Label |
-| --- | --- | --- |
-| Has `update_tracking` | `UpdateTracker` | "Update Tracker" |
-| Has `scheduler`, no `update_tracking` | `Scheduler` | "Scheduler" |
-| Has `ssh_remote` + `software_discovery`, no `update_tracking`, no `scheduler` | `Agent` | "SSH Agent" |
-| Has `software_discovery`, no `update_tracking`, no `scheduler`, no `ssh_remote` | `Agent` | "Agent" |
-| Unrecognized combination | `Unknown` | "Unknown" |
+| Capability set                                                                  | `ServiceProfile` | Label            |
+| ------------------------------------------------------------------------------- | ---------------- | ---------------- |
+| Has `update_tracking`                                                           | `UpdateTracker`  | "Update Tracker" |
+| Has `scheduler`, no `update_tracking`                                           | `Scheduler`      | "Scheduler"      |
+| Has `ssh_remote` + `software_discovery`, no `update_tracking`, no `scheduler`   | `Agent`          | "SSH Agent"      |
+| Has `software_discovery`, no `update_tracking`, no `scheduler`, no `ssh_remote` | `Agent`          | "Agent"          |
+| Unrecognized combination                                                        | `Unknown`        | "Unknown"        |
 
 Precedence when multiple key capabilities are present: `UpdateTracker` > `Scheduler` > `Agent` > `Unknown`.
 
@@ -1129,8 +1129,8 @@ with the freshly-reported one and refreshes in-session gating flags.
 
 **`register` (service → controller)**
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field          | Type                   | Description                                                     |
+| -------------- | ---------------------- | --------------------------------------------------------------- |
 | `capabilities` | `BTreeSet<Capability>` | The full capability set declared by the current service binary. |
 
 On receipt the controller:
@@ -1175,9 +1175,9 @@ The above JSON payload from a newer peer is silently decoded as `ServiceMessage:
 
 **Behaviour when an `Unknown` message is received:**
 
-| Recipient | Action |
-| --- | --- |
-| Controller (from service) | Emits `tracing::warn!` and continues the event loop. |
+| Recipient                       | Action                                               |
+| ------------------------------- | ---------------------------------------------------- |
+| Controller (from service)       | Emits `tracing::warn!` and continues the event loop. |
 | Service / SDK (from controller) | Emits `tracing::warn!` and continues the event loop. |
 
 **NATS publication:** `ControllerMessage::Unknown` is excluded from NATS publication
@@ -1191,22 +1191,22 @@ Both sides keep their counters in sync even when individual messages cannot be i
 
 The `MqttTenantConfig` struct is used in `tenant_assignments` and `tenant_config_updated` messages. Key fields:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `mqtt_client_id` | UUID | Primary identifier from the `mqtt_clients` table |
-| `tenant_id` | UUID | Tenant UUID |
-| `enabled` | bool | Whether this MQTT client is enabled |
-| `transport` | `tcp` / `tls` | Transport protocol |
-| `host` | String | MQTT broker hostname |
-| `port` | u16 | MQTT broker port |
-| `client_id` | String | MQTT client ID for broker connection |
-| `username` | `Option<SecretString>` | Broker authentication username |
-| `password` | `Option<SecretString>` | Broker authentication password |
-| `ca_pem` | `Option<SecretString>` | Custom CA certificate in PEM format for private brokers |
-| `topic_prefix` | String | MQTT topic prefix |
-| `ha_discovery` | bool | Whether to publish Home Assistant MQTT discovery topics (`#[serde(default)]`) |
-| `ha_discovery_prefix` | String | HA MQTT discovery topic prefix (default `"homeassistant"`) |
-| `updated_at` | i64 | Last update timestamp in milliseconds |
+| Field                 | Type                   | Description                                                                   |
+| --------------------- | ---------------------- | ----------------------------------------------------------------------------- |
+| `mqtt_client_id`      | UUID                   | Primary identifier from the `mqtt_clients` table                              |
+| `tenant_id`           | UUID                   | Tenant UUID                                                                   |
+| `enabled`             | bool                   | Whether this MQTT client is enabled                                           |
+| `transport`           | `tcp` / `tls`          | Transport protocol                                                            |
+| `host`                | String                 | MQTT broker hostname                                                          |
+| `port`                | u16                    | MQTT broker port                                                              |
+| `client_id`           | String                 | MQTT client ID for broker connection                                          |
+| `username`            | `Option<SecretString>` | Broker authentication username                                                |
+| `password`            | `Option<SecretString>` | Broker authentication password                                                |
+| `ca_pem`              | `Option<SecretString>` | Custom CA certificate in PEM format for private brokers                       |
+| `topic_prefix`        | String                 | MQTT topic prefix                                                             |
+| `ha_discovery`        | bool                   | Whether to publish Home Assistant MQTT discovery topics (`#[serde(default)]`) |
+| `ha_discovery_prefix` | String                 | HA MQTT discovery topic prefix (default `"homeassistant"`)                    |
+| `updated_at`          | i64                    | Last update timestamp in milliseconds                                         |
 
 The `ca_pem` field is optional and uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for
 backward compatibility. When present, the MQTT service uses the PEM bytes as the trusted CA for TLS
@@ -1235,10 +1235,10 @@ State is delivered in pages of up to `STATES_HOST_PAGE_SIZE` (100) active hosts 
 `page` field is **required** on every payload. Update-tracking services must accumulate pages until the last page
 (`page_index + 1 == total_pages`) before running the diff and publishing to retained MQTT topics.
 
-| `page` field | Type | Description |
-| --- | --- | --- |
-| `page_index` | u32 | Zero-based index of this page |
-| `total_pages` | u32 | Total pages in this batch (≥ 1) |
+| `page` field  | Type | Description                     |
+| ------------- | ---- | ------------------------------- |
+| `page_index`  | u32  | Zero-based index of this page   |
+| `total_pages` | u32  | Total pages in this batch (≥ 1) |
 
 **Single-page delivery** (most incremental updates): `{ "page_index": 0, "total_pages": 1 }` — apply
 immediately without buffering.
@@ -1291,17 +1291,17 @@ entry contains the version data for one host that tracks the software item. An e
 
 The `hosts` entries use the following fields:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `host_id` | UUID | Host UUID |
-| `hostname` | String | Machine hostname |
-| `friendly_name` | String | User-defined display name for the host |
-| `installed_version` | `Option<String>` | Currently installed version (omitted if unknown) |
-| `latest_version` | `Option<String>` | Latest available version (omitted if unknown) |
-| `update_available` | bool | `true` when `latest_version` differs from `installed_version` |
-| `update_in_progress` | bool | `true` while an `update_history` record with status `pending` or `in_progress` exists for this `(host_id, software_item_id)` pair; defaults to `false` when absent (older controller) |
-| `release_url` | `Option<String>` | URL to the upstream release page (omitted when unavailable) |
-| `release_notes` | `Option<String>` | Full release notes or changelog text (omitted when unavailable) |
+| Field                | Type             | Description                                                                                                                                                                           |
+| -------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host_id`            | UUID             | Host UUID                                                                                                                                                                             |
+| `hostname`           | String           | Machine hostname                                                                                                                                                                      |
+| `friendly_name`      | String           | User-defined display name for the host                                                                                                                                                |
+| `installed_version`  | `Option<String>` | Currently installed version (omitted if unknown)                                                                                                                                      |
+| `latest_version`     | `Option<String>` | Latest available version (omitted if unknown)                                                                                                                                         |
+| `update_available`   | bool             | `true` when `latest_version` differs from `installed_version`                                                                                                                         |
+| `update_in_progress` | bool             | `true` while an `update_history` record with status `pending` or `in_progress` exists for this `(host_id, software_item_id)` pair; defaults to `false` when absent (older controller) |
+| `release_url`        | `Option<String>` | URL to the upstream release page (omitted when unavailable)                                                                                                                           |
+| `release_notes`      | `Option<String>` | Full release notes or changelog text (omitted when unavailable)                                                                                                                       |
 
 `release_url` and `release_notes` are populated only when the plugin fetches release metadata (e.g. GitHub
 Releases). They are absent (`null` / omitted) for plugins that track only version numbers.
@@ -1312,15 +1312,15 @@ The `host_summaries` field (defaults to `[]` when absent -- older controllers om
 `HostPackageSummary` entry per host that has at least one tracked non-featured software item for
 the tenant.
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `host_id` | UUID | Host UUID |
-| `hostname` | String | Machine hostname |
-| `friendly_name` | String | User-defined display name for the host |
-| `pending_count` | u32 | Number of non-featured items where both versions are known and differ |
-| `security_pending_count` | u32 | Number of non-featured items with `update_category = "security"` where both versions are known and differ |
-| `total_count` | u32 | Total number of enabled, non-deactivated, non-featured items tracked for this host |
-| `update_in_progress` | bool | `true` while an `update_history` record is `pending` or `in_progress` for a batch on this host |
+| Field                    | Type   | Description                                                                                               |
+| ------------------------ | ------ | --------------------------------------------------------------------------------------------------------- |
+| `host_id`                | UUID   | Host UUID                                                                                                 |
+| `hostname`               | String | Machine hostname                                                                                          |
+| `friendly_name`          | String | User-defined display name for the host                                                                    |
+| `pending_count`          | u32    | Number of non-featured items where both versions are known and differ                                     |
+| `security_pending_count` | u32    | Number of non-featured items with `update_category = "security"` where both versions are known and differ |
+| `total_count`            | u32    | Total number of enabled, non-deactivated, non-featured items tracked for this host                        |
+| `update_in_progress`     | bool   | `true` while an `update_history` record is `pending` or `in_progress` for a batch on this host            |
 
 The MQTT service publishes these to retained topics per host. For the **all-packages** entity:
 
@@ -1363,13 +1363,13 @@ WebSocket connection is not closed).
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `tenant_id` | UUID | Tenant the update targets — must match an assigned tenant for this MQTT service |
-| `software_item_id` | UUID | The software item to update |
-| `host_id` | UUID | The host on which to apply the update |
-| `to_version` | String | Target version string resolved from the last `software_states` push |
-| `actor_service_id` | UUID | Service instance UUID that received the Install command; stored as `actor_id` in `update_history` |
+| Field              | Type   | Description                                                                                       |
+| ------------------ | ------ | ------------------------------------------------------------------------------------------------- |
+| `tenant_id`        | UUID   | Tenant the update targets — must match an assigned tenant for this MQTT service                   |
+| `software_item_id` | UUID   | The software item to update                                                                       |
+| `host_id`          | UUID   | The host on which to apply the update                                                             |
+| `to_version`       | String | Target version string resolved from the last `software_states` push                               |
+| `actor_service_id` | UUID   | Service instance UUID that received the Install command; stored as `actor_id` in `update_history` |
 
 The resulting `update_history` record has `actor_type = "mqtt"` and `actor_id = <actor_service_id>`.
 
@@ -1398,12 +1398,12 @@ non-featured software items for the host and dispatches a batch update to the ag
 }
 ```
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `tenant_id` | UUID | -- | Tenant scope -- must match an assigned tenant for this MQTT service |
-| `host_id` | UUID | -- | The host whose outdated non-featured items should be updated |
-| `actor_service_id` | UUID | -- | Service instance UUID that received the Install command; stored as `actor_id` in `update_history` |
-| `security_only` | bool | `false` | When `true`, only items with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
+| Field              | Type | Default | Description                                                                                                                                                                 |
+| ------------------ | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tenant_id`        | UUID | --      | Tenant scope -- must match an assigned tenant for this MQTT service                                                                                                         |
+| `host_id`          | UUID | --      | The host whose outdated non-featured items should be updated                                                                                                                |
+| `actor_service_id` | UUID | --      | Service instance UUID that received the Install command; stored as `actor_id` in `update_history`                                                                           |
+| `security_only`    | bool | `false` | When `true`, only items with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
 
 The controller:
 
@@ -1455,8 +1455,8 @@ keys the service no longer desires.
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field    | Type                     | Description                                                                                      |
+| -------- | ------------------------ | ------------------------------------------------------------------------------------------------ |
 | `claims` | `BTreeMap<String, UUID>` | Map of config key to tenant UUID. Keys use the same format as `service_config_delivery` entries. |
 
 ### `workload_claim_result` (controller -> service)
@@ -1474,9 +1474,9 @@ available (e.g. another service disconnected and released them).
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `granted` | `BTreeSet<String>` | Config keys that this service now exclusively owns. |
+| Field      | Type               | Description                                               |
+| ---------- | ------------------ | --------------------------------------------------------- |
+| `granted`  | `BTreeSet<String>` | Config keys that this service now exclusively owns.       |
 | `rejected` | `BTreeSet<String>` | Config keys that are already claimed by another instance. |
 
 After receiving granted keys, the controller pushes `software_states` (paginated) and
@@ -1496,8 +1496,8 @@ certain configs (e.g. after a config deletion).
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field  | Type               | Description             |
+| ------ | ------------------ | ----------------------- |
 | `keys` | `BTreeSet<String>` | Config keys to release. |
 
 Released keys become available for other service instances to claim. The controller
@@ -1586,10 +1586,10 @@ History page updates regardless of which instance processed the original API req
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `tenant_id` | UUID | No | Target tenant. `null` or absent means system-wide broadcast (all tenants). |
-| `event_json` | string | Yes | JSON-serialised `AdminEvent` (externally-tagged serde format). |
+| Field        | Type   | Required | Description                                                                |
+| ------------ | ------ | -------- | -------------------------------------------------------------------------- |
+| `tenant_id`  | UUID   | No       | Target tenant. `null` or absent means system-wide broadcast (all tenants). |
+| `event_json` | string | Yes      | JSON-serialised `AdminEvent` (externally-tagged serde format).             |
 
 **Safe to publish via NATS** — contains no credential material or plugin configs.
 
@@ -1613,13 +1613,13 @@ global claim registry.
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `service_id` | UUID | The service instance whose claims changed. |
-| `controller_id` | UUID | The controller that processed the claim. |
-| `claimed` | `BTreeMap<String, UUID>` | Newly claimed config keys with their tenant UUIDs. |
-| `released` | `BTreeSet<String>` | Config keys that were released. |
-| `claimed_at` | String (RFC 3339) | Timestamp for conflict resolution (earlier wins). |
+| Field           | Type                     | Description                                        |
+| --------------- | ------------------------ | -------------------------------------------------- |
+| `service_id`    | UUID                     | The service instance whose claims changed.         |
+| `controller_id` | UUID                     | The controller that processed the claim.           |
+| `claimed`       | `BTreeMap<String, UUID>` | Newly claimed config keys with their tenant UUIDs. |
+| `released`      | `BTreeSet<String>`       | Config keys that were released.                    |
+| `claimed_at`    | String (RFC 3339)        | Timestamp for conflict resolution (earlier wins).  |
 
 When two controllers grant the same key simultaneously, the conflict is resolved by
 `(claimed_at, service_id)` comparison — earlier timestamp wins, lower `service_id`
@@ -1728,25 +1728,25 @@ agent to register a Proxmox VE plugin configuration after detecting a PVE node d
 
 ### `report_plugin_config` (service -> controller)
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | string | Yes | `"report_plugin_config"` |
-| `seq` | integer | Yes | Monotonically increasing sequence number |
-| `request_id` | string | Yes | Unique request ID for correlation (max 64 chars) |
-| `plugin_type` | string | Yes | Plugin type identifier, e.g. `"proxmox"` (max 64 chars) |
-| `name` | string | Yes | Human-readable config name (max 128 chars) |
-| `config` | object | Yes | Plugin-specific configuration (validated by the plugin) |
+| Field         | Type    | Required | Description                                             |
+| ------------- | ------- | -------- | ------------------------------------------------------- |
+| `type`        | string  | Yes      | `"report_plugin_config"`                                |
+| `seq`         | integer | Yes      | Monotonically increasing sequence number                |
+| `request_id`  | string  | Yes      | Unique request ID for correlation (max 64 chars)        |
+| `plugin_type` | string  | Yes      | Plugin type identifier, e.g. `"proxmox"` (max 64 chars) |
+| `name`        | string  | Yes      | Human-readable config name (max 128 chars)              |
+| `config`      | object  | Yes      | Plugin-specific configuration (validated by the plugin) |
 
 ### `report_plugin_config_response` (controller -> service)
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | string | Yes | `"report_plugin_config_response"` |
-| `seq` | integer | Yes | Monotonically increasing sequence number |
-| `request_id` | string | Yes | Correlates with the original request |
-| `success` | boolean | Yes | Whether the config was created or found |
-| `plugin_config_id` | string | No | ID of the plugin configuration (on success) |
-| `error` | string | No | Error message (on failure) |
+| Field              | Type    | Required | Description                                 |
+| ------------------ | ------- | -------- | ------------------------------------------- |
+| `type`             | string  | Yes      | `"report_plugin_config_response"`           |
+| `seq`              | integer | Yes      | Monotonically increasing sequence number    |
+| `request_id`       | string  | Yes      | Correlates with the original request        |
+| `success`          | boolean | Yes      | Whether the config was created or found     |
+| `plugin_config_id` | string  | No       | ID of the plugin configuration (on success) |
+| `error`            | string  | No       | Error message (on failure)                  |
 
 The controller validates the config via `PluginOps::validate_config()`, checks for an existing
 config with the same `(tenant_id, plugin_type, name)`, and either returns the existing ID

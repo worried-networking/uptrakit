@@ -82,10 +82,10 @@ pub trait SchedulerNotifier: Send + Sync {
 
 Two implementations exist:
 
-| Implementation | Location | Transport |
-| --- | --- | --- |
+| Implementation                | Location                                      | Transport                                     |
+| ----------------------------- | --------------------------------------------- | --------------------------------------------- |
 | `ControllerSchedulerNotifier` | `crates/core/controller/src/scheduler/mod.rs` | `NotificationService` (local + optional NATS) |
-| `NatsSchedulerNotifier` | `crates/core/scheduler/src/nats_notifier.rs` | `NatsConnection` (NATS only) |
+| `NatsSchedulerNotifier`       | `crates/core/scheduler/src/nats_notifier.rs`  | `NatsConnection` (NATS only)                  |
 
 ## SchedulerConfig
 
@@ -118,9 +118,9 @@ manages the yield lifecycle.
 
 ## Feature flags
 
-| Feature | Default | Description |
-| --- | --- | --- |
-| `oidc` | No | Enables OIDC-related cleanup in `AuthCleanupExecutor` |
+| Feature | Default | Description                                           |
+| ------- | ------- | ----------------------------------------------------- |
+| `oidc`  | No      | Enables OIDC-related cleanup in `AuthCleanupExecutor` |
 
 When `oidc` is disabled, `AuthCleanupExecutor` skips the OIDC flow store cleanup calls
 (`OidcFlowStore`, `AccountLinkStore`, `OidcTokenExchangeStore`, `OidcRegistrationStore`).

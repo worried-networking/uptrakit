@@ -495,8 +495,14 @@ Multi-select state would use `SvelteSet<string>` per the frontend AGENTS rule, b
 
 ```ts
 export async function listInstancePlugins(): Promise<InstancePluginSummary[]>;
-export async function setInstancePluginEnabled(pluginType: string, enabled: boolean): Promise<InstancePluginSummary>;
-export async function upsertInstancePluginConfig(pluginType: string, config: Record<string, unknown>): Promise<InstancePluginSummary>;
+export async function setInstancePluginEnabled(
+  pluginType: string,
+  enabled: boolean,
+): Promise<InstancePluginSummary>;
+export async function upsertInstancePluginConfig(
+  pluginType: string,
+  config: Record<string, unknown>,
+): Promise<InstancePluginSummary>;
 ```
 
 All three follow the existing `fetch` wrapper convention; no direct `fetch()` calls.

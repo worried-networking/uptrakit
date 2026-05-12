@@ -79,6 +79,7 @@ set differs.
     so both accessibility and the required-children constraint are satisfied. Preserves the existing
     `e.stopPropagation()` + `e.currentTarget` call (positioning source for the popover) — the Button primitive forwards
     the native event object unchanged.
+
   - Keep the raw `&#8943;` unicode character as children. Rejected — icon-only buttons need a real icon for theme tint;
     the unicode ellipsis doesn't pick up `--accent` and fails dark-mode contrast. An `EllipsisIcon` component (matching
     the PlayIcon / ChevronIcon shape used elsewhere) is the replacement.
@@ -87,6 +88,7 @@ set differs.
     syntax shown above.
   - Omit children entirely (icon-only, no `sr-only` span). Rejected — `children: Snippet` in Button.svelte line 16 is
     required (no `?`), so omitting children is a compile error.
+
 - Reasoning: #2c's ariaLabel contract is the standard for icon-only buttons; the `sr-only` span satisfies the
   required-children constraint without affecting visual output; same shape used on host-detail context trigger in #3h.
 
@@ -214,6 +216,7 @@ Per-attribute translation:
 
   (`leadingIcon` is a `Snippet` prop — use `{#snippet leadingIcon()}` block syntax, not a component reference.
   `children: Snippet` is required; the `sr-only` span satisfies it without visible output.)
+
 - `preset-filled-primary-500` on the error Retry button →
   `<Button variant="primary" loading={isRetrying}>Retry</Button>`.
 - `preset-tonal-surface` on modal Cancel → `<Button variant="secondary">`.

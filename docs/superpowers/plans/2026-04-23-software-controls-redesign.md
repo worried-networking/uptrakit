@@ -19,8 +19,8 @@ new card header that wraps the entire list section. The card wrapper replaces th
 
 ## File Map
 
-| File | Change |
-| ---- | ------ |
+| File                                        | Change                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `frontend/src/routes/software/+page.svelte` | Template-only refactor — remove two floating divs, add card wrapper + header, adjust state container padding, strip redundant border/bg from inner list div |
 
 No other files change.

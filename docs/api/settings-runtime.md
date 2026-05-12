@@ -12,16 +12,16 @@ Settings are stored in the database and reconciled with CLI flags during startup
 
 ## Settings Categories
 
-| Category | Key Prefix | API | Runtime Change |
-| --- | --- | --- | --- |
-| Network | `network.*` | `/settings/network` | Mostly runtime-changeable (some bind addresses need restart). |
-| MQTT | `mqtt_*` table | `/settings/mqtt` | Runtime-changeable; controller pushes via WebSocket. |
-| Registration | `registration.*` | `/settings/registration` | Runtime-changeable. |
-| Authentication | `authentication.*` | `/settings/authentication` | Runtime-changeable. |
-| Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable. |
-| SMTP (per-tenant) | `smtp.*` | Shared surface action | Runtime-changeable; per-tenant overrides of global defaults. |
-| SMTP (global) | `global_smtp.*` | Shared surface action | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
-| NATS | `nats.url` | `/settings/nats` | Stored in DB; **requires restart** to change the live connection. |
+| Category             | Key Prefix               | API                              | Runtime Change                                                                |
+| -------------------- | ------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |
+| Network              | `network.*`              | `/settings/network`              | Mostly runtime-changeable (some bind addresses need restart).                 |
+| MQTT                 | `mqtt_*` table           | `/settings/mqtt`                 | Runtime-changeable; controller pushes via WebSocket.                          |
+| Registration         | `registration.*`         | `/settings/registration`         | Runtime-changeable.                                                           |
+| Authentication       | `authentication.*`       | `/settings/authentication`       | Runtime-changeable.                                                           |
+| Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable.                                                           |
+| SMTP (per-tenant)    | `smtp.*`                 | Shared surface action            | Runtime-changeable; per-tenant overrides of global defaults.                  |
+| SMTP (global)        | `global_smtp.*`          | Shared surface action            | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
+| NATS                 | `nats.url`               | `/settings/nats`                 | Stored in DB; **requires restart** to change the live connection.             |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
 
@@ -45,15 +45,15 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 
 ### Settings reference
 
-| CLI flag | DB key | Default | Runtime-changeable |
-| --- | --- | --- | --- |
-| `--trusted-proxy` | `network.trusted_proxies` | `[]` | Yes |
-| `--real-ip-header` | `network.real_ip_header` | `X-Forwarded-For` | Yes |
-| `--san` | `network.sans` | auto-detected | Yes |
-| `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null` | Yes |
-| `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | `null` | Yes |
-| `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |
-| `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
+| CLI flag                              | DB key                                      | Default           | Runtime-changeable         |
+| ------------------------------------- | ------------------------------------------- | ----------------- | -------------------------- |
+| `--trusted-proxy`                     | `network.trusted_proxies`                   | `[]`              | Yes                        |
+| `--real-ip-header`                    | `network.real_ip_header`                    | `X-Forwarded-For` | Yes                        |
+| `--san`                               | `network.sans`                              | auto-detected     | Yes                        |
+| `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null`            | Yes                        |
+| `--forwarded-client-cert-pem-header`  | `network.forwarded_client_cert_pem_header`  | `null`            | Yes                        |
+| `--pki-addr`                          | `network.pki_addr`                          | `null`            | Yes (requires CA rotation) |
+| `--https-addr`                        | `network.https_addr`                        | `[::]:8443`       | No (restart)               |
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`,
 `--ca-key`, `--static-dir`, `--reuseport`, `--takeover-from`, `--shutdown-timeout-secs`, `--master-key-file`.
@@ -63,15 +63,15 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 The controller supports bootstrapping an OIDC provider at startup via CLI flags. This solves the chicken-and-egg problem
 where configuring OIDC requires ManageSettings permission, but the first user needs to log in via OIDC.
 
-| CLI flag | Default | Description |
-| --- | --- | --- |
-| `--oidc-issuer-url` | — | OIDC issuer URL; triggers bootstrap when set |
-| `--oidc-client-id` | — | Required with `--oidc-issuer-url` |
-| `--oidc-client-secret` | — | Required with `--oidc-issuer-url` |
-| `--oidc-provider-name` | `SSO` | Display name for the provider |
-| `--oidc-provider-slug` | `sso` | URL-safe slug (used for uniqueness check) |
-| `--oidc-scopes` | `openid email profile groups` | Space-separated scopes |
-| `--oidc-allow-private-network-issuers` | mode-dependent | Whether the bootstrapped provider may resolve to private / LAN addresses |
+| CLI flag                               | Default                       | Description                                                              |
+| -------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
+| `--oidc-issuer-url`                    | —                             | OIDC issuer URL; triggers bootstrap when set                             |
+| `--oidc-client-id`                     | —                             | Required with `--oidc-issuer-url`                                        |
+| `--oidc-client-secret`                 | —                             | Required with `--oidc-issuer-url`                                        |
+| `--oidc-provider-name`                 | `SSO`                         | Display name for the provider                                            |
+| `--oidc-provider-slug`                 | `sso`                         | URL-safe slug (used for uniqueness check)                                |
+| `--oidc-scopes`                        | `openid email profile groups` | Space-separated scopes                                                   |
+| `--oidc-allow-private-network-issuers` | mode-dependent                | Whether the bootstrapped provider may resolve to private / LAN addresses |
 
 **Bootstrap behavior:**
 
@@ -118,14 +118,14 @@ returns `true` when mode is `Invite` AND (`is_first_user` OR `require_token_for_
 
 **New endpoint:**
 
-| Endpoint | Auth | Purpose |
-| --- | --- | --- |
+| Endpoint                                       | Auth   | Purpose                                            |
+| ---------------------------------------------- | ------ | -------------------------------------------------- |
 | `POST /api/v1/auth/oidc/complete-registration` | Public | Complete OIDC registration with registration token |
 
 **New setting:**
 
-| DB key | Type | Default | Description |
-| --- | --- | --- | --- |
+| DB key                                | Type | Default | Description                                                                         |
+| ------------------------------------- | ---- | ------- | ----------------------------------------------------------------------------------- |
 | `registration.require_token_for_oidc` | bool | `false` | When `true` and mode is `Invite`, require registration token for OIDC user creation |
 
 **New store:** `OidcRegistrationStore` in `crates/ui/web-api-auth/src/auth/oidc_state.rs` — follows the same atomic-delete
@@ -140,10 +140,10 @@ expires_at).
 
 Settings are stored in two separate tables:
 
-| Table | PK | Purpose |
-| --- | --- | --- |
-| `global_settings` | `key` | System-wide settings (no `tenant_id`). 20 keys: network, PKI, MQTT limit, multi-tenancy, JWT signing key, master key verification, global SMTP defaults. |
-| `settings` | `(tenant_id, key)` | Per-tenant settings (registration, authentication, service certificates, SMTP, etc.). |
+| Table             | PK                 | Purpose                                                                                                                                                  |
+| ----------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `global_settings` | `key`              | System-wide settings (no `tenant_id`). 20 keys: network, PKI, MQTT limit, multi-tenancy, JWT signing key, master key verification, global SMTP defaults. |
+| `settings`        | `(tenant_id, key)` | Per-tenant settings (registration, authentication, service certificates, SMTP, etc.).                                                                    |
 
 The `global_settings` table was introduced to cleanly separate system-wide configuration from
 per-tenant data, avoiding the previous design where global settings were stored under the default
@@ -196,13 +196,13 @@ In multi-instance deployments (multiple controllers sharing one DB behind a load
 is invalidated cross-instance via a **version-gated periodic reload**. The `settings_version` table stores per-tenant
 rows with two version counters:
 
-| Column | Type | Purpose |
-| --- | --- | --- |
-| `tenant_id` | UUID PK (FK → tenants) | Tenant identifier |
-| `version` | BIGINT | Per-tenant settings version (bumped on per-tenant setting changes) |
-| `global_version` | BIGINT | Global settings version (bumped on ALL rows when a global setting changes) |
-| `revocation_version` | BIGINT | Revocation version (bumped on every certificate revocation for cross-instance CRL propagation) |
-| `updated_at` | TIMESTAMP | Last update timestamp |
+| Column               | Type                   | Purpose                                                                                        |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------------------------- |
+| `tenant_id`          | UUID PK (FK → tenants) | Tenant identifier                                                                              |
+| `version`            | BIGINT                 | Per-tenant settings version (bumped on per-tenant setting changes)                             |
+| `global_version`     | BIGINT                 | Global settings version (bumped on ALL rows when a global setting changes)                     |
+| `revocation_version` | BIGINT                 | Revocation version (bumped on every certificate revocation for cross-instance CRL propagation) |
+| `updated_at`         | TIMESTAMP              | Last update timestamp                                                                          |
 
 **Write semantics:** Per-tenant writes (`upsert_setting()`, `delete_setting()`) call
 `bump_settings_version(db, tenant_id)` — incrementing only the tenant's `version` counter. Global
@@ -227,42 +227,42 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 
 **Key files:**
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/db/src/entity/global_setting.rs` | SeaORM entity for `global_settings` table |
-| `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity for version tracking |
-| `crates/shared/db/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
-| `crates/shared/db/src/migration/m20260303_000001_global_settings.rs` | Migration: create `global_settings` table, move 13 keys from `settings` |
-| `crates/ui/web-api-auth/src/settings_store.rs` | `upsert_global_setting()`, `load_global_setting()`, `bump_settings_version()`, `bump_global_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
-| `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
-| `crates/core/controller/src/crl_manager.rs` | Version-gated CRL rebuild loop |
+| File                                                                 | Purpose                                                                                                                                                                                             |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/db/src/entity/global_setting.rs`                      | SeaORM entity for `global_settings` table                                                                                                                                                           |
+| `crates/shared/db/src/entity/settings_version.rs`                    | SeaORM entity for version tracking                                                                                                                                                                  |
+| `crates/shared/db/src/migration/m20260209_000001_initial.rs`         | Single consolidated migration (includes settings_version + revocation_version)                                                                                                                      |
+| `crates/shared/db/src/migration/m20260303_000001_global_settings.rs` | Migration: create `global_settings` table, move 13 keys from `settings`                                                                                                                             |
+| `crates/ui/web-api-auth/src/settings_store.rs`                       | `upsert_global_setting()`, `load_global_setting()`, `bump_settings_version()`, `bump_global_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
+| `crates/ui/web-api/src/settings.rs`                                  | `reload_from_db()`, `check_version_and_reload()`                                                                                                                                                    |
+| `crates/core/controller/src/crl_manager.rs`                          | Version-gated CRL rebuild loop                                                                                                                                                                      |
 
 ### Settings API endpoints
 
-| Endpoint | Permission | Purpose |
-| --- | --- | --- |
-| `GET /api/v1/settings/network` | ManageGlobalSettings | Read network settings |
-| `PUT /api/v1/settings/network` | ManageGlobalSettings | Update network settings (includes `pki_addr`) |
-| `GET /api/v1/settings/mqtt` | ViewSettings | List all MQTT client configurations |
-| `POST /api/v1/settings/mqtt` | ManageSettings | Create MQTT client configuration (checks per-tenant limit) |
-| `GET /api/v1/settings/mqtt/limit` | ViewSettings | Get max MQTT clients per tenant limit |
-| `PUT /api/v1/settings/mqtt/limit` | ManageGlobalSettings | Update max MQTT clients per tenant limit |
-| `GET /api/v1/settings/mqtt/{id}` | ViewSettings | Get a specific MQTT client configuration |
-| `PUT /api/v1/settings/mqtt/{id}` | ManageSettings | Update MQTT client configuration |
-| `DELETE /api/v1/settings/mqtt/{id}` | ManageSettings | Delete MQTT client configuration |
-| *(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)* | | |
-| `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
-| `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
-| `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
+| Endpoint                                                                                  | Permission           | Purpose                                                    |
+| ----------------------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------- |
+| `GET /api/v1/settings/network`                                                            | ManageGlobalSettings | Read network settings                                      |
+| `PUT /api/v1/settings/network`                                                            | ManageGlobalSettings | Update network settings (includes `pki_addr`)              |
+| `GET /api/v1/settings/mqtt`                                                               | ViewSettings         | List all MQTT client configurations                        |
+| `POST /api/v1/settings/mqtt`                                                              | ManageSettings       | Create MQTT client configuration (checks per-tenant limit) |
+| `GET /api/v1/settings/mqtt/limit`                                                         | ViewSettings         | Get max MQTT clients per tenant limit                      |
+| `PUT /api/v1/settings/mqtt/limit`                                                         | ManageGlobalSettings | Update max MQTT clients per tenant limit                   |
+| `GET /api/v1/settings/mqtt/{id}`                                                          | ViewSettings         | Get a specific MQTT client configuration                   |
+| `PUT /api/v1/settings/mqtt/{id}`                                                          | ManageSettings       | Update MQTT client configuration                           |
+| `DELETE /api/v1/settings/mqtt/{id}`                                                       | ManageSettings       | Delete MQTT client configuration                           |
+| _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_ |                      |                                                            |
+| `POST /api/v1/settings/rotate-ca`                                                         | ManageGlobalSettings | Trigger immediate CA rotation                              |
+| `POST /api/v1/settings/renew-server-certificate`                                          | ManageGlobalSettings | Renew server TLS certificate                               |
+| `GET /api/v1/system/alerts`                                                               | ManageGlobalSettings | Get system alerts (CA/cert status)                         |
 
 ### PKI API endpoints (unauthenticated)
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/v1/pki/ca.crt` | Download CA certificate bundle |
-| `GET /api/v1/pki/ca.crl` | Download CRL (combined PEM) |
-| `POST /api/v1/pki/ocsp` | OCSP responder (RFC 6960, `application/ocsp-request` body) |
-| `GET /api/v1/pki/ocsp/{encoded}` | OCSP responder (base64-encoded request in URL path) |
+| Endpoint                         | Purpose                                                    |
+| -------------------------------- | ---------------------------------------------------------- |
+| `GET /api/v1/pki/ca.crt`         | Download CA certificate bundle                             |
+| `GET /api/v1/pki/ca.crl`         | Download CRL (combined PEM)                                |
+| `POST /api/v1/pki/ocsp`          | OCSP responder (RFC 6960, `application/ocsp-request` body) |
+| `GET /api/v1/pki/ocsp/{encoded}` | OCSP responder (base64-encoded request in URL path)        |
 
 MQTT password is never exposed in API responses; a `has_password: bool` field indicates whether one is set.
 
@@ -274,44 +274,44 @@ presentation field.
 
 **Table schema (`mqtt_clients`):**
 
-| Column | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `id` | UUID PK | `Uuid::now_v7()` | |
-| `tenant_id` | UUID FK → tenants | | Non-unique index (multiple clients per tenant) |
-| `enabled` | bool | `true` | |
-| `transport` | text | `tcp` | `tcp`, `tls` |
-| `host` | text | | Broker hostname |
-| `port` | integer | 1883 | |
-| `client_id` | text | `uptrakit-controller` | |
-| `username` | text? | | |
-| `password` | text? | | |
-| `topic_prefix` | text | `uptrakit` | |
-| `created_at` | timestamptz | | |
-| `updated_at` | timestamptz | | |
+| Column         | Type              | Default               | Notes                                          |
+| -------------- | ----------------- | --------------------- | ---------------------------------------------- |
+| `id`           | UUID PK           | `Uuid::now_v7()`      |                                                |
+| `tenant_id`    | UUID FK → tenants |                       | Non-unique index (multiple clients per tenant) |
+| `enabled`      | bool              | `true`                |                                                |
+| `transport`    | text              | `tcp`                 | `tcp`, `tls`                                   |
+| `host`         | text              |                       | Broker hostname                                |
+| `port`         | integer           | 1883                  |                                                |
+| `client_id`    | text              | `uptrakit-controller` |                                                |
+| `username`     | text?             |                       |                                                |
+| `password`     | text?             |                       |                                                |
+| `topic_prefix` | text              | `uptrakit`            |                                                |
+| `created_at`   | timestamptz       |                       |                                                |
+| `updated_at`   | timestamptz       |                       |                                                |
 
 **Table schema (`mqtt_leases`):**
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | `Uuid::now_v7()` |
-| `tenant_id` | UUID FK → tenants | |
-| `mqtt_client_id` | UUID FK → mqtt_clients (ON DELETE CASCADE) | UNIQUE (one lease per MQTT client config) |
-| `instance_id` | text | MQTT service instance identifier |
-| `acquired_at` | timestamptz | |
-| `last_heartbeat_at` | timestamptz | |
+| Column              | Type                                       | Notes                                     |
+| ------------------- | ------------------------------------------ | ----------------------------------------- |
+| `id`                | UUID PK                                    | `Uuid::now_v7()`                          |
+| `tenant_id`         | UUID FK → tenants                          |                                           |
+| `mqtt_client_id`    | UUID FK → mqtt_clients (ON DELETE CASCADE) | UNIQUE (one lease per MQTT client config) |
+| `instance_id`       | text                                       | MQTT service instance identifier          |
+| `acquired_at`       | timestamptz                                |                                           |
+| `last_heartbeat_at` | timestamptz                                |                                           |
 
 **Global setting (`MqttMaxClientsPerTenant`):**
 
-| DB key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `mqtt.max_clients_per_tenant` | u16 | 10 | Maximum number of MQTT client configurations per tenant |
+| DB key                        | Type | Default | Description                                             |
+| ----------------------------- | ---- | ------- | ------------------------------------------------------- |
+| `mqtt.max_clients_per_tenant` | u16  | 10      | Maximum number of MQTT client configurations per tenant |
 
 **MQTT URL scheme:**
 
-| URL example | Transport | Default port |
-| --- | --- | --- |
-| `mqtt://broker:1883` | tcp | 1883 |
-| `mqtts://broker:8883` | tls | 8883 |
+| URL example           | Transport | Default port |
+| --------------------- | --------- | ------------ |
+| `mqtt://broker:1883`  | tcp       | 1883         |
+| `mqtts://broker:8883` | tls       | 8883         |
 
 The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port` fields. The
 response always includes the computed `url`.
@@ -328,31 +328,31 @@ email delivery. Per-channel config stores only recipient addresses
 Stored in the `global_settings` table. Managed via the `get_global_smtp` / `save_global_smtp`
 shared surface actions on the "SMTP Defaults" panel in Global Settings.
 
-| DB key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `global_smtp.host` | string? | `null` | SMTP server hostname |
-| `global_smtp.port` | u16? | `null` (effective default: 587) | SMTP server port |
-| `global_smtp.username` | string? | `null` | SMTP auth username |
-| `global_smtp.password` | string? | `null` (encrypted) | SMTP auth password (AES-256-GCM) |
-| `global_smtp.from_address` | string? | `null` | Sender email address |
-| `global_smtp.from_name` | string? | `null` | Sender display name |
-| `global_smtp.tls_mode` | string | `"starttls"` | TLS mode: `starttls`, `tls`, or `none` |
-| `global_smtp.helo_host` | string? | `null` | Hostname sent in SMTP EHLO command (defaults to domain of `from_address`) |
+| DB key                     | Type    | Default                         | Description                                                               |
+| -------------------------- | ------- | ------------------------------- | ------------------------------------------------------------------------- |
+| `global_smtp.host`         | string? | `null`                          | SMTP server hostname                                                      |
+| `global_smtp.port`         | u16?    | `null` (effective default: 587) | SMTP server port                                                          |
+| `global_smtp.username`     | string? | `null`                          | SMTP auth username                                                        |
+| `global_smtp.password`     | string? | `null` (encrypted)              | SMTP auth password (AES-256-GCM)                                          |
+| `global_smtp.from_address` | string? | `null`                          | Sender email address                                                      |
+| `global_smtp.from_name`    | string? | `null`                          | Sender display name                                                       |
+| `global_smtp.tls_mode`     | string  | `"starttls"`                    | TLS mode: `starttls`, `tls`, or `none`                                    |
+| `global_smtp.helo_host`    | string? | `null`                          | Hostname sent in SMTP EHLO command (defaults to domain of `from_address`) |
 
 #### Per-tenant SMTP overrides
 
 Stored in the `settings` table (keyed by `tenant_id`). Managed via the `get_smtp` / `save_smtp`
 shared surface actions on the email channel surface.
 
-| DB key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `smtp.host` | string? | `null` | SMTP server hostname (overrides global) |
-| `smtp.port` | u16? | `null` | SMTP server port (overrides global) |
-| `smtp.username` | string? | `null` | SMTP auth username (overrides global) |
-| `smtp.password` | string? | `null` (encrypted) | SMTP auth password (overrides global) |
-| `smtp.from_address` | string? | `null` | Sender email address (overrides global) |
-| `smtp.from_name` | string? | `null` | Sender display name (overrides global) |
-| `smtp.tls_mode` | string | `"starttls"` | TLS mode (overrides global) |
+| DB key              | Type    | Default            | Description                             |
+| ------------------- | ------- | ------------------ | --------------------------------------- |
+| `smtp.host`         | string? | `null`             | SMTP server hostname (overrides global) |
+| `smtp.port`         | u16?    | `null`             | SMTP server port (overrides global)     |
+| `smtp.username`     | string? | `null`             | SMTP auth username (overrides global)   |
+| `smtp.password`     | string? | `null` (encrypted) | SMTP auth password (overrides global)   |
+| `smtp.from_address` | string? | `null`             | Sender email address (overrides global) |
+| `smtp.from_name`    | string? | `null`             | Sender display name (overrides global)  |
+| `smtp.tls_mode`     | string  | `"starttls"`       | TLS mode (overrides global)             |
 
 #### Merge semantics
 
@@ -381,9 +381,9 @@ This setting is only applicable when the controller is compiled with the `nats` 
 
 **Settings stored in the `settings` key-value table (global):**
 
-| DB key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `nats.url` | string? | `null` | NATS server URL (encrypted with AES-256-GCM). |
+| DB key     | Type    | Default | Description                                   |
+| ---------- | ------- | ------- | --------------------------------------------- |
+| `nats.url` | string? | `null`  | NATS server URL (encrypted with AES-256-GCM). |
 
 The stored URL is encrypted at rest using `uptrakit_crypto::encrypt_str` and decrypted at startup during reconciliation.
 
@@ -463,26 +463,26 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 
 **Common flags (shared with agent via `CommonServiceArgs`):**
 
-| Flag | Env var | Default | Description |
-| --- | --- | --- | --- |
-| `--version` | | `false` | Print crate version and build metadata (enabled features, target/cfg/profile) and exit. |
-| `--url` | | required for daemon mode | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. Not required for local-only subcommands (e.g., `uptrakit-agent-ssh host`). |
-| `--tofu` | | `false` | Trust the controller's TLS certificate on first connection (TOFU) with signature verification via `TofuVerifier`. Conflicts with `--ca-cert` and `--pki-addr`. |
-| `--tofu-fingerprint` | | | SHA-256 fingerprint for TOFU verification (hex-encoded, with or without colons). Requires `--tofu`. When set, the fetched CA certificate's fingerprint is compared against this value before trusting it. |
-| `--ca-cert` | | | Path to a PEM-encoded CA certificate file |
-| `--pki-addr` | | | Optional URL for PKI endpoints (CA certificate, OCSP). Supports `http://` and `https://`. |
-| `--config-dir` | `UPTRAKIT_CONFIG_DIR` | platform-specific | Config directory for CA certificate |
-| `--state-dir` | `UPTRAKIT_STATE_DIR` | platform-specific | State directory for service identity (service_id, keypair, certificate) |
-| `--friendly-name` | | hostname | Human-readable display name |
-| `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` | | Enrollment token for auto-approval |
-| `--force-enroll` | | `false` | Force fresh enrollment, discarding existing state (preserves cached CA certificate) |
+| Flag                 | Env var                     | Default                  | Description                                                                                                                                                                                               |
+| -------------------- | --------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--version`          |                             | `false`                  | Print crate version and build metadata (enabled features, target/cfg/profile) and exit.                                                                                                                   |
+| `--url`              |                             | required for daemon mode | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. Not required for local-only subcommands (e.g., `uptrakit-agent-ssh host`).                                                        |
+| `--tofu`             |                             | `false`                  | Trust the controller's TLS certificate on first connection (TOFU) with signature verification via `TofuVerifier`. Conflicts with `--ca-cert` and `--pki-addr`.                                            |
+| `--tofu-fingerprint` |                             |                          | SHA-256 fingerprint for TOFU verification (hex-encoded, with or without colons). Requires `--tofu`. When set, the fetched CA certificate's fingerprint is compared against this value before trusting it. |
+| `--ca-cert`          |                             |                          | Path to a PEM-encoded CA certificate file                                                                                                                                                                 |
+| `--pki-addr`         |                             |                          | Optional URL for PKI endpoints (CA certificate, OCSP). Supports `http://` and `https://`.                                                                                                                 |
+| `--config-dir`       | `UPTRAKIT_CONFIG_DIR`       | platform-specific        | Config directory for CA certificate                                                                                                                                                                       |
+| `--state-dir`        | `UPTRAKIT_STATE_DIR`        | platform-specific        | State directory for service identity (service_id, keypair, certificate)                                                                                                                                   |
+| `--friendly-name`    |                             | hostname                 | Human-readable display name                                                                                                                                                                               |
+| `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` |                          | Enrollment token for auto-approval                                                                                                                                                                        |
+| `--force-enroll`     |                             | `false`                  | Force fresh enrollment, discarding existing state (preserves cached CA certificate)                                                                                                                       |
 
 **MQTT-specific flags:**
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
-| `--ping-interval` | `15` | Ping interval in seconds |
+| Flag              | Default | Description                              |
+| ----------------- | ------- | ---------------------------------------- |
+| `--max-tenants`   | `0`     | Max tenants per instance (0 = unlimited) |
+| `--ping-interval` | `15`    | Ping interval in seconds                 |
 
 **Connection lifecycle (shared with agent via `uptrakit-service-sdk`):**
 
@@ -539,44 +539,44 @@ MQTT services use the unified service entity:
 
 **REST API endpoints (unified services API):**
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| GET | `/api/v1/services?capability=update_tracking&status=...` | ViewAgents | List update-tracking services (filter by capability) |
-| POST | `/api/v1/services/{id}/approve` | ManageAgents | Approve a pending service |
-| POST | `/api/v1/services/{id}/reject` | ManageAgents | Reject a pending service |
-| DELETE | `/api/v1/services/{id}` | ManageAgents | Deactivate a service |
-| POST | `/api/v1/services/enrollment-token` | ManageAgents | Create enrollment token (shared by all service types) |
-| DELETE | `/api/v1/services/enrollment-token` | ManageAgents | Revoke enrollment token |
-| GET | `/api/v1/services/enrollment-token/status` | ManageAgents | Check enrollment token status |
+| Method | Path                                                     | Permission   | Description                                           |
+| ------ | -------------------------------------------------------- | ------------ | ----------------------------------------------------- |
+| GET    | `/api/v1/services?capability=update_tracking&status=...` | ViewAgents   | List update-tracking services (filter by capability)  |
+| POST   | `/api/v1/services/{id}/approve`                          | ManageAgents | Approve a pending service                             |
+| POST   | `/api/v1/services/{id}/reject`                           | ManageAgents | Reject a pending service                              |
+| DELETE | `/api/v1/services/{id}`                                  | ManageAgents | Deactivate a service                                  |
+| POST   | `/api/v1/services/enrollment-token`                      | ManageAgents | Create enrollment token (shared by all service types) |
+| DELETE | `/api/v1/services/enrollment-token`                      | ManageAgents | Revoke enrollment token                               |
+| GET    | `/api/v1/services/enrollment-token/status`               | ManageAgents | Check enrollment token status                         |
 
 **Key files:**
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls) |
-| `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
-| `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
-| `crates/shared/wire/src/messages.rs` | Unified wire protocol messages (`ServiceMessage` / `ControllerMessage`) |
-| `crates/shared/db/src/entity/service.rs` | SeaORM entity for service identity (agents and MQTT) |
-| `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
-| `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
-| `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
-| `crates/shared/service-sdk/` | `uptrakit-service-sdk` crate: shared service SDK — enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, `ControllerConnection`, `Backoff`, and CLI args |
-| `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
-| `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services (with `CancellationToken`-based connection deduplication) |
-| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — local delivery + optional NATS cross-controller publish |
-| `crates/ui/web-api/src/nats_transport.rs` | `NatsTransport` — NATS JetStream transport (feature-gated) |
-| `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic |
-| `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
-| `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
-| `crates/ui/web-api/src/routes/service_ws/mod.rs` | Unified WebSocket entry point (`/api/v1/ws/service`), dispatch, and connection setup |
-| `crates/ui/web-api/src/routes/service_ws/protocol.rs` | Shared WS protocol utilities (serialization, rate limiting, types) |
-| `crates/ui/web-api/src/routes/service_ws/connection.rs` | Connection path handlers (authenticated/enrolled/anonymous) |
-| `crates/ui/web-api/src/routes/service_ws/handler/` | Unified capability-gated WebSocket handler (`pub(crate)`) — organized by concern |
-| `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
-| `crates/core/mqtt/src/main.rs` | Thin standalone adapter, enrollment flow, authenticated main loop |
-| `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
-| `crates/shared/service-sdk/src/connection.rs` | Shared `ControllerConnection` — authenticated WebSocket client for controller communication (used by both agent and MQTT) |
-| `crates/core/mqtt-runtime/src/tenant_manager.rs` | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`) |
-| `crates/core/mqtt-runtime/src/mqtt_client.rs` | MQTT broker connection logic |
-| `crates/core/mqtt-runtime/src/lib.rs` | Shared MQTT runtime state machine and application flow |
+| File                                                    | Purpose                                                                                                                                                                                                                                         |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/web-api-types/src/mqtt_transport.rs`     | `MqttTransport` enum (Tcp/Tls)                                                                                                                                                                                                                  |
+| `crates/shared/web-api-types/src/mqtt_url.rs`           | `MqttUrl` parsing and formatting                                                                                                                                                                                                                |
+| `crates/shared/web-api-types/src/settings_mqtt.rs`      | API request/response types                                                                                                                                                                                                                      |
+| `crates/shared/wire/src/messages.rs`                    | Unified wire protocol messages (`ServiceMessage` / `ControllerMessage`)                                                                                                                                                                         |
+| `crates/shared/db/src/entity/service.rs`                | SeaORM entity for service identity (agents and MQTT)                                                                                                                                                                                            |
+| `crates/shared/db/src/entity/service_certificate.rs`    | SeaORM entity for service certificates                                                                                                                                                                                                          |
+| `crates/shared/db/src/entity/mqtt_client.rs`            | SeaORM entity for MQTT config                                                                                                                                                                                                                   |
+| `crates/shared/db/src/entity/mqtt_lease.rs`             | SeaORM entity for leases (managed by controller)                                                                                                                                                                                                |
+| `crates/shared/service-sdk/`                            | `uptrakit-service-sdk` crate: shared service SDK — enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, `ControllerConnection`, `Backoff`, and CLI args |
+| `crates/ui/web-api/src/mqtt_client_store.rs`            | MQTT client config CRUD store                                                                                                                                                                                                                   |
+| `crates/ui/web-api/src/service_connections.rs`          | `ServiceConnectionRegistry` for all connected services (with `CancellationToken`-based connection deduplication)                                                                                                                                |
+| `crates/ui/web-api/src/notification_service.rs`         | `NotificationService` — local delivery + optional NATS cross-controller publish                                                                                                                                                                 |
+| `crates/ui/web-api/src/nats_transport.rs`               | `NatsTransport` — NATS JetStream transport (feature-gated)                                                                                                                                                                                      |
+| `crates/ui/web-api/src/event_delivery.rs`               | Shared delivery routing logic                                                                                                                                                                                                                   |
+| `crates/ui/web-api/src/mqtt_lease_coordinator.rs`       | Centralized lease management logic                                                                                                                                                                                                              |
+| `crates/ui/web-api/src/routes/settings_mqtt.rs`         | MQTT config API route handlers                                                                                                                                                                                                                  |
+| `crates/ui/web-api/src/routes/service_ws/mod.rs`        | Unified WebSocket entry point (`/api/v1/ws/service`), dispatch, and connection setup                                                                                                                                                            |
+| `crates/ui/web-api/src/routes/service_ws/protocol.rs`   | Shared WS protocol utilities (serialization, rate limiting, types)                                                                                                                                                                              |
+| `crates/ui/web-api/src/routes/service_ws/connection.rs` | Connection path handlers (authenticated/enrolled/anonymous)                                                                                                                                                                                     |
+| `crates/ui/web-api/src/routes/service_ws/handler/`      | Unified capability-gated WebSocket handler (`pub(crate)`) — organized by concern                                                                                                                                                                |
+| `crates/ui/web-api/src/routes/services.rs`              | Unified service management REST endpoints                                                                                                                                                                                                       |
+| `crates/core/mqtt/src/main.rs`                          | Thin standalone adapter, enrollment flow, authenticated main loop                                                                                                                                                                               |
+| `crates/core/mqtt/src/cli.rs`                           | CLI argument definitions                                                                                                                                                                                                                        |
+| `crates/shared/service-sdk/src/connection.rs`           | Shared `ControllerConnection` — authenticated WebSocket client for controller communication (used by both agent and MQTT)                                                                                                                       |
+| `crates/core/mqtt-runtime/src/tenant_manager.rs`        | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`)                                                                                                                                                                    |
+| `crates/core/mqtt-runtime/src/mqtt_client.rs`           | MQTT broker connection logic                                                                                                                                                                                                                    |
+| `crates/core/mqtt-runtime/src/lib.rs`                   | Shared MQTT runtime state machine and application flow                                                                                                                                                                                          |

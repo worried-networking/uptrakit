@@ -58,8 +58,8 @@ layer needing to depend on wire.
   convention (matches `plugin_role.rs`, `plugin_capability.rs`, etc.). Add
   `mod config_test_kind; pub use config_test_kind::ConfigTestKind;` to `types/src/lib.rs`.
   The new file must carry a doc comment on the enum: `// WIRE TYPE — used in
-  TestPluginConfigPayload; must follow the Other(String) catch-all pattern before new
-  variants are added (see coding-standards.md).` This preserves the wire context that is
+TestPluginConfigPayload; must follow the Other(String) catch-all pattern before new
+variants are added (see coding-standards.md).` This preserves the wire context that is
   otherwise lost once the definition moves out of payloads.rs.
 - `wire/src/payloads.rs`: replace the inline definition with
   **`pub use uptrakit_shared_types::ConfigTestKind;`** (must be `pub use`, not bare `use` —
@@ -90,15 +90,15 @@ explicit variant arrays, not `match` statements — no test changes needed.
 
 Five files, seven import sites. Required changes:
 
-| File | Current import | Replacement |
-| ---- | -------------- | ----------- |
-| `src/lib.rs` | `pub use uptrakit_wire::ConfigTestKind;` | `pub use uptrakit_shared_types::ConfigTestKind;` |
-| `src/lib.rs` | `pub use uptrakit_wire::surfaces;` | `pub use uptrakit_surfaces as surfaces;` |
-| `src/descriptor.rs` | `use uptrakit_wire::{ConfigTestKind, surfaces};` | `use uptrakit_shared_types::ConfigTestKind; use uptrakit_surfaces as surfaces;` |
-| `src/roles.rs` | `use uptrakit_wire::surfaces::{SurfaceActionRequest, SurfaceActionResponse};` | `use uptrakit_surfaces::{SurfaceActionRequest, SurfaceActionResponse};` |
-| `src/plugin_ops.rs` | `use uptrakit_wire::surfaces;` | `use uptrakit_surfaces as surfaces;` |
-| `src/catalog.rs` | `fn surface_registrations(...) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration>` | `Vec<uptrakit_surfaces::SurfaceRegistration>` |
-| `src/catalog.rs` (test mod) | `use uptrakit_wire::surfaces;` | `use uptrakit_surfaces as surfaces;` |
+| File                        | Current import                                                                       | Replacement                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `src/lib.rs`                | `pub use uptrakit_wire::ConfigTestKind;`                                             | `pub use uptrakit_shared_types::ConfigTestKind;`                                |
+| `src/lib.rs`                | `pub use uptrakit_wire::surfaces;`                                                   | `pub use uptrakit_surfaces as surfaces;`                                        |
+| `src/descriptor.rs`         | `use uptrakit_wire::{ConfigTestKind, surfaces};`                                     | `use uptrakit_shared_types::ConfigTestKind; use uptrakit_surfaces as surfaces;` |
+| `src/roles.rs`              | `use uptrakit_wire::surfaces::{SurfaceActionRequest, SurfaceActionResponse};`        | `use uptrakit_surfaces::{SurfaceActionRequest, SurfaceActionResponse};`         |
+| `src/plugin_ops.rs`         | `use uptrakit_wire::surfaces;`                                                       | `use uptrakit_surfaces as surfaces;`                                            |
+| `src/catalog.rs`            | `fn surface_registrations(...) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration>` | `Vec<uptrakit_surfaces::SurfaceRegistration>`                                   |
+| `src/catalog.rs` (test mod) | `use uptrakit_wire::surfaces;`                                                       | `use uptrakit_surfaces as surfaces;`                                            |
 
 Start with `grep -r 'uptrakit_wire' crates/plugins/infrastructure/core/` to confirm no sites
 were added since this spec was written.

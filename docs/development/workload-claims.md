@@ -45,12 +45,12 @@ up failover.
 Located in `crates/ui/web-api/src/workload_claims.rs`. Thread-safe via
 `parking_lot::RwLock`. Maintains:
 
-| Index | Type | Purpose |
-| --- | --- | --- |
-| `claims` | `HashMap<String, ClaimOwner>` | Config key to owner (service_id, controller_id, tenant_id, timestamp) |
-| `by_service` | `HashMap<Uuid, BTreeSet<String>>` | Reverse index for fast release on disconnect |
-| `tenant_services` | `HashMap<Uuid, BTreeSet<Uuid>>` | Tenant routing index for SoftwareStates delivery |
-| `pending_desires` | `HashMap<Uuid, BTreeMap<String, Uuid>>` | Rejected claims for proactive re-grant |
+| Index             | Type                                    | Purpose                                                               |
+| ----------------- | --------------------------------------- | --------------------------------------------------------------------- |
+| `claims`          | `HashMap<String, ClaimOwner>`           | Config key to owner (service_id, controller_id, tenant_id, timestamp) |
+| `by_service`      | `HashMap<Uuid, BTreeSet<String>>`       | Reverse index for fast release on disconnect                          |
+| `tenant_services` | `HashMap<Uuid, BTreeSet<Uuid>>`         | Tenant routing index for SoftwareStates delivery                      |
+| `pending_desires` | `HashMap<Uuid, BTreeMap<String, Uuid>>` | Rejected claims for proactive re-grant                                |
 
 ### Tenant-scoped delivery
 
@@ -72,37 +72,37 @@ configured.
 
 ## Wire Messages
 
-| Message | Direction | Wire type | Purpose |
-| --- | --- | --- | --- |
-| `WorkloadClaim` | Service to Controller | `workload_claim` | Request exclusive ownership of config keys |
-| `WorkloadClaimResult` | Controller to Service | `workload_claim_result` | Grant/reject response |
-| `WorkloadRelease` | Service to Controller | `workload_release` | Voluntarily release specific config keys |
-| `WorkloadClaimAnnouncement` | Controller to NATS | `workload_claim_announcement` | Sync claims across controllers |
-| `WorkloadClaimSyncRequest` | Controller to NATS | `workload_claim_sync_request` | Request claim state from peers |
-| `WorkloadClaimSyncResponse` | Controller to NATS | `workload_claim_sync_response` | Respond with local claim state |
+| Message                     | Direction             | Wire type                      | Purpose                                    |
+| --------------------------- | --------------------- | ------------------------------ | ------------------------------------------ |
+| `WorkloadClaim`             | Service to Controller | `workload_claim`               | Request exclusive ownership of config keys |
+| `WorkloadClaimResult`       | Controller to Service | `workload_claim_result`        | Grant/reject response                      |
+| `WorkloadRelease`           | Service to Controller | `workload_release`             | Voluntarily release specific config keys   |
+| `WorkloadClaimAnnouncement` | Controller to NATS    | `workload_claim_announcement`  | Sync claims across controllers             |
+| `WorkloadClaimSyncRequest`  | Controller to NATS    | `workload_claim_sync_request`  | Request claim state from peers             |
+| `WorkloadClaimSyncResponse` | Controller to NATS    | `workload_claim_sync_response` | Respond with local claim state             |
 
 See [Wire Protocol](../api/wire-protocol.md#workload-claim-protocol) for
 payload schemas and examples.
 
 ## Key Files
 
-| File | Description |
-| --- | --- |
-| `crates/shared/wire/src/payloads.rs` | Wire payload types (`WorkloadClaimPayload`, etc.) |
-| `crates/shared/wire/src/capabilities.rs` | `Capability::WorkloadClaims` variant |
-| `crates/ui/web-api/src/workload_claims.rs` | `WorkloadClaimRegistry` implementation |
-| `crates/ui/web-api/src/routes/service_ws/handler/workload.rs` | WebSocket claim/release handlers |
-| `crates/ui/web-api/src/event_delivery.rs` | NATS routing with tenant-scoped delivery |
-| `crates/ui/web-api/src/notification_service.rs` | Tenant-scoped SoftwareStates delivery |
-| `crates/core/mqtt/src/main.rs` | MQTT service claim protocol implementation |
+| File                                                          | Description                                       |
+| ------------------------------------------------------------- | ------------------------------------------------- |
+| `crates/shared/wire/src/payloads.rs`                          | Wire payload types (`WorkloadClaimPayload`, etc.) |
+| `crates/shared/wire/src/capabilities.rs`                      | `Capability::WorkloadClaims` variant              |
+| `crates/ui/web-api/src/workload_claims.rs`                    | `WorkloadClaimRegistry` implementation            |
+| `crates/ui/web-api/src/routes/service_ws/handler/workload.rs` | WebSocket claim/release handlers                  |
+| `crates/ui/web-api/src/event_delivery.rs`                     | NATS routing with tenant-scoped delivery          |
+| `crates/ui/web-api/src/notification_service.rs`               | Tenant-scoped SoftwareStates delivery             |
+| `crates/core/mqtt/src/main.rs`                                | MQTT service claim protocol implementation        |
 
 ## Scale Considerations
 
-| Parameter | Limit | Notes |
-| --- | --- | --- |
-| Keys per claim message | 100,000 | `MAX_WORKLOAD_CLAIM_KEYS` |
+| Parameter              | Limit     | Notes                        |
+| ---------------------- | --------- | ---------------------------- |
+| Keys per claim message | 100,000   | `MAX_WORKLOAD_CLAIM_KEYS`    |
 | Service config entries | 1,000,000 | `MAX_SERVICE_CONFIG_ENTRIES` |
-| Memory at 1M keys | ~250 MB | Registry + reverse indexes |
+| Memory at 1M keys      | ~250 MB   | Registry + reverse indexes   |
 
 ## Testing
 

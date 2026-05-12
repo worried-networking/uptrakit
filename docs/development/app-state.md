@@ -11,13 +11,13 @@ the sub-states they actually need.
 
 ## Focused Sub-States
 
-| Sub-state | Field path on `AppState` | Purpose |
-| --- | --- | --- |
-| `DbState` | `state.db` | Wraps `DatabaseConnection`; exposes `db()` accessor |
-| `AuthState` | `state.auth` | JWT, session, rate-limit, device-flow stores |
-| `BroadcastState` | `state.broadcast` | SSE event broadcaster, device-flow broadcaster |
-| `CertState` | `state.cert` | CA snapshot, CRL cache, CA key store |
-| `OidcState` | `state.oidc` | OIDC provider stores (`#[cfg(feature = "oidc")]`) |
+| Sub-state        | Field path on `AppState` | Purpose                                             |
+| ---------------- | ------------------------ | --------------------------------------------------- |
+| `DbState`        | `state.db`               | Wraps `DatabaseConnection`; exposes `db()` accessor |
+| `AuthState`      | `state.auth`             | JWT, session, rate-limit, device-flow stores        |
+| `BroadcastState` | `state.broadcast`        | SSE event broadcaster, device-flow broadcaster      |
+| `CertState`      | `state.cert`             | CA snapshot, CRL cache, CA key store                |
+| `OidcState`      | `state.oidc`             | OIDC provider stores (`#[cfg(feature = "oidc")]`)   |
 
 All five implement `FromRef<Arc<AppState>>` (not derived — `Arc<Struct>` is unsupported by the
 derive macro). The `OidcState` impl is gated with `#[cfg(feature = "oidc")]`.
@@ -56,9 +56,9 @@ pub async fn readyz(
 Two typed service extractors eliminate manual `Service::new(state.db().clone())` boilerplate
 in route handlers. Both are defined in `crates/ui/web-api/src/extract.rs`.
 
-| Extractor | Wraps | Bound |
-| --- | --- | --- |
-| `SessionSvc` | `SessionService` | `DbState: FromRef<S>` |
+| Extractor     | Wraps             | Bound                 |
+| ------------- | ----------------- | --------------------- |
+| `SessionSvc`  | `SessionService`  | `DbState: FromRef<S>` |
 | `ApiTokenSvc` | `ApiTokenService` | `DbState: FromRef<S>` |
 
 Both implement `Deref<Target = Service>` so method calls work transparently.
@@ -91,13 +91,13 @@ Both are re-exported from `uptrakit_web_api_auth::auth::{SessionOps, ApiTokenOps
 Every `async fn` in `crates/ui/web-api/src/routes/` is classified in
 `crates/ui/web-api/db_access_policy.toml`:
 
-| Classification | Meaning |
-| --- | --- |
-| `tenant-agnostic` | Uses `State<DbState>`, never `TenantDb` or full `AppState` |
-| `tenant-scoped` | Uses `TenantDb`, never `State<DbState>` or full `AppState` |
-| `no-db` | No database access at all |
-| `full-state` | Uses `State<Arc<AppState>>` (uncovered fields; migration pending) |
-| `ignore` | Non-handler helper function; not validated |
+| Classification    | Meaning                                                           |
+| ----------------- | ----------------------------------------------------------------- |
+| `tenant-agnostic` | Uses `State<DbState>`, never `TenantDb` or full `AppState`        |
+| `tenant-scoped`   | Uses `TenantDb`, never `State<DbState>` or full `AppState`        |
+| `no-db`           | No database access at all                                         |
+| `full-state`      | Uses `State<Arc<AppState>>` (uncovered fields; migration pending) |
+| `ignore`          | Non-handler helper function; not validated                        |
 
 The CI script `ci/verify_db_access_policy.py` checks every handler against this policy on
 every CI run. To update after adding or changing a handler:

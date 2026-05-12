@@ -19,14 +19,14 @@ execution.
 
 ### Attack Surface
 
-| Surface | Mitigation |
-| --- | --- |
-| Unauthorized stdin access | `ManageSoftware` permission required |
-| Session hijacking | Single-writer enforcement; authenticated WebSocket |
-| Stdin data interception | TLS encryption on all WebSocket connections |
-| Denial of service via stdin flooding | Rate limit: 1000 messages/sec; 64 KB per message |
-| Cross-tenant access | Tenant-scoped update history validation |
-| NATS message injection | `UpdateStdinData` is not NATS-publishable |
+| Surface                              | Mitigation                                         |
+| ------------------------------------ | -------------------------------------------------- |
+| Unauthorized stdin access            | `ManageSoftware` permission required               |
+| Session hijacking                    | Single-writer enforcement; authenticated WebSocket |
+| Stdin data interception              | TLS encryption on all WebSocket connections        |
+| Denial of service via stdin flooding | Rate limit: 1000 messages/sec; 64 KB per message   |
+| Cross-tenant access                  | Tenant-scoped update history validation            |
+| NATS message injection               | `UpdateStdinData` is not NATS-publishable          |
 
 ## Permission Model
 
@@ -79,11 +79,11 @@ direct WebSocket connection between the controller and the specific agent.
 
 ### Data Limits
 
-| Limit | Value | Purpose |
-| --- | --- | --- |
-| `MAX_STDIN_DATA_LEN` | 64 KB | Maximum base64-encoded stdin data per message |
-| Rate limit | 1000 messages/sec | Prevents stdin flooding |
-| Signal values | 2 (SIGINT), 15 (SIGTERM) | Only safe signals allowed |
+| Limit                | Value                    | Purpose                                       |
+| -------------------- | ------------------------ | --------------------------------------------- |
+| `MAX_STDIN_DATA_LEN` | 64 KB                    | Maximum base64-encoded stdin data per message |
+| Rate limit           | 1000 messages/sec        | Prevents stdin flooding                       |
+| Signal values        | 2 (SIGINT), 15 (SIGTERM) | Only safe signals allowed                     |
 
 ### Capability Gating
 
@@ -113,12 +113,12 @@ pattern).
 
 ## Graceful Degradation
 
-| Failure | Behavior |
-| --- | --- |
-| PTY allocation fails | Update runs non-interactive; warning logged |
-| Agent lacks `InteractiveUpdates` | Controller returns HTTP 409 |
-| Admin disconnects mid-update | Update continues; stdin channel closes (process sees EOF) |
-| Agent disconnects mid-session | Controller broadcasts error; frontend shows disconnect |
+| Failure                          | Behavior                                                  |
+| -------------------------------- | --------------------------------------------------------- |
+| PTY allocation fails             | Update runs non-interactive; warning logged               |
+| Agent lacks `InteractiveUpdates` | Controller returns HTTP 409                               |
+| Admin disconnects mid-update     | Update continues; stdin channel closes (process sees EOF) |
+| Agent disconnects mid-session    | Controller broadcasts error; frontend shows disconnect    |
 
 ## See Also
 

@@ -30,13 +30,13 @@ the controller's internal CA for the backend connection.
 Configure the controller via CLI flags, the Web UI (Settings > Network), or the REST API (`/api/v1/settings/network`). CLI flags seed the database on
 first run; thereafter the DB value takes precedence unless `--force-settings-override` is used.
 
-| Flag | DB key | Purpose |
-| --- | --- | --- |
-| `--trusted-proxy` | `network.trusted_proxies` | IP or CIDR of the proxy. Required in L7 mode. |
-| `--real-ip-header` | `network.real_ip_header` | Header carrying the client IP (defaults to `X-Forwarded-For`). |
-| `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | Header carrying structured cert info (`X-Forwarded-Client-Cert-Info` recommended). |
-| `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | Header carrying PEM-encoded cert (use when structured info is unavailable). |
-| `--pki-addr` | `network.pki_addr` | URL for PKI endpoints (`http://` recommended for OCSP support). Use with `--pki-http=listener` or `external`. |
+| Flag                                  | DB key                                      | Purpose                                                                                                       |
+| ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--trusted-proxy`                     | `network.trusted_proxies`                   | IP or CIDR of the proxy. Required in L7 mode.                                                                 |
+| `--real-ip-header`                    | `network.real_ip_header`                    | Header carrying the client IP (defaults to `X-Forwarded-For`).                                                |
+| `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | Header carrying structured cert info (`X-Forwarded-Client-Cert-Info` recommended).                            |
+| `--forwarded-client-cert-pem-header`  | `network.forwarded_client_cert_pem_header`  | Header carrying PEM-encoded cert (use when structured info is unavailable).                                   |
+| `--pki-addr`                          | `network.pki_addr`                          | URL for PKI endpoints (`http://` recommended for OCSP support). Use with `--pki-http=listener` or `external`. |
 
 Run the controller with the corresponding flags or set the values via the UI/API. Runtime changes via the UI or API apply immediately.
 

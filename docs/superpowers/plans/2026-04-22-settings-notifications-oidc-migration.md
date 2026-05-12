@@ -16,14 +16,14 @@ Each file is a standalone commit.
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `frontend/src/routes/settings/NotificationRulesSettings.svelte` | Add Button import; migrate Add Rule, per-row Edit/Delete, pagination Previous/Next, modal submit |
-| `frontend/src/routes/settings/NotificationLogView.svelte` | Add Button import; introduce `isRetrying` state; migrate single Retry button inside `{#snippet errorActions()}` |
-| `frontend/src/routes/settings/OidcProvidersSettings.svelte` | Add Button import; introduce `saving` + `togglingProviderId` state; wrap `saveOidcProvider`/`toggleOidcActive` in try/finally; migrate Add Provider, Edit, Activate/Deactivate, Delete, Cancel, modal submit |
-| `frontend/src/routes/settings/NotificationRulesSettings.test.ts` | Create — unit tests for all migrated buttons |
-| `frontend/src/routes/settings/NotificationLogView.test.ts` | Create — unit tests for Retry button + isRetrying |
-| `frontend/src/routes/settings/OidcProvidersSettings.test.ts` | Create — unit tests for all migrated buttons including per-row toggle isolation |
+| File                                                             | Change                                                                                                                                                                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `frontend/src/routes/settings/NotificationRulesSettings.svelte`  | Add Button import; migrate Add Rule, per-row Edit/Delete, pagination Previous/Next, modal submit                                                                                                             |
+| `frontend/src/routes/settings/NotificationLogView.svelte`        | Add Button import; introduce `isRetrying` state; migrate single Retry button inside `{#snippet errorActions()}`                                                                                              |
+| `frontend/src/routes/settings/OidcProvidersSettings.svelte`      | Add Button import; introduce `saving` + `togglingProviderId` state; wrap `saveOidcProvider`/`toggleOidcActive` in try/finally; migrate Add Provider, Edit, Activate/Deactivate, Delete, Cancel, modal submit |
+| `frontend/src/routes/settings/NotificationRulesSettings.test.ts` | Create — unit tests for all migrated buttons                                                                                                                                                                 |
+| `frontend/src/routes/settings/NotificationLogView.test.ts`       | Create — unit tests for Retry button + isRetrying                                                                                                                                                            |
+| `frontend/src/routes/settings/OidcProvidersSettings.test.ts`     | Create — unit tests for all migrated buttons including per-row toggle isolation                                                                                                                              |
 
 ---
 
@@ -38,14 +38,14 @@ Each file is a standalone commit.
 
 Six raw `<button>` sites in this file:
 
-| Location | Current classes | Target |
-| --- | --- | --- |
-| Line 156 — Add Rule | `btn preset-filled-primary-500 btn-sm` | `variant="primary" size="sm"` |
-| Line 191 — per-row Edit | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| Lines 192–196 — per-row Delete | `btn btn-sm preset-filled-error-500` | `variant="danger" size="sm"` |
-| Lines 207–214 — pagination Previous | `btn btn-sm preset-tonal` + `disabled` | `variant="secondary" size="sm"` + passthrough `disabled` |
-| Lines 219–225 — pagination Next | `btn btn-sm preset-tonal` + `disabled` | `variant="secondary" size="sm"` + passthrough `disabled` |
-| Line 290 — modal submit | `btn preset-filled-primary-500` + `disabled={saving}` + text swap | `variant="primary" loading={saving}` + static children `{editingRule ? 'Update' : 'Create'}` |
+| Location                            | Current classes                                                   | Target                                                                                       |
+| ----------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Line 156 — Add Rule                 | `btn preset-filled-primary-500 btn-sm`                            | `variant="primary" size="sm"`                                                                |
+| Line 191 — per-row Edit             | `btn btn-sm preset-tonal`                                         | `variant="secondary" size="sm"`                                                              |
+| Lines 192–196 — per-row Delete      | `btn btn-sm preset-filled-error-500`                              | `variant="danger" size="sm"`                                                                 |
+| Lines 207–214 — pagination Previous | `btn btn-sm preset-tonal` + `disabled`                            | `variant="secondary" size="sm"` + passthrough `disabled`                                     |
+| Lines 219–225 — pagination Next     | `btn btn-sm preset-tonal` + `disabled`                            | `variant="secondary" size="sm"` + passthrough `disabled`                                     |
+| Line 290 — modal submit             | `btn preset-filled-primary-500` + `disabled={saving}` + text swap | `variant="primary" loading={saving}` + static children `{editingRule ? 'Update' : 'Create'}` |
 
 The `saving` flag already exists in the script (line 42). The modal submit is inside a `<form onsubmit>` — keep
 `type="submit"` or use `onclick={() => void saveRule()}` consistent with the existing `<button type="submit">` pattern.
@@ -57,28 +57,28 @@ Since the current button has no explicit `type="submit"` and the form uses `onsu
 Create `frontend/src/routes/settings/NotificationRulesSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   listNotificationRules: vi.fn(),
   listNotificationChannels: vi.fn(),
   createNotificationRule: vi.fn(),
   updateNotificationRule: vi.fn(),
-  deleteNotificationRule: vi.fn()
+  deleteNotificationRule: vi.fn(),
 }));
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/notifications.svelte", () => ({
   showSuccess: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
 }));
 
-import * as api from '$lib/api';
-import NotificationRulesSettings from './NotificationRulesSettings.svelte';
+import * as api from "$lib/api";
+import NotificationRulesSettings from "./NotificationRulesSettings.svelte";
 
 const defaultProps = {
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 function stubApis() {
@@ -86,185 +86,189 @@ function stubApis() {
     items: [],
     total: 0,
     page: 1,
-    total_pages: 1
+    total_pages: 1,
   });
   vi.mocked(api.listNotificationChannels).mockResolvedValue({
-    items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
+    items: [{ id: "ch1", name: "Channel A", channel_type: "webhook" }],
     total: 1,
     page: 1,
-    total_pages: 1
+    total_pages: 1,
   });
 }
 
 afterEach(() => vi.clearAllMocks());
 
-describe('NotificationRulesSettings — button variants', () => {
-  it('Add Rule button has no raw preset-filled-primary-500 class', async () => {
+describe("NotificationRulesSettings — button variants", () => {
+  it("Add Rule button has no raw preset-filled-primary-500 class", async () => {
     stubApis();
     const { container } = render(NotificationRulesSettings, defaultProps);
     await waitFor(() => expect(api.listNotificationRules).toHaveBeenCalled());
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Add Rule button has primary variant class (accent gradient)', async () => {
+  it("Add Rule button has primary variant class (accent gradient)", async () => {
     stubApis();
     const { container } = render(NotificationRulesSettings, defaultProps);
     await waitFor(() => expect(api.listNotificationRules).toHaveBeenCalled());
-    const btn = screen.getByRole('button', { name: 'Add Rule' });
-    expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const btn = screen.getByRole("button", { name: "Add Rule" });
+    expect(btn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
-  it('Add Rule button has sm size class (h-[19px])', async () => {
+  it("Add Rule button has sm size class (h-[19px])", async () => {
     stubApis();
     const { container } = render(NotificationRulesSettings, defaultProps);
     await waitFor(() => expect(api.listNotificationRules).toHaveBeenCalled());
-    const btn = screen.getByRole('button', { name: 'Add Rule' });
-    expect(btn.className).toContain('h-[19px]');
+    const btn = screen.getByRole("button", { name: "Add Rule" });
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('per-row Edit button has secondary variant class and sm size', async () => {
+  it("per-row Edit button has secondary variant class and sm size", async () => {
     vi.mocked(api.listNotificationRules).mockResolvedValue({
       items: [
         {
-          id: 'r1',
-          channel_id: 'ch1',
-          event_type: 'update_available',
+          id: "r1",
+          channel_id: "ch1",
+          event_type: "update_available",
           host_id: null,
           software_item_id: null,
           plugin_type: null,
           enabled: true,
-          created_at: '2026-01-01T00:00:00Z'
-        }
+          created_at: "2026-01-01T00:00:00Z",
+        },
       ],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
-      items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
+      items: [{ id: "ch1", name: "Channel A", channel_type: "webhook" }],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationRulesSettings, defaultProps);
-    const btn = await screen.findByRole('button', { name: 'Edit' });
-    expect(btn.className).toContain('bg-[var(--bg-raised)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = await screen.findByRole("button", { name: "Edit" });
+    expect(btn.className).toContain("bg-[var(--bg-raised)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('per-row Delete button has danger variant class and sm size', async () => {
+  it("per-row Delete button has danger variant class and sm size", async () => {
     vi.mocked(api.listNotificationRules).mockResolvedValue({
       items: [
         {
-          id: 'r1',
-          channel_id: 'ch1',
-          event_type: 'update_available',
+          id: "r1",
+          channel_id: "ch1",
+          event_type: "update_available",
           host_id: null,
           software_item_id: null,
           plugin_type: null,
           enabled: true,
-          created_at: '2026-01-01T00:00:00Z'
-        }
+          created_at: "2026-01-01T00:00:00Z",
+        },
       ],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
-      items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
+      items: [{ id: "ch1", name: "Channel A", channel_type: "webhook" }],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationRulesSettings, defaultProps);
-    const btn = await screen.findByRole('button', { name: 'Delete' });
-    expect(btn.className).toContain('bg-[var(--color-error-bg)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = await screen.findByRole("button", { name: "Delete" });
+    expect(btn.className).toContain("bg-[var(--color-error-bg)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('pagination Previous/Next buttons have secondary variant and sm size', async () => {
+  it("pagination Previous/Next buttons have secondary variant and sm size", async () => {
     vi.mocked(api.listNotificationRules).mockResolvedValue({
       items: [
         {
-          id: 'r1',
-          channel_id: 'ch1',
-          event_type: 'update_available',
+          id: "r1",
+          channel_id: "ch1",
+          event_type: "update_available",
           host_id: null,
           software_item_id: null,
           plugin_type: null,
           enabled: true,
-          created_at: '2026-01-01T00:00:00Z'
-        }
+          created_at: "2026-01-01T00:00:00Z",
+        },
       ],
       total: 1,
       page: 1,
-      total_pages: 3
+      total_pages: 3,
     });
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
-      items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
+      items: [{ id: "ch1", name: "Channel A", channel_type: "webhook" }],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationRulesSettings, defaultProps);
-    const prev = await screen.findByRole('button', { name: 'Previous' });
-    const next = screen.getByRole('button', { name: 'Next' });
-    expect(prev.className).toContain('bg-[var(--bg-raised)]');
-    expect(prev.className).toContain('h-[19px]');
-    expect(next.className).toContain('bg-[var(--bg-raised)]');
-    expect(next.className).toContain('h-[19px]');
+    const prev = await screen.findByRole("button", { name: "Previous" });
+    const next = screen.getByRole("button", { name: "Next" });
+    expect(prev.className).toContain("bg-[var(--bg-raised)]");
+    expect(prev.className).toContain("h-[19px]");
+    expect(next.className).toContain("bg-[var(--bg-raised)]");
+    expect(next.className).toContain("h-[19px]");
   });
 
-  it('modal submit carries aria-busy=true while save is in flight', async () => {
+  it("modal submit carries aria-busy=true while save is in flight", async () => {
     stubApis();
     let resolve!: () => void;
     vi.mocked(api.createNotificationRule).mockReturnValue(
       new Promise((r) => {
         resolve = () => r({} as never);
-      })
+      }),
     );
     render(NotificationRulesSettings, defaultProps);
     await waitFor(() => expect(api.listNotificationRules).toHaveBeenCalled());
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
-    const submitBtn = await screen.findByRole('button', { name: 'Create' });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Rule" }));
+    const submitBtn = await screen.findByRole("button", { name: "Create" });
     await fireEvent.click(submitBtn);
 
-    await waitFor(() => expect(submitBtn).toHaveAttribute('aria-busy', 'true'));
-    expect(submitBtn).toHaveTextContent('Create');
+    await waitFor(() => expect(submitBtn).toHaveAttribute("aria-busy", "true"));
+    expect(submitBtn).toHaveTextContent("Create");
 
     resolve();
-    await waitFor(() => expect(submitBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(submitBtn).not.toHaveAttribute("aria-busy"));
   });
 
-  it('modal submit text is Update when editing a rule', async () => {
+  it("modal submit text is Update when editing a rule", async () => {
     vi.mocked(api.listNotificationRules).mockResolvedValue({
       items: [
         {
-          id: 'r1',
-          channel_id: 'ch1',
-          event_type: 'update_available',
+          id: "r1",
+          channel_id: "ch1",
+          event_type: "update_available",
           host_id: null,
           software_item_id: null,
           plugin_type: null,
           enabled: true,
-          created_at: '2026-01-01T00:00:00Z'
-        }
+          created_at: "2026-01-01T00:00:00Z",
+        },
       ],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
-      items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
+      items: [{ id: "ch1", name: "Channel A", channel_type: "webhook" }],
       total: 1,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationRulesSettings, defaultProps);
-    const editBtn = await screen.findByRole('button', { name: 'Edit' });
+    const editBtn = await screen.findByRole("button", { name: "Edit" });
     await fireEvent.click(editBtn);
-    await screen.findByRole('button', { name: 'Update' });
+    await screen.findByRole("button", { name: "Update" });
   });
 });
 ```
@@ -481,85 +485,92 @@ used for loading is `listNotificationLog` (imported at line 2, called at line 43
 Create `frontend/src/routes/settings/NotificationLogView.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   listNotificationLog: vi.fn(),
-  listNotificationChannels: vi.fn()
+  listNotificationChannels: vi.fn(),
 }));
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
 
-import * as api from '$lib/api';
-import NotificationLogView from './NotificationLogView.svelte';
+import * as api from "$lib/api";
+import NotificationLogView from "./NotificationLogView.svelte";
 
 afterEach(() => vi.clearAllMocks());
 
-describe('NotificationLogView Retry button', () => {
-  it('Retry button has no raw preset-filled-primary-500 class', async () => {
-    vi.mocked(api.listNotificationLog).mockRejectedValue(new Error('network error'));
+describe("NotificationLogView Retry button", () => {
+  it("Retry button has no raw preset-filled-primary-500 class", async () => {
+    vi.mocked(api.listNotificationLog).mockRejectedValue(
+      new Error("network error"),
+    );
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     const { container } = render(NotificationLogView);
-    await screen.findByRole('button', { name: 'Retry' });
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    await screen.findByRole("button", { name: "Retry" });
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Retry button has primary variant class (accent gradient)', async () => {
-    vi.mocked(api.listNotificationLog).mockRejectedValue(new Error('network error'));
+  it("Retry button has primary variant class (accent gradient)", async () => {
+    vi.mocked(api.listNotificationLog).mockRejectedValue(
+      new Error("network error"),
+    );
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationLogView);
-    const btn = await screen.findByRole('button', { name: 'Retry' });
-    expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const btn = await screen.findByRole("button", { name: "Retry" });
+    expect(btn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
-  it('Retry button carries aria-busy=true while retry is in flight', async () => {
+  it("Retry button carries aria-busy=true while retry is in flight", async () => {
     vi.mocked(api.listNotificationLog)
-      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error("network error"))
       .mockReturnValue(new Promise(() => {}));
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationLogView);
-    const btn = await screen.findByRole('button', { name: 'Retry' });
+    const btn = await screen.findByRole("button", { name: "Retry" });
     await fireEvent.click(btn);
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
   });
 
-  it('aria-busy clears after retry resolves', async () => {
+  it("aria-busy clears after retry resolves", async () => {
     let resolve!: () => void;
     vi.mocked(api.listNotificationLog)
-      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error("network error"))
       .mockReturnValue(
         new Promise((r) => {
-          resolve = () =>
-            r({ items: [], total: 0, page: 1, total_pages: 1 });
-        })
+          resolve = () => r({ items: [], total: 0, page: 1, total_pages: 1 });
+        }),
       );
     vi.mocked(api.listNotificationChannels).mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
-      total_pages: 1
+      total_pages: 1,
     });
     render(NotificationLogView);
-    const btn = await screen.findByRole('button', { name: 'Retry' });
+    const btn = await screen.findByRole("button", { name: "Retry" });
     await fireEvent.click(btn);
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
     resolve();
-    await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy"));
   });
 });
 ```
@@ -665,15 +676,15 @@ git commit -m "feat(ui): migrate NotificationLogView to Button primitive (#3e st
 
 Six raw `<button>` sites in this file:
 
-| Location | Current classes | Target |
-| --- | --- | --- |
-| Line 199 — Add Provider | `btn preset-filled-primary-500` | `variant="primary"` |
-| Line 229 — per-row Edit | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| Line 231 — per-row Deactivate | `btn btn-sm preset-tonal-warning` | `variant="secondary" size="sm" loading={togglingProviderId === provider.id}` |
-| Line 235 — per-row Activate | `btn btn-sm preset-tonal-success` | `variant="secondary" size="sm" loading={togglingProviderId === provider.id}` |
-| Line 239 — per-row Delete | `btn btn-sm preset-tonal-error` | `variant="danger" size="sm"` |
-| Line 362 — modal Cancel | `btn preset-tonal-surface` | `variant="secondary"` |
-| Line 363 — modal submit | `btn preset-filled-primary-500` + `disabled={!getIsOnline()}` + conditional text | `variant="primary" loading={saving} disabled={!getIsOnline()}` + static children `{editingProvider ? 'Update' : 'Create'}` |
+| Location                      | Current classes                                                                  | Target                                                                                                                     |
+| ----------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Line 199 — Add Provider       | `btn preset-filled-primary-500`                                                  | `variant="primary"`                                                                                                        |
+| Line 229 — per-row Edit       | `btn btn-sm preset-tonal`                                                        | `variant="secondary" size="sm"`                                                                                            |
+| Line 231 — per-row Deactivate | `btn btn-sm preset-tonal-warning`                                                | `variant="secondary" size="sm" loading={togglingProviderId === provider.id}`                                               |
+| Line 235 — per-row Activate   | `btn btn-sm preset-tonal-success`                                                | `variant="secondary" size="sm" loading={togglingProviderId === provider.id}`                                               |
+| Line 239 — per-row Delete     | `btn btn-sm preset-tonal-error`                                                  | `variant="danger" size="sm"`                                                                                               |
+| Line 362 — modal Cancel       | `btn preset-tonal-surface`                                                       | `variant="secondary"`                                                                                                      |
+| Line 363 — modal submit       | `btn preset-filled-primary-500` + `disabled={!getIsOnline()}` + conditional text | `variant="primary" loading={saving} disabled={!getIsOnline()}` + static children `{editingProvider ? 'Update' : 'Create'}` |
 
 The current `saveOidcProvider()` and `toggleOidcActive()` functions have no loading guards. Two new reactive
 state variables must be introduced before the migrations are applied.
@@ -741,32 +752,34 @@ async function toggleOidcActive(provider: OidcProviderResponse) {
 Create `frontend/src/routes/settings/OidcProvidersSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   getOidcProviders: vi.fn(),
   createOidcProvider: vi.fn(),
   updateOidcProvider: vi.fn(),
   deleteOidcProvider: vi.fn(),
   activateOidcProvider: vi.fn(),
-  deactivateOidcProvider: vi.fn()
+  deactivateOidcProvider: vi.fn(),
 }));
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/notifications.svelte", () => ({
   showSuccess: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
 }));
-vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
+vi.mock("$lib/stores/network.svelte", () => ({
+  getIsOnline: vi.fn(() => true),
+}));
 
-import * as api from '$lib/api';
-import OidcProvidersSettings from './OidcProvidersSettings.svelte';
+import * as api from "$lib/api";
+import OidcProvidersSettings from "./OidcProvidersSettings.svelte";
 
 const defaultProps = {
   providers: [],
   multiTenancyEnabled: false,
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 function makeProvider(id: string, name: string, isActive: boolean) {
@@ -775,134 +788,147 @@ function makeProvider(id: string, name: string, isActive: boolean) {
     name,
     slug: id,
     logo_url: null,
-    issuer_url: 'https://issuer.example.com',
-    client_id: 'client_id',
-    scopes: 'openid',
+    issuer_url: "https://issuer.example.com",
+    client_id: "client_id",
+    scopes: "openid",
     auto_create_users: true,
     allow_private_network_issuers: false,
     role_mapping: {},
     role_claim_path: null,
-    is_active: isActive
+    is_active: isActive,
   };
 }
 
 afterEach(() => vi.clearAllMocks());
 
-describe('OidcProvidersSettings — button variants', () => {
-  it('Add Provider button has no raw preset-filled-primary-500 class', () => {
+describe("OidcProvidersSettings — button variants", () => {
+  it("Add Provider button has no raw preset-filled-primary-500 class", () => {
     const { container } = render(OidcProvidersSettings, defaultProps);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Add Provider button has primary variant class (accent gradient)', () => {
+  it("Add Provider button has primary variant class (accent gradient)", () => {
     render(OidcProvidersSettings, defaultProps);
-    const btn = screen.getByRole('button', { name: 'Add Provider' });
-    expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const btn = screen.getByRole("button", { name: "Add Provider" });
+    expect(btn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
-  it('per-row Edit button has secondary variant and sm size', () => {
+  it("per-row Edit button has secondary variant and sm size", () => {
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', false)]
+      providers: [makeProvider("p1", "Provider One", false)],
     });
-    const btn = screen.getByRole('button', { name: 'Edit' });
-    expect(btn.className).toContain('bg-[var(--bg-raised)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = screen.getByRole("button", { name: "Edit" });
+    expect(btn.className).toContain("bg-[var(--bg-raised)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('per-row Activate button has secondary variant and sm size', () => {
+  it("per-row Activate button has secondary variant and sm size", () => {
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', false)]
+      providers: [makeProvider("p1", "Provider One", false)],
     });
-    const btn = screen.getByRole('button', { name: 'Activate' });
-    expect(btn.className).toContain('bg-[var(--bg-raised)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = screen.getByRole("button", { name: "Activate" });
+    expect(btn.className).toContain("bg-[var(--bg-raised)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('per-row Deactivate button has secondary variant and sm size', () => {
+  it("per-row Deactivate button has secondary variant and sm size", () => {
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', true)]
+      providers: [makeProvider("p1", "Provider One", true)],
     });
-    const btn = screen.getByRole('button', { name: 'Deactivate' });
-    expect(btn.className).toContain('bg-[var(--bg-raised)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = screen.getByRole("button", { name: "Deactivate" });
+    expect(btn.className).toContain("bg-[var(--bg-raised)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('per-row Delete button has danger variant and sm size', () => {
+  it("per-row Delete button has danger variant and sm size", () => {
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', false)]
+      providers: [makeProvider("p1", "Provider One", false)],
     });
-    const btn = screen.getByRole('button', { name: 'Delete' });
-    expect(btn.className).toContain('bg-[var(--color-error-bg)]');
-    expect(btn.className).toContain('h-[19px]');
+    const btn = screen.getByRole("button", { name: "Delete" });
+    expect(btn.className).toContain("bg-[var(--color-error-bg)]");
+    expect(btn.className).toContain("h-[19px]");
   });
 
-  it('only the toggled row has aria-busy=true — other rows remain unaffected', async () => {
+  it("only the toggled row has aria-busy=true — other rows remain unaffected", async () => {
     let resolveToggle!: () => void;
     vi.mocked(api.deactivateOidcProvider).mockReturnValue(
       new Promise((r) => {
-        resolveToggle = () => r(makeProvider('p1', 'Provider One', false));
-      })
+        resolveToggle = () => r(makeProvider("p1", "Provider One", false));
+      }),
     );
     vi.mocked(api.getOidcProviders).mockResolvedValue([
-      makeProvider('p1', 'Provider One', true),
-      makeProvider('p2', 'Provider Two', true)
+      makeProvider("p1", "Provider One", true),
+      makeProvider("p2", "Provider Two", true),
     ]);
 
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', true), makeProvider('p2', 'Provider Two', true)]
+      providers: [
+        makeProvider("p1", "Provider One", true),
+        makeProvider("p2", "Provider Two", true),
+      ],
     });
 
-    const deactivateBtns = screen.getAllByRole('button', { name: 'Deactivate' });
+    const deactivateBtns = screen.getAllByRole("button", {
+      name: "Deactivate",
+    });
     expect(deactivateBtns).toHaveLength(2);
 
     await fireEvent.click(deactivateBtns[0]);
-    await waitFor(() => expect(deactivateBtns[0]).toHaveAttribute('aria-busy', 'true'));
-    expect(deactivateBtns[1]).not.toHaveAttribute('aria-busy');
+    await waitFor(() =>
+      expect(deactivateBtns[0]).toHaveAttribute("aria-busy", "true"),
+    );
+    expect(deactivateBtns[1]).not.toHaveAttribute("aria-busy");
 
     resolveToggle();
-    await waitFor(() => expect(deactivateBtns[0]).not.toHaveAttribute('aria-busy'));
+    await waitFor(() =>
+      expect(deactivateBtns[0]).not.toHaveAttribute("aria-busy"),
+    );
   });
 
-  it('modal submit shows Create text and carries aria-busy during save', async () => {
+  it("modal submit shows Create text and carries aria-busy during save", async () => {
     let resolve!: () => void;
     vi.mocked(api.createOidcProvider).mockReturnValue(
       new Promise((r) => {
-        resolve = () => r(makeProvider('p-new', 'New Provider', false));
-      })
+        resolve = () => r(makeProvider("p-new", "New Provider", false));
+      }),
     );
 
     render(OidcProvidersSettings, defaultProps);
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Provider' }));
+    await fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
 
-    const submitBtn = await screen.findByRole('button', { name: 'Create' });
+    const submitBtn = await screen.findByRole("button", { name: "Create" });
     expect(submitBtn).toBeDefined();
 
     await fireEvent.click(submitBtn);
-    await waitFor(() => expect(submitBtn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(submitBtn).toHaveAttribute("aria-busy", "true"));
 
     resolve();
-    await waitFor(() => expect(submitBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(submitBtn).not.toHaveAttribute("aria-busy"));
   });
 
-  it('modal submit shows Update text when editing', async () => {
+  it("modal submit shows Update text when editing", async () => {
     render(OidcProvidersSettings, {
       ...defaultProps,
-      providers: [makeProvider('p1', 'Provider One', false)]
+      providers: [makeProvider("p1", "Provider One", false)],
     });
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    await screen.findByRole('button', { name: 'Update' });
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("button", { name: "Update" });
   });
 
-  it('modal Cancel button has secondary variant', async () => {
+  it("modal Cancel button has secondary variant", async () => {
     render(OidcProvidersSettings, defaultProps);
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Provider' }));
-    const cancelBtn = await screen.findByRole('button', { name: 'Cancel' });
-    expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+    await fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+    const cancelBtn = await screen.findByRole("button", { name: "Cancel" });
+    expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
   });
 });
 ```
@@ -1315,26 +1341,26 @@ If no snapshots exist for the affected routes, skip this task entirely.
 
 **Spec coverage:**
 
-| Spec requirement | Task |
-| --- | --- |
-| NotificationRulesSettings: Add Rule → `primary sm` | Task 1, Step 1.4 |
-| NotificationRulesSettings: Edit → `secondary sm` | Task 1, Step 1.5 |
-| NotificationRulesSettings: Delete → `danger sm` | Task 1, Step 1.6 |
-| NotificationRulesSettings: Previous → `secondary sm` + disabled passthrough | Task 1, Step 1.7 |
-| NotificationRulesSettings: Next → `secondary sm` + disabled passthrough | Task 1, Step 1.8 |
-| NotificationRulesSettings: modal submit → `primary loading={saving}` + static text | Task 1, Step 1.9 |
-| NotificationLogView: Retry → `primary loading={isRetrying}` | Task 2, Step 2.4 |
-| NotificationLogView: isRetrying state introduced | Task 2, Step 2.3 |
-| OidcProvidersSettings: Add Provider → `primary` | Task 3, Step 3.7 |
-| OidcProvidersSettings: Edit → `secondary sm` | Task 3, Step 3.8 |
-| OidcProvidersSettings: Deactivate → `secondary sm loading={togglingProviderId === provider.id}` | Task 3, Step 3.9 |
-| OidcProvidersSettings: Activate → `secondary sm loading={togglingProviderId === provider.id}` | Task 3, Step 3.10 |
-| OidcProvidersSettings: Delete → `danger sm` | Task 3, Step 3.11 |
-| OidcProvidersSettings: Cancel → `secondary` | Task 3, Step 3.12 |
-| OidcProvidersSettings: modal submit → `primary loading={saving}` + static conditional text | Task 3, Step 3.13 |
-| OidcProvidersSettings: saving state introduced | Task 3, Step 3.4 |
-| OidcProvidersSettings: togglingProviderId state introduced | Task 3, Step 3.4 |
-| No text-swap expressions ("Saving...", "Creating...") anywhere | All tasks |
-| Form inputs (`<input>`, `<textarea>`, `<select>`) untouched | All tasks — deferred to #3e2 |
-| Full frontend gate | Task 5 |
-| Playwright re-baseline | Task 6 |
+| Spec requirement                                                                                | Task                         |
+| ----------------------------------------------------------------------------------------------- | ---------------------------- |
+| NotificationRulesSettings: Add Rule → `primary sm`                                              | Task 1, Step 1.4             |
+| NotificationRulesSettings: Edit → `secondary sm`                                                | Task 1, Step 1.5             |
+| NotificationRulesSettings: Delete → `danger sm`                                                 | Task 1, Step 1.6             |
+| NotificationRulesSettings: Previous → `secondary sm` + disabled passthrough                     | Task 1, Step 1.7             |
+| NotificationRulesSettings: Next → `secondary sm` + disabled passthrough                         | Task 1, Step 1.8             |
+| NotificationRulesSettings: modal submit → `primary loading={saving}` + static text              | Task 1, Step 1.9             |
+| NotificationLogView: Retry → `primary loading={isRetrying}`                                     | Task 2, Step 2.4             |
+| NotificationLogView: isRetrying state introduced                                                | Task 2, Step 2.3             |
+| OidcProvidersSettings: Add Provider → `primary`                                                 | Task 3, Step 3.7             |
+| OidcProvidersSettings: Edit → `secondary sm`                                                    | Task 3, Step 3.8             |
+| OidcProvidersSettings: Deactivate → `secondary sm loading={togglingProviderId === provider.id}` | Task 3, Step 3.9             |
+| OidcProvidersSettings: Activate → `secondary sm loading={togglingProviderId === provider.id}`   | Task 3, Step 3.10            |
+| OidcProvidersSettings: Delete → `danger sm`                                                     | Task 3, Step 3.11            |
+| OidcProvidersSettings: Cancel → `secondary`                                                     | Task 3, Step 3.12            |
+| OidcProvidersSettings: modal submit → `primary loading={saving}` + static conditional text      | Task 3, Step 3.13            |
+| OidcProvidersSettings: saving state introduced                                                  | Task 3, Step 3.4             |
+| OidcProvidersSettings: togglingProviderId state introduced                                      | Task 3, Step 3.4             |
+| No text-swap expressions ("Saving...", "Creating...") anywhere                                  | All tasks                    |
+| Form inputs (`<input>`, `<textarea>`, `<select>`) untouched                                     | All tasks — deferred to #3e2 |
+| Full frontend gate                                                                              | Task 5                       |
+| Playwright re-baseline                                                                          | Task 6                       |

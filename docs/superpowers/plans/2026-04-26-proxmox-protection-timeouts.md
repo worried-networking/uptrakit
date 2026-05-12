@@ -18,18 +18,18 @@ descriptors, Svelte `SchemaForm` numeric coercion, `rootcause`.
 
 ## File Map
 
-| File | Action | Responsibility |
-| --- | --- | --- |
-| `crates/shared/db/src/entity/proxmox_protection_default.rs` | Modify | Add nullable timeout columns to the SeaORM entity |
-| `crates/shared/db/src/entity/proxmox_protection_item_override.rs` | Modify | Add nullable timeout columns to the SeaORM entity |
-| `crates/plugins/infrastructure/core/src/roles.rs` | Modify | Extend typed Proxmox policy record and save request structs |
-| `crates/plugins/infrastructure/proxmox/src/policy_store.rs` | Modify | Persist/load timeout fields and merge item/global timeout overrides per field |
-| `crates/ui/web-api-queries/src/queries/update_dispatch.rs` | Modify | Build an effective runtime `ProxmoxProtectionPolicyRecord` with merged timeout fields |
+| File                                                                | Action | Responsibility                                                                               |
+| ------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------- |
+| `crates/shared/db/src/entity/proxmox_protection_default.rs`         | Modify | Add nullable timeout columns to the SeaORM entity                                            |
+| `crates/shared/db/src/entity/proxmox_protection_item_override.rs`   | Modify | Add nullable timeout columns to the SeaORM entity                                            |
+| `crates/plugins/infrastructure/core/src/roles.rs`                   | Modify | Extend typed Proxmox policy record and save request structs                                  |
+| `crates/plugins/infrastructure/proxmox/src/policy_store.rs`         | Modify | Persist/load timeout fields and merge item/global timeout overrides per field                |
+| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`          | Modify | Build an effective runtime `ProxmoxProtectionPolicyRecord` with merged timeout fields        |
 | `crates/plugins/infrastructure/proxmox/src/controller_migration.rs` | Modify | Add new timeout columns to fresh schema and create a forward-safe migration for existing DBs |
-| `crates/ui/web-api/src/surface_proxy.rs` | Modify | Keep controller-owned test/bootstrap tables in sync with the new schema |
-| `crates/plugins/infrastructure/proxmox/src/plugin.rs` | Modify | Add `Snapshot timeout` and `Backup timeout` numeric fields to both policy surfaces |
-| `crates/plugins/infrastructure/proxmox/src/surfaces.rs` | Modify | Preload/save timeout fields and preserve null/inherit semantics |
-| `crates/plugins/infrastructure/proxmox/src/update_protection.rs` | Modify | Replace the shared wait timeout with resolved snapshot/backup durations |
+| `crates/ui/web-api/src/surface_proxy.rs`                            | Modify | Keep controller-owned test/bootstrap tables in sync with the new schema                      |
+| `crates/plugins/infrastructure/proxmox/src/plugin.rs`               | Modify | Add `Snapshot timeout` and `Backup timeout` numeric fields to both policy surfaces           |
+| `crates/plugins/infrastructure/proxmox/src/surfaces.rs`             | Modify | Preload/save timeout fields and preserve null/inherit semantics                              |
+| `crates/plugins/infrastructure/proxmox/src/update_protection.rs`    | Modify | Replace the shared wait timeout with resolved snapshot/backup durations                      |
 
 ---
 
@@ -591,7 +591,6 @@ descriptors, Svelte `SchemaForm` numeric coercion, `rootcause`.
 - [ ] **Step 3: Implement the new forward-safe migration**
 
   In `crates/plugins/infrastructure/proxmox/src/controller_migration.rs`:
-
   1. add the new identifiers to both policy-table enums
   2. update `CreateProxmoxProtectionPolicyTables::up()` so fresh DBs create the new nullable columns
   3. add a new migration struct named `AddProxmoxProtectionTimeoutColumns`

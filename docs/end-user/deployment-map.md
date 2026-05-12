@@ -6,9 +6,9 @@ description: A quick-reference index linking to deployment guides for reverse pr
 
 # Deployment Map
 
-| Area | Guide |
-| --- | --- |
-| Reverse proxy deployment | [docs/end-user/deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
-| Reverse proxy security | [docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md) |
-| MQTT/Home Assistant | [docs/end-user/home-assistant-mqtt.md](home-assistant-mqtt.md) |
-| Controller/TLS sizing | [docs/security/security-architecture.md](../security/security-architecture.md) (includes certificate lifecycle) |
+| Area                     | Guide                                                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Reverse proxy deployment | [docs/end-user/deployment/reverse-proxy.md](deployment/reverse-proxy.md)                                        |
+| Reverse proxy security   | [docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md)                                |
+| MQTT/Home Assistant      | [docs/end-user/home-assistant-mqtt.md](home-assistant-mqtt.md)                                                  |
+| Controller/TLS sizing    | [docs/security/security-architecture.md](../security/security-architecture.md) (includes certificate lifecycle) |

@@ -15,18 +15,18 @@ AuthenticationSettings and RegistrationSettings. DangerZone inline modal buttons
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `frontend/src/routes/settings/+page.svelte` | Replace 5× raw `<button class="btn btn-sm preset-filled-primary-500">Retry All</button>` → `<Button variant="primary" size="sm">` |
-| `frontend/src/routes/settings/GlobalSettingsTab.svelte` | Replace 7× raw `<button class="btn ...">` → `<Button>` with correct variants and existing loading flags |
-| `frontend/src/routes/settings/AuthenticationSettings.svelte` | Add `isSaving` state, wrap save handler, replace raw `<button>` → `<Button loading={isSaving}>` |
-| `frontend/src/routes/settings/RegistrationSettings.svelte` | Same isSaving pattern as Auth |
-| `frontend/src/routes/settings/DangerZone.svelte` | Replace 3× raw `<button>` → `<Button>` (launcher=danger, cancel=secondary, confirm=danger) |
-| `frontend/src/routes/settings/+page.test.ts` (new) | Unit tests for Retry All buttons |
-| `frontend/src/routes/settings/GlobalSettingsTab.test.ts` (new) | Unit tests for GlobalSettingsTab buttons |
-| `frontend/src/routes/settings/AuthenticationSettings.test.ts` (new) | Unit tests for auth save button + isSaving |
-| `frontend/src/routes/settings/RegistrationSettings.test.ts` (new) | Unit tests for registration save button + isSaving |
-| `frontend/src/routes/settings/DangerZone.test.ts` (new) | Unit tests for all three DangerZone buttons |
+| File                                                                | Change                                                                                                                            |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/routes/settings/+page.svelte`                         | Replace 5× raw `<button class="btn btn-sm preset-filled-primary-500">Retry All</button>` → `<Button variant="primary" size="sm">` |
+| `frontend/src/routes/settings/GlobalSettingsTab.svelte`             | Replace 7× raw `<button class="btn ...">` → `<Button>` with correct variants and existing loading flags                           |
+| `frontend/src/routes/settings/AuthenticationSettings.svelte`        | Add `isSaving` state, wrap save handler, replace raw `<button>` → `<Button loading={isSaving}>`                                   |
+| `frontend/src/routes/settings/RegistrationSettings.svelte`          | Same isSaving pattern as Auth                                                                                                     |
+| `frontend/src/routes/settings/DangerZone.svelte`                    | Replace 3× raw `<button>` → `<Button>` (launcher=danger, cancel=secondary, confirm=danger)                                        |
+| `frontend/src/routes/settings/+page.test.ts` (new)                  | Unit tests for Retry All buttons                                                                                                  |
+| `frontend/src/routes/settings/GlobalSettingsTab.test.ts` (new)      | Unit tests for GlobalSettingsTab buttons                                                                                          |
+| `frontend/src/routes/settings/AuthenticationSettings.test.ts` (new) | Unit tests for auth save button + isSaving                                                                                        |
+| `frontend/src/routes/settings/RegistrationSettings.test.ts` (new)   | Unit tests for registration save button + isSaving                                                                                |
+| `frontend/src/routes/settings/DangerZone.test.ts` (new)             | Unit tests for all three DangerZone buttons                                                                                       |
 
 ---
 
@@ -48,49 +48,51 @@ blocks exist at lines 258, 266, 279, 287, 295. Each is inside a `<Callout>` erro
 Create `frontend/src/routes/settings/+page.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/svelte';
+import { describe, expect, it, vi } from "vitest";
+import { render, waitFor } from "@testing-library/svelte";
 
 // Heavy mocks — +page.svelte pulls in many modules
-vi.mock('$app/state', () => ({ page: { url: { searchParams: { get: () => null } } } }));
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/api', () => ({
-  getCombinedSettings: vi.fn().mockRejectedValue(new Error('network error')),
-  getOidcProviders: vi.fn(() => new Promise(() => {}))
+vi.mock("$app/state", () => ({
+  page: { url: { searchParams: { get: () => null } } },
 }));
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/api", () => ({
+  getCombinedSettings: vi.fn().mockRejectedValue(new Error("network error")),
+  getOidcProviders: vi.fn(() => new Promise(() => {})),
+}));
+vi.mock("$lib/notifications.svelte", () => ({
   showSuccess: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
 }));
-vi.mock('$lib/surfaces/registry.svelte', () => ({
+vi.mock("$lib/surfaces/registry.svelte", () => ({
   getSurfaceReadLoading: vi.fn(() => false),
   getSurfaceReadModel: vi.fn(() => undefined),
   getSurfaceReadRequested: vi.fn(() => false),
   getSurfaceRegistryLoaded: vi.fn(() => true),
   getSurfacesBySlot: vi.fn(() => []),
-  loadSurfaceReadModels: vi.fn()
+  loadSurfaceReadModels: vi.fn(),
 }));
-vi.mock('$lib/surfaces/read-model', () => ({
+vi.mock("$lib/surfaces/read-model", () => ({
   filterSurfacesByPermission: vi.fn(() => []),
-  isSurfaceTabPending: vi.fn(() => false)
+  isSurfaceTabPending: vi.fn(() => false),
 }));
 
-import * as auth from '$lib/auth.svelte';
-import { Permission } from '$lib/types';
-import SettingsPage from './+page.svelte';
+import * as auth from "$lib/auth.svelte";
+import { Permission } from "$lib/types";
+import SettingsPage from "./+page.svelte";
 
 function makeUser() {
   return {
-    id: 'u1',
-    email: 'a@b.com',
-    first_name: 'A',
-    last_name: 'B',
-    permissions: [Permission.ManageAuthSettings]
+    id: "u1",
+    email: "a@b.com",
+    first_name: "A",
+    last_name: "B",
+    permissions: [Permission.ManageAuthSettings],
   };
 }
 
-describe('+page.svelte Retry All buttons', () => {
+describe("+page.svelte Retry All buttons", () => {
   it('Retry All buttons render as Button variant="primary" size="sm" (h-[19px] class)', async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
 
@@ -100,7 +102,9 @@ describe('+page.svelte Retry All buttons', () => {
 
     // Wait for the error Callout to appear (async rejection settles on next tick)
     await waitFor(() => {
-      const rawBtns = container.querySelectorAll('button.btn.btn-sm.preset-filled-primary-500');
+      const rawBtns = container.querySelectorAll(
+        "button.btn.btn-sm.preset-filled-primary-500",
+      );
       // Pre-migration: 5 raw preset buttons exist — this assertion FAILS (rawBtns.length > 0)
       expect(rawBtns.length).toBe(0);
     });
@@ -187,15 +191,15 @@ git commit -m "feat(frontend): migrate settings page Retry All buttons to Button
 
 Six raw `<button>` elements in this file:
 
-| Line (approx) | Current class | Handler | Loading flag | Target |
-| --- | --- | --- | --- | --- |
-| 364 | `btn preset-filled-primary-500` | `saveGitHubProviderSettings` | `githubProviderSaving` | `variant="primary"` |
-| 405 | `btn preset-filled-primary-500` | `saveNatsUrl` | `natsSaving` | `variant="primary"` |
-| 412 | `btn preset-tonal-error` | `clearNatsUrl` | `natsClearing` | `variant="danger"` |
-| 467 | `btn preset-filled-primary-500` | `saveZeroconfSettings` | `zeroconfSaving` | `variant="primary"` |
-| 518 | `btn preset-filled-primary-500` | `saveNetworkSettings` | none | `variant="primary"` |
-| 540 | `btn preset-filled-primary-500` | `handleRenewServerCert` | `renewingCert` | `variant="primary"` |
-| 556 | `btn preset-filled-error-500` | opens confirm dialog | `rotatingCa` | `variant="danger"` |
+| Line (approx) | Current class                   | Handler                      | Loading flag           | Target              |
+| ------------- | ------------------------------- | ---------------------------- | ---------------------- | ------------------- |
+| 364           | `btn preset-filled-primary-500` | `saveGitHubProviderSettings` | `githubProviderSaving` | `variant="primary"` |
+| 405           | `btn preset-filled-primary-500` | `saveNatsUrl`                | `natsSaving`           | `variant="primary"` |
+| 412           | `btn preset-tonal-error`        | `clearNatsUrl`               | `natsClearing`         | `variant="danger"`  |
+| 467           | `btn preset-filled-primary-500` | `saveZeroconfSettings`       | `zeroconfSaving`       | `variant="primary"` |
+| 518           | `btn preset-filled-primary-500` | `saveNetworkSettings`        | none                   | `variant="primary"` |
+| 540           | `btn preset-filled-primary-500` | `handleRenewServerCert`      | `renewingCert`         | `variant="primary"` |
+| 556           | `btn preset-filled-error-500`   | opens confirm dialog         | `rotatingCa`           | `variant="danger"`  |
 
 `saveNetworkSettings` has no loading flag — keep as `variant="primary"` without `loading` prop (no `networkSaving`
 state exists). The spec only requires adding loading where existing state flags exist.
@@ -205,25 +209,25 @@ state exists). The spec only requires adding loading where existing state flags 
 Create `frontend/src/routes/settings/GlobalSettingsTab.test.ts`:
 
 ```ts
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/notifications.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/notifications.svelte", () => ({
   showSuccess: vi.fn(),
   showError: vi.fn(),
-  clearError: vi.fn()
+  clearError: vi.fn(),
 }));
-vi.mock('$lib/surfaces/registry.svelte', () => ({
+vi.mock("$lib/surfaces/registry.svelte", () => ({
   getSurfaceReadModel: vi.fn(() => undefined),
   getSurfacesBySlot: vi.fn(() => []),
-  loadSurfaceReadModels: vi.fn()
+  loadSurfaceReadModels: vi.fn(),
 }));
-vi.mock('$lib/surfaces/read-model', () => ({
+vi.mock("$lib/surfaces/read-model", () => ({
   filterSurfacesByPermission: vi.fn(() => []),
-  shouldUseSurfaceRoute: vi.fn(() => false)
+  shouldUseSurfaceRoute: vi.fn(() => false),
 }));
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   getGitHubProviderSettings: vi.fn(),
   getSystemAlerts: vi.fn(),
   renewServerCertificate: vi.fn(),
@@ -234,70 +238,72 @@ vi.mock('$lib/api', () => ({
   updateGitHubProviderSettings: vi.fn(),
   getZeroconfSettings: vi.fn(),
   updateZeroconfSettings: vi.fn(),
-  rotateCA: vi.fn()
+  rotateCA: vi.fn(),
 }));
 
-import * as api from '$lib/api';
-import GlobalSettingsTab from './GlobalSettingsTab.svelte';
+import * as api from "$lib/api";
+import GlobalSettingsTab from "./GlobalSettingsTab.svelte";
 
 function stubAllApis() {
   vi.mocked(api.getNetworkSettings).mockResolvedValue({
     trusted_proxies: [],
-    real_ip_header: 'X-Forwarded-For',
+    real_ip_header: "X-Forwarded-For",
     sans: [],
-    https_addr: '[::]:8443'
+    https_addr: "[::]:8443",
   });
   vi.mocked(api.getSystemAlerts).mockResolvedValue({ alerts: [] });
-  vi.mocked(api.getNatsSettings).mockResolvedValue({ url: 'nats://host:4222' });
+  vi.mocked(api.getNatsSettings).mockResolvedValue({ url: "nats://host:4222" });
   vi.mocked(api.getZeroconfSettings).mockResolvedValue({
     enabled: false,
     ca_fingerprint: null,
     url: null,
-    pki_addr: null
+    pki_addr: null,
   });
   vi.mocked(api.getGitHubProviderSettings).mockResolvedValue({
     api_base_url: null,
     auth_token: null,
-    has_auth_token: false
+    has_auth_token: false,
   });
 }
 
-describe('GlobalSettingsTab button variants', () => {
+describe("GlobalSettingsTab button variants", () => {
   beforeEach(() => stubAllApis());
   afterEach(() => vi.clearAllMocks());
 
-  it('GitHub Provider Save button has no raw preset-filled-primary-500 class', async () => {
+  it("GitHub Provider Save button has no raw preset-filled-primary-500 class", async () => {
     const { container } = render(GlobalSettingsTab);
-    await screen.findByText('Save GitHub Provider');
-    const raw = container.querySelector('button.preset-filled-primary-500');
+    await screen.findByText("Save GitHub Provider");
+    const raw = container.querySelector("button.preset-filled-primary-500");
     expect(raw).toBeNull();
   });
 
-  it('NATS Save button has no raw preset class', async () => {
+  it("NATS Save button has no raw preset class", async () => {
     const { container } = render(GlobalSettingsTab);
-    await waitFor(() => expect(screen.queryAllByText('Save').length).toBeGreaterThan(0));
-    const raw = container.querySelector('button.preset-filled-primary-500');
+    await waitFor(() =>
+      expect(screen.queryAllByText("Save").length).toBeGreaterThan(0),
+    );
+    const raw = container.querySelector("button.preset-filled-primary-500");
     expect(raw).toBeNull();
   });
 
-  it('NATS Clear button has no raw preset-tonal-error class', async () => {
+  it("NATS Clear button has no raw preset-tonal-error class", async () => {
     const { container } = render(GlobalSettingsTab);
-    await screen.findByText('Clear');
-    const raw = container.querySelector('button.preset-tonal-error');
+    await screen.findByText("Clear");
+    const raw = container.querySelector("button.preset-tonal-error");
     expect(raw).toBeNull();
   });
 
-  it('CA Rotate button has no raw preset-filled-error-500 class', async () => {
+  it("CA Rotate button has no raw preset-filled-error-500 class", async () => {
     const { container } = render(GlobalSettingsTab);
-    await screen.findByText('Rotate CA');
-    const raw = container.querySelector('button.preset-filled-error-500');
+    await screen.findByText("Rotate CA");
+    const raw = container.querySelector("button.preset-filled-error-500");
     expect(raw).toBeNull();
   });
 
-  it('Renew Server Certificate button has no raw preset-filled-primary-500 class', async () => {
+  it("Renew Server Certificate button has no raw preset-filled-primary-500 class", async () => {
     const { container } = render(GlobalSettingsTab);
-    await screen.findByText('Renew Server Certificate');
-    const raw = container.querySelector('button.preset-filled-primary-500');
+    await screen.findByText("Renew Server Certificate");
+    const raw = container.querySelector("button.preset-filled-primary-500");
     expect(raw).toBeNull();
   });
 });
@@ -513,45 +519,49 @@ guard. The button is `<button class="btn preset-filled-primary-500" onclick={sav
 Create `frontend/src/routes/settings/AuthenticationSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({ updateAuthenticationSettings: vi.fn() }));
-vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
+vi.mock("$lib/api", () => ({ updateAuthenticationSettings: vi.fn() }));
+vi.mock("$lib/stores/network.svelte", () => ({
+  getIsOnline: vi.fn(() => true),
+}));
 
-import * as api from '$lib/api';
-import AuthenticationSettings from './AuthenticationSettings.svelte';
+import * as api from "$lib/api";
+import AuthenticationSettings from "./AuthenticationSettings.svelte";
 
 const settingsProps = {
   settings: { password_auth_enabled: true },
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('AuthenticationSettings button', () => {
-  it('Save button has no raw preset-filled-primary-500 class', () => {
+describe("AuthenticationSettings button", () => {
+  it("Save button has no raw preset-filled-primary-500 class", () => {
     const { container } = render(AuthenticationSettings, settingsProps);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Save button carries aria-busy=true while save is in flight', async () => {
+  it("Save button carries aria-busy=true while save is in flight", async () => {
     let resolve!: () => void;
     vi.mocked(api.updateAuthenticationSettings).mockReturnValue(
       new Promise<{ password_auth_enabled: boolean }>((r) => {
         resolve = () => r({ password_auth_enabled: true });
-      })
+      }),
     );
 
     render(AuthenticationSettings, settingsProps);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
 
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
 
     resolve();
-    await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy"));
   });
 
   it('Save button text is static "Save" during loading — no text swap', async () => {
@@ -559,15 +569,15 @@ describe('AuthenticationSettings button', () => {
     vi.mocked(api.updateAuthenticationSettings).mockReturnValue(
       new Promise<{ password_auth_enabled: boolean }>((r) => {
         resolve = () => r({ password_auth_enabled: true });
-      })
+      }),
     );
 
     render(AuthenticationSettings, settingsProps);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
 
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-    expect(btn).toHaveTextContent('Save');
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    expect(btn).toHaveTextContent("Save");
 
     resolve();
   });
@@ -746,61 +756,65 @@ No "Generate new token" button exists in this file (token is set via input field
 Create `frontend/src/routes/settings/RegistrationSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({ updateRegistrationSettings: vi.fn() }));
-vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
+vi.mock("$lib/api", () => ({ updateRegistrationSettings: vi.fn() }));
+vi.mock("$lib/stores/network.svelte", () => ({
+  getIsOnline: vi.fn(() => true),
+}));
 
-import * as api from '$lib/api';
-import RegistrationSettings from './RegistrationSettings.svelte';
+import * as api from "$lib/api";
+import RegistrationSettings from "./RegistrationSettings.svelte";
 
 const settingsProps = {
-  settings: { mode: 'open' as const, require_token_for_oidc: false },
+  settings: { mode: "open" as const, require_token_for_oidc: false },
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('RegistrationSettings button', () => {
-  it('Save button has no raw preset-filled-primary-500 class', () => {
+describe("RegistrationSettings button", () => {
+  it("Save button has no raw preset-filled-primary-500 class", () => {
     const { container } = render(RegistrationSettings, settingsProps);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Save button carries aria-busy=true while save is in flight', async () => {
+  it("Save button carries aria-busy=true while save is in flight", async () => {
     let resolve!: () => void;
     vi.mocked(api.updateRegistrationSettings).mockReturnValue(
-      new Promise<{ mode: 'open'; require_token_for_oidc: boolean }>((r) => {
-        resolve = () => r({ mode: 'open', require_token_for_oidc: false });
-      })
+      new Promise<{ mode: "open"; require_token_for_oidc: boolean }>((r) => {
+        resolve = () => r({ mode: "open", require_token_for_oidc: false });
+      }),
     );
 
     render(RegistrationSettings, settingsProps);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
 
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
 
     resolve();
-    await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy"));
   });
 
   it('Save button text is static "Save" during loading — no text swap', async () => {
     let resolve!: () => void;
     vi.mocked(api.updateRegistrationSettings).mockReturnValue(
-      new Promise<{ mode: 'open'; require_token_for_oidc: boolean }>((r) => {
-        resolve = () => r({ mode: 'open', require_token_for_oidc: false });
-      })
+      new Promise<{ mode: "open"; require_token_for_oidc: boolean }>((r) => {
+        resolve = () => r({ mode: "open", require_token_for_oidc: false });
+      }),
     );
 
     render(RegistrationSettings, settingsProps);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
 
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-    expect(btn).toHaveTextContent('Save');
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    expect(btn).toHaveTextContent("Save");
 
     resolve();
   });
@@ -1013,40 +1027,46 @@ rendered in the `result` branch — also → `variant="secondary"`.
 Create `frontend/src/routes/settings/DangerZone.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({ resetData: vi.fn() }));
-vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
+vi.mock("$lib/api", () => ({ resetData: vi.fn() }));
+vi.mock("$lib/stores/network.svelte", () => ({
+  getIsOnline: vi.fn(() => true),
+}));
 
-import * as api from '$lib/api';
-import DangerZone from './DangerZone.svelte';
+import * as api from "$lib/api";
+import DangerZone from "./DangerZone.svelte";
 
 const props = { onSuccess: vi.fn(), onError: vi.fn() };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('DangerZone button variants', () => {
-  it('launcher Reset Data button has no raw preset-filled-error-500 class', () => {
+describe("DangerZone button variants", () => {
+  it("launcher Reset Data button has no raw preset-filled-error-500 class", () => {
     const { container } = render(DangerZone, props);
-    expect(container.querySelector('button.preset-filled-error-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-error-500"),
+    ).toBeNull();
   });
 
-  it('inline Cancel button inside modal has no raw preset-tonal-surface class', async () => {
+  it("inline Cancel button inside modal has no raw preset-tonal-surface class", async () => {
     const { container } = render(DangerZone, props);
-    await fireEvent.click(screen.getByRole('button', { name: 'Reset Data' }));
-    await screen.findByText('Reset All Data');
-    expect(container.querySelector('button.preset-tonal-surface')).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: "Reset Data" }));
+    await screen.findByText("Reset All Data");
+    expect(container.querySelector("button.preset-tonal-surface")).toBeNull();
   });
 
-  it('inline Reset All Data button inside modal has no raw preset-filled-error-500 class', async () => {
+  it("inline Reset All Data button inside modal has no raw preset-filled-error-500 class", async () => {
     const { container } = render(DangerZone, props);
-    await fireEvent.click(screen.getByRole('button', { name: 'Reset Data' }));
-    await screen.findByText('Reset All Data');
-    expect(container.querySelector('button.preset-filled-error-500')).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: "Reset Data" }));
+    await screen.findByText("Reset All Data");
+    expect(
+      container.querySelector("button.preset-filled-error-500"),
+    ).toBeNull();
   });
 
-  it('inline Reset All Data button carries aria-busy=true while submitting', async () => {
+  it("inline Reset All Data button carries aria-busy=true while submitting", async () => {
     let resolve!: () => void;
     vi.mocked(api.resetData).mockReturnValue(
       new Promise<{ deleted: Record<string, number> }>((r) => {
@@ -1058,26 +1078,28 @@ describe('DangerZone button variants', () => {
               plugin_configs: 0,
               host_tags: 0,
               update_history: 0,
-              update_batches: 0
-            }
+              update_batches: 0,
+            },
           });
-      })
+      }),
     );
 
     render(DangerZone, props);
-    await fireEvent.click(screen.getByRole('button', { name: 'Reset Data' }));
-    await screen.findByText('Reset All Data');
+    await fireEvent.click(screen.getByRole("button", { name: "Reset Data" }));
+    await screen.findByText("Reset All Data");
 
-    const confirmInput = screen.getByPlaceholderText('Type RESET to confirm');
-    await fireEvent.input(confirmInput, { target: { value: 'RESET' } });
+    const confirmInput = screen.getByPlaceholderText("Type RESET to confirm");
+    await fireEvent.input(confirmInput, { target: { value: "RESET" } });
 
-    const confirmBtn = screen.getByRole('button', { name: 'Reset All Data' });
+    const confirmBtn = screen.getByRole("button", { name: "Reset All Data" });
     await fireEvent.click(confirmBtn);
 
-    await waitFor(() => expect(confirmBtn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() =>
+      expect(confirmBtn).toHaveAttribute("aria-busy", "true"),
+    );
 
     resolve();
-    await waitFor(() => expect(confirmBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(confirmBtn).not.toHaveAttribute("aria-busy"));
   });
 
   it('inline Reset All Data button text is static "Reset All Data" during loading', async () => {
@@ -1092,24 +1114,26 @@ describe('DangerZone button variants', () => {
               plugin_configs: 0,
               host_tags: 0,
               update_history: 0,
-              update_batches: 0
-            }
+              update_batches: 0,
+            },
           });
-      })
+      }),
     );
 
     render(DangerZone, props);
-    await fireEvent.click(screen.getByRole('button', { name: 'Reset Data' }));
-    await screen.findByText('Reset All Data');
+    await fireEvent.click(screen.getByRole("button", { name: "Reset Data" }));
+    await screen.findByText("Reset All Data");
 
-    const confirmInput = screen.getByPlaceholderText('Type RESET to confirm');
-    await fireEvent.input(confirmInput, { target: { value: 'RESET' } });
+    const confirmInput = screen.getByPlaceholderText("Type RESET to confirm");
+    await fireEvent.input(confirmInput, { target: { value: "RESET" } });
 
-    const confirmBtn = screen.getByRole('button', { name: 'Reset All Data' });
+    const confirmBtn = screen.getByRole("button", { name: "Reset All Data" });
     await fireEvent.click(confirmBtn);
 
-    await waitFor(() => expect(confirmBtn).toHaveAttribute('aria-busy', 'true'));
-    expect(confirmBtn).toHaveTextContent('Reset All Data');
+    await waitFor(() =>
+      expect(confirmBtn).toHaveAttribute("aria-busy", "true"),
+    );
+    expect(confirmBtn).toHaveTextContent("Reset All Data");
 
     resolve();
   });
@@ -1320,24 +1344,24 @@ If no snapshot changes, skip this commit.
 
 **Spec coverage:**
 
-| Spec requirement | Task |
-| --- | --- |
-| `+page.svelte` 5× Retry All → `variant="primary" size="sm"` | Task 1 |
-| GlobalSettingsTab: GitHub Save → primary | Task 2, Step 2.4 |
-| GlobalSettingsTab: NATS Save → primary | Task 2, Step 2.5 |
-| GlobalSettingsTab: NATS Clear → danger (`preset-tonal-error` rule) | Task 2, Step 2.6 |
-| GlobalSettingsTab: Zeroconf Save → primary | Task 2, Step 2.7 |
-| GlobalSettingsTab: Network Save → primary | Task 2, Step 2.8 |
-| GlobalSettingsTab: Renew Server Cert → primary | Task 2, Step 2.9 |
-| GlobalSettingsTab: CA Rotate launcher → danger | Task 2, Step 2.10 |
-| AuthenticationSettings: isSaving introduced | Task 3, Step 3.3 |
-| AuthenticationSettings: Save → primary + loading | Task 3, Step 3.4 |
-| RegistrationSettings: isSaving introduced | Task 4, Step 4.3 |
-| RegistrationSettings: Save → primary + loading | Task 4, Step 4.4 |
-| DangerZone: launcher → danger | Task 5, Step 5.4 |
-| DangerZone: Cancel → secondary | Task 5, Steps 5.5–5.6 |
-| DangerZone: Reset All Data confirm → danger + loading | Task 5, Step 5.7 |
-| Non-button Skeleton classes on badge/aside — OUT OF SCOPE | Not touched |
-| TabStrip — OUT OF SCOPE | Not touched |
-| OIDC buttons — OUT OF SCOPE | Not touched |
-| Full frontend gate | Task 6 |
+| Spec requirement                                                   | Task                  |
+| ------------------------------------------------------------------ | --------------------- |
+| `+page.svelte` 5× Retry All → `variant="primary" size="sm"`        | Task 1                |
+| GlobalSettingsTab: GitHub Save → primary                           | Task 2, Step 2.4      |
+| GlobalSettingsTab: NATS Save → primary                             | Task 2, Step 2.5      |
+| GlobalSettingsTab: NATS Clear → danger (`preset-tonal-error` rule) | Task 2, Step 2.6      |
+| GlobalSettingsTab: Zeroconf Save → primary                         | Task 2, Step 2.7      |
+| GlobalSettingsTab: Network Save → primary                          | Task 2, Step 2.8      |
+| GlobalSettingsTab: Renew Server Cert → primary                     | Task 2, Step 2.9      |
+| GlobalSettingsTab: CA Rotate launcher → danger                     | Task 2, Step 2.10     |
+| AuthenticationSettings: isSaving introduced                        | Task 3, Step 3.3      |
+| AuthenticationSettings: Save → primary + loading                   | Task 3, Step 3.4      |
+| RegistrationSettings: isSaving introduced                          | Task 4, Step 4.3      |
+| RegistrationSettings: Save → primary + loading                     | Task 4, Step 4.4      |
+| DangerZone: launcher → danger                                      | Task 5, Step 5.4      |
+| DangerZone: Cancel → secondary                                     | Task 5, Steps 5.5–5.6 |
+| DangerZone: Reset All Data confirm → danger + loading              | Task 5, Step 5.7      |
+| Non-button Skeleton classes on badge/aside — OUT OF SCOPE          | Not touched           |
+| TabStrip — OUT OF SCOPE                                            | Not touched           |
+| OIDC buttons — OUT OF SCOPE                                        | Not touched           |
+| Full frontend gate                                                 | Task 6                |

@@ -31,14 +31,14 @@ requires auditing all call sites; Pagination migration affects every page that u
 
 ## Migration rules (quick reference)
 
-| Legacy class | Button variant |
-| --- | --- |
-| `preset-filled-primary-500` | `primary` |
-| `preset-tonal-primary` | `primary` |
-| `preset-tonal-surface` | `secondary` |
-| `preset-tonal` (row neutral side action) | `secondary` |
-| `preset-tonal` (pagination) | `ghost` — Q3 governs all Pagination buttons |
-| `preset-tonal-error` / `preset-filled-error-500` | `danger` |
+| Legacy class                                     | Button variant                              |
+| ------------------------------------------------ | ------------------------------------------- |
+| `preset-filled-primary-500`                      | `primary`                                   |
+| `preset-tonal-primary`                           | `primary`                                   |
+| `preset-tonal-surface`                           | `secondary`                                 |
+| `preset-tonal` (row neutral side action)         | `secondary`                                 |
+| `preset-tonal` (pagination)                      | `ghost` — Q3 governs all Pagination buttons |
+| `preset-tonal-error` / `preset-filled-error-500` | `danger`                                    |
 
 **Snippet icon syntax:** Always `{#snippet leadingIcon()}<svg …/>{/snippet}` passed via `leadingIcon={snippetRef}`.
 Never `leadingIcon={Component}`.
@@ -81,7 +81,7 @@ const confirmTone = $derived(confirmVariant === 'danger' ? 'danger' : 'info');
 
 - Line ~126: primary actions loop — raw `<button class="btn btn-sm preset-filled-primary-500">` migrates to
   `<Button variant={a.variant ?? (a.destructive ? 'danger' : 'primary')} size="sm" loading={a.loading}
-  onclick={() => onaction(a.id)}>{a.label}</Button>`.
+onclick={() => onaction(a.id)}>{a.label}</Button>`.
 - Line ~132–133: More-menu trigger — `<button class="btn btn-sm preset-tonal-surface">` migrates to
   `<Button variant="secondary" size="sm">` with existing `aria-label`, `aria-haspopup`, `aria-expanded` preserved.
 - Line ~170: Deselect all — `<button class="btn btn-sm preset-tonal-surface" onclick={oncancel}>Deselect all</button>`
@@ -162,16 +162,16 @@ before editing — the numbers below are approximate against the ~1365-line sour
 
 **Eight JSON view-mode toggle buttons** (all `btn btn-sm preset-tonal text-xs`):
 
-| Approx line | Children text | Context |
-| --- | --- | --- |
-| ~817 | `Edit as JSON` | standard role, form→JSON |
-| ~841 | `Back to Form` | standard role, JSON→form |
-| ~943 | `Advanced: Edit as JSON` | standard role advanced toggle |
-| ~969 | `Back to Form` | standard role advanced, JSON→form |
-| ~1137 | `Edit as JSON` | hook entry, form→JSON |
-| ~1163 | `Back to Form` | hook entry, JSON→form |
-| ~1270 | `Advanced: Edit as JSON` | hook entry advanced |
-| ~1298 | `Back to Form` | hook entry advanced, JSON→form |
+| Approx line | Children text            | Context                           |
+| ----------- | ------------------------ | --------------------------------- |
+| ~817        | `Edit as JSON`           | standard role, form→JSON          |
+| ~841        | `Back to Form`           | standard role, JSON→form          |
+| ~943        | `Advanced: Edit as JSON` | standard role advanced toggle     |
+| ~969        | `Back to Form`           | standard role advanced, JSON→form |
+| ~1137       | `Edit as JSON`           | hook entry, form→JSON             |
+| ~1163       | `Back to Form`           | hook entry, JSON→form             |
+| ~1270       | `Advanced: Edit as JSON` | hook entry advanced               |
+| ~1298       | `Back to Form`           | hook entry advanced, JSON→form    |
 
 Each migrates to `<Button variant="secondary" size="sm" type="button">children text</Button>`. Drop `text-xs`.
 Preserve any `shrink-0` or other layout classes via the `class` prop. Existing `onclick` handlers unchanged.
@@ -201,13 +201,13 @@ Preserve any `shrink-0` or other layout classes via the `class` prop. Existing `
 Twenty-one `confirmClass=` call sites exist across the codebase. TypeScript errors after Task 1 serve as the
 acceptance gate. Mapping rules:
 
-| Current `confirmClass` value | Action |
-| --- | --- |
-| `"preset-filled-error-500"` | Remove the prop (default `confirmVariant='danger'` is identical) |
-| `"preset-filled-success-500"` | Replace with `confirmVariant="primary"` |
-| `"preset-filled-warning-500"` | Replace with `confirmVariant="primary"` |
-| ternary `success-500` or `error-500` | Bind ternary result to `confirmVariant` using `'primary'` and `'danger'` |
-| `{labels.btnClass}` dynamic | Migrate `confirmLabels` object to use `variant` field; bind to `confirmVariant` |
+| Current `confirmClass` value         | Action                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------- |
+| `"preset-filled-error-500"`          | Remove the prop (default `confirmVariant='danger'` is identical)                |
+| `"preset-filled-success-500"`        | Replace with `confirmVariant="primary"`                                         |
+| `"preset-filled-warning-500"`        | Replace with `confirmVariant="primary"`                                         |
+| ternary `success-500` or `error-500` | Bind ternary result to `confirmVariant` using `'primary'` and `'danger'`        |
+| `{labels.btnClass}` dynamic          | Migrate `confirmLabels` object to use `variant` field; bind to `confirmVariant` |
 
 **Note on `success-500` / `warning-500`:** The Button primitive has no `success` or `warning` variant.
 `primary` is the nearest non-destructive positive-action variant. Flag this substitution in the PR description
@@ -267,7 +267,7 @@ Remove the `resolveConfirmTone` function and the `const confirmTone = $derived(r
 line. Add:
 
 ```ts
-const confirmTone = $derived(confirmVariant === 'danger' ? 'danger' : 'info');
+const confirmTone = $derived(confirmVariant === "danger" ? "danger" : "info");
 ```
 
 (Type is `StatusBadgeTone` — the existing import covers this.)
@@ -388,9 +388,21 @@ Before:
 
 ```ts
 const confirmLabels = {
-  approve: { title: 'Approve Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
-  reject:  { title: 'Reject Service',  verb: 'reject',  btnClass: 'preset-filled-error-500' },
-  delete:  { title: 'Delete Service',  verb: '…',       btnClass: 'preset-filled-error-500' }
+  approve: {
+    title: "Approve Service",
+    verb: "approve",
+    btnClass: "preset-filled-success-500",
+  },
+  reject: {
+    title: "Reject Service",
+    verb: "reject",
+    btnClass: "preset-filled-error-500",
+  },
+  delete: {
+    title: "Delete Service",
+    verb: "…",
+    btnClass: "preset-filled-error-500",
+  },
 } as const;
 ```
 
@@ -398,9 +410,17 @@ After:
 
 ```ts
 const confirmLabels = {
-  approve: { title: 'Approve Service', verb: 'approve', variant: 'primary' as const },
-  reject:  { title: 'Reject Service',  verb: 'reject',  variant: 'danger'  as const },
-  delete:  { title: 'Delete Service',  verb: '…',       variant: 'danger'  as const }
+  approve: {
+    title: "Approve Service",
+    verb: "approve",
+    variant: "primary" as const,
+  },
+  reject: {
+    title: "Reject Service",
+    verb: "reject",
+    variant: "danger" as const,
+  },
+  delete: { title: "Delete Service", verb: "…", variant: "danger" as const },
 } as const;
 ```
 
@@ -459,7 +479,7 @@ Read the file before editing. It is 47 lines.
 In the `<script lang="ts">` block, add after the existing `Modal` import:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate the Close button**
@@ -506,7 +526,7 @@ Read the file before editing. It is 173 lines.
 After the existing `ContextMenuItem` import:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Extend `actions` prop type**
@@ -643,7 +663,7 @@ Read the file before editing. It is 83 lines.
 In the `<script lang="ts">` block:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Declare chevron icon snippets**
@@ -781,7 +801,7 @@ Read around lines 379 and 386 before editing. The file is ~406 lines.
 Check if `Button` is already imported. Add only if missing:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate the Dismiss button (line ~379)**
@@ -833,7 +853,7 @@ Read lines ~360–550 before editing. The file is ~550 lines.
 Check if `Button` is already imported. Add if missing:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate addHook buttons (~371 and ~498)**
@@ -943,7 +963,7 @@ grep -n "btn preset\|btn btn-sm preset" frontend/src/lib/components/EditHostAssi
 Check if `Button` is already imported. Add if missing:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate the eight JSON view-mode toggle buttons**
@@ -1079,7 +1099,7 @@ Add these test cases to the existing `describe('ConfirmDialog', ...)` block:
 ```ts
 it('confirm button renders variant="danger" by default', () => {
   render(ConfirmDialog, defaultProps);
-  const confirmBtn = screen.getByRole('button', { name: 'Delete' });
+  const confirmBtn = screen.getByRole("button", { name: "Delete" });
   expect(confirmBtn.className).toMatch(/danger|error/);
 });
 ```
@@ -1088,8 +1108,8 @@ it('confirm button renders variant="danger" by default', () => {
 
 ```ts
 it('confirm button renders variant="primary" when confirmVariant="primary"', () => {
-  render(ConfirmDialog, { ...defaultProps, confirmVariant: 'primary' });
-  const confirmBtn = screen.getByRole('button', { name: 'Delete' });
+  render(ConfirmDialog, { ...defaultProps, confirmVariant: "primary" });
+  const confirmBtn = screen.getByRole("button", { name: "Delete" });
   expect(confirmBtn.className).not.toMatch(/danger|error/);
 });
 ```
@@ -1099,54 +1119,67 @@ it('confirm button renders variant="primary" when confirmVariant="primary"', () 
 ```ts
 it('cancel button renders variant="secondary"', () => {
   render(ConfirmDialog, defaultProps);
-  const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-  expect(cancelBtn.className).toContain('border');
+  const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+  expect(cancelBtn.className).toContain("border");
 });
 ```
 
 - [ ] **confirmDisabled passthrough — false (default):**
 
 ```ts
-it('confirm button is NOT disabled when confirmDisabled=false (default)', () => {
+it("confirm button is NOT disabled when confirmDisabled=false (default)", () => {
   render(ConfirmDialog, defaultProps);
-  expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Delete" })).not.toBeDisabled();
 });
 ```
 
 - [ ] **confirmDisabled passthrough — true:**
 
 ```ts
-it('confirm button IS disabled when confirmDisabled=true', () => {
+it("confirm button IS disabled when confirmDisabled=true", () => {
   render(ConfirmDialog, { ...defaultProps, confirmDisabled: true });
-  expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
 });
 ```
 
 ### Step 2: Create `BatchResultDialog.test.ts`
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import BatchResultDialog from './BatchResultDialog.svelte';
-import type { BatchActionResponse } from '$lib/types';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import BatchResultDialog from "./BatchResultDialog.svelte";
+import type { BatchActionResponse } from "$lib/types";
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 type LocalResponse = BatchActionResponse;
-const makeResponse = (succeeded: string[], failed: { id: string; error: string }[]): LocalResponse =>
-  ({ succeeded, failed });
+const makeResponse = (
+  succeeded: string[],
+  failed: { id: string; error: string }[],
+): LocalResponse => ({ succeeded, failed });
 
-describe('BatchResultDialog', () => {
+describe("BatchResultDialog", () => {
   it('Close button renders variant="primary"', () => {
-    render(BatchResultDialog, { title: 'Results', response: makeResponse(['id-1'], []), onclose: vi.fn() });
-    const closeBtn = screen.getByRole('button', { name: 'Close' });
+    render(BatchResultDialog, {
+      title: "Results",
+      response: makeResponse(["id-1"], []),
+      onclose: vi.fn(),
+    });
+    const closeBtn = screen.getByRole("button", { name: "Close" });
     expect(closeBtn.className).toMatch(/bg-\[linear-gradient/);
   });
 
-  it('calls onclose when Close is clicked', () => {
+  it("calls onclose when Close is clicked", () => {
     const onclose = vi.fn();
-    render(BatchResultDialog, { title: 'Results', response: makeResponse(['id-1'], []), onclose });
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    render(BatchResultDialog, {
+      title: "Results",
+      response: makeResponse(["id-1"], []),
+      onclose,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onclose).toHaveBeenCalledOnce();
   });
 });
@@ -1155,64 +1188,110 @@ describe('BatchResultDialog', () => {
 ### Step 3: Create `BatchActionBar.test.ts`
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import BatchActionBar from './BatchActionBar.svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import BatchActionBar from "./BatchActionBar.svelte";
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 type Action = {
   id: string;
   label: string;
   destructive?: boolean;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: "primary" | "secondary" | "danger";
   loading?: boolean;
 };
 
-describe('BatchActionBar', () => {
+describe("BatchActionBar", () => {
   it('non-destructive action renders variant="primary"', () => {
-    const actions: Action[] = [{ id: 'do', label: 'Do It', destructive: false }];
-    render(BatchActionBar, { selectedCount: 2, actions, onaction: vi.fn(), oncancel: vi.fn() });
-    const btn = screen.getByRole('button', { name: 'Do It' });
+    const actions: Action[] = [
+      { id: "do", label: "Do It", destructive: false },
+    ];
+    render(BatchActionBar, {
+      selectedCount: 2,
+      actions,
+      onaction: vi.fn(),
+      oncancel: vi.fn(),
+    });
+    const btn = screen.getByRole("button", { name: "Do It" });
     expect(btn.className).toMatch(/bg-\[linear-gradient/);
   });
 
   it('destructive action renders variant="danger"', () => {
-    const actions: Action[] = [{ id: 'del', label: 'Delete', destructive: true }];
-    render(BatchActionBar, { selectedCount: 1, actions, onaction: vi.fn(), oncancel: vi.fn() });
-    expect(screen.getByRole('button', { name: 'Delete' }).className).toMatch(/danger|error/);
+    const actions: Action[] = [
+      { id: "del", label: "Delete", destructive: true },
+    ];
+    render(BatchActionBar, {
+      selectedCount: 1,
+      actions,
+      onaction: vi.fn(),
+      oncancel: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Delete" }).className).toMatch(
+      /danger|error/,
+    );
   });
 
-  it('explicit variant override wins over destructive flag', () => {
-    const actions: Action[] = [{ id: 'act', label: 'Mark', destructive: true, variant: 'secondary' }];
-    render(BatchActionBar, { selectedCount: 1, actions, onaction: vi.fn(), oncancel: vi.fn() });
-    const btn = screen.getByRole('button', { name: 'Mark' });
-    expect(btn.className).toContain('border');
+  it("explicit variant override wins over destructive flag", () => {
+    const actions: Action[] = [
+      { id: "act", label: "Mark", destructive: true, variant: "secondary" },
+    ];
+    render(BatchActionBar, {
+      selectedCount: 1,
+      actions,
+      onaction: vi.fn(),
+      oncancel: vi.fn(),
+    });
+    const btn = screen.getByRole("button", { name: "Mark" });
+    expect(btn.className).toContain("border");
     expect(btn.className).not.toMatch(/danger|error/);
   });
 
   it('action with loading=true has aria-busy="true"', () => {
     const actions: Action[] = [
-      { id: 'a', label: 'Action A', loading: true },
-      { id: 'b', label: 'Action B', loading: false }
+      { id: "a", label: "Action A", loading: true },
+      { id: "b", label: "Action B", loading: false },
     ];
-    render(BatchActionBar, { selectedCount: 2, actions, onaction: vi.fn(), oncancel: vi.fn() });
-    expect(screen.getByRole('button', { name: 'Action A' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('button', { name: 'Action B' })).not.toHaveAttribute('aria-busy');
+    render(BatchActionBar, {
+      selectedCount: 2,
+      actions,
+      onaction: vi.fn(),
+      oncancel: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Action A" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "Action B" }),
+    ).not.toHaveAttribute("aria-busy");
   });
 
-  it('onaction fires with the correct id on click', () => {
+  it("onaction fires with the correct id on click", () => {
     const onaction = vi.fn();
-    const actions: Action[] = [{ id: 'my-action', label: 'Run' }];
-    render(BatchActionBar, { selectedCount: 1, actions, onaction, oncancel: vi.fn() });
-    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
-    expect(onaction).toHaveBeenCalledWith('my-action');
+    const actions: Action[] = [{ id: "my-action", label: "Run" }];
+    render(BatchActionBar, {
+      selectedCount: 1,
+      actions,
+      onaction,
+      oncancel: vi.fn(),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(onaction).toHaveBeenCalledWith("my-action");
   });
 
   it('Deselect all button renders variant="secondary" size="sm"', () => {
-    render(BatchActionBar, { selectedCount: 2, actions: [{ id: 'x', label: 'X' }], onaction: vi.fn(), oncancel: vi.fn() });
-    const btn = screen.getByRole('button', { name: 'Deselect all' });
-    expect(btn.className).toContain('border');
+    render(BatchActionBar, {
+      selectedCount: 2,
+      actions: [{ id: "x", label: "X" }],
+      onaction: vi.fn(),
+      oncancel: vi.fn(),
+    });
+    const btn = screen.getByRole("button", { name: "Deselect all" });
+    expect(btn.className).toContain("border");
   });
 });
 ```
@@ -1224,47 +1303,51 @@ describe('BatchActionBar', () => {
 Before:
 
 ```ts
-expect(currentBtn.className).toContain('preset-filled-primary-500');
+expect(currentBtn.className).toContain("preset-filled-primary-500");
 ```
 
 After:
 
 ```ts
-expect(currentBtn.className).toContain('text-[var(--accent)]');
-expect(currentBtn.className).toContain('bg-[var(--bg-hover)]');
+expect(currentBtn.className).toContain("text-[var(--accent)]");
+expect(currentBtn.className).toContain("bg-[var(--bg-hover)]");
 ```
 
 - [ ] **Add new assertions:**
 
 ```ts
-it('Previous and Next buttons carry h-8 height override class', () => {
+it("Previous and Next buttons carry h-8 height override class", () => {
   render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
-  expect(screen.getByRole('button', { name: /previous/i }).className).toContain('h-8');
-  expect(screen.getByRole('button', { name: /next/i }).className).toContain('h-8');
+  expect(screen.getByRole("button", { name: /previous/i }).className).toContain(
+    "h-8",
+  );
+  expect(screen.getByRole("button", { name: /next/i }).className).toContain(
+    "h-8",
+  );
 });
 
-it('page-number buttons carry h-8 height override class', () => {
+it("page-number buttons carry h-8 height override class", () => {
   render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
-  expect(screen.getByRole('button', { name: '3' }).className).toContain('h-8');
+  expect(screen.getByRole("button", { name: "3" }).className).toContain("h-8");
 });
 
-it('inactive page-number buttons do not carry active accent/bg-hover classes', () => {
+it("inactive page-number buttons do not carry active accent/bg-hover classes", () => {
   render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
-  const inactiveBtn = screen.getByRole('button', { name: '3' });
-  expect(inactiveBtn.className).not.toContain('text-[var(--accent)]');
-  expect(inactiveBtn.className).not.toContain('bg-[var(--bg-hover)]');
+  const inactiveBtn = screen.getByRole("button", { name: "3" });
+  expect(inactiveBtn.className).not.toContain("text-[var(--accent)]");
+  expect(inactiveBtn.className).not.toContain("bg-[var(--bg-hover)]");
 });
 
-it('Previous button has a leadingIcon SVG in the DOM', () => {
+it("Previous button has a leadingIcon SVG in the DOM", () => {
   render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
-  const prevBtn = screen.getByRole('button', { name: /previous/i });
-  expect(prevBtn.querySelector('svg')).not.toBeNull();
+  const prevBtn = screen.getByRole("button", { name: /previous/i });
+  expect(prevBtn.querySelector("svg")).not.toBeNull();
 });
 
-it('Next button has a trailingIcon SVG in the DOM', () => {
+it("Next button has a trailingIcon SVG in the DOM", () => {
   render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
-  const nextBtn = screen.getByRole('button', { name: /next/i });
-  expect(nextBtn.querySelector('svg')).not.toBeNull();
+  const nextBtn = screen.getByRole("button", { name: /next/i });
+  expect(nextBtn.querySelector("svg")).not.toBeNull();
 });
 ```
 
@@ -1276,25 +1359,32 @@ Read the file in full before editing. It mocks `$lib/notifications.svelte` and u
 
 ```ts
 it('Dismiss renders as Button variant="ghost" size="sm" with text "Dismiss"', () => {
-  notificationState.errorMessage = 'Something failed';
+  notificationState.errorMessage = "Something failed";
   render(ToastNotifications, { alerts: [], onDismiss: vi.fn() });
-  const dismissBtn = screen.getByRole('button', { name: 'Dismiss' });
-  expect(dismissBtn).not.toHaveAttribute('aria-busy');
-  expect(dismissBtn.className).toContain('bg-transparent');
+  const dismissBtn = screen.getByRole("button", { name: "Dismiss" });
+  expect(dismissBtn).not.toHaveAttribute("aria-busy");
+  expect(dismissBtn.className).toContain("bg-transparent");
 });
 
-it('Go to Global Settings anchor is NOT a Button (belongs to #2b)', () => {
-  const alerts: SystemAlert[] = [{
-    id: 'cert-alert',
-    severity: 'warning',
-    title: 'Cert renewal',
-    message: 'Certificate needs renewal',
-    action: 'renew_server_certificate'
-  } as SystemAlert];
-  const { container } = render(ToastNotifications, { alerts, onDismiss: vi.fn() });
-  const cta = container.querySelector('a[href="/settings/global"]') as HTMLElement;
+it("Go to Global Settings anchor is NOT a Button (belongs to #2b)", () => {
+  const alerts: SystemAlert[] = [
+    {
+      id: "cert-alert",
+      severity: "warning",
+      title: "Cert renewal",
+      message: "Certificate needs renewal",
+      action: "renew_server_certificate",
+    } as SystemAlert,
+  ];
+  const { container } = render(ToastNotifications, {
+    alerts,
+    onDismiss: vi.fn(),
+  });
+  const cta = container.querySelector(
+    'a[href="/settings/global"]',
+  ) as HTMLElement;
   expect(cta).not.toBeNull();
-  expect(cta.tagName.toLowerCase()).toBe('a');
+  expect(cta.tagName.toLowerCase()).toBe("a");
 });
 ```
 
@@ -1310,26 +1400,30 @@ Read the existing test file in full. It mocks `$lib/api` and `$lib/notifications
 ```ts
 it('addHook launcher renders variant="secondary" size="sm"', async () => {
   // Use the existing fixture that loads the modal with plugin configs.
-  const addBtn = screen.getAllByRole('button', { name: '+ Add' })[0];
-  expect(addBtn.className).toContain('border');
+  const addBtn = screen.getAllByRole("button", { name: "+ Add" })[0];
+  expect(addBtn.className).toContain("border");
 });
 
 it('removeHook button renders variant="danger" size="sm" with shrink-0 class', async () => {
-  const removeBtn = screen.getByRole('button', { name: 'Remove' });
+  const removeBtn = screen.getByRole("button", { name: "Remove" });
   expect(removeBtn.className).toMatch(/danger|error/);
-  expect(removeBtn.className).toContain('shrink-0');
+  expect(removeBtn.className).toContain("shrink-0");
 });
 
 it('Cancel button renders variant="secondary"', async () => {
-  expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('border');
+  expect(screen.getByRole("button", { name: "Cancel" }).className).toContain(
+    "border",
+  );
 });
 
 it('Save button renders variant="primary"', async () => {
-  expect(screen.getByRole('button', { name: 'Save' }).className).toMatch(/bg-\[linear-gradient/);
+  expect(screen.getByRole("button", { name: "Save" }).className).toMatch(
+    /bg-\[linear-gradient/,
+  );
 });
 
 it('Save button has no "Saving..." text in any rendered state', () => {
-  expect(document.body.textContent).not.toContain('Saving...');
+  expect(document.body.textContent).not.toContain("Saving...");
 });
 ```
 
@@ -1344,33 +1438,41 @@ Read the existing test file in full before editing.
 
 ```ts
 it('view-mode toggle buttons render variant="secondary" size="sm"', async () => {
-  const editJsonBtns = screen.getAllByRole('button', { name: /edit as json/i });
+  const editJsonBtns = screen.getAllByRole("button", { name: /edit as json/i });
   expect(editJsonBtns.length).toBeGreaterThan(0);
-  editJsonBtns.forEach((btn) => { expect(btn.className).toContain('border'); });
+  editJsonBtns.forEach((btn) => {
+    expect(btn.className).toContain("border");
+  });
 });
 
 it('+ Add hook-row button renders variant="primary" with shrink-0', async () => {
-  const addBtn = screen.getByRole('button', { name: '+ Add' });
+  const addBtn = screen.getByRole("button", { name: "+ Add" });
   expect(addBtn.className).toMatch(/bg-\[linear-gradient/);
-  expect(addBtn.className).toContain('shrink-0');
+  expect(addBtn.className).toContain("shrink-0");
 });
 
 it('Remove hook-entry button renders variant="danger"', async () => {
-  const removeBtn = screen.getByRole('button', { name: 'Remove' });
+  const removeBtn = screen.getByRole("button", { name: "Remove" });
   expect(removeBtn.className).toMatch(/danger|error/);
 });
 
 it('Cancel button renders variant="secondary"', async () => {
-  expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('border');
+  expect(screen.getByRole("button", { name: "Cancel" }).className).toContain(
+    "border",
+  );
 });
 
 it('Save Changes label is "Save Changes" not "Save"', async () => {
-  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Save Changes" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /^save$/i }),
+  ).not.toBeInTheDocument();
 });
 
 it('Save Changes button has no "Saving…" text in any rendered state', () => {
-  expect(document.body.textContent).not.toContain('Saving…');
+  expect(document.body.textContent).not.toContain("Saving…");
 });
 ```
 
@@ -1449,11 +1551,11 @@ For each spec being re-baselined, ensure these masks are configured:
 
 - [ ] **Step 4: Verify delta sizes match spec**
 
-| Button kind | Expected height |
-| --- | --- |
-| `size="md"` (ConfirmDialog, BatchResultDialog, modal footers) | `h-[23px]` |
-| `size="sm"` (BatchActionBar, row actions, Toast Dismiss, modal hook buttons) | `h-[19px]` |
-| Pagination (class override) | `h-8` (32px) |
+| Button kind                                                                  | Expected height |
+| ---------------------------------------------------------------------------- | --------------- |
+| `size="md"` (ConfirmDialog, BatchResultDialog, modal footers)                | `h-[23px]`      |
+| `size="sm"` (BatchActionBar, row actions, Toast Dismiss, modal hook buttons) | `h-[19px]`      |
+| Pagination (class override)                                                  | `h-8` (32px)    |
 
 - [ ] **Step 5: Re-run all specs to confirm stability**
 
@@ -1509,15 +1611,15 @@ Expected: no matches.
 
 ## Commit summary
 
-| # | Commit message | Files |
-| --- | --- | --- |
-| 1 | refactor(confirm-dialog): replace confirmClass with confirmVariant prop, migrate buttons | `ConfirmDialog.svelte` |
-| 2 | refactor(confirm-dialog): migrate all confirmClass= call sites to confirmVariant= | 12 consumer files |
-| 3 | refactor(batch-result-dialog): migrate Close button | `BatchResultDialog.svelte` |
-| 4 | refactor(batch-action-bar): migrate to Button primitive, extend actions type | `BatchActionBar.svelte` |
-| 5 | refactor(pagination): migrate all page buttons with ghost+size-override contract | `Pagination.svelte` |
-| 6 | refactor(toast-notifications): migrate Dismiss button | `ToastNotifications.svelte` |
-| 7 | refactor(assign-to-host-modal): migrate all 6 button sites | `AssignToHostModal.svelte` |
-| 8 | refactor(edit-host-assignment-modal): migrate all 12 button sites | `EditHostAssignmentModal.svelte` |
-| 9 | test(shared-modals): add Button primitive contract tests for seven components | 7 test files |
-| 10 | test(e2e): re-baseline snapshots after shared-modals migration | e2e spec + PNGs |
+| #   | Commit message                                                                           | Files                            |
+| --- | ---------------------------------------------------------------------------------------- | -------------------------------- |
+| 1   | refactor(confirm-dialog): replace confirmClass with confirmVariant prop, migrate buttons | `ConfirmDialog.svelte`           |
+| 2   | refactor(confirm-dialog): migrate all confirmClass= call sites to confirmVariant=        | 12 consumer files                |
+| 3   | refactor(batch-result-dialog): migrate Close button                                      | `BatchResultDialog.svelte`       |
+| 4   | refactor(batch-action-bar): migrate to Button primitive, extend actions type             | `BatchActionBar.svelte`          |
+| 5   | refactor(pagination): migrate all page buttons with ghost+size-override contract         | `Pagination.svelte`              |
+| 6   | refactor(toast-notifications): migrate Dismiss button                                    | `ToastNotifications.svelte`      |
+| 7   | refactor(assign-to-host-modal): migrate all 6 button sites                               | `AssignToHostModal.svelte`       |
+| 8   | refactor(edit-host-assignment-modal): migrate all 12 button sites                        | `EditHostAssignmentModal.svelte` |
+| 9   | test(shared-modals): add Button primitive contract tests for seven components            | 7 test files                     |
+| 10  | test(e2e): re-baseline snapshots after shared-modals migration                           | e2e spec + PNGs                  |

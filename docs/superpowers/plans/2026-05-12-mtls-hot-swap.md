@@ -431,7 +431,7 @@ Ok(LoopOutcome::Continue)
 ```
 
 - [ ] **Step 6: Add `cert_resolver: Arc<AgentClientCertResolver>` field to
-  `CertificateRenewalHandler`**
+      `CertificateRenewalHandler`**
 
 In the struct definition:
 
@@ -1100,7 +1100,7 @@ at every reachable site (CRL rebuild loop, CA rotation, etc.).
 - [ ] **Step 4: Delete `reload_tls_config` from `CrlManager`**
 
 - [ ] **Step 5: Verify no remaining `axum_server::tls_rustls::RustlsConfig::reload_from_config`
-  calls in CRL paths**
+      calls in CRL paths**
 
 Run: `rg -n 'reload_from_config' crates/`
 
@@ -1140,7 +1140,7 @@ Run: `rg -n 'renew_server_certificate\|reload_from_config'
 crates/ui/web-api/src/routes/server_cert.rs crates/core/controller-runtime/src/tasks.rs`
 
 - [ ] **Step 2: Replace `RustlsConfig::reload_from_config` with
-  `ControllerServerCertResolver.swap`**
+      `ControllerServerCertResolver.swap`**
 
 In `renew_server_certificate_inner` (or equivalent), after generating + persisting the new server
 cert:
@@ -1155,7 +1155,7 @@ Where `state.tls_handles` is the `BuiltTlsConfig` introduced in Task 8, stored i
 Remove the prior full-config rebuild path for this renewal.
 
 - [ ] **Step 3: Update the scheduled background renewal** (`tasks.rs` server-cert renewal loop) to
-  use the same `.swap` call.
+      use the same `.swap` call.
 
 - [ ] **Step 4: Tests**
 
@@ -1337,7 +1337,7 @@ git commit -m "test(integration): cert renewal via resolver keeps TLS session al
 
 - [ ] **Step 1: `cargo fmt --all -- --check`** — no diff.
 - [ ] **Step 2: `cargo check --workspace --no-default-features --features db-sqlite && cargo check
-  --workspace --all-features`** — PASS.
+--workspace --all-features`** — PASS.
 - [ ] **Step 3: Clippy on both feature sets:**
 
   ```sh
@@ -1346,10 +1346,11 @@ git commit -m "test(integration): cert renewal via resolver keeps TLS session al
   ```
 
   Expected: PASS.
+
 - [ ] **Step 4: `cargo test --all-features`** — PASS.
 - [ ] **Step 5: `cargo deny check`** — PASS.
 - [ ] **Step 6: Reverse-proxy: `cargo test -p uptrakit-controller reverse_proxy -- --ignored`** —
-  PASS.
+      PASS.
 - [ ] **Step 7: System integration:**
 
   ```sh

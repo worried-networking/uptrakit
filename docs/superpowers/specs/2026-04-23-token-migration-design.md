@@ -61,41 +61,41 @@ No behaviour changes. Pure class-substitution.
 
 ## Token substitution table
 
-| Skeleton class | Design token replacement |
-| --- | --- |
-| `text-surface-400`, `text-surface-500` | `text-[var(--text-muted)]` |
-| `text-surface-600`, `text-surface-700` | `text-[var(--text-secondary)]` |
-| `text-surface-600 dark:text-surface-400` | `text-[var(--text-secondary)]` (dark variant dropped — `--text-secondary` is theme-aware) |
-| `text-surface-900 dark:text-surface-100` | `text-[var(--text-primary)]` |
-| `bg-surface-50 dark:bg-surface-900` | `bg-[var(--bg-surface)]` |
-| `bg-surface-100 dark:bg-surface-800` | `bg-[var(--bg-raised)]` |
-| `bg-surface-100/800` (slash notation) | `bg-[var(--bg-raised)]` |
-| `border-surface-200`, `border-surface-300` | `border-[var(--border-default)]` |
-| `dark:border-surface-600`, `dark:border-surface-700` | (drop — `--border-default` handles both themes) |
-| `divide-surface-200 dark:divide-surface-700` | `divide-[var(--border-subtle)]` |
-| `hover:bg-surface-100-800-token` | `hover:bg-[var(--bg-hover)]` |
-| `rounded-container-token` | `rounded-[3px]` |
-| `border-surface-300-600-token` | `border-[var(--border-default)]` |
-| `text-error-500` | `text-[var(--color-danger)]` |
-| `text-success-500` | `text-[var(--color-success)]` |
-| `border-t-primary-500` | `border-t-[var(--accent)]` |
-| `border-primary-500` | `border-[var(--accent)]` |
-| `bg-primary-100 dark:bg-primary-900/40` | `bg-[rgba(var(--accent-rgb),0.12)]` |
-| `text-primary-700 dark:text-primary-200` | `text-[var(--accent-bright)]` |
-| `preset-filled-error-500` on `<aside>` | `<Callout tone="danger">` |
-| `preset-tonal-surface` on `<aside>` | `<Callout tone="info">` (or omit Callout and use `bg-[var(--bg-raised)]`) |
-| `preset-filled-warning-500` | `<Callout tone="warning">` |
-| `preset-filled-surface-400-600` | `bg-[var(--bg-raised)]` |
-| `badge preset-tonal` | `<StatusBadge tone="info">` |
-| `badge preset-tonal-warning` | `<StatusBadge tone="warning">` |
-| `badge preset-tonal-error` | `<StatusBadge tone="danger">` |
-| `badge preset-tonal-surface` | `<StatusBadge tone="info">` |
-| `badge preset-filled-primary-500` | `<StatusBadge tone="info">` |
-| `card preset-tonal-primary` | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4` |
-| `card preset-tonal-surface` | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` |
-| `card` (Skeleton utility) | `<SectionCard>` or inline token classes |
-| `btn btn-sm preset-tonal` on `<a>` | `<Button variant="ghost" size="sm" href=...>` |
-| `hover:text-surface-700 dark:hover:text-surface-300` on raw `<button>` | migrate element to `<Button variant="ghost">` |
+| Skeleton class                                                         | Design token replacement                                                                           |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `text-surface-400`, `text-surface-500`                                 | `text-[var(--text-muted)]`                                                                         |
+| `text-surface-600`, `text-surface-700`                                 | `text-[var(--text-secondary)]`                                                                     |
+| `text-surface-600 dark:text-surface-400`                               | `text-[var(--text-secondary)]` (dark variant dropped — `--text-secondary` is theme-aware)          |
+| `text-surface-900 dark:text-surface-100`                               | `text-[var(--text-primary)]`                                                                       |
+| `bg-surface-50 dark:bg-surface-900`                                    | `bg-[var(--bg-surface)]`                                                                           |
+| `bg-surface-100 dark:bg-surface-800`                                   | `bg-[var(--bg-raised)]`                                                                            |
+| `bg-surface-100/800` (slash notation)                                  | `bg-[var(--bg-raised)]`                                                                            |
+| `border-surface-200`, `border-surface-300`                             | `border-[var(--border-default)]`                                                                   |
+| `dark:border-surface-600`, `dark:border-surface-700`                   | (drop — `--border-default` handles both themes)                                                    |
+| `divide-surface-200 dark:divide-surface-700`                           | `divide-[var(--border-subtle)]`                                                                    |
+| `hover:bg-surface-100-800-token`                                       | `hover:bg-[var(--bg-hover)]`                                                                       |
+| `rounded-container-token`                                              | `rounded-[3px]`                                                                                    |
+| `border-surface-300-600-token`                                         | `border-[var(--border-default)]`                                                                   |
+| `text-error-500`                                                       | `text-[var(--color-danger)]`                                                                       |
+| `text-success-500`                                                     | `text-[var(--color-success)]`                                                                      |
+| `border-t-primary-500`                                                 | `border-t-[var(--accent)]`                                                                         |
+| `border-primary-500`                                                   | `border-[var(--accent)]`                                                                           |
+| `bg-primary-100 dark:bg-primary-900/40`                                | `bg-[rgba(var(--accent-rgb),0.12)]`                                                                |
+| `text-primary-700 dark:text-primary-200`                               | `text-[var(--accent-bright)]`                                                                      |
+| `preset-filled-error-500` on `<aside>`                                 | `<Callout tone="danger">`                                                                          |
+| `preset-tonal-surface` on `<aside>`                                    | `<Callout tone="info">` (or omit Callout and use `bg-[var(--bg-raised)]`)                          |
+| `preset-filled-warning-500`                                            | `<Callout tone="warning">`                                                                         |
+| `preset-filled-surface-400-600`                                        | `bg-[var(--bg-raised)]`                                                                            |
+| `badge preset-tonal`                                                   | `<StatusBadge tone="info">`                                                                        |
+| `badge preset-tonal-warning`                                           | `<StatusBadge tone="warning">`                                                                     |
+| `badge preset-tonal-error`                                             | `<StatusBadge tone="danger">`                                                                      |
+| `badge preset-tonal-surface`                                           | `<StatusBadge tone="info">`                                                                        |
+| `badge preset-filled-primary-500`                                      | `<StatusBadge tone="info">`                                                                        |
+| `card preset-tonal-primary`                                            | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4` |
+| `card preset-tonal-surface`                                            | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]`                         |
+| `card` (Skeleton utility)                                              | `<SectionCard>` or inline token classes                                                            |
+| `btn btn-sm preset-tonal` on `<a>`                                     | `<Button variant="ghost" size="sm" href=...>`                                                      |
+| `hover:text-surface-700 dark:hover:text-surface-300` on raw `<button>` | migrate element to `<Button variant="ghost">`                                                      |
 
 ---
 
@@ -103,19 +103,19 @@ No behaviour changes. Pure class-substitution.
 
 ### `lib/components/` files
 
-| File | Key violations |
-| --- | --- |
-| `ToastNotifications.svelte:388` | `<a class="btn btn-sm preset-tonal">` → `<Button variant="ghost" size="sm" href=...>` |
-| `BatchActionBar.svelte:105,110,112,119,155` | `bg-surface-*`, `text-surface-500`, `border-t-primary-500`; raw `<button>` as link → `<Button variant="ghost">` |
-| `BatchResultDialog.svelte:21,29,37,38,39` | `text-success-500`, `text-error-500`, `bg-surface-100/800`, `text-surface-500` |
-| `Modal.svelte:22` | `bg-surface-50 dark:bg-surface-900` |
-| `CheckboxList.svelte:34,38,52,59` | `rounded-container-token`, `border-surface-*-token`, `hover:bg-surface-*-token`, `text-surface-500` |
-| `AddSoftwareModal.svelte:59` | `text-surface-500` |
-| `AssignToHostModal.svelte:261,270,274,375,501` | `text-surface-*`; `preset-filled-error-500` → `<Callout tone="danger">`; `preset-tonal-surface` → `<Callout tone="info">` |
-| `EditHostAssignmentModal.svelte:685,699,838,883,965,1015,1157,1205` | `text-surface-*`, `bg-surface-*`, `border-surface-*`, `preset-filled-error-500` (×3 at 685,838,965), `badge preset-tonal` (×2 at 699,1015), `badge preset-tonal-warning` (×2 at 883,1205); error paragraphs 838,965,1157 |
-| `SoftwareMergeWizard.svelte` | `bg-primary-*`, `text-primary-*`, `bg-surface-*`, `text-surface-*`; `badge preset-*` (×4); `card preset-tonal-primary` |
-| `surfaces/SurfaceKeyValue.svelte:16,20` | `text-surface-500`, `divide-surface-200/700` |
-| `surfaces/SurfaceWorkflow.svelte` | `bg-primary-*`, `text-primary-*`, `border-primary-500` (incl. :471), `text-surface-*`, `card preset-tonal-surface` at :420 → `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` (no padding — this card has its own internal layout) |
+| File                                                                | Key violations                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ToastNotifications.svelte:388`                                     | `<a class="btn btn-sm preset-tonal">` → `<Button variant="ghost" size="sm" href=...>`                                                                                                                                                                        |
+| `BatchActionBar.svelte:105,110,112,119,155`                         | `bg-surface-*`, `text-surface-500`, `border-t-primary-500`; raw `<button>` as link → `<Button variant="ghost">`                                                                                                                                              |
+| `BatchResultDialog.svelte:21,29,37,38,39`                           | `text-success-500`, `text-error-500`, `bg-surface-100/800`, `text-surface-500`                                                                                                                                                                               |
+| `Modal.svelte:22`                                                   | `bg-surface-50 dark:bg-surface-900`                                                                                                                                                                                                                          |
+| `CheckboxList.svelte:34,38,52,59`                                   | `rounded-container-token`, `border-surface-*-token`, `hover:bg-surface-*-token`, `text-surface-500`                                                                                                                                                          |
+| `AddSoftwareModal.svelte:59`                                        | `text-surface-500`                                                                                                                                                                                                                                           |
+| `AssignToHostModal.svelte:261,270,274,375,501`                      | `text-surface-*`; `preset-filled-error-500` → `<Callout tone="danger">`; `preset-tonal-surface` → `<Callout tone="info">`                                                                                                                                    |
+| `EditHostAssignmentModal.svelte:685,699,838,883,965,1015,1157,1205` | `text-surface-*`, `bg-surface-*`, `border-surface-*`, `preset-filled-error-500` (×3 at 685,838,965), `badge preset-tonal` (×2 at 699,1015), `badge preset-tonal-warning` (×2 at 883,1205); error paragraphs 838,965,1157                                     |
+| `SoftwareMergeWizard.svelte`                                        | `bg-primary-*`, `text-primary-*`, `bg-surface-*`, `text-surface-*`; `badge preset-*` (×4); `card preset-tonal-primary`                                                                                                                                       |
+| `surfaces/SurfaceKeyValue.svelte:16,20`                             | `text-surface-500`, `divide-surface-200/700`                                                                                                                                                                                                                 |
+| `surfaces/SurfaceWorkflow.svelte`                                   | `bg-primary-*`, `text-primary-*`, `border-primary-500` (incl. :471), `text-surface-*`, `card preset-tonal-surface` at :420 → `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` (no padding — this card has its own internal layout) |
 
 > **Cross-spec note:** `SurfaceSlot.svelte:38,40` uses Skeleton `card` utility and `h3`
 > typography class. Those are geometry/typography deviations handled by
@@ -123,22 +123,22 @@ No behaviour changes. Pure class-substitution.
 
 ### Route files
 
-| File | Key violations |
-| --- | --- |
-| `routes/+page.svelte:161` | `text-surface-500` |
-| `routes/surfaces/[id]/+page.svelte:54,62` | `text-surface-500` |
-| `routes/history/+page.svelte:682,711` | `bg-surface-50/900`, `text-error-500` |
-| `routes/audit-logs/+page.svelte:216` | `text-surface-500` |
-| `routes/profile/+page.svelte:182` | `bg-surface-100/800` |
-| `routes/hosts/+page.svelte:437,563` | `text-surface-400`, `text-error-500` |
-| `routes/hosts/[id]/+page.svelte:584,624,643` | `<a class="btn btn-sm preset-tonal">` → `<Button variant="ghost" size="sm" href=...>`; `preset-tonal-surface`; `preset-tonal` badge → `<StatusBadge>` |
-| `routes/host-tags/+page.svelte:480` | `text-surface-400` |
-| `routes/software/[id]/+page.svelte:848` | `badge preset-tonal` → `<StatusBadge>` |
-| `routes/settings/GlobalSettingsTab.svelte` | `text-surface-*`, `bg-surface-100-900`, `preset-filled-warning-500` → `<Callout tone="warning">`, `preset-filled-surface-400-600` |
-| `routes/settings/PluginConfigsTab.svelte:1276,1288` | `text-surface-500`, `text-error-500` |
-| `routes/settings/SchedulerTab.svelte:124,141` | `text-surface-500`, `text-error-500` |
-| `routes/settings/SystemServicesSettings.svelte:200` | `text-surface-600 dark:text-surface-400` |
-| `routes/settings/+page.svelte:250` | `text-surface-600` |
+| File                                                | Key violations                                                                                                                                        |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `routes/+page.svelte:161`                           | `text-surface-500`                                                                                                                                    |
+| `routes/surfaces/[id]/+page.svelte:54,62`           | `text-surface-500`                                                                                                                                    |
+| `routes/history/+page.svelte:682,711`               | `bg-surface-50/900`, `text-error-500`                                                                                                                 |
+| `routes/audit-logs/+page.svelte:216`                | `text-surface-500`                                                                                                                                    |
+| `routes/profile/+page.svelte:182`                   | `bg-surface-100/800`                                                                                                                                  |
+| `routes/hosts/+page.svelte:437,563`                 | `text-surface-400`, `text-error-500`                                                                                                                  |
+| `routes/hosts/[id]/+page.svelte:584,624,643`        | `<a class="btn btn-sm preset-tonal">` → `<Button variant="ghost" size="sm" href=...>`; `preset-tonal-surface`; `preset-tonal` badge → `<StatusBadge>` |
+| `routes/host-tags/+page.svelte:480`                 | `text-surface-400`                                                                                                                                    |
+| `routes/software/[id]/+page.svelte:848`             | `badge preset-tonal` → `<StatusBadge>`                                                                                                                |
+| `routes/settings/GlobalSettingsTab.svelte`          | `text-surface-*`, `bg-surface-100-900`, `preset-filled-warning-500` → `<Callout tone="warning">`, `preset-filled-surface-400-600`                     |
+| `routes/settings/PluginConfigsTab.svelte:1276,1288` | `text-surface-500`, `text-error-500`                                                                                                                  |
+| `routes/settings/SchedulerTab.svelte:124,141`       | `text-surface-500`, `text-error-500`                                                                                                                  |
+| `routes/settings/SystemServicesSettings.svelte:200` | `text-surface-600 dark:text-surface-400`                                                                                                              |
+| `routes/settings/+page.svelte:250`                  | `text-surface-600`                                                                                                                                    |
 
 ---
 

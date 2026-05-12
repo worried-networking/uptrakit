@@ -19,11 +19,11 @@ install code only — no functions. JSON metadata describes the app for the PVEH
 
 ## File Map
 
-| File | Action | Responsibility |
-| ---- | ------ | -------------- |
-| `scripts/pvehs/ct/uptrakit.sh` | Create | CT creation, `update_script()`, framework delegation |
-| `scripts/pvehs/install/uptrakit-install.sh` | Create | Flat install path only — no functions |
-| `scripts/pvehs/json/uptrakit.json` | Create | PVEHS web UI metadata |
+| File                                        | Action | Responsibility                                       |
+| ------------------------------------------- | ------ | ---------------------------------------------------- |
+| `scripts/pvehs/ct/uptrakit.sh`              | Create | CT creation, `update_script()`, framework delegation |
+| `scripts/pvehs/install/uptrakit-install.sh` | Create | Flat install path only — no functions                |
+| `scripts/pvehs/json/uptrakit.json`          | Create | PVEHS web UI metadata                                |
 
 `update_script()` lives in `ct/uptrakit.sh` — that is where the PVEHS framework calls it from.
 The install script is flat top-level code only; defining functions in it has no effect on updates.

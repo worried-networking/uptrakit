@@ -23,15 +23,15 @@ and sub-spec #2c merged (`ariaLabel?: string` prop available on `Button` for ico
 
 ## Migration rules (quick reference)
 
-| Legacy class | Button variant | Notes |
-| --- | --- | --- |
-| `preset-filled-primary-500` | `primary` | Retry button in `+page.svelte` |
-| `preset-filled-error-500` | `danger` | Session-expired "Log in" link |
-| `preset-tonal-surface` (non-destructive) | `ghost` | theme toggle, sidebar toggle, Dismiss |
-| `preset-tonal-surface` (sign-out) | `danger` | Logout — destructive action per spec §Testing |
-| `btn btn-sm preset-tonal` | `ghost` size="sm" | Action link `<a>` elements in `+page.svelte` |
-| `btn-icon preset-tonal-surface` | `ghost` + icon-only + `ariaLabel` | Theme toggle, tablet sidebar toggle |
-| Active nav pill | `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]` | **No change** — leave existing `<a>` elements untouched (Q5); document class for Playwright assertion |
+| Legacy class                             | Button variant                                                  | Notes                                                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `preset-filled-primary-500`              | `primary`                                                       | Retry button in `+page.svelte`                                                                        |
+| `preset-filled-error-500`                | `danger`                                                        | Session-expired "Log in" link                                                                         |
+| `preset-tonal-surface` (non-destructive) | `ghost`                                                         | theme toggle, sidebar toggle, Dismiss                                                                 |
+| `preset-tonal-surface` (sign-out)        | `danger`                                                        | Logout — destructive action per spec §Testing                                                         |
+| `btn btn-sm preset-tonal`                | `ghost` size="sm"                                               | Action link `<a>` elements in `+page.svelte`                                                          |
+| `btn-icon preset-tonal-surface`          | `ghost` + icon-only + `ariaLabel`                               | Theme toggle, tablet sidebar toggle                                                                   |
+| Active nav pill                          | `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]` | **No change** — leave existing `<a>` elements untouched (Q5); document class for Playwright assertion |
 
 Nav `<a>` elements inside `<nav>` landmarks: **no change** — already token-based, no `preset-*`
 classes present. Do NOT wrap in `<Button>`.
@@ -122,19 +122,19 @@ do NOT import component-internal types from the `.svelte` file.
 - [ ] **Step 2: Add test — theme toggle renders as ghost Button with aria-label**
 
 ```ts
-it('theme toggle renders as ghost Button with aria-label', () => {
+it("theme toggle renders as ghost Button with aria-label", () => {
   render(Layout, {
-    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+    children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
   });
   const toggle = document.querySelector(
-    '[data-ui="app-shell-header"] button[aria-label*="mode"]'
+    '[data-ui="app-shell-header"] button[aria-label*="mode"]',
   ) as HTMLElement;
   expect(toggle).not.toBeNull();
-  expect(toggle.className).toContain('h-[23px]');
-  expect(toggle.className).toContain('bg-transparent');
-  expect(toggle).toHaveAttribute('aria-label');
+  expect(toggle.className).toContain("h-[23px]");
+  expect(toggle.className).toContain("bg-transparent");
+  expect(toggle).toHaveAttribute("aria-label");
   // Icon-only guard: the accessible name comes from ariaLabel alone — no visible text
-  expect(toggle.textContent?.trim()).toBe('');
+  expect(toggle.textContent?.trim()).toBe("");
 });
 ```
 
@@ -143,31 +143,33 @@ This test fails on the current file (no `h-[23px]` class present) and passes aft
 - [ ] **Step 3: Add test — tablet sidebar toggle renders as ghost Button with aria-label**
 
 ```ts
-it('tablet sidebar toggle renders as ghost Button with aria-label', () => {
+it("tablet sidebar toggle renders as ghost Button with aria-label", () => {
   render(Layout, {
-    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+    children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
   });
-  const toggle = document.querySelector('[data-ui="app-shell-sidebar-toggle"]') as HTMLElement;
+  const toggle = document.querySelector(
+    '[data-ui="app-shell-sidebar-toggle"]',
+  ) as HTMLElement;
   // Toggle only renders in tablet viewport range; skip assertion if not rendered
   if (!toggle) return;
-  expect(toggle.className).toContain('h-[23px]');
-  expect(toggle.className).toContain('bg-transparent');
-  expect(toggle).toHaveAttribute('aria-label');
-  expect(toggle).not.toHaveAttribute('role', 'link');
+  expect(toggle.className).toContain("h-[23px]");
+  expect(toggle.className).toContain("bg-transparent");
+  expect(toggle).toHaveAttribute("aria-label");
+  expect(toggle).not.toHaveAttribute("role", "link");
 });
 ```
 
 - [ ] **Step 4: Add test — Logout renders as danger Button**
 
 ```ts
-it('logout button renders as danger Button', () => {
+it("logout button renders as danger Button", () => {
   render(Layout, {
-    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+    children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
   });
-  const logoutBtn = screen.getByRole('button', { name: /logout/i });
-  expect(logoutBtn.className).toContain('h-[23px]');
-  expect(logoutBtn.className).toContain('var(--color-error-bg)'); // danger variant
-  expect(logoutBtn.className).not.toContain('bg-transparent');
+  const logoutBtn = screen.getByRole("button", { name: /logout/i });
+  expect(logoutBtn.className).toContain("h-[23px]");
+  expect(logoutBtn.className).toContain("var(--color-error-bg)"); // danger variant
+  expect(logoutBtn.className).not.toContain("bg-transparent");
 });
 ```
 
@@ -177,30 +179,32 @@ The mock for `getSessionExpired` must return `true` for this test. Use a nested 
 its own `beforeEach` that overrides `getSessionExpired` to return `true`.
 
 ```ts
-describe('session-expired banner', () => {
+describe("session-expired banner", () => {
   beforeEach(() => {
     vi.mocked(auth.getSessionExpired).mockReturnValue(true);
   });
 
   it('"Log in" in session-expired banner renders as danger Button (size="sm") with href', () => {
     render(Layout, {
-      children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
     });
     // Use CSS selector — Button href branch renders <a role="button">, not <a role="link">
-    const loginAnchor = document.querySelector('a[href*="/login"]') as HTMLElement;
+    const loginAnchor = document.querySelector(
+      'a[href*="/login"]',
+    ) as HTMLElement;
     expect(loginAnchor).not.toBeNull();
-    expect(loginAnchor.className).toContain('h-[19px]'); // size="sm"
-    expect(loginAnchor.className).toContain('var(--color-error-bg)'); // danger variant
-    expect(loginAnchor.className).not.toContain('preset-filled-error');
+    expect(loginAnchor.className).toContain("h-[19px]"); // size="sm"
+    expect(loginAnchor.className).toContain("var(--color-error-bg)"); // danger variant
+    expect(loginAnchor.className).not.toContain("preset-filled-error");
   });
 
   it('"Dismiss" in session-expired banner renders as ghost Button (size="sm")', () => {
     render(Layout, {
-      children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
     });
-    const dismissBtn = screen.getByRole('button', { name: /dismiss/i });
-    expect(dismissBtn.className).toContain('h-[19px]'); // size="sm"
-    expect(dismissBtn.className).toContain('bg-transparent'); // ghost
+    const dismissBtn = screen.getByRole("button", { name: /dismiss/i });
+    expect(dismissBtn.className).toContain("h-[19px]"); // size="sm"
+    expect(dismissBtn.className).toContain("bg-transparent"); // ghost
   });
 });
 ```
@@ -212,30 +216,30 @@ Active nav items use `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.1
 holds, and neither is present on an inactive pill.
 
 ```ts
-it('active nav pill carries accent-bright text and rgba bg tokens', () => {
+it("active nav pill carries accent-bright text and rgba bg tokens", () => {
   // Mock the page route to match one of the nav items (e.g. /hosts).
   // If the mock supports setting page.url, set it; otherwise use the test pattern from
   // surface-migration.test.ts which already controls active-route state.
   render(Layout, {
-    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+    children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
   });
   const nav = document.querySelector('[data-ui="app-shell-nav"]');
   if (!nav) return; // layout may not render in jsdom — skip gracefully
-  const links = Array.from(nav.querySelectorAll('a'));
+  const links = Array.from(nav.querySelectorAll("a"));
   if (links.length === 0) return;
 
   // At least one link must be inactive (no active class) when the page is not at that route.
   for (const link of links) {
     // If this link is active, both fragments must be present together.
-    if (link.className.includes('accent-bright')) {
-      expect(link.className).toContain('bg-[rgba(var(--accent-rgb)');
+    if (link.className.includes("accent-bright")) {
+      expect(link.className).toContain("bg-[rgba(var(--accent-rgb)");
     }
     // If this link is inactive, neither fragment should be present.
-    if (!link.className.includes('accent-bright')) {
-      expect(link.className).not.toContain('bg-[rgba(var(--accent-rgb)');
+    if (!link.className.includes("accent-bright")) {
+      expect(link.className).not.toContain("bg-[rgba(var(--accent-rgb)");
     }
     // The old bg-hover token must NOT be used for nav-pill active state.
-    expect(link.className).not.toContain('bg-[var(--bg-hover)]');
+    expect(link.className).not.toContain("bg-[var(--bg-hover)]");
   }
 });
 ```
@@ -245,23 +249,23 @@ it('active nav pill carries accent-bright text and rgba bg tokens', () => {
 ```ts
 it('nav anchors inside nav landmark render as plain <a> without role="button"', () => {
   render(Layout, {
-    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+    children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
   });
   const nav = document.querySelector('[data-ui="app-shell-nav"]');
   if (!nav) return;
-  const navLinks = nav.querySelectorAll('a');
+  const navLinks = nav.querySelectorAll("a");
   for (const link of navLinks) {
-    expect(link.getAttribute('role')).not.toBe('button');
+    expect(link.getAttribute("role")).not.toBe("button");
   }
 });
 ```
 
-- [ ] **Step 9: Add test — no preset-* classes remain in layout source**
+- [ ] **Step 9: Add test — no preset-\* classes remain in layout source**
 
 ```ts
-import layoutSource from './+layout.svelte?raw';
+import layoutSource from "./+layout.svelte?raw";
 
-it('layout source contains no preset-filled-* or preset-tonal-* class strings', () => {
+it("layout source contains no preset-filled-* or preset-tonal-* class strings", () => {
   expect(layoutSource).not.toMatch(/preset-filled-/);
   expect(layoutSource).not.toMatch(/preset-tonal-/);
   expect(layoutSource).not.toMatch(/btn-icon/);
@@ -299,7 +303,7 @@ Read the file before editing to confirm exact markup and surrounding context.
 In the `<script lang="ts">` block, after the existing imports, add:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 No existing imports need to be removed — `+layout.svelte` does not import any `preset-*`
@@ -516,22 +520,22 @@ The Retry button only appears when an error is set. Reject all API calls to trig
 state, then assert the button renders with Button primitive classes.
 
 ```ts
-it('Retry button renders as primary Button with mt-3 class', async () => {
-  vi.mocked(api.getHosts).mockRejectedValue(new Error('fail'));
-  vi.mocked(api.getServices).mockRejectedValue(new Error('fail'));
-  vi.mocked(api.getSoftwareItems).mockRejectedValue(new Error('fail'));
-  vi.mocked(api.listUpdateHistory).mockRejectedValue(new Error('fail'));
+it("Retry button renders as primary Button with mt-3 class", async () => {
+  vi.mocked(api.getHosts).mockRejectedValue(new Error("fail"));
+  vi.mocked(api.getServices).mockRejectedValue(new Error("fail"));
+  vi.mocked(api.getSoftwareItems).mockRejectedValue(new Error("fail"));
+  vi.mocked(api.listUpdateHistory).mockRejectedValue(new Error("fail"));
   render(HomePage);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument(),
   );
 
-  const retryBtn = screen.getByRole('button', { name: /retry/i });
-  expect(retryBtn.className).toContain('h-[23px]');
+  const retryBtn = screen.getByRole("button", { name: /retry/i });
+  expect(retryBtn.className).toContain("h-[23px]");
   expect(retryBtn.className).toContain(
-    'bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'
+    "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
   );
-  expect(retryBtn.className).toContain('mt-3');
+  expect(retryBtn.className).toContain("mt-3");
 });
 ```
 
@@ -540,15 +544,17 @@ it('Retry button renders as primary Button with mt-3 class', async () => {
 ```ts
 it('"Review" action link renders as ghost Button href', async () => {
   render(HomePage);
-  await waitFor(() => expect(screen.getByText('Attention Needed')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Attention Needed")).toBeInTheDocument(),
+  );
 
   const reviewAnchor = document.querySelector(
-    'a[href="/services?status=pending"]'
+    'a[href="/services?status=pending"]',
   ) as HTMLElement;
   expect(reviewAnchor).not.toBeNull();
-  expect(reviewAnchor.className).toContain('h-[23px]');
-  expect(reviewAnchor.className).toContain('bg-transparent');
-  expect(reviewAnchor.className).not.toContain('preset-tonal');
+  expect(reviewAnchor.className).toContain("h-[23px]");
+  expect(reviewAnchor.className).toContain("bg-transparent");
+  expect(reviewAnchor.className).not.toContain("preset-tonal");
 });
 ```
 
@@ -557,14 +563,16 @@ it('"Review" action link renders as ghost Button href', async () => {
 ```ts
 it('"Investigate" action link renders as ghost Button href', async () => {
   render(HomePage);
-  await waitFor(() => expect(screen.getByText('Attention Needed')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Attention Needed")).toBeInTheDocument(),
+  );
 
   const investigateAnchor = document.querySelector(
-    'a[href="/history?status=failed"]'
+    'a[href="/history?status=failed"]',
   ) as HTMLElement;
   expect(investigateAnchor).not.toBeNull();
-  expect(investigateAnchor.className).toContain('h-[23px]');
-  expect(investigateAnchor.className).toContain('bg-transparent');
+  expect(investigateAnchor.className).toContain("h-[23px]");
+  expect(investigateAnchor.className).toContain("bg-transparent");
 });
 ```
 
@@ -577,34 +585,38 @@ it('"View all" action link renders as ghost Button href', async () => {
     items: Array.from({ length: 5 }, (_, i) => ({
       id: `hist-${i}`,
       software_item_name: `pkg-${i}`,
-      host_name: 'host',
-      status: 'completed',
-      created_at: '2026-01-01T10:00:00Z'
+      host_name: "host",
+      status: "completed",
+      created_at: "2026-01-01T10:00:00Z",
     })) as unknown as UpdateHistoryResponse[],
     total: 10,
     page: 1,
     per_page: 5,
-    total_pages: 2
+    total_pages: 2,
   });
   render(HomePage);
-  await waitFor(() => expect(screen.getByText('Recent Updates')).toBeInTheDocument());
   await waitFor(() =>
-    expect(document.querySelector('a[href="/history"]')).not.toBeNull()
+    expect(screen.getByText("Recent Updates")).toBeInTheDocument(),
+  );
+  await waitFor(() =>
+    expect(document.querySelector('a[href="/history"]')).not.toBeNull(),
   );
 
-  const viewAllAnchor = document.querySelector('a[href="/history"]') as HTMLElement;
+  const viewAllAnchor = document.querySelector(
+    'a[href="/history"]',
+  ) as HTMLElement;
   expect(viewAllAnchor).not.toBeNull();
-  expect(viewAllAnchor.className).toContain('h-[23px]');
-  expect(viewAllAnchor.className).toContain('bg-transparent');
+  expect(viewAllAnchor.className).toContain("h-[23px]");
+  expect(viewAllAnchor.className).toContain("bg-transparent");
 });
 ```
 
-- [ ] **Step 5: Add test — no preset-* classes remain in home page source**
+- [ ] **Step 5: Add test — no preset-\* classes remain in home page source**
 
 ```ts
-import homeSource from './+page.svelte?raw';
+import homeSource from "./+page.svelte?raw";
 
-it('home page source contains no preset-filled-* or preset-tonal-* class strings', () => {
+it("home page source contains no preset-filled-* or preset-tonal-* class strings", () => {
   expect(homeSource).not.toMatch(/preset-filled-/);
   expect(homeSource).not.toMatch(/preset-tonal-/);
 });
@@ -641,7 +653,7 @@ Read the file before editing to confirm exact markup and surrounding context.
 In the `<script lang="ts">` block, add after existing imports:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 - [ ] **Step 2: Migrate site 1 — Retry button (line ~162)**
@@ -843,11 +855,11 @@ form-primitive) must be unaffected — this migration only touches `+layout.svel
 
 ## Commit summary
 
-| # | Commit | Files |
-| --- | --- | --- |
-| 1 | Failing layout tests | `layout-button-migration.test.ts` (new) |
-| 2 | Migrate 6 sites | `+layout.svelte` |
-| 3 | Failing home tests | `home.test.ts` |
-| 4 | Migrate 4 sites | `+page.svelte` |
-| 5 | Fix surface-migration test if needed | `surface-migration.test.ts` |
-| 6 | E2e baselines | `layout-shell.spec.ts` + PNGs |
+| #   | Commit                               | Files                                   |
+| --- | ------------------------------------ | --------------------------------------- |
+| 1   | Failing layout tests                 | `layout-button-migration.test.ts` (new) |
+| 2   | Migrate 6 sites                      | `+layout.svelte`                        |
+| 3   | Failing home tests                   | `home.test.ts`                          |
+| 4   | Migrate 4 sites                      | `+page.svelte`                          |
+| 5   | Fix surface-migration test if needed | `surface-migration.test.ts`             |
+| 6   | E2e baselines                        | `layout-shell.spec.ts` + PNGs           |

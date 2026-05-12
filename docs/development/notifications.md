@@ -21,30 +21,30 @@ This separation means adding a new notification plugin never requires changes to
 
 ## Crate structure
 
-| Crate | Path | Purpose |
-| --- | --- | --- |
-| `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
-| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing); typed `WebhookChannelConfig` + `NotificationTransport` impl |
-| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support); typed `TelegramChannelConfig` + `NotificationTransport` impl |
-| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); typed `EmailChannelConfig` + `NotificationTransport` impl |
-| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | `NotificationTransport` role trait, `PluginMeta`, `PluginDescriptor`, `PluginConfig` trait, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `declare_plugin!` macro |
-| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | `PluginCatalog` registers all plugins (software, notification, enhancement) via descriptors; transport lookup via `catalog.transport(&PluginTypeId)` |
-| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications/` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
-| `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
-| `uptrakit-web-api-queries` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
-| `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + generic notification callback endpoint |
+| Crate                                     | Path                                                     | Purpose                                                                                                                                                             |
+| ----------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uptrakit-notification-plugin-core`       | `crates/plugins/notifications/core/`                     | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()`                                                                                      |
+| `uptrakit-notification-plugin-webhook`    | `crates/plugins/notifications/webhook/`                  | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing); typed `WebhookChannelConfig` + `NotificationTransport` impl                                |
+| `uptrakit-notification-plugin-telegram`   | `crates/plugins/notifications/telegram/`                 | Telegram plugin (inline keyboard support); typed `TelegramChannelConfig` + `NotificationTransport` impl                                                             |
+| `uptrakit-notification-plugin-email`      | `crates/plugins/notifications/email/`                    | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); typed `EmailChannelConfig` + `NotificationTransport` impl                    |
+| `uptrakit-plugin-infrastructure-core`     | `crates/plugins/infrastructure/core/`                    | `NotificationTransport` role trait, `PluginMeta`, `PluginDescriptor`, `PluginConfig` trait, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `declare_plugin!` macro |
+| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/`                | `PluginCatalog` registers all plugins (software, notification, enhancement) via descriptors; transport lookup via `catalog.transport(&PluginTypeId)`                |
+| `uptrakit-web-api-types`                  | `crates/shared/web-api-types/src/notifications/`         | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum)                       |
+| `uptrakit-web-api`                        | `crates/ui/web-api/src/notifications/`                   | Dispatcher, internal event types, `message_builder`                                                                                                                 |
+| `uptrakit-web-api-queries`                | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log)                                                                                                                    |
+| `uptrakit-web-api`                        | `crates/ui/web-api/src/routes/notifications.rs`          | REST API route handlers + generic notification callback endpoint                                                                                                    |
 
 ## Feature flags
 
-| Feature | Crate | Default | Description |
-| --- | --- | --- | --- |
-| `notifications-webhook` | `plugin-infrastructure-registry` | no | Webhook plugin |
-| `notifications-telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
-| `notifications-email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
-| `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
-| `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
-| `notifications-all` | `web-api` | no | Enables all optional notification plugins |
-| `notifications-all` | `controller` | **yes** | Enables all optional notification plugins (default since `notifications-all` is in `default`) |
+| Feature                  | Crate                            | Default | Description                                                                                   |
+| ------------------------ | -------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `notifications-webhook`  | `plugin-infrastructure-registry` | no      | Webhook plugin                                                                                |
+| `notifications-telegram` | `plugin-infrastructure-registry` | no      | Telegram plugin with inline keyboard                                                          |
+| `notifications-email`    | `plugin-infrastructure-registry` | no      | Email plugin (SMTP via mail-send, async TLS)                                                  |
+| `notifications-telegram` | `web-api`, `controller`          | no      | Propagated feature flag enabling Telegram                                                     |
+| `notifications-email`    | `web-api`, `controller`          | no      | Propagated feature flag enabling email                                                        |
+| `notifications-all`      | `web-api`                        | no      | Enables all optional notification plugins                                                     |
+| `notifications-all`      | `controller`                     | **yes** | Enables all optional notification plugins (default since `notifications-all` is in `default`) |
 
 Feature flags are additive and chain through the dependency graph:
 
@@ -540,13 +540,13 @@ the Telegram and email plugin implementations for consistency.
 Event hooks are wired into existing handlers. Each call site constructs a `NotificationEvent` and calls
 `state.notification_dispatcher.dispatch(...)`:
 
-| Event | File | Handler |
-| --- | --- | --- |
-| `UpdateAvailable` | `routes/service_ws/handler/messages.rs` | `handle_version_check_results()` |
-| `NewSoftwareDiscovered` | `routes/service_ws/handler/messages.rs` | `handle_discovery_results()` |
-| `UpdateCompleted` / `UpdateFailed` | `routes/service_ws/handler/updates.rs` | `handle_update_result()` |
-| `NewServiceEnrolled` | `routes/services.rs` | `approve_service()` |
-| `CaRotated` | `routes/settings_ca.rs` | `rotate_ca()` |
+| Event                              | File                                    | Handler                          |
+| ---------------------------------- | --------------------------------------- | -------------------------------- |
+| `UpdateAvailable`                  | `routes/service_ws/handler/messages.rs` | `handle_version_check_results()` |
+| `NewSoftwareDiscovered`            | `routes/service_ws/handler/messages.rs` | `handle_discovery_results()`     |
+| `UpdateCompleted` / `UpdateFailed` | `routes/service_ws/handler/updates.rs`  | `handle_update_result()`         |
+| `NewServiceEnrolled`               | `routes/services.rs`                    | `approve_service()`              |
+| `CaRotated`                        | `routes/settings_ca.rs`                 | `rotate_ca()`                    |
 
 Example pattern:
 
@@ -570,11 +570,11 @@ silently dropped with a `tracing::warn!`.
 
 ## Database tables
 
-| Table | Purpose |
-| --- | --- |
-| `notification_channels` | Channel configs (encrypted via `EncryptedString`), one per tenant+channel |
-| `notification_rules` | Event-to-channel bindings with optional scope filters (`host_id`, `software_item_id`, `plugin_type`) |
-| `notification_log` | Delivery audit trail: status (`pending`/`delivered`/`failed`), `action_token`, `action_taken`, timestamps |
+| Table                   | Purpose                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `notification_channels` | Channel configs (encrypted via `EncryptedString`), one per tenant+channel                                 |
+| `notification_rules`    | Event-to-channel bindings with optional scope filters (`host_id`, `software_item_id`, `plugin_type`)      |
+| `notification_log`      | Delivery audit trail: status (`pending`/`delivered`/`failed`), `action_token`, `action_taken`, timestamps |
 
 All three tables implement `TenantScoped`. IDs use UUIDv7 for time-ordered indexing.
 
@@ -589,30 +589,30 @@ which delegates to the typed `PluginConfig::with_secrets_masked()`.
 
 ### Channels
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| `POST` | `/api/v1/notifications/channels` | `manage_notifications` | Create channel |
-| `GET` | `/api/v1/notifications/channels` | `view_notifications` | List channels (paginated) |
-| `GET` | `/api/v1/notifications/channels/{id}` | `view_notifications` | Get channel by ID |
-| `PUT` | `/api/v1/notifications/channels/{id}` | `manage_notifications` | Update channel |
-| `DELETE` | `/api/v1/notifications/channels/{id}` | `manage_notifications` | Delete channel |
-| `POST` | `/api/v1/notifications/channels/{id}/test` | `manage_notifications` | Send test notification |
+| Method   | Path                                       | Permission             | Description               |
+| -------- | ------------------------------------------ | ---------------------- | ------------------------- |
+| `POST`   | `/api/v1/notifications/channels`           | `manage_notifications` | Create channel            |
+| `GET`    | `/api/v1/notifications/channels`           | `view_notifications`   | List channels (paginated) |
+| `GET`    | `/api/v1/notifications/channels/{id}`      | `view_notifications`   | Get channel by ID         |
+| `PUT`    | `/api/v1/notifications/channels/{id}`      | `manage_notifications` | Update channel            |
+| `DELETE` | `/api/v1/notifications/channels/{id}`      | `manage_notifications` | Delete channel            |
+| `POST`   | `/api/v1/notifications/channels/{id}/test` | `manage_notifications` | Send test notification    |
 
 ### Rules
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| `POST` | `/api/v1/notifications/rules` | `manage_notifications` | Create rule |
-| `GET` | `/api/v1/notifications/rules` | `view_notifications` | List rules (paginated, filterable) |
-| `GET` | `/api/v1/notifications/rules/{id}` | `view_notifications` | Get rule by ID |
-| `PUT` | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Update rule |
-| `DELETE` | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Delete rule |
+| Method   | Path                               | Permission             | Description                        |
+| -------- | ---------------------------------- | ---------------------- | ---------------------------------- |
+| `POST`   | `/api/v1/notifications/rules`      | `manage_notifications` | Create rule                        |
+| `GET`    | `/api/v1/notifications/rules`      | `view_notifications`   | List rules (paginated, filterable) |
+| `GET`    | `/api/v1/notifications/rules/{id}` | `view_notifications`   | Get rule by ID                     |
+| `PUT`    | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Update rule                        |
+| `DELETE` | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Delete rule                        |
 
 ### Log and callbacks
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/notifications/log` | `view_notifications` | List delivery log (paginated) |
+| Method | Path                                                         | Permission               | Description                   |
+| ------ | ------------------------------------------------------------ | ------------------------ | ----------------------------- |
+| `GET`  | `/api/v1/notifications/log`                                  | `view_notifications`     | List delivery log (paginated) |
 | `POST` | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Public (plugin-verified) | Generic notification callback |
 
 The callback endpoint is not authenticated via JWT. It dispatches to the plugin's
@@ -681,39 +681,39 @@ Server-wide SMTP defaults are stored in the `global_settings` table and managed 
 "SMTP Defaults" shared surface on the Global Settings page. See
 [Settings Runtime Architecture](../api/settings-runtime.md) for the full key reference.
 
-| Setting key | DB key | Description |
-| --- | --- | --- |
-| SMTP host | `global_smtp.host` | SMTP server hostname |
-| SMTP port | `global_smtp.port` | SMTP server port (default: 587) |
-| SMTP username | `global_smtp.username` | Auth username (optional) |
-| SMTP password | `global_smtp.password` | Auth password (stored encrypted, optional) |
-| From address | `global_smtp.from_address` | Sender email address |
-| From name | `global_smtp.from_name` | Sender display name (optional) |
-| TLS mode | `global_smtp.tls_mode` | `"starttls"` (default), `"tls"`, or `"none"` |
-| EHLO hostname | `global_smtp.helo_host` | Hostname sent in the SMTP EHLO command (optional; defaults to the domain of `from_address`) |
+| Setting key   | DB key                     | Description                                                                                 |
+| ------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| SMTP host     | `global_smtp.host`         | SMTP server hostname                                                                        |
+| SMTP port     | `global_smtp.port`         | SMTP server port (default: 587)                                                             |
+| SMTP username | `global_smtp.username`     | Auth username (optional)                                                                    |
+| SMTP password | `global_smtp.password`     | Auth password (stored encrypted, optional)                                                  |
+| From address  | `global_smtp.from_address` | Sender email address                                                                        |
+| From name     | `global_smtp.from_name`    | Sender display name (optional)                                                              |
+| TLS mode      | `global_smtp.tls_mode`     | `"starttls"` (default), `"tls"`, or `"none"`                                                |
+| EHLO hostname | `global_smtp.helo_host`    | Hostname sent in the SMTP EHLO command (optional; defaults to the domain of `from_address`) |
 
 ### Per-tenant SMTP overrides
 
 Per-tenant SMTP settings override the global defaults on a field-by-field basis. Empty fields
 inherit from global defaults. Configured via the email channel surface's `configure_smtp` action.
 
-| Setting key | DB key | Description |
-| --- | --- | --- |
-| SMTP host | `smtp.host` | SMTP server hostname (overrides global) |
-| SMTP port | `smtp.port` | SMTP server port (overrides global) |
-| SMTP username | `smtp.username` | Auth username (overrides global) |
-| SMTP password | `smtp.password` | Auth password (stored encrypted, overrides global) |
-| From address | `smtp.from_address` | Sender email address (overrides global) |
-| From name | `smtp.from_name` | Sender display name (overrides global) |
-| TLS mode | `smtp.tls_mode` | TLS mode (overrides global) |
+| Setting key   | DB key              | Description                                        |
+| ------------- | ------------------- | -------------------------------------------------- |
+| SMTP host     | `smtp.host`         | SMTP server hostname (overrides global)            |
+| SMTP port     | `smtp.port`         | SMTP server port (overrides global)                |
+| SMTP username | `smtp.username`     | Auth username (overrides global)                   |
+| SMTP password | `smtp.password`     | Auth password (stored encrypted, overrides global) |
+| From address  | `smtp.from_address` | Sender email address (overrides global)            |
+| From name     | `smtp.from_name`    | Sender display name (overrides global)             |
+| TLS mode      | `smtp.tls_mode`     | TLS mode (overrides global)                        |
 
 ### TLS modes
 
-| Mode | Description | Default Port |
-| --- | --- | --- |
-| `starttls` | Opportunistic STARTTLS (upgrades plaintext connection to TLS) | 587 |
-| `tls` | Implicit TLS/SMTPS (TLS from the first byte) | 465 |
-| `none` | No TLS (plaintext -- development only) | 25 |
+| Mode       | Description                                                   | Default Port |
+| ---------- | ------------------------------------------------------------- | ------------ |
+| `starttls` | Opportunistic STARTTLS (upgrades plaintext connection to TLS) | 587          |
+| `tls`      | Implicit TLS/SMTPS (TLS from the first byte)                  | 465          |
+| `none`     | No TLS (plaintext -- development only)                        | 25           |
 
 `"starttls"` is the default and is appropriate for most modern SMTP providers.
 
@@ -803,32 +803,32 @@ action.
 
 ## Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/plugins/infrastructure/core/src/roles.rs` | `PluginMeta` trait, `NotificationTransport` role trait |
-| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema) |
-| `crates/plugins/infrastructure/core/src/descriptor.rs` | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps` |
-| `crates/plugins/infrastructure/core/src/macros.rs` | `declare_plugin!` macro |
-| `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
-| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper (behind `extensions` feature) |
-| `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` with descriptor-driven registration; `transport()` lookup |
-| `crates/plugins/notifications/webhook/src/plugin.rs` | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing) |
-| `crates/plugins/notifications/webhook/src/config.rs` | `WebhookChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
-| `crates/plugins/notifications/telegram/src/plugin.rs` | Telegram plugin (`declare_plugin!`, inline keyboard) |
-| `crates/plugins/notifications/telegram/src/config.rs` | `TelegramChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback handling) |
-| `crates/plugins/notifications/email/src/plugin.rs` | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative) |
-| `crates/plugins/notifications/email/src/config.rs` | `EmailChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (including SMTP settings CRUD) |
-| `crates/shared/web-api-types/src/notifications/mod.rs` | Shared request/response types, `Validate` impls |
-| `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
-| `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
-| `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
-| `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
-| `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, generic notification callback |
-| `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
-| `crates/ui/web-api/src/surface_proxy.rs` | Shared-surface interaction dispatch to plugin `handle_surface_action()` |
+| File                                                      | Purpose                                                                                              |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `crates/plugins/infrastructure/core/src/roles.rs`         | `PluginMeta` trait, `NotificationTransport` role trait                                               |
+| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema)                                          |
+| `crates/plugins/infrastructure/core/src/descriptor.rs`    | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps` |
+| `crates/plugins/infrastructure/core/src/macros.rs`        | `declare_plugin!` macro                                                                              |
+| `crates/plugins/notifications/core/src/lib.rs`            | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()`                       |
+| `crates/plugins/notifications/core/src/list_channels.rs`  | Shared `list_channels` helper (behind `extensions` feature)                                          |
+| `crates/plugins/infrastructure/registry/src/registry.rs`  | `PluginCatalog` with descriptor-driven registration; `transport()` lookup                            |
+| `crates/plugins/notifications/webhook/src/plugin.rs`      | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing)                |
+| `crates/plugins/notifications/webhook/src/config.rs`      | `WebhookChannelConfig` implementing `PluginConfig`                                                   |
+| `crates/plugins/notifications/webhook/src/surfaces.rs`    | Webhook surface action handler                                                                       |
+| `crates/plugins/notifications/telegram/src/plugin.rs`     | Telegram plugin (`declare_plugin!`, inline keyboard)                                                 |
+| `crates/plugins/notifications/telegram/src/config.rs`     | `TelegramChannelConfig` implementing `PluginConfig`                                                  |
+| `crates/plugins/notifications/telegram/src/surfaces.rs`   | Telegram surface action handler (including callback handling)                                        |
+| `crates/plugins/notifications/email/src/plugin.rs`        | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative)                          |
+| `crates/plugins/notifications/email/src/config.rs`        | `EmailChannelConfig` implementing `PluginConfig`                                                     |
+| `crates/plugins/notifications/email/src/surfaces.rs`      | Email surface action handler (including SMTP settings CRUD)                                          |
+| `crates/shared/web-api-types/src/notifications/mod.rs`    | Shared request/response types, `Validate` impls                                                      |
+| `crates/ui/web-api/src/notifications/dispatcher.rs`       | Fire-and-forget generic background dispatcher loop                                                   |
+| `crates/ui/web-api/src/notifications/events.rs`           | `NotificationEvent`, `NotificationEventDetails`, `ActionParams`                                      |
+| `crates/ui/web-api/src/notifications/message_builder.rs`  | Event-to-`DeliveryMessage` translation                                                               |
+| `crates/ui/web-api-queries/src/queries/notifications.rs`  | DB query helpers, `ChannelQueryError`, `RuleQueryError`                                              |
+| `crates/ui/web-api/src/routes/notifications.rs`           | REST route handlers, generic notification callback                                                   |
+| `crates/ui/web-api-auth/src/settings_store.rs`            | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.)             |
+| `crates/ui/web-api/src/surface_proxy.rs`                  | Shared-surface interaction dispatch to plugin `handle_surface_action()`                              |
 
 ## Shared surface integration
 
@@ -870,12 +870,12 @@ into the row object. The shared surface table definitions reference these flatte
 
 Surface IDs follow the convention `notifications.<channel_type>`:
 
-| Surface ID | Label | Sort order | Placement |
-| --- | --- | --- | --- |
-| `notifications.webhook` | Webhook Channels | 500 | Tab (group: "Notification Channels") |
-| `notifications.telegram` | Telegram Channels | 501 | Tab (group: "Notification Channels") |
-| `notifications.email` | Email Channels | 502 | Tab (group: "Notification Channels") |
-| `notifications.email.global_smtp` | SMTP Defaults | 600 | Below (target: "global-settings") |
+| Surface ID                        | Label             | Sort order | Placement                            |
+| --------------------------------- | ----------------- | ---------- | ------------------------------------ |
+| `notifications.webhook`           | Webhook Channels  | 500        | Tab (group: "Notification Channels") |
+| `notifications.telegram`          | Telegram Channels | 501        | Tab (group: "Notification Channels") |
+| `notifications.email`             | Email Channels    | 502        | Tab (group: "Notification Channels") |
+| `notifications.email.global_smtp` | SMTP Defaults     | 600        | Below (target: "global-settings")    |
 
 Channel surfaces share the `tab_group` value `"Notification Channels"`, so they render as
 sections within a single "Notification Channels" tab on the Settings page rather than as separate

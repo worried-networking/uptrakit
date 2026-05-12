@@ -16,15 +16,15 @@ failure paths; defer frontend `openLiveModal` until `update_protection_started` 
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `crates/ui/web-api/src/update_output_broadcaster.rs` | Add `AgentClaimed` variant + `send_agent_claimed` |
-| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Call `send_agent_claimed` in `handle_update_started` |
-| `crates/ui/web-api/src/update_orchestrator.rs` | Call `send_completed` on all three failure paths |
-| `crates/ui/web-api/src/routes/interactive_ws.rs` | Allow `service_id: Option<Uuid>`, handle `AgentClaimed`, fix audit |
-| `frontend/src/lib/sse.ts` | Add `'update_protection_started'` to `AdminEventType` |
-| `frontend/src/routes/software/[id]/+page.svelte` | Defer `openLiveModal` to SSE event |
-| `frontend/src/routes/history/+page.svelte` | Handle `update_protection_started` SSE |
+| File                                                         | Change                                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `crates/ui/web-api/src/update_output_broadcaster.rs`         | Add `AgentClaimed` variant + `send_agent_claimed`                  |
+| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Call `send_agent_claimed` in `handle_update_started`               |
+| `crates/ui/web-api/src/update_orchestrator.rs`               | Call `send_completed` on all three failure paths                   |
+| `crates/ui/web-api/src/routes/interactive_ws.rs`             | Allow `service_id: Option<Uuid>`, handle `AgentClaimed`, fix audit |
+| `frontend/src/lib/sse.ts`                                    | Add `'update_protection_started'` to `AdminEventType`              |
+| `frontend/src/routes/software/[id]/+page.svelte`             | Defer `openLiveModal` to SSE event                                 |
+| `frontend/src/routes/history/+page.svelte`                   | Handle `update_protection_started` SSE                             |
 
 ---
 
@@ -662,7 +662,7 @@ failure paths; defer frontend `openLiveModal` until `update_protection_started` 
 
   ```typescript
   let pendingLiveHistoryId: string | null = $state(null);
-  let pendingLiveHostName: string = $state('');
+  let pendingLiveHostName: string = $state("");
   ```
 
 - [ ] **Step 2: Replace immediate `openLiveModal` call**

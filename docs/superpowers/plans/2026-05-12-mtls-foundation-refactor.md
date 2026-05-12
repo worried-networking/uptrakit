@@ -32,8 +32,8 @@ Zeroize, §5.6 OCSP/CRL, §5.8 ASN.1 unification, §5.9 Issuer cache, §5.10 onl
 - Modify: `crates/core/controller-runtime/src/pki.rs`
   - Replace `encode_der_length`, `encode_der_sequence`, `encode_access_description`,
     `build_aia_extension_der` with `x509-cert::ext::pkix::{AuthorityInfoAccessSyntax,
-    CrlDistributionPoints, AccessDescription, DistributionPoint, DistributionPointName,
-    name::GeneralName}`.
+CrlDistributionPoints, AccessDescription, DistributionPoint, DistributionPointName,
+name::GeneralName}`.
   - Migrate any direct `x509-parser` introspection to `x509_cert::Certificate::from_der`.
   - Remove `.only_check_end_entity_revocation()` from `WebPkiClientVerifier::builder` chain (~line
     1187).
@@ -89,7 +89,7 @@ All tasks below bind to these snapshot rules (`.superpowers/standards-snapshot.m
 - "Use `impl_report_conversion!` macro for cross-boundary conversions."
 - "Conventional Commits required: `<type>(scope): description`."
 - "Run full quality gate suite before committing: `cargo fmt`, `cargo check`, `cargo clippy`, `cargo
-  test`, `cargo deny check`."
+test`, `cargo deny check`."
 - "Tests must never sleep on real wall-clock time; use `#[tokio::test(start_paused = true)]` +
   `tokio::time::advance()`."
 
@@ -341,7 +341,7 @@ git commit -m "refactor(crl-manager): cache Arc<Issuer> per trusted CA"
 Run: `rg -n 'Issuer::from_ca_cert_pem' crates/core/controller-runtime/src/cert_signer.rs`
 
 - [ ] **Step 2: Change `CertSigner` to accept `Arc<TrustedIssuer>` (or the inner `Arc<Issuer>`)
-  rather than the PEM**
+      rather than the PEM**
 
 Replace the PEM-taking signature with:
 
@@ -522,7 +522,7 @@ Run: `cargo test -p uptrakit-controller-runtime -- --nocapture 2>&1 | tail -20`
 Expected: PASS.
 
 - [ ] **Step 4: Run the mandatory reverse-proxy integration tests** (per snapshot binding: "Reverse
-  proxy integration tests mandatory for mTLS … changes")
+      proxy integration tests mandatory for mTLS … changes")
 
 Run: `cargo test -p uptrakit-controller reverse_proxy -- --ignored 2>&1 | tail -30`
 
@@ -646,7 +646,7 @@ fn build_aia_extension_der(ocsp_url: &str, ca_issuers_url: &str) -> Result<Vec<u
 ```
 
 - [ ] **Step 5: Add a `PkiError::DerEncode` variant** if not present (use `#[error("DER encode:
-  {0}")] DerEncode(String)`).
+{0}")] DerEncode(String)`).
 
 - [ ] **Step 6: Locate the CDP encoder and migrate similarly**
 
@@ -687,7 +687,7 @@ Run: `cargo test -p uptrakit-controller-runtime aia_extension_roundtrips -- --no
 Expected: PASS (the new encoder still round-trips through x509-cert).
 
 - [ ] **Step 9: Add a structural test confirming new bytes match legacy bytes** (only if both can
-  coexist temporarily — otherwise skip)
+      coexist temporarily — otherwise skip)
 
 This is implicit if the test was authored against `build_aia_extension_der` and now invokes the new
 implementation — same function name, byte-compatible output is locked in.
@@ -758,7 +758,7 @@ parser; the variant choice is local to this call site.
 Add `OcspError::KeyDecode(String)` variant if absent.
 
 - [ ] **Step 4: Update the `pem_to_der_key_works` test** to call the new path directly, or migrate
-  to a higher-level test asserting `sign_ocsp_response_with_pkcs8(...)` round-trips a known input.
+      to a higher-level test asserting `sign_ocsp_response_with_pkcs8(...)` round-trips a known input.
 
 - [ ] **Step 5: Delete the now-unused `pem_to_der_key` function**
 
@@ -793,7 +793,7 @@ Expected: only the controller-runtime + web-api use sites (rcgen's transitive us
 here).
 
 - [ ] **Step 2: For each callsite, replace with `x509_cert::Certificate::from_der` + descend the
-  structure**
+      structure**
 
 Common patterns:
 
@@ -862,7 +862,7 @@ Run: `cargo check --workspace --all-features`
 Expected: PASS.
 
 - [ ] **Step 4: Verify `x509-parser` is still pulled transitively via rcgen (not eliminated, only
-  de-direct-ed)**
+      de-direct-ed)**
 
 Run: `cargo tree -e normal -i x509-parser 2>&1 | head -10`
 
@@ -1512,8 +1512,8 @@ Run: `cargo test -p uptrakit-controller reverse_proxy -- --ignored 2>&1 | tail -
 Expected: PASS.
 
 - [ ] **Step 8: System integration tests** (mandatory per snapshot binding for
-  enrollment/wire/service-lifecycle changes — Plan 1 touches identity-file write paths,
-  so enrollment is affected)
+      enrollment/wire/service-lifecycle changes — Plan 1 touches identity-file write paths,
+      so enrollment is affected)
 
 Run: `docker build -f docker/Dockerfile.test -t uptrakit-test:latest . && cargo test -p
 uptrakit-integration-tests -- --ignored 2>&1 | tail -30`

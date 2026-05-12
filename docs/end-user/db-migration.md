@@ -50,10 +50,10 @@ Before running the migration:
 The `uptrakit-controller` binary must be compiled with support for **both** the
 source and target database backends.
 
-| Migration direction | Required `--features` |
-| --- | --- |
-| SQLite → SQLite | _(default, no extra flag needed)_ |
-| SQLite → PostgreSQL | `--features db-postgres` |
+| Migration direction | Required `--features`                       |
+| ------------------- | ------------------------------------------- |
+| SQLite → SQLite     | _(default, no extra flag needed)_           |
+| SQLite → PostgreSQL | `--features db-postgres`                    |
 | PostgreSQL → SQLite | _(SQLite is always compiled in by default)_ |
 
 Example build for a SQLite → PostgreSQL migration:
@@ -119,20 +119,20 @@ uptrakit-controller [GLOBAL OPTIONS] db-migrate [OPTIONS]
 
 ### Global options (shared with `serve`)
 
-| Flag | Description |
-| --- | --- |
-| `--master-key-file <PATH>` | Path to a file containing the 64-char hex master key. |
+| Flag                        | Description                                                  |
+| --------------------------- | ------------------------------------------------------------ |
+| `--master-key-file <PATH>`  | Path to a file containing the 64-char hex master key.        |
 | `--allow-plaintext-secrets` | Allow the controller to run without a master key (dev only). |
 
 ### Subcommand options
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--source-db <URL>` | _(required)_ | Source database URL to read from. |
-| `--target-db <URL>` | _(required)_ | Target database URL to write to. |
-| `--batch-size <N>` | `500` | Number of rows per read/write batch. |
-| `--force` | `false` | Skip the non-empty target safety check. |
-| `--yes` | `false` | Skip the interactive confirmation prompt (for scripted/CI use). |
+| Flag                | Default      | Description                                                     |
+| ------------------- | ------------ | --------------------------------------------------------------- |
+| `--source-db <URL>` | _(required)_ | Source database URL to read from.                               |
+| `--target-db <URL>` | _(required)_ | Target database URL to write to.                                |
+| `--batch-size <N>`  | `500`        | Number of rows per read/write batch.                            |
+| `--force`           | `false`      | Skip the non-empty target safety check.                         |
+| `--yes`             | `false`      | Skip the interactive confirmation prompt (for scripted/CI use). |
 
 ---
 

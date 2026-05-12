@@ -492,18 +492,18 @@ changelog_update = false
 Replace the "Build controller" step:
 
 ```yaml
-      # --- controller (lean: no embedded services, with frontend) ---
-      - name: Build controller
-        if: ${{ needs.release-plz.outputs.released == 'true' }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller
-        run: |
-          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
-            --target ${{ matrix.target }} \
-            -p uptrakit-controller \
-            --features db-all,nats
-          cp target/${{ matrix.target }}/release/uptrakit-controller \
-            uptrakit-controller-${{ matrix.target }}
+# --- controller (lean: no embedded services, with frontend) ---
+- name: Build controller
+  if: ${{ needs.release-plz.outputs.released == 'true' }}
+  env:
+    UPTRAKIT_RELEASE_NAME: uptrakit-controller
+  run: |
+    ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+      --target ${{ matrix.target }} \
+      -p uptrakit-controller \
+      --features db-all,nats
+    cp target/${{ matrix.target }}/release/uptrakit-controller \
+      uptrakit-controller-${{ matrix.target }}
 ```
 
 Only `db-all` and `nats` are forwarding features declared in `controller/Cargo.toml`.
@@ -516,18 +516,18 @@ features as an error.
 Replace the "Build controller-standalone" step:
 
 ```yaml
-      # --- controller-standalone (all-in-one: embedded scheduler + mqtt + frontend) ---
-      - name: Build controller-standalone
-        if: ${{ needs.release-plz.outputs.released == 'true' }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
-        run: |
-          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
-            --target ${{ matrix.target }} \
-            -p uptrakit-controller-standalone \
-            --features db-all,nats
-          cp target/${{ matrix.target }}/release/uptrakit-controller-standalone \
-            uptrakit-controller-standalone-${{ matrix.target }}
+# --- controller-standalone (all-in-one: embedded scheduler + mqtt + frontend) ---
+- name: Build controller-standalone
+  if: ${{ needs.release-plz.outputs.released == 'true' }}
+  env:
+    UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
+  run: |
+    ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+      --target ${{ matrix.target }} \
+      -p uptrakit-controller-standalone \
+      --features db-all,nats
+    cp target/${{ matrix.target }}/release/uptrakit-controller-standalone \
+      uptrakit-controller-standalone-${{ matrix.target }}
 ```
 
 Same rationale as controller: only pass declared forwarding features.
@@ -588,27 +588,27 @@ Apply these changes:
 **Lines 46–57 (two matrix entries, one per platform):**
 
 ```yaml
-          - name: controller
-            runner: ubuntu-latest
-            platform: linux/amd64
-            package: uptrakit-controller-standalone
-            binary: uptrakit-controller-standalone
-            features: db-all,nats
-          - name: controller
-            runner: ubuntu-24.04-arm
-            platform: linux/arm64
-            package: uptrakit-controller-standalone
-            binary: uptrakit-controller-standalone
-            features: db-all,nats
+- name: controller
+  runner: ubuntu-latest
+  platform: linux/amd64
+  package: uptrakit-controller-standalone
+  binary: uptrakit-controller-standalone
+  features: db-all,nats
+- name: controller
+  runner: ubuntu-24.04-arm
+  platform: linux/arm64
+  package: uptrakit-controller-standalone
+  binary: uptrakit-controller-standalone
+  features: db-all,nats
 ```
 
 **Lines 200–203 (swagger build-args block):**
 
 ```yaml
-          build-args: |
-            PACKAGE=uptrakit-controller-standalone
-            BINARY=uptrakit-controller-standalone
-            FEATURES=db-all,nats,swagger-ui
+build-args: |
+  PACKAGE=uptrakit-controller-standalone
+  BINARY=uptrakit-controller-standalone
+  FEATURES=db-all,nats,swagger-ui
 ```
 
 - [ ] **Step 9: Verify no remaining embed-frontend in CI or runtime**
@@ -761,20 +761,20 @@ Expected: `[]` (empty array means publish = false in Cargo metadata).
 
 ### Spec coverage
 
-| Spec requirement | Task |
-| --- | --- |
-| Rename controller/ to controller-runtime/ | 1 |
-| lib crate with pub fn run() | 2 |
-| Feature rename embed-frontend → embedded-frontend | 3, 6 |
-| controller wrapper crate with forwarding features | 4 |
-| controller-standalone wrapper crate with forwarding features | 5 |
-| release-plz.toml three-block config | 6 |
-| CI build steps updated (no --features on wrappers) | 6 |
-| upload_if_released standalone fix (required, not deferred) | 6 |
-| select(.package_name) gate updated | 6 |
-| Feature rename + CI atomic commit | 6 |
-| Full quality gate | 7 |
-| release-plz dry-run | 8 |
+| Spec requirement                                             | Task |
+| ------------------------------------------------------------ | ---- |
+| Rename controller/ to controller-runtime/                    | 1    |
+| lib crate with pub fn run()                                  | 2    |
+| Feature rename embed-frontend → embedded-frontend            | 3, 6 |
+| controller wrapper crate with forwarding features            | 4    |
+| controller-standalone wrapper crate with forwarding features | 5    |
+| release-plz.toml three-block config                          | 6    |
+| CI build steps updated (no --features on wrappers)           | 6    |
+| upload_if_released standalone fix (required, not deferred)   | 6    |
+| select(.package_name) gate updated                           | 6    |
+| Feature rename + CI atomic commit                            | 6    |
+| Full quality gate                                            | 7    |
+| release-plz dry-run                                          | 8    |
 
 ### Notes
 

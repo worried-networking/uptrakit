@@ -29,24 +29,24 @@ This is configured via `bump-minor-pre-major` and `bump-patch-for-minor-pre-majo
 
 Each release includes pre-built binaries for 4 targets:
 
-| Target | Runner | Method |
-| --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | `ubuntu-latest` | native |
+| Target                      | Runner          | Method  |
+| --------------------------- | --------------- | ------- |
+| `x86_64-unknown-linux-gnu`  | `ubuntu-latest` | native  |
 | `x86_64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
 | `aarch64-unknown-linux-gnu` | `ubuntu-latest` | `cross` |
-| `aarch64-apple-darwin` | `macos-latest` | native |
+| `aarch64-apple-darwin`      | `macos-latest`  | native  |
 
 ### Binaries per release
 
-| Artifact name | Package | Features |
-| --- | --- | --- |
-| `uptrakit-controller` | uptrakit-controller | embedded-frontend,db-all,nats,oidc,zeroconf,notifications-all (no embedded services) |
+| Artifact name                    | Package                        | Features                                                                                                                         |
+| -------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `uptrakit-controller`            | uptrakit-controller            | embedded-frontend,db-all,nats,oidc,zeroconf,notifications-all (no embedded services)                                             |
 | `uptrakit-controller-standalone` | uptrakit-controller-standalone | embedded-frontend,db-all,nats,oidc,zeroconf,notifications-all,embedded-scheduler,embedded-mqtt,embedded-agent,embedded-ssh-agent |
-| `uptrakit-agent` | uptrakit-agent | (default) |
-| `uptrakit-agent-ssh` | uptrakit-agent-ssh | (default) |
-| `uptrakit-mqtt` | uptrakit-mqtt | (default) |
-| `uptrakit-scheduler` | uptrakit-scheduler | db-all,oidc (no-default-features) |
-| `uptrakit-cli` | uptrakit-cli | (default) |
+| `uptrakit-agent`                 | uptrakit-agent                 | (default)                                                                                                                        |
+| `uptrakit-agent-ssh`             | uptrakit-agent-ssh             | (default)                                                                                                                        |
+| `uptrakit-mqtt`                  | uptrakit-mqtt                  | (default)                                                                                                                        |
+| `uptrakit-scheduler`             | uptrakit-scheduler             | db-all,oidc (no-default-features)                                                                                                |
+| `uptrakit-cli`                   | uptrakit-cli                   | (default)                                                                                                                        |
 
 Asset naming: `{artifact}-{version}-{target}.tar.gz` (archived; single binary at archive root).
 
@@ -109,12 +109,12 @@ the frontend from a separate directory via `--static-dir`.
 
 ## Configuration files
 
-| File | Purpose |
-| --- | --- |
-| `release-plz.toml` | release-plz package configuration (bump rules, changelog) |
-| `.github/workflows/release-plz.yml` | Release workflow (version bump + artifact builds) |
-| `.github/workflows/docker.yml` | Docker image builds (triggered by `v*` tags) |
-| `Cross.toml` | Cross-compilation settings for cross-compiled Linux targets |
+| File                                | Purpose                                                     |
+| ----------------------------------- | ----------------------------------------------------------- |
+| `release-plz.toml`                  | release-plz package configuration (bump rules, changelog)   |
+| `.github/workflows/release-plz.yml` | Release workflow (version bump + artifact builds)           |
+| `.github/workflows/docker.yml`      | Docker image builds (triggered by `v*` tags)                |
+| `Cross.toml`                        | Cross-compilation settings for cross-compiled Linux targets |
 
 ## Related documentation
 

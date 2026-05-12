@@ -2119,26 +2119,26 @@ paths. interactive always false — AI agent cannot interact with PTY."
 
 **Spec coverage check:**
 
-| Spec requirement | Task covering it |
-| --- | --- |
-| `Permission::Other(String)` with `#[strum(disabled)]`, infallible `FromStr`/`Deserialize`; remove `ParsePermissionError` | Task 1 |
-| `AccessMcp` variant + DB migration to `viewer`, `operator`, `software_manager` | Task 2 |
-| count assertion 33→34 | Task 2 |
-| `mcp` feature (default-on), `rmcp` + `vt100` deps | Task 3 |
-| `build_mcp_router` merged before middleware in `server.rs` | Task 3 |
-| `allowed_hosts` from SANs with port-stripping + unit test | Task 3 |
-| Tower auth layer, API-token-only, JWT rejection with descriptive message | Task 4 |
-| `AUTH_API_TOKEN_AUTHENTICATE` audit on success and failure | Task 4 |
-| Request-log middleware tolerates absent `AuthenticatedUser` | Task 4 |
-| `McpRequestContext` per-request via `http::request::Extensions` | Task 4 |
-| `render_terminal_output` via vt100 width=220 | Task 5 |
-| `\r` collapse, cursor-up collapse, ANSI strip, UTF-8 safety tests | Task 5 |
-| `get_current_user` tool — no `ManageUsers` required | Task 6 |
-| `list_update_history` — clears output field | Task 7 |
-| `get_update_history_detail` — vt100-rendered output | Task 7 |
-| `trigger_update` — `interactive=false`, `spawn_protection_and_dispatch`, `emit_software_update_audit` | Task 8 |
-| Actor type `ApiToken` for MCP, `actor_id = token_id` | Task 8 |
-| `operator` partial-access documented in migration comment | Task 2 |
+| Spec requirement                                                                                                         | Task covering it |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| `Permission::Other(String)` with `#[strum(disabled)]`, infallible `FromStr`/`Deserialize`; remove `ParsePermissionError` | Task 1           |
+| `AccessMcp` variant + DB migration to `viewer`, `operator`, `software_manager`                                           | Task 2           |
+| count assertion 33→34                                                                                                    | Task 2           |
+| `mcp` feature (default-on), `rmcp` + `vt100` deps                                                                        | Task 3           |
+| `build_mcp_router` merged before middleware in `server.rs`                                                               | Task 3           |
+| `allowed_hosts` from SANs with port-stripping + unit test                                                                | Task 3           |
+| Tower auth layer, API-token-only, JWT rejection with descriptive message                                                 | Task 4           |
+| `AUTH_API_TOKEN_AUTHENTICATE` audit on success and failure                                                               | Task 4           |
+| Request-log middleware tolerates absent `AuthenticatedUser`                                                              | Task 4           |
+| `McpRequestContext` per-request via `http::request::Extensions`                                                          | Task 4           |
+| `render_terminal_output` via vt100 width=220                                                                             | Task 5           |
+| `\r` collapse, cursor-up collapse, ANSI strip, UTF-8 safety tests                                                        | Task 5           |
+| `get_current_user` tool — no `ManageUsers` required                                                                      | Task 6           |
+| `list_update_history` — clears output field                                                                              | Task 7           |
+| `get_update_history_detail` — vt100-rendered output                                                                      | Task 7           |
+| `trigger_update` — `interactive=false`, `spawn_protection_and_dispatch`, `emit_software_update_audit`                    | Task 8           |
+| Actor type `ApiToken` for MCP, `actor_id = token_id`                                                                     | Task 8           |
+| `operator` partial-access documented in migration comment                                                                | Task 2           |
 
 **Placeholder scan:** All code blocks contain actual implementation. No "TBD" or "TODO" in step content.
 

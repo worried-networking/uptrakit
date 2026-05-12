@@ -148,9 +148,9 @@ parse `resumable` as `None` (non-resumable) — backward compatible.
 The resumable check is applied only when `status == UpdateFinalStatus::Completed`.
 
 - `status: Completed, resumable: Some(true)` → call `transition_to_awaiting_restart(db,
-  update_history_id)` in `web-api-queries/update_dispatch.rs`. This is a CAS UPDATE that
+update_history_id)` in `web-api-queries/update_dispatch.rs`. This is a CAS UPDATE that
   filters on `id = update_history_id AND status = 'in_progress' AND
-  execution_owner_service_id = <service_id>`, where `<service_id>` is the same `service_id`
+execution_owner_service_id = <service_id>`, where `<service_id>` is the same `service_id`
   parameter already present in `handle_update_result` — the value stored as
   `execution_owner_service_id` when `handle_update_started` transitioned the record to
   `InProgress`:
@@ -492,6 +492,7 @@ For all `AwaitingRestart` records across all tenants where
   not part of the agent wire protocol); the receiving controller dispatches inline. The `NoopSchedulerNotifier` (test-only, in
   `notifier.rs` behind `#[cfg(test)]`) also gets a no-op implementation. This keeps
   `scheduler-engine` decoupled from `web-api-queries`.
+
 - Fires regardless of agent connection state.
 
 ---
@@ -502,7 +503,7 @@ For all `AwaitingRestart` records across all tenants where
 
 1. **Batch completion check** — the non-terminal status filter in the batch completion query
    (`maybe_complete_batch` in `update_batches/dispatch.rs`, currently `{Queued, Pending,
-   InProgress}`) must include `AwaitingRestart`. Without this, a batch containing an
+InProgress}`) must include `AwaitingRestart`. Without this, a batch containing an
    `AwaitingRestart` item would be incorrectly marked complete.
 
 2. **`has_active_update_for_host` in `update_dispatch.rs`** — currently checks only
@@ -516,9 +517,9 @@ For all `AwaitingRestart` records across all tenants where
    trigger host/batch progression:
    - Batch items: call `dispatch_next_in_batch`.
    - Non-batch items: call `dispatch_next_queued_for_host`.
-   The WS handler has `AppState` and constructs `DispatchContext` directly. The scheduler
-   timeout enforcer signals progression via `SchedulerNotifier::signal_host_progression`
-   (see Scheduler Changes section).
+     The WS handler has `AppState` and constructs `DispatchContext` directly. The scheduler
+     timeout enforcer signals progression via `SchedulerNotifier::signal_host_progression`
+     (see Scheduler Changes section).
 
 4. **Unique constraint violation on dispatch insert:** when `dispatch_next_in_batch` or
    `dispatch_next_queued_for_host` inserts a new `update_history` row and the DB returns a
@@ -616,11 +617,11 @@ when self-update support is extended to them.
 
 For each discovered service, the plugin creates assignments:
 
-| Role | Plugin | Config |
-| --- | --- | --- |
-| `detect_version` | Shell | `version_command: "<binary_path> --version"` (binary path embedded literally at discovery time; no `{package_identifier}` substitution); `version_regex: "(?P<version>\d+\.\d+\.\d+)"` to strip the binary name prefix from output like `"uptrakit-controller-standalone 1.2.3"` |
-| `fetch_releases` | `releases_github` | uptrakit GitHub repo; `tag_strip_prefix: "v"`; tag filter per service |
-| `execute_update` | Shell (binary) or Docker plugin | `resumable: true`; binary path or container identity |
+| Role             | Plugin                          | Config                                                                                                                                                                                                                                                                           |
+| ---------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `detect_version` | Shell                           | `version_command: "<binary_path> --version"` (binary path embedded literally at discovery time; no `{package_identifier}` substitution); `version_regex: "(?P<version>\d+\.\d+\.\d+)"` to strip the binary name prefix from output like `"uptrakit-controller-standalone 1.2.3"` |
+| `fetch_releases` | `releases_github`               | uptrakit GitHub repo; `tag_strip_prefix: "v"`; tag filter per service                                                                                                                                                                                                            |
+| `execute_update` | Shell (binary) or Docker plugin | `resumable: true`; binary path or container identity                                                                                                                                                                                                                             |
 
 `binary --version` output format: `"<service-name> <semver>"` (e.g., `"uptrakit-controller-standalone 1.2.3"`). The
 shell `detect_version` plugin extracts the version using `version_regex`. If the binary ever changes its
@@ -675,7 +676,6 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
   operation (writes one byte to a pre-created pipe). A dedicated Tokio task reads from that
   pipe and spawns the child via `tokio::process::Command::new()`, which uses a
   carefully-managed fork+exec path that avoids the multi-threaded lock hazard.
-
   1. **Spawn** PID B via `tokio::process::Command::new(binary_path)` with
      `--reuseport --post-takeover-child --notify-fd <pipe_write_fd>` and the listening
      socket fd explicitly inherited (via `CommandExt::pre_exec` to clear `O_CLOEXEC`).
@@ -688,7 +688,7 @@ The discovery plugin uses `DeploymentTopology` from the metadata interface:
   4. **PID A** drains in-flight connections (waits for active requests to complete, bounded
      by a short grace period).
   5. **PID A** calls `execve(binary_path, ["--reuseport", "--post-takeover-parent",
-     "--notify-fd", "<pipe_write_fd>"])` — PID A is now running the new binary with the
+"--notify-fd", "<pipe_write_fd>"])` — PID A is now running the new binary with the
      original PID. The supervisor still tracks PID A; it never saw a process exit.
   6. **PID A** (new binary) writes `done` to the pipe.
   7. **PID B** reads `done` and exits cleanly.
@@ -1070,6 +1070,6 @@ Standard gates apply. Additionally:
   and scheduler retries next tick.
 - Unit test verifying that receiving `UpdateResultPayload { resumable: true }` does not call
   `dispatch_next_in_batch` or `dispatch_next_queued_for_host` — the `InProgress →
-  AwaitingRestart` transition must not trigger host/batch progression.
+AwaitingRestart` transition must not trigger host/batch progression.
 - The self-update discovery plugin integration test requires a running controller-standalone
   instance; mark `#[ignore]` and document in testing.md.

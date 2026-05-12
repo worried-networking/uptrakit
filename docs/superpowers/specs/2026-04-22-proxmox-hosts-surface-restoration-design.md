@@ -161,13 +161,13 @@ Add interface:
 
 ```typescript
 export interface SurfaceContextSelector {
-    param_key: string;
-    label: string;
-    all_option_label: string;
-    rest_api_path: string;
-    value_field: string;
-    label_field: string;
-    required_for_interactions: string[];
+  param_key: string;
+  label: string;
+  all_option_label: string;
+  rest_api_path: string;
+  value_field: string;
+  label_field: string;
+  required_for_interactions: string[];
 }
 ```
 
@@ -189,7 +189,7 @@ When `descriptor.context_selector` is present:
 
 1. On mount, fetch `context_selector.rest_api_path` via the standard API client. Parse response as
    `items[]` (paginated) or as array directly. Populate a local `selectorOptions: { value: string; label:
-   string }[]` array.
+string }[]` array.
 2. Manage `selectedContextValue = $state<string>("")`.
 3. Build providers array by prepending the "All" option:
 
@@ -725,16 +725,16 @@ async fn handle_list_with_plugin_config_id_filters_to_that_config() {
 
 ## Testing summary
 
-| Layer         | What's tested                                                                         |
-| ------------- | ------------------------------------------------------------------------------------- |
-| Rust unit     | New surface descriptor (table node, context selector, interactions, data source)      |
-| Rust unit     | `handle_list` no `plugin_config_id`: all-tenant rows, `config_name` field present     |
-| Rust unit     | `handle_list` with `plugin_config_id`: filters to that config (regression)            |
-| Frontend unit | `SurfaceReadPanel` renders context selector; options fetched from REST API            |
-| Frontend unit | Selector selection updates `effectiveBaseParams`                                      |
-| Frontend unit | `SurfaceInteractionButton` disabled when `requiredContextParam` set, param absent     |
-| Frontend e2e  | Default state: table visible (mocked), selector shows "All Configurations"            |
-| Frontend e2e  | Config selected: table refetches with `plugin_config_id`; Discover button enabled     |
+| Layer         | What's tested                                                                     |
+| ------------- | --------------------------------------------------------------------------------- |
+| Rust unit     | New surface descriptor (table node, context selector, interactions, data source)  |
+| Rust unit     | `handle_list` no `plugin_config_id`: all-tenant rows, `config_name` field present |
+| Rust unit     | `handle_list` with `plugin_config_id`: filters to that config (regression)        |
+| Frontend unit | `SurfaceReadPanel` renders context selector; options fetched from REST API        |
+| Frontend unit | Selector selection updates `effectiveBaseParams`                                  |
+| Frontend unit | `SurfaceInteractionButton` disabled when `requiredContextParam` set, param absent |
+| Frontend e2e  | Default state: table visible (mocked), selector shows "All Configurations"        |
+| Frontend e2e  | Config selected: table refetches with `plugin_config_id`; Discover button enabled |
 
 ## Rollout
 

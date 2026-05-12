@@ -15,21 +15,21 @@ update support out of the box. Library crates keep it opt-in.
 
 ### Feature Propagation Chain
 
-| Crate | Feature | Enables |
-| --- | --- | --- |
-| `uptrakit-command` | `interactive` | PTY support via `rustix`, `InteractiveHandle`, `execute_interactive()` |
-| `uptrakit-agent-core` | `interactive` | Interactive update execution path, stdin forwarding |
-| `uptrakit-agent` | `interactive` (default) | `UpdateStdinData` handler, attention polling, `InteractiveUpdates` capability |
-| `uptrakit-agent-ssh` | `interactive` (default) | SSH PTY request, `UpdateStdinData` handler, `InteractiveUpdates` capability |
-| `uptrakit-web-api` | `interactive` | Interactive WS endpoint, `InteractiveSessionRegistry` |
-| `uptrakit-controller` | `interactive` (default) | Propagates to `web-api/interactive` |
+| Crate                 | Feature                 | Enables                                                                       |
+| --------------------- | ----------------------- | ----------------------------------------------------------------------------- |
+| `uptrakit-command`    | `interactive`           | PTY support via `rustix`, `InteractiveHandle`, `execute_interactive()`        |
+| `uptrakit-agent-core` | `interactive`           | Interactive update execution path, stdin forwarding                           |
+| `uptrakit-agent`      | `interactive` (default) | `UpdateStdinData` handler, attention polling, `InteractiveUpdates` capability |
+| `uptrakit-agent-ssh`  | `interactive` (default) | SSH PTY request, `UpdateStdinData` handler, `InteractiveUpdates` capability   |
+| `uptrakit-web-api`    | `interactive`           | Interactive WS endpoint, `InteractiveSessionRegistry`                         |
+| `uptrakit-controller` | `interactive` (default) | Propagates to `web-api/interactive`                                           |
 
 ### Wire Types Are Unconditional
 
 The wire protocol types (`UpdateStdinDataPayload`, `StdinAttentionPayload`,
 `ExecuteUpdatePayload.interactive`) are always compiled regardless of the `interactive`
 feature. This ensures a non-interactive controller can still deserialize messages from
-an interactive agent (and vice versa). Only the *behavior* is feature-gated.
+an interactive agent (and vice versa). Only the _behavior_ is feature-gated.
 
 ### Additive-Only Pattern
 

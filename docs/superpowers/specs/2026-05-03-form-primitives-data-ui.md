@@ -26,12 +26,12 @@ the out-of-scope follow-up explicitly listed in
 
 Attribute value = component name lowercased, matching the established pattern:
 
-| Component | Root element | `data-ui` value |
-| --- | --- | --- |
-| `Select.svelte` | `<select>` | `"select"` ✓ already present |
-| `Input.svelte` | `<input>` | `"input"` |
-| `Textarea.svelte` | `<textarea>` | `"textarea"` |
-| `Checkbox.svelte` | `<input type="checkbox">` | `"checkbox"` |
+| Component         | Root element              | `data-ui` value              |
+| ----------------- | ------------------------- | ---------------------------- |
+| `Select.svelte`   | `<select>`                | `"select"` ✓ already present |
+| `Input.svelte`    | `<input>`                 | `"input"`                    |
+| `Textarea.svelte` | `<textarea>`              | `"textarea"`                 |
+| `Checkbox.svelte` | `<input type="checkbox">` | `"checkbox"`                 |
 
 `Checkbox` uses `"checkbox"` (not `"input"`) to distinguish from text inputs. The naming
 is component-semantic, not element-type-literal — consistent with `Select`, which also
@@ -77,8 +77,10 @@ One new case per test file, placed after the existing attribute-forwarding tests
 
 ```ts
 it('has data-ui="input" attribute', () => {
-    const { container } = render(Input, baseInput());
-    expect(container.querySelector('input')!.getAttribute('data-ui')).toBe('input');
+  const { container } = render(Input, baseInput());
+  expect(container.querySelector("input")!.getAttribute("data-ui")).toBe(
+    "input",
+  );
 });
 ```
 
@@ -86,8 +88,10 @@ it('has data-ui="input" attribute', () => {
 
 ```ts
 it('has data-ui="textarea" attribute', () => {
-    const { container } = render(Textarea, base());
-    expect(container.querySelector('textarea')!.getAttribute('data-ui')).toBe('textarea');
+  const { container } = render(Textarea, base());
+  expect(container.querySelector("textarea")!.getAttribute("data-ui")).toBe(
+    "textarea",
+  );
 });
 ```
 
@@ -95,8 +99,10 @@ it('has data-ui="textarea" attribute', () => {
 
 ```ts
 it('has data-ui="checkbox" attribute', () => {
-    const { container } = render(Checkbox, baseCheckbox());
-    expect(container.querySelector('input')!.getAttribute('data-ui')).toBe('checkbox');
+  const { container } = render(Checkbox, baseCheckbox());
+  expect(container.querySelector("input")!.getAttribute("data-ui")).toBe(
+    "checkbox",
+  );
 });
 ```
 

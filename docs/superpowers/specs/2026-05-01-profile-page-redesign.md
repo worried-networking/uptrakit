@@ -206,12 +206,12 @@ Keep:
 The following `$state` variables from the current inline-form implementation are **removed**
 and must not survive the refactor:
 
-| Remove | Replaced by |
-| ------ | ----------- |
-| `showChangeEmail` | `showChangeEmailModal` |
-| `showChangePassword` (if present) | `showChangePasswordModal` |
-| `emailChangeSuccess` (local display gate) | removed — `user.has_pending_email_change` (refreshed via `initialize()`) is the canonical source of truth |
-| `passwordChangeSuccess` (in-modal display gate) | removed — success triggers close+toast directly |
+| Remove                                          | Replaced by                                                                                               |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `showChangeEmail`                               | `showChangeEmailModal`                                                                                    |
+| `showChangePassword` (if present)               | `showChangePasswordModal`                                                                                 |
+| `emailChangeSuccess` (local display gate)       | removed — `user.has_pending_email_change` (refreshed via `initialize()`) is the canonical source of truth |
+| `passwordChangeSuccess` (in-modal display gate) | removed — success triggers close+toast directly                                                           |
 
 Any `{:else if showChangeEmail}` or `{:else if showChangePassword}` inline branches in the
 current single-card layout are deleted.

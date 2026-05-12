@@ -127,15 +127,15 @@ fallback or development mode: a missing master key is a hard failure that must b
 
 Database columns using encryption:
 
-| Table | Column | AAD string | Description |
-| --- | --- | --- | --- |
-| `mqtt_clients` | `password` | `uptrakit:mqtt_clients:password` | MQTT broker password |
-| `mqtt_clients` | `ca_cert_pem` | `uptrakit:mqtt_clients:ca_cert_pem` | Custom MQTT CA certificate |
-| `oidc_providers` | `client_secret` | `uptrakit:oidc_providers:client_secret` | OIDC client secret |
-| `ca_certificates` | `key_pem` | `uptrakit:ca_certificates:key_pem` | CA private key |
-| `pending_oidc_flows` | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` | PKCE code verifier for in-flight OIDC authorization |
-| `ssh_hosts` | `private_key` | `uptrakit:ssh_hosts:private_key` | SSH private key (agent-ssh local DB) |
-| `notification_channels` | `config` | `uptrakit:notification_channels:config` | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
+| Table                   | Column          | AAD string                                  | Description                                                  |
+| ----------------------- | --------------- | ------------------------------------------- | ------------------------------------------------------------ |
+| `mqtt_clients`          | `password`      | `uptrakit:mqtt_clients:password`            | MQTT broker password                                         |
+| `mqtt_clients`          | `ca_cert_pem`   | `uptrakit:mqtt_clients:ca_cert_pem`         | Custom MQTT CA certificate                                   |
+| `oidc_providers`        | `client_secret` | `uptrakit:oidc_providers:client_secret`     | OIDC client secret                                           |
+| `ca_certificates`       | `key_pem`       | `uptrakit:ca_certificates:key_pem`          | CA private key                                               |
+| `pending_oidc_flows`    | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` | PKCE code verifier for in-flight OIDC authorization          |
+| `ssh_hosts`             | `private_key`   | `uptrakit:ssh_hosts:private_key`            | SSH private key (agent-ssh local DB)                         |
+| `notification_channels` | `config`        | `uptrakit:notification_channels:config`     | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
 
 ### Envelope encryption
 
@@ -156,11 +156,11 @@ embedded in the ciphertext prefix so the correct DEK can be looked up at decrypt
 
 Three wire formats coexist for backward compatibility:
 
-| Format | Prefix | AAD | Key | Used by |
-| --- | --- | --- | --- | --- |
-| v1 | `ENC:v1:` | empty | KEK direct | Legacy (read-only during migration) |
-| v2 | `ENC:v2:` | caller-supplied | KEK direct | Migration compat, key verification |
-| v3 | `ENC:v3:<key_id>:` | caller-supplied | DEK (envelope) | Current default |
+| Format | Prefix             | AAD             | Key            | Used by                             |
+| ------ | ------------------ | --------------- | -------------- | ----------------------------------- |
+| v1     | `ENC:v1:`          | empty           | KEK direct     | Legacy (read-only during migration) |
+| v2     | `ENC:v2:`          | caller-supplied | KEK direct     | Migration compat, key verification  |
+| v3     | `ENC:v3:<key_id>:` | caller-supplied | DEK (envelope) | Current default                     |
 
 The `is_encrypted()` helper returns `true` for all three prefixes.
 
@@ -239,8 +239,8 @@ only the DEK wrappers change.
 See [Key Rotation](key-rotation.md) for the full procedure, including HA rolling restart
 instructions.
 
-| Method | Details |
-| --- | --- |
+| Method                      | Details                                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `--master-key-file` CLI arg | Path to a file containing the 64-character hex key (32 bytes). Use `chmod 0600` to restrict to the service user. This is the only supported delivery method. |
 
 ### Master Key Verification (HA Safety)
@@ -274,12 +274,12 @@ considerations.
 Short-lived bearer tokens used in pending authentication flows are stored as SHA-256 hashes rather than plaintext.
 This prevents an attacker with database access from using leaked tokens to complete authentication flows.
 
-| Table | Token field | Hash column | Notes |
-| --- | --- | --- | --- |
-| `pending_device_flows` | `device_code` | `device_code_hash` | `user_code` remains unhashed (short-lived, user-facing, consonant alphabet) |
-| `pending_account_links` | `link_token` | `link_token_hash` | |
-| `pending_oidc_token_exchanges` | `exchange_code` | `exchange_code_hash` | |
-| `pending_oidc_registrations` | `registration_code` | `registration_code_hash` | |
+| Table                          | Token field         | Hash column              | Notes                                                                       |
+| ------------------------------ | ------------------- | ------------------------ | --------------------------------------------------------------------------- |
+| `pending_device_flows`         | `device_code`       | `device_code_hash`       | `user_code` remains unhashed (short-lived, user-facing, consonant alphabet) |
+| `pending_account_links`        | `link_token`        | `link_token_hash`        |                                                                             |
+| `pending_oidc_token_exchanges` | `exchange_code`     | `exchange_code_hash`     |                                                                             |
+| `pending_oidc_registrations`   | `registration_code` | `registration_code_hash` |                                                                             |
 
 All four tables use a UUID `id` as primary key and a `*_hash TEXT NOT NULL UNIQUE` column for hash-based lookups.
 The hashing uses the same `hash_token()` function (SHA-256, hex-encoded) used by `api_token` entities.
@@ -295,11 +295,11 @@ Services advertising credential capabilities (`DatabaseAccess`, `NatsAccess`, `M
 a `ServiceCredentials` message from the controller after mTLS authentication. This message carries
 infrastructure secrets:
 
-| Capability | Field | Content |
-| --- | --- | --- |
-| `DatabaseAccess` | `db_url` | Database connection string (contains credentials) |
-| `NatsAccess` | `nats_url` | NATS server URL |
-| `MasterKeyAccess` | `master_key_hex` | 256-bit master encryption key as 64-char hex |
+| Capability        | Field            | Content                                           |
+| ----------------- | ---------------- | ------------------------------------------------- |
+| `DatabaseAccess`  | `db_url`         | Database connection string (contains credentials) |
+| `NatsAccess`      | `nats_url`       | NATS server URL                                   |
+| `MasterKeyAccess` | `master_key_hex` | 256-bit master encryption key as 64-char hex      |
 
 ### Security invariants
 
@@ -341,10 +341,10 @@ sometimes misconfigured with plaintext transport.
 
 ### Requirements
 
-| Environment | Requirement |
-| --- | --- |
-| Production | `nats-tls://` scheme, or `nats://` with `tls_required: true` on the NATS server |
-| Development / CI | `nats://` is accepted; a warning is emitted |
+| Environment      | Requirement                                                                     |
+| ---------------- | ------------------------------------------------------------------------------- |
+| Production       | `nats-tls://` scheme, or `nats://` with `tls_required: true` on the NATS server |
+| Development / CI | `nats://` is accepted; a warning is emitted                                     |
 
 ### Operator warning
 
@@ -404,12 +404,12 @@ See [NATS Integration — Plugin Config Protection](https://github.com/worried-n
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/crypto/src/lib.rs` | `EncryptedString` type, `init_master_key()`, `DataKeyRing`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:`/`ENC:v3:` formats, DEK wrap/unwrap |
-| `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
-| `crates/ui/web-api-auth/src/settings_store.rs` | JWT signing key storage with AAD `"uptrakit:settings:jwt_signing_key"` |
-| `crates/ui/web-api-auth/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
-| `crates/core/controller/src/startup.rs` | `verify_master_key()`, `init_data_key_ring()`, `rotate_master_key()` |
-| `crates/core/controller/src/reencrypt.rs` | Automatic v3 re-encryption of all encrypted columns and settings |
-| `crates/core/agent-ssh/src/main.rs` | SSH agent DEK ring init, v3 re-encryption, master key rotation |
+| File                                           | Purpose                                                                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/crypto/src/lib.rs`              | `EncryptedString` type, `init_master_key()`, `DataKeyRing`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:`/`ENC:v3:` formats, DEK wrap/unwrap |
+| `crates/shared/types/src/secret_string.rs`     | `SecretString` newtype with redacted Debug/Display                                                                                                                |
+| `crates/ui/web-api-auth/src/settings_store.rs` | JWT signing key storage with AAD `"uptrakit:settings:jwt_signing_key"`                                                                                            |
+| `crates/ui/web-api-auth/src/setting_key.rs`    | `SettingKey::MasterKeyVerification` — stores the key verification token                                                                                           |
+| `crates/core/controller/src/startup.rs`        | `verify_master_key()`, `init_data_key_ring()`, `rotate_master_key()`                                                                                              |
+| `crates/core/controller/src/reencrypt.rs`      | Automatic v3 re-encryption of all encrypted columns and settings                                                                                                  |
+| `crates/core/agent-ssh/src/main.rs`            | SSH agent DEK ring init, v3 re-encryption, master key rotation                                                                                                    |

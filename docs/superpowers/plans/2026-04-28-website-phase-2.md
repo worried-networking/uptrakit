@@ -14,36 +14,37 @@
 
 ## File Map
 
-| Status | Path | Responsibility |
-| --- | --- | --- |
-| Modify | `website/config.toml` | Add `[markdown]` section |
-| Create | `website/content/docs/_index.md` | Docs hub landing page |
-| Create | `website/content/docs/end-user` | Symlink → `../../../docs/end-user/` |
-| Create | `website/content/docs/security` | Symlink → `../../../docs/security/` |
-| Create | `docs/end-user/_index.md` | Zola section metadata |
-| Create | `docs/end-user/deployment/_index.md` | Zola section metadata |
-| Create | `docs/end-user/plugins/_index.md` | Zola section metadata |
-| Create | `docs/security/_index.md` | Zola section metadata |
-| Create | `docs/end-user/plugins/README.md` | New authored overview page |
-| Modify | `docs/end-user/*.md` (26 files) | Add YAML front matter |
-| Modify | `docs/end-user/deployment/*.md` (10 files) | Add YAML front matter |
-| Modify | `docs/end-user/plugins/*.md` (4 files) | Add YAML front matter |
-| Modify | `docs/security/*.md` (19 files) | Add YAML front matter |
-| Modify | All 60 published `.md` files | GFM alert migration |
-| Modify | ~42 published `.md` files | Rewrite unpublished cross-links to GitHub `tree/` URLs |
-| Create | `website/templates/docs.html` | Unified docs template |
-| Modify | `website/templates/base.html` | Add Docs/Install nav links + og:image |
-| Modify | `website/static/css/site.css` | Docs layout, sidebar, GFM alert, pre override |
-| Create | `website/static/og.png` | 1200×630 social card |
-| Modify | `website/templates/install.html` | Update deployment reference link |
-| Modify | `.github/workflows/website.yml` | Paths filter, pagefind step, 10 MB guard |
-| Modify | `website/README.md` | Document pagefind version bump procedure |
+| Status | Path                                       | Responsibility                                         |
+| ------ | ------------------------------------------ | ------------------------------------------------------ |
+| Modify | `website/config.toml`                      | Add `[markdown]` section                               |
+| Create | `website/content/docs/_index.md`           | Docs hub landing page                                  |
+| Create | `website/content/docs/end-user`            | Symlink → `../../../docs/end-user/`                    |
+| Create | `website/content/docs/security`            | Symlink → `../../../docs/security/`                    |
+| Create | `docs/end-user/_index.md`                  | Zola section metadata                                  |
+| Create | `docs/end-user/deployment/_index.md`       | Zola section metadata                                  |
+| Create | `docs/end-user/plugins/_index.md`          | Zola section metadata                                  |
+| Create | `docs/security/_index.md`                  | Zola section metadata                                  |
+| Create | `docs/end-user/plugins/README.md`          | New authored overview page                             |
+| Modify | `docs/end-user/*.md` (26 files)            | Add YAML front matter                                  |
+| Modify | `docs/end-user/deployment/*.md` (10 files) | Add YAML front matter                                  |
+| Modify | `docs/end-user/plugins/*.md` (4 files)     | Add YAML front matter                                  |
+| Modify | `docs/security/*.md` (19 files)            | Add YAML front matter                                  |
+| Modify | All 60 published `.md` files               | GFM alert migration                                    |
+| Modify | ~42 published `.md` files                  | Rewrite unpublished cross-links to GitHub `tree/` URLs |
+| Create | `website/templates/docs.html`              | Unified docs template                                  |
+| Modify | `website/templates/base.html`              | Add Docs/Install nav links + og:image                  |
+| Modify | `website/static/css/site.css`              | Docs layout, sidebar, GFM alert, pre override          |
+| Create | `website/static/og.png`                    | 1200×630 social card                                   |
+| Modify | `website/templates/install.html`           | Update deployment reference link                       |
+| Modify | `.github/workflows/website.yml`            | Paths filter, pagefind step, 10 MB guard               |
+| Modify | `website/README.md`                        | Document pagefind version bump procedure               |
 
 ---
 
 ## Task 1: Add `[markdown]` section to `website/config.toml`
 
 **Files:**
+
 - Modify: `website/config.toml`
 
 - [ ] **Step 1: Append `[markdown]` section**
@@ -95,6 +96,7 @@ git commit -m "feat(website): add [markdown] section with GFM alerts and syntax 
 ## Task 2: Create `website/content/docs/` structure
 
 **Files:**
+
 - Create: `website/content/docs/_index.md`
 - Create: `website/content/docs/end-user` (symlink)
 - Create: `website/content/docs/security` (symlink)
@@ -152,6 +154,7 @@ git commit -m "feat(website): add docs/ content root with hub landing and symlin
 Zola requires an `_index.md` at each section level. These files contain metadata only — no body content — so GitHub directory browsing is unaffected (GitHub shows `README.md` not `_index.md`).
 
 **Files:**
+
 - Create: `docs/end-user/_index.md`
 - Create: `docs/end-user/deployment/_index.md`
 - Create: `docs/end-user/plugins/_index.md`
@@ -223,6 +226,7 @@ git commit -m "feat(docs): add Zola _index.md section metadata files"
 This is the only new content file in Phase 2. The plugins subsection has no existing overview page.
 
 **Files:**
+
 - Create: `docs/end-user/plugins/README.md`
 
 - [ ] **Step 1: Write the file**
@@ -238,12 +242,12 @@ description: Per-plugin configuration reference for the Uptrakit package-manager
 
 Uptrakit ships built-in plugins for common Linux package managers. Each plugin page documents the configuration schema, supported options, and behavior notes specific to that package manager.
 
-| Plugin | Description |
-| --- | --- |
-| [APT](apt.md) | Debian and Ubuntu package management via `apt`. |
-| [DNF](dnf.md) | Fedora and RHEL package management via `dnf`. |
-| [Docker](docker.md) | Docker image and container update tracking. |
-| [Pacman](pacman.md) | Arch Linux package management via `pacman`. |
+| Plugin              | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| [APT](apt.md)       | Debian and Ubuntu package management via `apt`. |
+| [DNF](dnf.md)       | Fedora and RHEL package management via `dnf`.   |
+| [Docker](docker.md) | Docker image and container update tracking.     |
+| [Pacman](pacman.md) | Arch Linux package management via `pacman`.     |
 
 ## Related Documentation
 
@@ -267,6 +271,7 @@ Front matter is added to every `.md` file directly under `docs/end-user/` (not i
 Weights derive from the README contents table order. Files absent from the README get sequential weights starting at 130.
 
 **Files:**
+
 - Modify: `docs/end-user/README.md` and 25 other `.md` files
 
 - [ ] **Step 1: Add front matter to each file**
@@ -285,34 +290,34 @@ description: <One-sentence summary written from the file's opening paragraph>
 
 **Weight table — end-user top-level:**
 
-| File | Weight | Title (from H1) |
-| --- | --- | --- |
-| `README.md` | 1 | Overview |
-| `system-overview.md` | 10 | System Overview |
-| `cli-usage.md` | 20 | CLI Usage Guide |
-| `plugin-configs.md` | 30 | Plugin Configurations |
-| `manual-software-tracking.md` | 40 | Manual Software Tracking |
-| `autodiscovery.md` | 50 | Autodiscovery |
-| `update-workflow.md` | 60 | Update Workflow |
-| `update-history.md` | 70 | Update History |
-| `notifications.md` | 80 | Notifications |
-| `profile-tokens.md` | 90 | Profile and API Tokens |
-| `home-assistant-mqtt.md` | 100 | Home Assistant and MQTT |
-| `deployment-map.md` | 110 | Deployment Map |
-| `db-migration.md` | 120 | Database Data Migration |
-| `audit-logs.md` | 130 | Audit Logs |
-| `batch-actions.md` | 140 | Batch Actions |
-| `dashboard-icons.md` | 150 | Dashboard Icons |
-| `host-packages.md` | 160 | Host packages *(see note below)* |
-| `interactive-updates.md` | 170 | Interactive Updates |
-| `npm-plugin.md` | 180 | npm Plugin (`package_manager_npm`) |
-| `proxmox.md` | 190 | Proxmox VE Integration |
-| `snap-plugin.md` | 200 | Snap Package Manager Plugin |
-| `ssh-agent-bootstrap.md` | 210 | SSH Agent Bootstrap |
-| `ssh-agent-host-management.md` | 220 | SSH Agent Host Management |
-| `surfaces.md` | 230 | Shared Surfaces |
-| `user-management.md` | 240 | User Management |
-| `zeroconf-discovery.md` | 250 | Zero-Configuration Service Discovery |
+| File                           | Weight | Title (from H1)                      |
+| ------------------------------ | ------ | ------------------------------------ |
+| `README.md`                    | 1      | Overview                             |
+| `system-overview.md`           | 10     | System Overview                      |
+| `cli-usage.md`                 | 20     | CLI Usage Guide                      |
+| `plugin-configs.md`            | 30     | Plugin Configurations                |
+| `manual-software-tracking.md`  | 40     | Manual Software Tracking             |
+| `autodiscovery.md`             | 50     | Autodiscovery                        |
+| `update-workflow.md`           | 60     | Update Workflow                      |
+| `update-history.md`            | 70     | Update History                       |
+| `notifications.md`             | 80     | Notifications                        |
+| `profile-tokens.md`            | 90     | Profile and API Tokens               |
+| `home-assistant-mqtt.md`       | 100    | Home Assistant and MQTT              |
+| `deployment-map.md`            | 110    | Deployment Map                       |
+| `db-migration.md`              | 120    | Database Data Migration              |
+| `audit-logs.md`                | 130    | Audit Logs                           |
+| `batch-actions.md`             | 140    | Batch Actions                        |
+| `dashboard-icons.md`           | 150    | Dashboard Icons                      |
+| `host-packages.md`             | 160    | Host packages _(see note below)_     |
+| `interactive-updates.md`       | 170    | Interactive Updates                  |
+| `npm-plugin.md`                | 180    | npm Plugin (`package_manager_npm`)   |
+| `proxmox.md`                   | 190    | Proxmox VE Integration               |
+| `snap-plugin.md`               | 200    | Snap Package Manager Plugin          |
+| `ssh-agent-bootstrap.md`       | 210    | SSH Agent Bootstrap                  |
+| `ssh-agent-host-management.md` | 220    | SSH Agent Host Management            |
+| `surfaces.md`                  | 230    | Shared Surfaces                      |
+| `user-management.md`           | 240    | User Management                      |
+| `zeroconf-discovery.md`        | 250    | Zero-Configuration Service Discovery |
 
 For `README.md` specifically:
 
@@ -357,6 +362,7 @@ git commit -m "docs(end-user): add YAML front matter to top-level pages"
 ## Task 6: Add YAML front matter — end-user deployment pages
 
 **Files:**
+
 - Modify: `docs/end-user/deployment/README.md` and 9 other `.md` files
 
 - [ ] **Step 1: Add front matter to each deployment file**
@@ -365,19 +371,19 @@ Use the same front matter template as Task 5. Open each file, read H1 and openin
 
 **Weight table — deployment:**
 
-| File | Weight | Title (from H1) |
-| --- | --- | --- |
-| `README.md` | 1 | Overview |
-| `reverse-proxy.md` | 10 | Reverse Proxy Deployment |
-| `nginx.md` | 20 | Nginx |
-| `nginx-proxy-manager.md` | 30 | Nginx Proxy Manager |
-| `traefik.md` | 40 | Traefik |
-| `caddy.md` | 50 | Caddy |
-| `envoy.md` | 60 | Envoy |
-| `haproxy.md` | 70 | HAProxy |
-| `docker.md` | 80 | Docker Deployment |
-| `external-scheduler.md` | 90 | External Scheduler |
-| `nats.md` | 100 | NATS |
+| File                     | Weight | Title (from H1)          |
+| ------------------------ | ------ | ------------------------ |
+| `README.md`              | 1      | Overview                 |
+| `reverse-proxy.md`       | 10     | Reverse Proxy Deployment |
+| `nginx.md`               | 20     | Nginx                    |
+| `nginx-proxy-manager.md` | 30     | Nginx Proxy Manager      |
+| `traefik.md`             | 40     | Traefik                  |
+| `caddy.md`               | 50     | Caddy                    |
+| `envoy.md`               | 60     | Envoy                    |
+| `haproxy.md`             | 70     | HAProxy                  |
+| `docker.md`              | 80     | Docker Deployment        |
+| `external-scheduler.md`  | 90     | External Scheduler       |
+| `nats.md`                | 100    | NATS                     |
 
 - [ ] **Step 2: Verify front matter count**
 
@@ -399,6 +405,7 @@ git commit -m "docs(end-user/deployment): add YAML front matter to deployment pa
 ## Task 7: Add YAML front matter — end-user plugins pages
 
 **Files:**
+
 - Modify: `docs/end-user/plugins/apt.md`, `dnf.md`, `docker.md`, `pacman.md`
 - `docs/end-user/plugins/README.md` already has front matter from Task 4.
 
@@ -406,12 +413,12 @@ git commit -m "docs(end-user/deployment): add YAML front matter to deployment pa
 
 **Weight table — plugins:**
 
-| File | Weight | Title (from H1) |
-| --- | --- | --- |
-| `apt.md` | 10 | APT Plugin |
-| `dnf.md` | 20 | DNF Plugin |
-| `docker.md` | 30 | Docker Plugin |
-| `pacman.md` | 40 | Pacman Plugin |
+| File        | Weight | Title (from H1) |
+| ----------- | ------ | --------------- |
+| `apt.md`    | 10     | APT Plugin      |
+| `dnf.md`    | 20     | DNF Plugin      |
+| `docker.md` | 30     | Docker Plugin   |
+| `pacman.md` | 40     | Pacman Plugin   |
 
 - [ ] **Step 2: Verify front matter count**
 
@@ -433,33 +440,34 @@ git commit -m "docs(end-user/plugins): add YAML front matter to plugin pages"
 ## Task 8: Add YAML front matter — security pages
 
 **Files:**
+
 - Modify: `docs/security/README.md` and 18 other `.md` files
 
 - [ ] **Step 1: Add front matter to each security file**
 
 **Weight table — security:**
 
-| File | Weight | Title (from H1) |
-| --- | --- | --- |
-| `README.md` | 1 | Overview |
-| `security-architecture.md` | 10 | Security Architecture |
-| `cryptography.md` | 20 | Cryptography |
-| `pki-certificates.md` | 30 | PKI and Certificates |
-| `auth-and-authorization.md` | 40 | Auth and Authorization |
-| `secrets-and-encryption.md` | 50 | Secrets and Encryption |
-| `tofu-tls.md` | 60 | TOFU and TLS |
-| `filesystem-dependency-security.md` | 70 | Filesystem and Dependency Security |
-| `secure-development.md` | 80 | Secure Development |
-| `reverse-proxy-security.md` | 90 | Reverse Proxy Security |
-| `ssh-agent-secrets.md` | 100 | SSH Agent Secrets |
-| `sudoers-management.md` | 110 | Sudoers Management |
-| `notifications-security.md` | 120 | Notification Subsystem Security |
-| `audit-logs.md` | 130 | Audit Log Security |
-| `github-attestation.md` | 140 | GitHub Actions Attestation Verification |
-| `interactive-updates.md` | 150 | Interactive Updates Security |
-| `key-rotation.md` | 160 | Master Key Rotation |
-| `surfaces.md` | 170 | Shared Surface Security |
-| `zeroconf-discovery.md` | 180 | Zero-Configuration Discovery Security |
+| File                                | Weight | Title (from H1)                         |
+| ----------------------------------- | ------ | --------------------------------------- |
+| `README.md`                         | 1      | Overview                                |
+| `security-architecture.md`          | 10     | Security Architecture                   |
+| `cryptography.md`                   | 20     | Cryptography                            |
+| `pki-certificates.md`               | 30     | PKI and Certificates                    |
+| `auth-and-authorization.md`         | 40     | Auth and Authorization                  |
+| `secrets-and-encryption.md`         | 50     | Secrets and Encryption                  |
+| `tofu-tls.md`                       | 60     | TOFU and TLS                            |
+| `filesystem-dependency-security.md` | 70     | Filesystem and Dependency Security      |
+| `secure-development.md`             | 80     | Secure Development                      |
+| `reverse-proxy-security.md`         | 90     | Reverse Proxy Security                  |
+| `ssh-agent-secrets.md`              | 100    | SSH Agent Secrets                       |
+| `sudoers-management.md`             | 110    | Sudoers Management                      |
+| `notifications-security.md`         | 120    | Notification Subsystem Security         |
+| `audit-logs.md`                     | 130    | Audit Log Security                      |
+| `github-attestation.md`             | 140    | GitHub Actions Attestation Verification |
+| `interactive-updates.md`            | 150    | Interactive Updates Security            |
+| `key-rotation.md`                   | 160    | Master Key Rotation                     |
+| `surfaces.md`                       | 170    | Shared Surface Security                 |
+| `zeroconf-discovery.md`             | 180    | Zero-Configuration Discovery Security   |
 
 - [ ] **Step 2: Verify front matter count**
 
@@ -492,24 +500,26 @@ Replace all `> **Label:**` callout patterns in `docs/end-user/` and `docs/securi
 
 **Mapping:**
 
-| Old pattern | New first line | Notes |
-| --- | --- | --- |
-| `> **Note:**` | `> [!NOTE]` | Drop the label entirely |
-| `> **Note**:` | `> [!NOTE]` | Variant spelling |
-| `> **Tip:**` | `> [!TIP]` | Drop the label |
-| `> **Important:**` | `> [!IMPORTANT]` | Drop the label |
-| `> **Warning:**` | `> [!WARNING]` | Drop the label |
-| `> **Security note:**` | `> [!CAUTION]` | Drop the label |
-| Any other `> **Label:**` | `> [!NOTE]` | Fold label text into first sentence |
+| Old pattern              | New first line   | Notes                               |
+| ------------------------ | ---------------- | ----------------------------------- |
+| `> **Note:**`            | `> [!NOTE]`      | Drop the label entirely             |
+| `> **Note**:`            | `> [!NOTE]`      | Variant spelling                    |
+| `> **Tip:**`             | `> [!TIP]`       | Drop the label                      |
+| `> **Important:**`       | `> [!IMPORTANT]` | Drop the label                      |
+| `> **Warning:**`         | `> [!WARNING]`   | Drop the label                      |
+| `> **Security note:**`   | `> [!CAUTION]`   | Drop the label                      |
+| Any other `> **Label:**` | `> [!NOTE]`      | Fold label text into first sentence |
 
 **Conversion example — standard label:**
 
 Before:
+
 ```markdown
 > **Note:** API tokens are scoped to a single tenant.
 ```
 
 After:
+
 ```markdown
 > [!NOTE]
 > API tokens are scoped to a single tenant.
@@ -518,11 +528,13 @@ After:
 **Conversion example — multi-word label:**
 
 Before:
+
 ```markdown
 > **Output size limit:** Uptrakit stores up to 50 MB of output per update.
 ```
 
 After:
+
 ```markdown
 > [!NOTE]
 > Output size limit: Uptrakit stores up to 50 MB of output per update.
@@ -531,12 +543,14 @@ After:
 **Conversion example — multi-line alert body:**
 
 Before:
+
 ```markdown
 > **Note:** First line of the callout.
 > Continuation on the next line.
 ```
 
 After:
+
 ```markdown
 > [!NOTE]
 > First line of the callout.
@@ -546,6 +560,7 @@ After:
 The `> [!NOTE]` marker occupies its own line. All subsequent `>` continuation lines remain unchanged — no blank line is inserted between the marker and the body.
 
 **Files:**
+
 - Modify: all `docs/end-user/**/*.md` and `docs/security/*.md` that contain `> **`
 
 - [ ] **Step 1: Find all instances**
@@ -590,6 +605,7 @@ Target URL pattern: `https://github.com/worried-networking/uptrakit/tree/main/do
 Do NOT link to individual file blob URLs (`blob/main/<file>`). Directory URLs survive file-level renames within a section.
 
 **Files:**
+
 - Modify: ~42 files across `docs/end-user/` and `docs/security/`
 
 - [ ] **Step 1: Find all cross-links to unpublished sections**
@@ -610,23 +626,25 @@ Save this output — it is your work list.
 
 For each match, replace the relative path with the corresponding GitHub directory URL:
 
-| Relative path (any depth) | Replace with |
-| --- | --- |
-| `../api/` or `../../api/` (or deeper) | `https://github.com/worried-networking/uptrakit/tree/main/docs/api/` |
-| `../architecture/` or deeper | `https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/` |
-| `../development/` or deeper | `https://github.com/worried-networking/uptrakit/tree/main/docs/development/` |
-| `../hackme/` or deeper | `https://github.com/worried-networking/uptrakit/tree/main/docs/hackme/` |
+| Relative path (any depth)             | Replace with                                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| `../api/` or `../../api/` (or deeper) | `https://github.com/worried-networking/uptrakit/tree/main/docs/api/`          |
+| `../architecture/` or deeper          | `https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/` |
+| `../development/` or deeper           | `https://github.com/worried-networking/uptrakit/tree/main/docs/development/`  |
+| `../hackme/` or deeper                | `https://github.com/worried-networking/uptrakit/tree/main/docs/hackme/`       |
 
 If the link target is a specific file (e.g. `../api/README.md`), still replace the whole href with the directory URL (e.g. `.../tree/main/docs/api/`). The link text is unchanged.
 
 Example:
 
 Before:
+
 ```markdown
 See the [API docs](../api/README.md) for endpoint reference.
 ```
 
 After:
+
 ```markdown
 See the [API docs](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for endpoint reference.
 ```
@@ -658,14 +676,19 @@ Expected: PASS. If it fails with broken link errors, read the error output — t
    grep -rn "\.\./security/" docs/end-user
    ```
 2. Rewrite each relative cross-section link to an absolute site path:
+
    ```markdown
    <!-- before -->
+
    [Traefik guide](../end-user/deployment/traefik.md)
 
    <!-- after -->
+
    [Traefik guide](/docs/end-user/deployment/traefik/)
    ```
+
    Use the site URL path (trailing slash, no `.md` extension) — Zola renders pages to directories.
+
 3. Re-run `zola check` after rewriting.
 
 If `zola check` passes without these rewrites, Zola resolved the cross-symlink links correctly — no action needed.
@@ -704,6 +727,7 @@ cd website && zola check
 ```
 
 Expected: PASS with no broken link warnings. If it fails:
+
 - Broken internal link: find the file shown, fix the link.
 - Missing section: verify `_index.md` exists in the referenced directory.
 - Symlink not followed: check `readlink -f website/content/docs/end-user`.
@@ -717,6 +741,7 @@ All three gates must pass before proceeding to template work.
 Unified template for all docs pages — both section indexes and leaf pages.
 
 **Files:**
+
 - Create: `website/templates/docs.html`
 
 - [ ] **Step 1: Write the template**
@@ -1034,6 +1059,7 @@ python3 -m http.server 8080 --directory public
 ```
 
 Navigate to `http://localhost:8080/docs/end-user/deployment/nginx/` (a nested leaf page) and verify:
+
 - Sidebar renders with section headings and page list.
 - Deployment `<details>` group is **open** and Nginx is highlighted as active.
 - Breadcrumbs show `Docs › End-user Guides › Deployment Guides › Nginx`.
@@ -1042,6 +1068,7 @@ Navigate to `http://localhost:8080/docs/end-user/deployment/nginx/` (a nested le
 This verifies that `page.ancestors in` check works through symlinks. If the `<details>` group is closed (not open), Zola is returning resolved paths in `page.ancestors` rather than logical content-relative paths. Fallback: replace the `nested.relative_path in page.ancestors` condition in `docs.html` with `current_path is starting_with(nested.permalink | replace(from=config.base_url, to="/"))`. Then rebuild and verify again.
 
 Also navigate to `/docs/` hub landing:
+
 - Breadcrumbs: absent or just "Docs" with no separator.
 - Alpha banner: absent.
 - Sidebar present.
@@ -1060,6 +1087,7 @@ git commit -m "feat(website): add docs.html template; add template/page_template
 Add "Docs" and "Install" nav links and the og:image meta tag.
 
 **Files:**
+
 - Modify: `website/templates/base.html`
 
 - [ ] **Step 1: Add nav links**
@@ -1067,27 +1095,55 @@ Add "Docs" and "Install" nav links and the og:image meta tag.
 Current nav block (lines 40–45 of `website/templates/base.html`):
 
 ```html
-    <nav class="topbar__nav">
-      <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
-      <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
-        <span aria-hidden="true">◐</span>
-      </button>
-    </nav>
+<nav class="topbar__nav">
+  <a
+    class="topbar__link"
+    href="{{ config.extra.github_repo_url }}"
+    rel="noopener"
+    target="_blank"
+    >GitHub</a
+  >
+  <button
+    class="topbar__theme-toggle"
+    type="button"
+    aria-label="Toggle theme"
+    data-theme-toggle
+  >
+    <span aria-hidden="true">◐</span>
+  </button>
+</nav>
 ```
 
 Replace with:
 
 ```html
-    <nav class="topbar__nav">
-      <a class="topbar__link{% if current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
-         href="/docs/">Docs</a>
-      <a class="topbar__link{% if current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
-         href="/install/">Install</a>
-      <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
-      <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
-        <span aria-hidden="true">◐</span>
-      </button>
-    </nav>
+<nav class="topbar__nav">
+  <a
+    class="topbar__link{% if current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
+    href="/docs/"
+    >Docs</a
+  >
+  <a
+    class="topbar__link{% if current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
+    href="/install/"
+    >Install</a
+  >
+  <a
+    class="topbar__link"
+    href="{{ config.extra.github_repo_url }}"
+    rel="noopener"
+    target="_blank"
+    >GitHub</a
+  >
+  <button
+    class="topbar__theme-toggle"
+    type="button"
+    aria-label="Toggle theme"
+    data-theme-toggle
+  >
+    <span aria-hidden="true">◐</span>
+  </button>
+</nav>
 ```
 
 `is starting_with(...)` is a built-in Tera test and works correctly here. Use literal `/docs/` and `/install/` hrefs — `get_url(path='/docs/')` treats the path as a static file lookup (not a content section) and would produce the wrong URL.
@@ -1097,18 +1153,27 @@ Replace with:
 In the `<head>` section, after the existing OG tags (after `og:url`), add:
 
 ```html
-  <meta property="og:image" content="{{ get_url(path='og.png') }}">
+<meta property="og:image" content="{{ get_url(path='og.png') }}" />
 ```
 
 The full OG block after edit:
 
 ```html
-  <!-- Open Graph -->
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="{% block og_title %}{{ config.title }}{% endblock %}">
-  <meta property="og:description" content="{% block og_description %}{{ config.description }}{% endblock %}">
-  <meta property="og:url" content="{% block og_url %}{{ config.base_url }}{% endblock %}">
-  <meta property="og:image" content="{{ get_url(path='og.png') }}">
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta
+  property="og:title"
+  content="{% block og_title %}{{ config.title }}{% endblock %}"
+/>
+<meta
+  property="og:description"
+  content="{% block og_description %}{{ config.description }}{% endblock %}"
+/>
+<meta
+  property="og:url"
+  content="{% block og_url %}{{ config.base_url }}{% endblock %}"
+/>
+<meta property="og:image" content="{{ get_url(path='og.png') }}" />
 ```
 
 - [ ] **Step 3: Run `zola check`**
@@ -1133,6 +1198,7 @@ git commit -m "feat(website): add Docs/Install nav links and og:image to base te
 Append to the end of `website/static/css/site.css`. Do not modify existing rules.
 
 **Files:**
+
 - Modify: `website/static/css/site.css`
 
 - [ ] **Step 1: Append docs styles**
@@ -1308,8 +1374,12 @@ details:has([data-active]) > .sidebar-nested-title {
   color: var(--accent);
 }
 
-details > summary { list-style: none; }
-details > summary::-webkit-details-marker { display: none; }
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
 
 /* ---- Content area ---- */
 
@@ -1362,16 +1432,29 @@ details > summary::-webkit-details-marker { display: none; }
   color: var(--text-primary);
 }
 
-.docs-article h2 { font-size: 18px; font-weight: 600; margin-top: 32px; }
-.docs-article h3 { font-size: 15px; font-weight: 600; margin-top: 24px; }
+.docs-article h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 32px;
+}
+.docs-article h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 24px;
+}
 
-.docs-article p, .docs-article li {
+.docs-article p,
+.docs-article li {
   color: var(--text-secondary);
   line-height: 1.7;
 }
 
-.docs-article a { color: var(--accent); }
-.docs-article a:hover { color: var(--accent-bright); }
+.docs-article a {
+  color: var(--accent);
+}
+.docs-article a:hover {
+  color: var(--accent-bright);
+}
 
 .docs-article table {
   border-collapse: collapse;
@@ -1394,7 +1477,7 @@ details > summary::-webkit-details-marker { display: none; }
 }
 
 .docs-article code {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   font-size: 12px;
   background: var(--bg-raised);
   border: 1px solid var(--border-subtle);
@@ -1416,7 +1499,9 @@ details > summary::-webkit-details-marker { display: none; }
   font-size: 14px;
 }
 
-.docs-section-index li:last-child { border-bottom: none; }
+.docs-section-index li:last-child {
+  border-bottom: none;
+}
 
 /* ---- Prev/Next navigation ---- */
 
@@ -1436,10 +1521,14 @@ details > summary::-webkit-details-marker { display: none; }
   font-size: 13px;
 }
 
-.docs-prevnext__next { margin-left: auto; }
+.docs-prevnext__next {
+  margin-left: auto;
+}
 
 .docs-prevnext__prev:hover,
-.docs-prevnext__next:hover { color: var(--accent-bright); }
+.docs-prevnext__next:hover {
+  color: var(--accent-bright);
+}
 
 /* ---- Edit link ---- */
 
@@ -1453,7 +1542,9 @@ details > summary::-webkit-details-marker { display: none; }
   text-decoration: none;
 }
 
-.docs-edit-link a:hover { color: var(--text-secondary); }
+.docs-edit-link a:hover {
+  color: var(--text-secondary);
+}
 
 /* ---- Hamburger (mobile only) ---- */
 
@@ -1473,14 +1564,14 @@ details > summary::-webkit-details-marker { display: none; }
   cursor: pointer;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .docs-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 100;
 }
 
@@ -1536,6 +1627,7 @@ python3 -m http.server 8080 --directory public
 ```
 
 Navigate to `http://localhost:8080/docs/end-user/`. Check:
+
 - Two-column layout visible (sidebar left, content right).
 - GFM alert blocks styled (if any on first page).
 - `pre` blocks use `--bg-raised` background.
@@ -1555,6 +1647,7 @@ git commit -m "feat(website): add docs layout, sidebar, GFM alert, and syntax hi
 1200×630 PNG: dark background, favicon icon at top, wordmark below center.
 
 **Files:**
+
 - Create: `website/static/og.png`
 
 - [ ] **Step 1: Render the OG image**
@@ -1572,6 +1665,7 @@ magick -size 1200x630 xc:'#0F172A' \
 ```
 
 Geometry notes:
+
 - Icon: 400×400, top-left at (400, 58) → centered horizontally on 1200px, top edge 58px from top, bottom edge at 458px.
 - Wordmark: `-gravity Center` places origin at (600, 315). The wordmark vertical center must be at y=544. Offset from image center: 544 − 315 = 229px down → `-annotate +0+229`.
 
@@ -1584,6 +1678,7 @@ magick -list font | grep -i mono
 Use whatever name appears (e.g. `DejaVu-Sans-Mono`, `Courier`). The exact font name varies by system.
 
 If ImageMagick is unavailable, produce the image using Figma, Inkscape, or any raster editor to match the spec exactly:
+
 - Canvas: 1200×630, background `#0F172A`
 - Icon: favicon SVG at 400×400 px, centered horizontally, top edge 58px from top
 - Wordmark: "uptrakit", monospace, 48px, weight 500, `#e4e4e7`, horizontally centered, vertical center at 544px from top
@@ -1596,6 +1691,7 @@ magick identify website/static/og.png
 ```
 
 Open `website/static/og.png` and visually confirm:
+
 - Dark `#0F172A` background.
 - Favicon icon visible at top-center with the slate plate (`#1e293b`) and gradient chevrons.
 - "uptrakit" text readable in light color, positioned in the lower half.
@@ -1615,6 +1711,7 @@ git commit -m "feat(website): add og.png social card"
 Change the "canonical deployment reference" link from the GitHub blob URL to the published `/docs/end-user/deployment/` section.
 
 **Files:**
+
 - Modify: `website/templates/install.html`
 
 - [ ] **Step 1: Replace the deployment reference link**
@@ -1624,7 +1721,10 @@ Current (line 66 of `website/templates/install.html`):
 ```html
 <p>
   Full reference:
-  <a href="{{ config.extra.github_repo_url }}/blob/main/docs/end-user/deployment/docker.md">docs/end-user/deployment/docker.md</a>
+  <a
+    href="{{ config.extra.github_repo_url }}/blob/main/docs/end-user/deployment/docker.md"
+    >docs/end-user/deployment/docker.md</a
+  >
   on GitHub.
 </p>
 ```
@@ -1660,6 +1760,7 @@ git commit -m "feat(website): update install page deployment link to /docs/end-u
 Extend paths filter, add Pagefind index step, bump size guard to 10 MB.
 
 **Files:**
+
 - Modify: `.github/workflows/website.yml`
 
 - [ ] **Step 1: Apply all three changes**
@@ -1673,16 +1774,16 @@ on:
   push:
     branches: [main]
     paths:
-      - 'website/**'
-      - 'docs/end-user/**'
-      - 'docs/security/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - "docs/end-user/**"
+      - "docs/security/**"
+      - ".github/workflows/website.yml"
   pull_request:
     paths:
-      - 'website/**'
-      - 'docs/end-user/**'
-      - 'docs/security/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - "docs/end-user/**"
+      - "docs/security/**"
+      - ".github/workflows/website.yml"
   workflow_dispatch:
 
 permissions:
@@ -1776,27 +1877,27 @@ python3 -m http.server 8080 --directory public
 
 Visit `http://localhost:8080` and verify each item:
 
-| Check | Where | Expected |
-| --- | --- | --- |
-| Alpha banner present | `/docs/end-user/` | Visible below breadcrumbs |
-| Alpha banner absent | `/docs/` | Not shown |
-| Sidebar renders | `/docs/end-user/system-overview/` | Section headings + pages listed |
-| Deployment group collapsed | `/docs/end-user/system-overview/` | `<details>` closed |
-| Deployment group open | `/docs/end-user/deployment/nginx/` | `<details>` open, active page highlighted |
-| Breadcrumbs | `/docs/end-user/deployment/nginx/` | `Docs › End-user Guides › Deployment Guides › Nginx` |
-| Prev/next links | any leaf page | Previous/Next in weight order |
-| No prev/next | `/docs/end-user/` section index | Links absent |
-| Edit-on-GitHub | any leaf page | Links to `github.com/.../blob/main/docs/...` |
-| Pagefind widget | sidebar header | Search input rendered; WASM not loaded yet |
-| Pagefind search | type "update" | Results appear |
-| GFM note alert | any page with `[!NOTE]` | Blue-tinted callout |
-| GFM warning alert | any page with `[!WARNING]` | Yellow-tinted callout |
-| Syntax highlight | any page with code fence | Dark code block, `--bg-raised` background |
-| Top bar "Docs" active | `/docs/end-user/` | "Docs" link highlighted |
-| Top bar "Install" active | `/install/` | "Install" link highlighted |
-| OG image | view source of any page | `<meta property="og:image" content="https://uptrakit.org/og.png">` |
-| Install deployment link | `/install/` | "Deployment Guides" link → `/docs/end-user/deployment/` |
-| Mobile drawer (320px) | resize browser to 320px | Hamburger button visible; tap opens sidebar |
+| Check                      | Where                              | Expected                                                           |
+| -------------------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| Alpha banner present       | `/docs/end-user/`                  | Visible below breadcrumbs                                          |
+| Alpha banner absent        | `/docs/`                           | Not shown                                                          |
+| Sidebar renders            | `/docs/end-user/system-overview/`  | Section headings + pages listed                                    |
+| Deployment group collapsed | `/docs/end-user/system-overview/`  | `<details>` closed                                                 |
+| Deployment group open      | `/docs/end-user/deployment/nginx/` | `<details>` open, active page highlighted                          |
+| Breadcrumbs                | `/docs/end-user/deployment/nginx/` | `Docs › End-user Guides › Deployment Guides › Nginx`               |
+| Prev/next links            | any leaf page                      | Previous/Next in weight order                                      |
+| No prev/next               | `/docs/end-user/` section index    | Links absent                                                       |
+| Edit-on-GitHub             | any leaf page                      | Links to `github.com/.../blob/main/docs/...`                       |
+| Pagefind widget            | sidebar header                     | Search input rendered; WASM not loaded yet                         |
+| Pagefind search            | type "update"                      | Results appear                                                     |
+| GFM note alert             | any page with `[!NOTE]`            | Blue-tinted callout                                                |
+| GFM warning alert          | any page with `[!WARNING]`         | Yellow-tinted callout                                              |
+| Syntax highlight           | any page with code fence           | Dark code block, `--bg-raised` background                          |
+| Top bar "Docs" active      | `/docs/end-user/`                  | "Docs" link highlighted                                            |
+| Top bar "Install" active   | `/install/`                        | "Install" link highlighted                                         |
+| OG image                   | view source of any page            | `<meta property="og:image" content="https://uptrakit.org/og.png">` |
+| Install deployment link    | `/install/`                        | "Deployment Guides" link → `/docs/end-user/deployment/`            |
+| Mobile drawer (320px)      | resize browser to 320px            | Hamburger button visible; tap opens sidebar                        |
 
 - [ ] **Step 3: Run pre-merge gates one final time**
 
@@ -1827,6 +1928,7 @@ CI will run `zola check`, `zola build`, `npx -y pagefind@1 --site public`, and t
 The spec requires documenting the pagefind version pin alongside the existing Zola bump procedure.
 
 **Files:**
+
 - Modify: `website/README.md`
 
 - [ ] **Step 1: Add Pagefind bump section**

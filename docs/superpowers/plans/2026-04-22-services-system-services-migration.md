@@ -33,7 +33,7 @@ sub-spec #2b primitives land).
 ### `frontend/src/routes/services/+page.svelte`
 
 1. **Capability filter chip — All Services** (line 407): `btn btn-sm {capabilityFilter ===
-   'all' ? 'preset-filled-primary-500' : 'preset-tonal'}` → ghost + active-override
+'all' ? 'preset-filled-primary-500' : 'preset-tonal'}` → ghost + active-override
 2. **Capability filter chip — Agents** (line 411): same pattern → ghost + active-override
 3. **Capability filter chip — SSH Agents** (line 417): same pattern → ghost + active-override
 4. **Row ellipsis trigger** (line 515): `btn btn-sm preset-tonal` with `&#8943;` unicode →
@@ -51,7 +51,7 @@ sub-spec #2b primitives land).
 ### `frontend/src/routes/system-services/+page.svelte`
 
 1. **Status filter chip — All** (line 383): `btn btn-sm {statusFilter === 'all' ?
-   'preset-filled-primary-500' : 'preset-tonal'}` → ghost + active-override
+'preset-filled-primary-500' : 'preset-tonal'}` → ghost + active-override
 2. **Status filter chip — Pending** (line 388): same pattern → ghost + active-override
 3. **Status filter chip — Approved** (line 394): same pattern → ghost + active-override
 4. **Status filter chip — Rejected** (line 400): same pattern → ghost + active-override
@@ -68,14 +68,14 @@ sub-spec #2b primitives land).
 
 ## Migration pattern quick reference
 
-| Legacy class | Button shape |
-| --- | --- |
-| `btn btn-sm preset-filled-primary-500` (filter active) | `<Button variant="ghost" size="sm" class="text-[var(--accent)] bg-[var(--bg-hover)]">` |
-| `btn btn-sm preset-tonal` (filter inactive) | `<Button variant="ghost" size="sm">` |
-| `btn btn-sm preset-tonal` on ellipsis trigger | `<Button variant="ghost" size="sm" ariaLabel="..." onclick={...}>` + leadingIcon snippet |
-| `btn preset-filled-primary-500` on Retry | `<Button variant="primary" loading={isRetrying}>Retry</Button>` |
-| `btn preset-tonal-surface` on modal Cancel | `<Button variant="secondary">Cancel</Button>` |
-| `btn preset-filled-primary-500` on modal Submit | `<Button variant="primary" loading={submitting}>{label}</Button>` |
+| Legacy class                                           | Button shape                                                                             |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `btn btn-sm preset-filled-primary-500` (filter active) | `<Button variant="ghost" size="sm" class="text-[var(--accent)] bg-[var(--bg-hover)]">`   |
+| `btn btn-sm preset-tonal` (filter inactive)            | `<Button variant="ghost" size="sm">`                                                     |
+| `btn btn-sm preset-tonal` on ellipsis trigger          | `<Button variant="ghost" size="sm" ariaLabel="..." onclick={...}>` + leadingIcon snippet |
+| `btn preset-filled-primary-500` on Retry               | `<Button variant="primary" loading={isRetrying}>Retry</Button>`                          |
+| `btn preset-tonal-surface` on modal Cancel             | `<Button variant="secondary">Cancel</Button>`                                            |
+| `btn preset-filled-primary-500` on modal Submit        | `<Button variant="primary" loading={submitting}>{label}</Button>`                        |
 
 ---
 
@@ -148,9 +148,9 @@ Below the existing `approvedAgent` fixture, add:
 ```ts
 const pendingAgent: ServiceResponse = {
   ...approvedAgent,
-  id: 'svc-002',
-  friendly_name: 'pending-agent',
-  status: 'pending'
+  id: "svc-002",
+  friendly_name: "pending-agent",
+  status: "pending",
 };
 ```
 
@@ -160,58 +160,66 @@ Add a `describe('capability filter chips', ...)` block inside
 `describe('Services Page', ...)`:
 
 ```ts
-describe('capability filter chips', () => {
+describe("capability filter chips", () => {
   beforeEach(() => {
     vi.mocked(api.getServices).mockResolvedValue(makePage([]));
   });
 
-  it('All Services chip is active by default — carries accent/bg-hover fragments',
-    async () => {
-      render(ServicesPage);
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'All Services' })).toBeInTheDocument()
-      );
-      const allChip = screen.getByRole('button', { name: 'All Services' });
-      expect(allChip.className).toContain('text-[var(--accent)]');
-      expect(allChip.className).toContain('bg-[var(--bg-hover)]');
-  });
-
-  it('inactive chips carry no accent/bg-hover fragments', async () => {
+  it("All Services chip is active by default — carries accent/bg-hover fragments", async () => {
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "All Services" }),
+      ).toBeInTheDocument(),
     );
-    for (const label of ['Agents', 'SSH Agents']) {
-      const chip = screen.getByRole('button', { name: label });
-      expect(chip.className).not.toContain('text-[var(--accent)]');
-      expect(chip.className).not.toContain('bg-[var(--bg-hover)]');
+    const allChip = screen.getByRole("button", { name: "All Services" });
+    expect(allChip.className).toContain("text-[var(--accent)]");
+    expect(allChip.className).toContain("bg-[var(--bg-hover)]");
+  });
+
+  it("inactive chips carry no accent/bg-hover fragments", async () => {
+    render(ServicesPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Agents" }),
+      ).toBeInTheDocument(),
+    );
+    for (const label of ["Agents", "SSH Agents"]) {
+      const chip = screen.getByRole("button", { name: label });
+      expect(chip.className).not.toContain("text-[var(--accent)]");
+      expect(chip.className).not.toContain("bg-[var(--bg-hover)]");
     }
   });
 
-  it('clicking Agents chip makes it active and deactivates All Services', async () => {
+  it("clicking Agents chip makes it active and deactivates All Services", async () => {
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Agents" }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
+    fireEvent.click(screen.getByRole("button", { name: "Agents" }));
     await waitFor(() => {
-      const agentsChip = screen.getByRole('button', { name: 'Agents' });
-      expect(agentsChip.className).toContain('text-[var(--accent)]');
-      expect(agentsChip.className).toContain('bg-[var(--bg-hover)]');
+      const agentsChip = screen.getByRole("button", { name: "Agents" });
+      expect(agentsChip.className).toContain("text-[var(--accent)]");
+      expect(agentsChip.className).toContain("bg-[var(--bg-hover)]");
     });
-    expect(screen.getByRole('button', { name: 'All Services' }).className)
-      .not.toContain('text-[var(--accent)]');
+    expect(
+      screen.getByRole("button", { name: "All Services" }).className,
+    ).not.toContain("text-[var(--accent)]");
   });
 
-  it('clicking SSH Agents chip makes it active', async () => {
+  it("clicking SSH Agents chip makes it active", async () => {
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'SSH Agents' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "SSH Agents" }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'SSH Agents' }));
+    fireEvent.click(screen.getByRole("button", { name: "SSH Agents" }));
     await waitFor(() => {
-      const sshChip = screen.getByRole('button', { name: 'SSH Agents' });
-      expect(sshChip.className).toContain('text-[var(--accent)]');
+      const sshChip = screen.getByRole("button", { name: "SSH Agents" });
+      expect(sshChip.className).toContain("text-[var(--accent)]");
     });
   });
 });
@@ -222,42 +230,49 @@ describe('capability filter chips', () => {
 Add a `describe('row ellipsis trigger', ...)` block:
 
 ```ts
-describe('row ellipsis trigger', () => {
+describe("row ellipsis trigger", () => {
   it('renders variant="ghost" size="sm" — bg-transparent and h-[19px]', async () => {
     vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /actions for prod-agent/i }))
-        .toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /actions for prod-agent/i }),
+      ).toBeInTheDocument(),
     );
-    const trigger = screen.getByRole('button', { name: /actions for prod-agent/i });
-    expect(trigger.className).toContain('bg-transparent');
-    expect(trigger.className).toContain('h-[19px]');
+    const trigger = screen.getByRole("button", {
+      name: /actions for prod-agent/i,
+    });
+    expect(trigger.className).toContain("bg-transparent");
+    expect(trigger.className).toContain("h-[19px]");
   });
 
-  it('aria-label matches "Actions for {friendly_name}" including space in name',
-    async () => {
-      vi.mocked(api.getServices).mockResolvedValue(
-        makePage([{ ...approvedAgent, friendly_name: 'my prod agent' }])
-      );
-      render(ServicesPage);
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Actions for my prod agent' }))
-          .toBeInTheDocument()
-      );
+  it('aria-label matches "Actions for {friendly_name}" including space in name', async () => {
+    vi.mocked(api.getServices).mockResolvedValue(
+      makePage([{ ...approvedAgent, friendly_name: "my prod agent" }]),
+    );
+    render(ServicesPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for my prod agent" }),
+      ).toBeInTheDocument(),
+    );
   });
 
-  it('clicking the trigger opens the context menu', async () => {
+  it("clicking the trigger opens the context menu", async () => {
     vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /actions for prod-agent/i }))
-        .toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /actions for prod-agent/i }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: /actions for prod-agent/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for prod-agent/i }),
+    );
     await waitFor(() =>
-      expect(document.querySelector('[data-ui="context-menu-item"]'))
-        .toBeInTheDocument()
+      expect(
+        document.querySelector('[data-ui="context-menu-item"]'),
+      ).toBeInTheDocument(),
     );
   });
 });
@@ -268,55 +283,67 @@ describe('row ellipsis trigger', () => {
 Add a `describe('Retry button', ...)` block:
 
 ```ts
-describe('Retry button', () => {
+describe("Retry button", () => {
   it('renders variant="primary" (md size) in error state', async () => {
-    vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+    vi.mocked(api.getServices).mockRejectedValue(new Error("fetch failed"));
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
-    const retryBtn = screen.getByRole('button', { name: /retry/i });
-    expect(retryBtn.className).toContain('h-[23px]');
-    expect(retryBtn.className)
-      .toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const retryBtn = screen.getByRole("button", { name: /retry/i });
+    expect(retryBtn.className).toContain("h-[23px]");
+    expect(retryBtn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
   it('sets aria-busy="true" during fetch and clears after rejection', async () => {
-    vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+    vi.mocked(api.getServices).mockRejectedValue(new Error("fetch failed"));
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
     let resolveReject!: () => void;
     vi.mocked(api.getServices).mockReturnValue(
       new Promise<never>((_, reject) => {
-        resolveReject = () => reject(new Error('still failing'));
-      })
+        resolveReject = () => reject(new Error("still failing"));
+      }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i }))
-        .toHaveAttribute('aria-busy', 'true')
+      expect(screen.getByRole("button", { name: /retry/i })).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
     );
     resolveReject();
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i }))
-        .not.toHaveAttribute('aria-busy')
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).not.toHaveAttribute("aria-busy"),
     );
   });
 
-  it('clears aria-busy after successful retry and hides the Retry button', async () => {
-    vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+  it("clears aria-busy after successful retry and hides the Retry button", async () => {
+    vi.mocked(api.getServices).mockRejectedValue(new Error("fetch failed"));
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
     vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: /retry/i }),
+      ).not.toBeInTheDocument(),
     );
-    expect(screen.getByText('prod-agent')).toBeInTheDocument();
+    expect(screen.getByText("prod-agent")).toBeInTheDocument();
   });
 });
 ```
@@ -327,7 +354,7 @@ Add a `describe('Merge modal footer', ...)` block. The outer `beforeEach` sets
 `adminUser` as the current user; this block sets a pending service row.
 
 ```ts
-describe('Merge modal footer', () => {
+describe("Merge modal footer", () => {
   beforeEach(() => {
     vi.mocked(api.getServices).mockResolvedValue(makePage([pendingAgent]));
   });
@@ -335,55 +362,71 @@ describe('Merge modal footer', () => {
   async function openMergeModal() {
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /actions for pending-agent/i }))
-        .toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /actions for pending-agent/i }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: /actions for pending-agent/i }));
-    await waitFor(() => expect(screen.getByText('Merge Into...')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Merge Into...'));
-    await waitFor(() => expect(screen.getByText('Merge Service')).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for pending-agent/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Merge Into...")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByText("Merge Into..."));
+    await waitFor(() =>
+      expect(screen.getByText("Merge Service")).toBeInTheDocument(),
+    );
   }
 
   it('Cancel renders variant="secondary"', async () => {
     await openMergeModal();
-    const cancelBtn = screen.getByRole('button', { name: /cancel/i });
-    expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
-    expect(cancelBtn.className).toContain('border');
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
+    expect(cancelBtn.className).toContain("border");
   });
 
   it('Merge submit renders variant="primary" with static "Merge" label', async () => {
     await openMergeModal();
-    const mergeBtn = screen.getByRole('button', { name: /^merge$/i });
-    expect(mergeBtn.className)
-      .toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-    expect(mergeBtn.textContent).not.toContain('Merging');
+    const mergeBtn = screen.getByRole("button", { name: /^merge$/i });
+    expect(mergeBtn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
+    expect(mergeBtn.textContent).not.toContain("Merging");
   });
 
-  it('Merge submit is disabled when no target is selected', async () => {
+  it("Merge submit is disabled when no target is selected", async () => {
     await openMergeModal();
-    expect(screen.getByRole('button', { name: /^merge$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^merge$/i })).toBeDisabled();
   });
 
-  it('loading=true sets aria-busy and disables the Merge submit', async () => {
+  it("loading=true sets aria-busy and disables the Merge submit", async () => {
     vi.mocked(api.mergeService).mockReturnValue(new Promise(() => {}));
     vi.mocked(api.getServices).mockResolvedValue(
       makePage([
         pendingAgent,
-        { ...approvedAgent, id: 'svc-target', capabilities: ['software_discovery'] }
-      ])
+        {
+          ...approvedAgent,
+          id: "svc-target",
+          capabilities: ["software_discovery"],
+        },
+      ]),
     );
     await openMergeModal();
-    const select = document.querySelector('select') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'svc-target' } });
+    const select = document.querySelector("select") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "svc-target" } });
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^merge$/i })).not.toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: /^merge$/i }),
+      ).not.toBeDisabled(),
     );
-    fireEvent.click(screen.getByRole('button', { name: /^merge$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^merge$/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^merge$/i }))
-        .toHaveAttribute('aria-busy', 'true')
+      expect(screen.getByRole("button", { name: /^merge$/i })).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
     );
-    expect(screen.getByRole('button', { name: /^merge$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^merge$/i })).toBeDisabled();
   });
 });
 ```
@@ -393,7 +436,7 @@ describe('Merge modal footer', () => {
 Add a `describe('Ping modal footer (services)', ...)` block:
 
 ```ts
-describe('Ping modal footer (services)', () => {
+describe("Ping modal footer (services)", () => {
   beforeEach(() => {
     vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
   });
@@ -401,43 +444,50 @@ describe('Ping modal footer (services)', () => {
   async function openPingModal() {
     render(ServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /actions for prod-agent/i }))
-        .toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /actions for prod-agent/i }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: /actions for prod-agent/i }));
-    await waitFor(() =>
-      expect(screen.getByText('Edit Ping Interval')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for prod-agent/i }),
     );
-    fireEvent.click(screen.getByText('Edit Ping Interval'));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Edit Ping Interval' }))
-        .toBeInTheDocument()
+      expect(screen.getByText("Edit Ping Interval")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByText("Edit Ping Interval"));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Edit Ping Interval" }),
+      ).toBeInTheDocument(),
     );
   }
 
   it('Cancel renders variant="secondary"', async () => {
     await openPingModal();
-    const cancelBtn = screen.getByRole('button', { name: /cancel/i });
-    expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
   });
 
   it('Save renders variant="primary" with static "Save" label', async () => {
     await openPingModal();
-    const saveBtn = screen.getByRole('button', { name: /^save$/i });
-    expect(saveBtn.className)
-      .toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-    expect(saveBtn.textContent).not.toContain('Saving');
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
+    expect(saveBtn.textContent).not.toContain("Saving");
   });
 
   it('Save shows aria-busy during submit and "Saving..." text never appears', async () => {
     vi.mocked(api.updateService).mockReturnValue(new Promise(() => {}));
     await openPingModal();
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^save$/i }))
-        .toHaveAttribute('aria-busy', 'true')
+      expect(screen.getByRole("button", { name: /^save$/i })).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
     );
-    expect(document.body.textContent).not.toContain('Saving...');
+    expect(document.body.textContent).not.toContain("Saving...");
   });
 });
 ```
@@ -445,25 +495,28 @@ describe('Ping modal footer (services)', () => {
 - [ ] **Step 7: Add ContextMenuItem out-of-scope regression guard**
 
 ```ts
-it('ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)',
-  async () => {
-    vi.mocked(api.getServices).mockResolvedValue(makePage([pendingAgent]));
-    render(ServicesPage);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /actions for pending-agent/i }))
-        .toBeInTheDocument()
-    );
-    fireEvent.click(screen.getByRole('button', { name: /actions for pending-agent/i }));
-    await waitFor(() =>
-      expect(document.querySelector('[data-ui="context-menu-item"]'))
-        .toBeInTheDocument()
-    );
-    const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
-    expect(menuItems.length).toBeGreaterThan(0);
-    for (const item of menuItems) {
-      expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
-      expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
-    }
+it("ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)", async () => {
+  vi.mocked(api.getServices).mockResolvedValue(makePage([pendingAgent]));
+  render(ServicesPage);
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /actions for pending-agent/i }),
+    ).toBeInTheDocument(),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: /actions for pending-agent/i }),
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-ui="context-menu-item"]'),
+    ).toBeInTheDocument(),
+  );
+  const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
+  expect(menuItems.length).toBeGreaterThan(0);
+  for (const item of menuItems) {
+    expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
+    expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
+  }
 });
 ```
 
@@ -497,8 +550,8 @@ Read the file before editing to confirm exact line numbers.
 In the `<script lang="ts">` block, add after the existing imports:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
-import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
+import Button from "$lib/components/Button.svelte";
+import EllipsisIcon from "$lib/components/icons/EllipsisIcon.svelte";
 ```
 
 - [ ] **Step 2: Add `isRetrying` state variable**
@@ -682,77 +735,88 @@ Add a `describe('status filter chips', ...)` block inside
 `describe('System Services Route', ...)`:
 
 ```ts
-describe('status filter chips', () => {
-  it('All chip is active by default — carries accent/bg-hover fragments', async () => {
+describe("status filter chips", () => {
+  it("All chip is active by default — carries accent/bg-hover fragments", async () => {
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "All" })).toBeInTheDocument(),
     );
-    const allChip = screen.getByRole('button', { name: 'All' });
-    expect(allChip.className).toContain('text-[var(--accent)]');
-    expect(allChip.className).toContain('bg-[var(--bg-hover)]');
+    const allChip = screen.getByRole("button", { name: "All" });
+    expect(allChip.className).toContain("text-[var(--accent)]");
+    expect(allChip.className).toContain("bg-[var(--bg-hover)]");
   });
 
-  it('inactive chips carry no accent/bg-hover fragments', async () => {
+  it("inactive chips carry no accent/bg-hover fragments", async () => {
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Pending" }),
+      ).toBeInTheDocument(),
     );
-    for (const label of ['Pending', 'Approved', 'Rejected', 'Deactivated']) {
-      const chip = screen.getByRole('button', { name: label });
-      expect(chip.className).not.toContain('text-[var(--accent)]');
-      expect(chip.className).not.toContain('bg-[var(--bg-hover)]');
+    for (const label of ["Pending", "Approved", "Rejected", "Deactivated"]) {
+      const chip = screen.getByRole("button", { name: label });
+      expect(chip.className).not.toContain("text-[var(--accent)]");
+      expect(chip.className).not.toContain("bg-[var(--bg-hover)]");
     }
   });
 
-  it('clicking Pending chip makes it active and deactivates All', async () => {
+  it("clicking Pending chip makes it active and deactivates All", async () => {
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Pending" }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Pending' }));
+    fireEvent.click(screen.getByRole("button", { name: "Pending" }));
     await waitFor(() => {
-      const pendingChip = screen.getByRole('button', { name: 'Pending' });
-      expect(pendingChip.className).toContain('text-[var(--accent)]');
-      expect(pendingChip.className).toContain('bg-[var(--bg-hover)]');
+      const pendingChip = screen.getByRole("button", { name: "Pending" });
+      expect(pendingChip.className).toContain("text-[var(--accent)]");
+      expect(pendingChip.className).toContain("bg-[var(--bg-hover)]");
     });
-    expect(screen.getByRole('button', { name: 'All' }).className)
-      .not.toContain('text-[var(--accent)]');
+    expect(screen.getByRole("button", { name: "All" }).className).not.toContain(
+      "text-[var(--accent)]",
+    );
   });
 
-  it('clicking Approved chip makes it active', async () => {
+  it("clicking Approved chip makes it active", async () => {
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Approved' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Approved" }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Approved' }));
+    fireEvent.click(screen.getByRole("button", { name: "Approved" }));
     await waitFor(() => {
-      const chip = screen.getByRole('button', { name: 'Approved' });
-      expect(chip.className).toContain('text-[var(--accent)]');
-    });
-  });
-
-  it('clicking Rejected chip makes it active', async () => {
-    render(SystemServicesPage);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Rejected' })).toBeInTheDocument()
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Rejected' }));
-    await waitFor(() => {
-      const chip = screen.getByRole('button', { name: 'Rejected' });
-      expect(chip.className).toContain('text-[var(--accent)]');
+      const chip = screen.getByRole("button", { name: "Approved" });
+      expect(chip.className).toContain("text-[var(--accent)]");
     });
   });
 
-  it('clicking Deactivated chip makes it active', async () => {
+  it("clicking Rejected chip makes it active", async () => {
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Deactivated' })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Rejected" }),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Deactivated' }));
+    fireEvent.click(screen.getByRole("button", { name: "Rejected" }));
     await waitFor(() => {
-      const chip = screen.getByRole('button', { name: 'Deactivated' });
-      expect(chip.className).toContain('text-[var(--accent)]');
+      const chip = screen.getByRole("button", { name: "Rejected" });
+      expect(chip.className).toContain("text-[var(--accent)]");
+    });
+  });
+
+  it("clicking Deactivated chip makes it active", async () => {
+    render(SystemServicesPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Deactivated" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Deactivated" }));
+    await waitFor(() => {
+      const chip = screen.getByRole("button", { name: "Deactivated" });
+      expect(chip.className).toContain("text-[var(--accent)]");
     });
   });
 });
@@ -763,59 +827,59 @@ describe('status filter chips', () => {
 The outer `beforeEach` already provides a `pending` row (`scheduler-service`).
 
 ```ts
-describe('row ellipsis trigger', () => {
+describe("row ellipsis trigger", () => {
   it('renders variant="ghost" size="sm" — bg-transparent and h-[19px]', async () => {
     render(SystemServicesPage);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /actions for scheduler-service/i })
-      ).toBeInTheDocument()
+        screen.getByRole("button", { name: /actions for scheduler-service/i }),
+      ).toBeInTheDocument(),
     );
-    const trigger = screen.getByRole(
-      'button', { name: /actions for scheduler-service/i }
-    );
-    expect(trigger.className).toContain('bg-transparent');
-    expect(trigger.className).toContain('h-[19px]');
+    const trigger = screen.getByRole("button", {
+      name: /actions for scheduler-service/i,
+    });
+    expect(trigger.className).toContain("bg-transparent");
+    expect(trigger.className).toContain("h-[19px]");
   });
 
-  it('aria-label matches "Actions for {friendly_name}" including space in name',
-    async () => {
-      vi.mocked(api.getSystemServices).mockResolvedValue(
-        makePage([
-          {
-            id: 'sys-space',
-            friendly_name: 'my system svc',
-            hostname: 'host-a',
-            ip_address: null,
-            status: 'pending',
-            is_embedded: false,
-            yielded_to: [],
-            last_seen_at: '2026-02-01T10:00:00Z',
-            capabilities: []
-          } as unknown as SystemServiceResponse
-        ])
-      );
-      render(SystemServicesPage);
-      await waitFor(() =>
-        expect(
-          screen.getByRole('button', { name: 'Actions for my system svc' })
-        ).toBeInTheDocument()
-      );
-  });
-
-  it('clicking the trigger opens the context menu', async () => {
+  it('aria-label matches "Actions for {friendly_name}" including space in name', async () => {
+    vi.mocked(api.getSystemServices).mockResolvedValue(
+      makePage([
+        {
+          id: "sys-space",
+          friendly_name: "my system svc",
+          hostname: "host-a",
+          ip_address: null,
+          status: "pending",
+          is_embedded: false,
+          yielded_to: [],
+          last_seen_at: "2026-02-01T10:00:00Z",
+          capabilities: [],
+        } as unknown as SystemServiceResponse,
+      ]),
+    );
     render(SystemServicesPage);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /actions for scheduler-service/i })
-      ).toBeInTheDocument()
+        screen.getByRole("button", { name: "Actions for my system svc" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("clicking the trigger opens the context menu", async () => {
+    render(SystemServicesPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /actions for scheduler-service/i }),
+      ).toBeInTheDocument(),
     );
     fireEvent.click(
-      screen.getByRole('button', { name: /actions for scheduler-service/i })
+      screen.getByRole("button", { name: /actions for scheduler-service/i }),
     );
     await waitFor(() =>
-      expect(document.querySelector('[data-ui="context-menu-item"]'))
-        .toBeInTheDocument()
+      expect(
+        document.querySelector('[data-ui="context-menu-item"]'),
+      ).toBeInTheDocument(),
     );
   });
 });
@@ -824,67 +888,85 @@ describe('row ellipsis trigger', () => {
 - [ ] **Step 3: Add Retry button tests**
 
 ```ts
-describe('Retry button', () => {
+describe("Retry button", () => {
   it('renders variant="primary" (md default size) in error state', async () => {
-    vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+    vi.mocked(api.getSystemServices).mockRejectedValue(
+      new Error("network error"),
+    );
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
-    const retryBtn = screen.getByRole('button', { name: /retry/i });
-    expect(retryBtn.className).toContain('h-[23px]');
-    expect(retryBtn.className)
-      .toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const retryBtn = screen.getByRole("button", { name: /retry/i });
+    expect(retryBtn.className).toContain("h-[23px]");
+    expect(retryBtn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
   it('sets aria-busy="true" during fetch and clears after rejection', async () => {
-    vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+    vi.mocked(api.getSystemServices).mockRejectedValue(
+      new Error("network error"),
+    );
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
     let resolveReject!: () => void;
     vi.mocked(api.getSystemServices).mockReturnValue(
       new Promise<never>((_, reject) => {
-        resolveReject = () => reject(new Error('still failing'));
-      })
+        resolveReject = () => reject(new Error("still failing"));
+      }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i }))
-        .toHaveAttribute('aria-busy', 'true')
+      expect(screen.getByRole("button", { name: /retry/i })).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
     );
     resolveReject();
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i }))
-        .not.toHaveAttribute('aria-busy')
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).not.toHaveAttribute("aria-busy"),
     );
   });
 
-  it('clears aria-busy after successful retry and hides the Retry button', async () => {
+  it("clears aria-busy after successful retry and hides the Retry button", async () => {
     const approvedSvc = {
-      id: 'sys-ok',
-      friendly_name: 'recovered-svc',
-      hostname: 'host-c',
+      id: "sys-ok",
+      friendly_name: "recovered-svc",
+      hostname: "host-c",
       ip_address: null,
-      status: 'approved',
+      status: "approved",
       is_embedded: false,
       yielded_to: [],
-      last_seen_at: '2026-02-01T10:00:00Z',
-      capabilities: []
+      last_seen_at: "2026-02-01T10:00:00Z",
+      capabilities: [],
     } as unknown as SystemServiceResponse;
 
-    vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+    vi.mocked(api.getSystemServices).mockRejectedValue(
+      new Error("network error"),
+    );
     render(SystemServicesPage);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument(),
     );
     vi.mocked(api.getSystemServices).mockResolvedValue(makePage([approvedSvc]));
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: /retry/i }),
+      ).not.toBeInTheDocument(),
     );
-    expect(screen.getByText('recovered-svc')).toBeInTheDocument();
+    expect(screen.getByText("recovered-svc")).toBeInTheDocument();
   });
 });
 ```
@@ -892,67 +974,72 @@ describe('Retry button', () => {
 - [ ] **Step 4: Add Ping modal footer tests**
 
 ```ts
-describe('Ping modal footer (system-services)', () => {
+describe("Ping modal footer (system-services)", () => {
   const approvedSystemSvc = {
-    id: 'sys-approved',
-    friendly_name: 'approved-scheduler',
-    hostname: 'controller-b',
-    ip_address: '10.10.1.6',
-    status: 'approved',
+    id: "sys-approved",
+    friendly_name: "approved-scheduler",
+    hostname: "controller-b",
+    ip_address: "10.10.1.6",
+    status: "approved",
     is_embedded: false,
     yielded_to: [],
-    last_seen_at: '2026-02-01T10:00:00Z',
-    capabilities: []
+    last_seen_at: "2026-02-01T10:00:00Z",
+    capabilities: [],
   } as unknown as SystemServiceResponse;
 
   beforeEach(() => {
-    vi.mocked(api.getSystemServices).mockResolvedValue(makePage([approvedSystemSvc]));
+    vi.mocked(api.getSystemServices).mockResolvedValue(
+      makePage([approvedSystemSvc]),
+    );
   });
 
   async function openPingModal() {
     render(SystemServicesPage);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /actions for approved-scheduler/i })
-      ).toBeInTheDocument()
+        screen.getByRole("button", { name: /actions for approved-scheduler/i }),
+      ).toBeInTheDocument(),
     );
     fireEvent.click(
-      screen.getByRole('button', { name: /actions for approved-scheduler/i })
+      screen.getByRole("button", { name: /actions for approved-scheduler/i }),
     );
     await waitFor(() =>
-      expect(screen.getByText('Edit Ping Interval')).toBeInTheDocument()
+      expect(screen.getByText("Edit Ping Interval")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByText('Edit Ping Interval'));
+    fireEvent.click(screen.getByText("Edit Ping Interval"));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Edit Ping Interval' }))
-        .toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "Edit Ping Interval" }),
+      ).toBeInTheDocument(),
     );
   }
 
   it('Cancel renders variant="secondary"', async () => {
     await openPingModal();
-    const cancelBtn = screen.getByRole('button', { name: /cancel/i });
-    expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
   });
 
   it('Save renders variant="primary" with static "Save" label', async () => {
     await openPingModal();
-    const saveBtn = screen.getByRole('button', { name: /^save$/i });
-    expect(saveBtn.className)
-      .toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-    expect(saveBtn.textContent).not.toContain('Saving');
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
+    expect(saveBtn.textContent).not.toContain("Saving");
   });
 
-  it('Save shows aria-busy during submit and "Saving..." text never appears',
-    async () => {
-      vi.mocked(api.updateSystemService).mockReturnValue(new Promise(() => {}));
-      await openPingModal();
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: /^save$/i }))
-          .toHaveAttribute('aria-busy', 'true')
-      );
-      expect(document.body.textContent).not.toContain('Saving...');
+  it('Save shows aria-busy during submit and "Saving..." text never appears', async () => {
+    vi.mocked(api.updateSystemService).mockReturnValue(new Promise(() => {}));
+    await openPingModal();
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^save$/i })).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
+    );
+    expect(document.body.textContent).not.toContain("Saving...");
   });
 });
 ```
@@ -960,27 +1047,27 @@ describe('Ping modal footer (system-services)', () => {
 - [ ] **Step 5: Add ContextMenuItem regression guard**
 
 ```ts
-it('ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)',
-  async () => {
-    render(SystemServicesPage);
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: /actions for scheduler-service/i })
-      ).toBeInTheDocument()
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: /actions for scheduler-service/i })
-    );
-    await waitFor(() =>
-      expect(document.querySelector('[data-ui="context-menu-item"]'))
-        .toBeInTheDocument()
-    );
-    const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
-    expect(menuItems.length).toBeGreaterThan(0);
-    for (const item of menuItems) {
-      expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
-      expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
-    }
+it("ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)", async () => {
+  render(SystemServicesPage);
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /actions for scheduler-service/i }),
+    ).toBeInTheDocument(),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: /actions for scheduler-service/i }),
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-ui="context-menu-item"]'),
+    ).toBeInTheDocument(),
+  );
+  const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
+  expect(menuItems.length).toBeGreaterThan(0);
+  for (const item of menuItems) {
+    expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
+    expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
+  }
 });
 ```
 
@@ -1014,8 +1101,8 @@ Read the file before editing to confirm exact line numbers.
 In the `<script lang="ts">` block, add:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
-import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
+import Button from "$lib/components/Button.svelte";
+import EllipsisIcon from "$lib/components/icons/EllipsisIcon.svelte";
 ```
 
 - [ ] **Step 2: Add `isRetrying` state variable**
@@ -1241,14 +1328,14 @@ Expected: 0 failures. All other snapshot suites unaffected.
 
 ## Commit summary
 
-| # | Commit | Files |
-| --- | --- | --- |
-| 1 | Create EllipsisIcon SVG | `icons/EllipsisIcon.svelte` |
-| 2 | Failing tests — services | `services/services.test.ts` |
-| 3 | Migrate services route | `services/+page.svelte` |
-| 4 | Failing tests — system-services | `system-services/system-services.test.ts` |
-| 5 | Migrate system-services route | `system-services/+page.svelte` |
-| 6 | E2e baselines | `tests/e2e/services.spec.ts` + PNGs |
+| #   | Commit                          | Files                                     |
+| --- | ------------------------------- | ----------------------------------------- |
+| 1   | Create EllipsisIcon SVG         | `icons/EllipsisIcon.svelte`               |
+| 2   | Failing tests — services        | `services/services.test.ts`               |
+| 3   | Migrate services route          | `services/+page.svelte`                   |
+| 4   | Failing tests — system-services | `system-services/system-services.test.ts` |
+| 5   | Migrate system-services route   | `system-services/+page.svelte`            |
+| 6   | E2e baselines                   | `tests/e2e/services.spec.ts` + PNGs       |
 
 ---
 

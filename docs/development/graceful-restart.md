@@ -5,11 +5,11 @@ to start accepting connections while the old process drains existing ones.
 
 **CLI flags:**
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--reuseport` | `false` | Enable `SO_REUSEPORT` socket option (required on both processes) |
-| `--takeover-from <PID>` | — | PID of old process to take over from; sends SIGUSR1 to initiate graceful shutdown |
-| `--shutdown-timeout-secs` | `30` | Graceful shutdown timeout (how long to drain connections) |
+| Flag                      | Default | Description                                                                       |
+| ------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `--reuseport`             | `false` | Enable `SO_REUSEPORT` socket option (required on both processes)                  |
+| `--takeover-from <PID>`   | —       | PID of old process to take over from; sends SIGUSR1 to initiate graceful shutdown |
+| `--shutdown-timeout-secs` | `30`    | Graceful shutdown timeout (how long to drain connections)                         |
 
 **Restart sequence:**
 
@@ -30,10 +30,10 @@ to start accepting connections while the old process drains existing ones.
 
 **Signal handling:**
 
-| Signal | Action |
-| --- | --- |
-| SIGTERM | Initiate graceful shutdown |
-| SIGINT | Initiate graceful shutdown |
+| Signal  | Action                                         |
+| ------- | ---------------------------------------------- |
+| SIGTERM | Initiate graceful shutdown                     |
+| SIGINT  | Initiate graceful shutdown                     |
 | SIGUSR1 | Initiate graceful shutdown (used for takeover) |
 
 **Wire protocol:** The `ServerRestarting` message (`ControllerMessage::ServerRestarting(ServerRestartingPayload)`)
@@ -44,11 +44,11 @@ with backoff once the controller is available again.
 
 **Service shutdown cause mapping:**
 
-| Trigger | `DisconnectReason` sent | `LoopOutcome` returned |
-| --- | --- | --- |
-| `SIGHUP` | `restart` | `Restart` (exits lifecycle for external restart) |
-| `SIGINT` / `SIGTERM` | `shutdown` | `Shutdown` (exits lifecycle cleanly) |
-| `ServerRestarting` | `restart` | `Disconnected` (reconnects with backoff) |
+| Trigger              | `DisconnectReason` sent | `LoopOutcome` returned                           |
+| -------------------- | ----------------------- | ------------------------------------------------ |
+| `SIGHUP`             | `restart`               | `Restart` (exits lifecycle for external restart) |
+| `SIGINT` / `SIGTERM` | `shutdown`              | `Shutdown` (exits lifecycle cleanly)             |
+| `ServerRestarting`   | `restart`               | `Disconnected` (reconnects with backoff)         |
 
 The mapping is implemented by `default_resolve_shutdown()` in `crates/shared/service-sdk/src/lifecycle.rs`. All
 `ServiceHandler::on_shutdown` implementations MUST call this function and use the returned
@@ -58,15 +58,15 @@ The mapping is implemented by `default_resolve_shutdown()` in `crates/shared/ser
 
 **Timeout guards preventing shutdown hangs:**
 
-| Layer | Timeout | Constant | File |
-| --- | --- | --- | --- |
-| Service event loop `conn.close()` | 5 s | `CLOSE_TIMEOUT` | `crates/shared/service-sdk/src/event_loop.rs` |
-| Controller WS handler `sink.send()` | 15 s | `WS_WRITE_TIMEOUT` | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` |
-| Controller `broadcast_server_restarting_scattered` | 5 s | `BROADCAST_SEND_TIMEOUT` | `crates/ui/web-api/src/service_connections.rs` |
-| Service SDK `conn.send()` | 30 s | `SEND_TIMEOUT` | `crates/shared/service-sdk/src/connection.rs` |
-| MQTT `publish_retained()` / `subscribe_topic()` | 5 s | `OPERATION_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
-| MQTT `shutdown()` offline publish + disconnect | 5 s | `OPERATION_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
-| MQTT event loop shutdown | 5 s | `SHUTDOWN_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
+| Layer                                              | Timeout | Constant                 | File                                                     |
+| -------------------------------------------------- | ------- | ------------------------ | -------------------------------------------------------- |
+| Service event loop `conn.close()`                  | 5 s     | `CLOSE_TIMEOUT`          | `crates/shared/service-sdk/src/event_loop.rs`            |
+| Controller WS handler `sink.send()`                | 15 s    | `WS_WRITE_TIMEOUT`       | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` |
+| Controller `broadcast_server_restarting_scattered` | 5 s     | `BROADCAST_SEND_TIMEOUT` | `crates/ui/web-api/src/service_connections.rs`           |
+| Service SDK `conn.send()`                          | 30 s    | `SEND_TIMEOUT`           | `crates/shared/service-sdk/src/connection.rs`            |
+| MQTT `publish_retained()` / `subscribe_topic()`    | 5 s     | `OPERATION_TIMEOUT`      | `crates/core/mqtt/src/mqtt_client.rs`                    |
+| MQTT `shutdown()` offline publish + disconnect     | 5 s     | `OPERATION_TIMEOUT`      | `crates/core/mqtt/src/mqtt_client.rs`                    |
+| MQTT event loop shutdown                           | 5 s     | `SHUTDOWN_TIMEOUT`       | `crates/core/mqtt/src/mqtt_client.rs`                    |
 
 Without these timeouts, a cascading deadlock can occur: if a service stops reading its WebSocket (e.g. because
 its event loop is blocked by a long-running operation), the controller's `sink.send()` blocks when the TCP
@@ -78,15 +78,15 @@ indefinitely.
 
 **Key files:**
 
-| File | Purpose |
-| --- | --- |
-| `crates/core/controller/src/tasks.rs` | `BackgroundTasks` struct with coordinated shutdown sequence |
-| `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s), `SERVICE_DRAIN_POLL_INTERVAL` (250ms) |
-| `crates/core/controller/src/main.rs` | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop |
-| `crates/shared/service-sdk/src/shared_types.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `default_resolve_shutdown()` - canonical cause-to-outcome mapping |
-| `crates/shared/service-sdk/src/event_loop.rs` | `ServerRestarting` handler — calls `on_shutdown` with `ShutdownCause::ServerRestarting` |
-| `crates/core/agent/src/main.rs` | `AgentHandler::on_shutdown` implementation |
-| `crates/core/agent-ssh/src/main.rs` | `SshAgentHandler::on_shutdown` implementation |
-| `crates/core/mqtt/src/main.rs` | `MqttHandler::on_shutdown` implementation |
-| `crates/core/scheduler/src/handler.rs` | `SchedulerHandler::on_shutdown` implementation |
+| File                                            | Purpose                                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `crates/core/controller/src/tasks.rs`           | `BackgroundTasks` struct with coordinated shutdown sequence                                                         |
+| `crates/core/controller/src/durations.rs`       | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s), `SERVICE_DRAIN_POLL_INTERVAL` (250ms) |
+| `crates/core/controller/src/main.rs`            | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop                                               |
+| `crates/shared/service-sdk/src/shared_types.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method                                                 |
+| `crates/shared/service-sdk/src/lifecycle.rs`    | `default_resolve_shutdown()` - canonical cause-to-outcome mapping                                                   |
+| `crates/shared/service-sdk/src/event_loop.rs`   | `ServerRestarting` handler — calls `on_shutdown` with `ShutdownCause::ServerRestarting`                             |
+| `crates/core/agent/src/main.rs`                 | `AgentHandler::on_shutdown` implementation                                                                          |
+| `crates/core/agent-ssh/src/main.rs`             | `SshAgentHandler::on_shutdown` implementation                                                                       |
+| `crates/core/mqtt/src/main.rs`                  | `MqttHandler::on_shutdown` implementation                                                                           |
+| `crates/core/scheduler/src/handler.rs`          | `SchedulerHandler::on_shutdown` implementation                                                                      |

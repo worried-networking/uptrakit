@@ -74,13 +74,17 @@ await waitFor(() => expect(screen.getByText("Demo App")).toBeInTheDocument());
 expect(screen.getByText("2 hosts · 1 update")).toBeInTheDocument();
 expect(screen.getByText("1.0.0")).toBeInTheDocument();
 expect(screen.getByText("↓ 1.1.0")).toBeInTheDocument();
-expect(screen.getByRole("button", { name: "Update Avail" })).toBeInTheDocument();
+expect(
+  screen.getByRole("button", { name: "Update Avail" }),
+).toBeInTheDocument();
 ```
 
 Also extend `frontend/tests/e2e/ui-parity.test.ts` with a screenshot assertion for the grouped software row:
 
 ```ts
-await expect(page.getByTestId("parity-software-group-row")).toHaveScreenshot("ui-parity-software-group-row.png");
+await expect(page.getByTestId("parity-software-group-row")).toHaveScreenshot(
+  "ui-parity-software-group-row.png",
+);
 ```
 
 Run:
@@ -355,8 +359,14 @@ Add route-level assertions that lock the shared spec usage rather than just shel
 
 ```ts
 expect(screen.getByText("Approved")).toBeInTheDocument();
-expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
-expect(document.querySelector('[data-ui="table-footer-bar"] nav[aria-label="Pagination"]')).toBeInTheDocument();
+expect(
+  document.querySelector('[data-ui="table-footer-bar"]'),
+).toBeInTheDocument();
+expect(
+  document.querySelector(
+    '[data-ui="table-footer-bar"] nav[aria-label="Pagination"]',
+  ),
+).toBeInTheDocument();
 ```
 
 `frontend/src/routes/settings/surface-tabs.test.ts`

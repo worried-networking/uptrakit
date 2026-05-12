@@ -14,21 +14,22 @@
 
 ## File Map
 
-| File | Action | Notes |
-| --- | --- | --- |
-| `frontend/playwright.config.ts` | Modify | Add `chromium-mobile` and `chromium-mobile-dark` projects |
-| `frontend/src/lib/components/ui/DataTable.svelte` | Modify | Add `mobileMode`, `mobileRow`, column flags, dual-DOM, scroll width |
-| `frontend/src/lib/components/ui/DataTable.test.ts` | Modify | Tests for all new DataTable behavior |
-| `frontend/src/lib/components/ui/SoftwareGroupList.svelte` | **Create** | Extracted group list + mobile card layout |
-| `frontend/src/routes/software/+page.svelte` | Modify | Replace inline group list with `<SoftwareGroupList>` |
-| `frontend/tests/e2e/software-area.spec.ts` | Modify | Add mobile snapshot variants |
-| `docs/development/ui/layout.md` | Modify | Update responsive status to `Implemented` |
+| File                                                      | Action     | Notes                                                               |
+| --------------------------------------------------------- | ---------- | ------------------------------------------------------------------- |
+| `frontend/playwright.config.ts`                           | Modify     | Add `chromium-mobile` and `chromium-mobile-dark` projects           |
+| `frontend/src/lib/components/ui/DataTable.svelte`         | Modify     | Add `mobileMode`, `mobileRow`, column flags, dual-DOM, scroll width |
+| `frontend/src/lib/components/ui/DataTable.test.ts`        | Modify     | Tests for all new DataTable behavior                                |
+| `frontend/src/lib/components/ui/SoftwareGroupList.svelte` | **Create** | Extracted group list + mobile card layout                           |
+| `frontend/src/routes/software/+page.svelte`               | Modify     | Replace inline group list with `<SoftwareGroupList>`                |
+| `frontend/tests/e2e/software-area.spec.ts`                | Modify     | Add mobile snapshot variants                                        |
+| `docs/development/ui/layout.md`                           | Modify     | Update responsive status to `Implemented`                           |
 
 ---
 
 ## Task 1: Add `chromium-mobile` Playwright Projects
 
 **Files:**
+
 - Modify: `frontend/playwright.config.ts`
 
 - [ ] **Step 1: Add the two mobile projects**
@@ -78,6 +79,7 @@
 ## Task 2: Write Failing Tests for DataTable Responsive Extension
 
 **Files:**
+
 - Modify: `frontend/src/lib/components/ui/DataTable.test.ts`
 
 - [ ] **Step 1: Add the failing tests**
@@ -85,158 +87,176 @@
   Append this block to the end of the `describe('DataTable', ...)` block in `frontend/src/lib/components/ui/DataTable.test.ts` (before the closing `}`):
 
   ```typescript
-  describe('responsive mode', () => {
-    it('renders data-table-cards container with role=list when mobileMode is cards', () => {
+  describe("responsive mode", () => {
+    it("renders data-table-cards container with role=list when mobileMode is cards", () => {
       const { container } = render(DataTable, {
         columns: [
-          { key: 'name', label: 'Name', mobileTitle: true },
-          { key: 'status', label: 'Status' }
+          { key: "name", label: "Name", mobileTitle: true },
+          { key: "status", label: "Status" },
         ],
-        rows: [{ name: 'alpha', status: 'ready' }],
-        mobileMode: 'cards'
+        rows: [{ name: "alpha", status: "ready" }],
+        mobileMode: "cards",
       });
 
       const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
       expect(cardsEl).toBeInTheDocument();
-      expect(cardsEl).toHaveAttribute('role', 'list');
+      expect(cardsEl).toHaveAttribute("role", "list");
     });
 
-    it('renders both table and cards layouts in DOM for cards mode (dual-DOM)', () => {
+    it("renders both table and cards layouts in DOM for cards mode (dual-DOM)", () => {
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name', mobileTitle: true }],
-        rows: [{ name: 'alpha' }],
-        mobileMode: 'cards'
+        columns: [{ key: "name", label: "Name", mobileTitle: true }],
+        rows: [{ name: "alpha" }],
+        mobileMode: "cards",
       });
 
-      expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
-      expect(container.querySelector('[data-ui="data-table-cards"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-ui="data-table"]'),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-ui="data-table-cards"]'),
+      ).toBeInTheDocument();
     });
 
-    it('auto-generates a card with title from mobileTitle column and dl key/value pairs', () => {
+    it("auto-generates a card with title from mobileTitle column and dl key/value pairs", () => {
       const { container } = render(DataTable, {
         columns: [
-          { key: 'name', label: 'Name', mobileTitle: true },
-          { key: 'status', label: 'Status' }
+          { key: "name", label: "Name", mobileTitle: true },
+          { key: "status", label: "Status" },
         ],
-        rows: [{ name: 'alpha', status: 'ready' }],
-        mobileMode: 'cards'
+        rows: [{ name: "alpha", status: "ready" }],
+        mobileMode: "cards",
       });
 
       const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
       const listItem = cardsEl?.querySelector('[role="listitem"]');
       expect(listItem).toBeInTheDocument();
       // Title column renders as <p>
-      const titleEl = listItem?.querySelector('p');
-      expect(titleEl).toHaveTextContent('alpha');
+      const titleEl = listItem?.querySelector("p");
+      expect(titleEl).toHaveTextContent("alpha");
       // Value column renders in <dl>
-      expect(listItem?.querySelector('dt')).toHaveTextContent('Status');
-      expect(listItem?.querySelector('dd')).toHaveTextContent('ready');
+      expect(listItem?.querySelector("dt")).toHaveTextContent("Status");
+      expect(listItem?.querySelector("dd")).toHaveTextContent("ready");
     });
 
-    it('uses the first visible column as implicit title when no mobileTitle is set', () => {
+    it("uses the first visible column as implicit title when no mobileTitle is set", () => {
       const { container } = render(DataTable, {
         columns: [
-          { key: 'name', label: 'Name' },
-          { key: 'status', label: 'Status' }
+          { key: "name", label: "Name" },
+          { key: "status", label: "Status" },
         ],
-        rows: [{ name: 'alpha', status: 'ready' }],
-        mobileMode: 'cards'
+        rows: [{ name: "alpha", status: "ready" }],
+        mobileMode: "cards",
       });
 
       const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
       const listItem = cardsEl?.querySelector('[role="listitem"]');
-      const titleEl = listItem?.querySelector('p');
-      expect(titleEl).toHaveTextContent('alpha');
+      const titleEl = listItem?.querySelector("p");
+      expect(titleEl).toHaveTextContent("alpha");
       // 'Name' column used as title so only 'Status' appears in dl
-      expect(listItem?.querySelector('dt')).toHaveTextContent('Status');
+      expect(listItem?.querySelector("dt")).toHaveTextContent("Status");
     });
 
-    it('excludes mobileHide columns from auto-generated cards', () => {
+    it("excludes mobileHide columns from auto-generated cards", () => {
       const { container } = render(DataTable, {
         columns: [
-          { key: 'name', label: 'Name', mobileTitle: true },
-          { key: 'internal', label: 'Internal', mobileHide: true },
-          { key: 'status', label: 'Status' }
+          { key: "name", label: "Name", mobileTitle: true },
+          { key: "internal", label: "Internal", mobileHide: true },
+          { key: "status", label: "Status" },
         ],
-        rows: [{ name: 'alpha', internal: 'hidden', status: 'ready' }],
-        mobileMode: 'cards'
+        rows: [{ name: "alpha", internal: "hidden", status: "ready" }],
+        mobileMode: "cards",
       });
 
       const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
-      const dts = cardsEl?.querySelectorAll('dt');
+      const dts = cardsEl?.querySelectorAll("dt");
       // Only 'Status' dt — 'Internal' is hidden, 'Name' is the title
       expect(dts).toHaveLength(1);
-      expect(dts?.[0]).toHaveTextContent('Status');
+      expect(dts?.[0]).toHaveTextContent("Status");
     });
 
-    it('renders mobileRow snippet content in cards mode when provided', () => {
-      const mobileRowSnippet = createRawSnippet<[Record<string, unknown>]>((getRow) => ({
-        render() {
-          const row = getRow();
-          return `<div role="listitem" data-testid="custom-mobile-card">${String(row.name)}</div>`;
-        }
-      }));
+    it("renders mobileRow snippet content in cards mode when provided", () => {
+      const mobileRowSnippet = createRawSnippet<[Record<string, unknown>]>(
+        (getRow) => ({
+          render() {
+            const row = getRow();
+            return `<div role="listitem" data-testid="custom-mobile-card">${String(row.name)}</div>`;
+          },
+        }),
+      );
 
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name' }],
-        rows: [{ name: 'custom' }],
-        mobileMode: 'cards',
-        mobileRow: mobileRowSnippet
+        columns: [{ key: "name", label: "Name" }],
+        rows: [{ name: "custom" }],
+        mobileMode: "cards",
+        mobileRow: mobileRowSnippet,
       });
 
-      expect(container.querySelector('[data-testid="custom-mobile-card"]')).toBeInTheDocument();
-      expect(container.querySelector('[data-testid="custom-mobile-card"]')).toHaveTextContent('custom');
+      expect(
+        container.querySelector('[data-testid="custom-mobile-card"]'),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-testid="custom-mobile-card"]'),
+      ).toHaveTextContent("custom");
     });
 
-    it('renders auto-generated cards even when custom row snippet is provided without mobileRow', () => {
+    it("renders auto-generated cards even when custom row snippet is provided without mobileRow", () => {
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name' }],
-        rows: [{ name: 'alpha' }],
-        mobileMode: 'cards',
-        row: makeRowSnippet()
+        columns: [{ key: "name", label: "Name" }],
+        rows: [{ name: "alpha" }],
+        mobileMode: "cards",
+        row: makeRowSnippet(),
         // no mobileRow: auto-generated cards are the normal path
       });
 
       // Cards DOM present — row snippet does not suppress cards mode
-      expect(container.querySelector('[data-ui="data-table-cards"]')).toBeInTheDocument();
-      expect(container.querySelector('[data-ui="data-table-cards"] [role="listitem"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-ui="data-table-cards"]'),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector(
+          '[data-ui="data-table-cards"] [role="listitem"]',
+        ),
+      ).toBeInTheDocument();
     });
 
-    it('applies w-max class to table when mobileMode is scroll', () => {
+    it("applies w-max class to table when mobileMode is scroll", () => {
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name' }],
-        rows: [{ name: 'alpha' }],
-        mobileMode: 'scroll'
+        columns: [{ key: "name", label: "Name" }],
+        rows: [{ name: "alpha" }],
+        mobileMode: "scroll",
       });
 
-      expect(container.querySelector('table')).toHaveClass('w-max');
-      expect(container.querySelector('table')).not.toHaveClass('min-w-full');
+      expect(container.querySelector("table")).toHaveClass("w-max");
+      expect(container.querySelector("table")).not.toHaveClass("min-w-full");
     });
 
-    it('keeps min-w-full on table when no mobileMode is provided', () => {
+    it("keeps min-w-full on table when no mobileMode is provided", () => {
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name' }],
-        rows: [{ name: 'alpha' }]
+        columns: [{ key: "name", label: "Name" }],
+        rows: [{ name: "alpha" }],
       });
 
-      expect(container.querySelector('table')).toHaveClass('min-w-full');
-      expect(container.querySelector('table')).not.toHaveClass('w-max');
+      expect(container.querySelector("table")).toHaveClass("min-w-full");
+      expect(container.querySelector("table")).not.toHaveClass("w-max");
     });
 
-    it('renders rowActions in a group element inside cards auto-layout', () => {
+    it("renders rowActions in a group element inside cards auto-layout", () => {
       const { container } = render(DataTable, {
-        columns: [{ key: 'name', label: 'Name', mobileTitle: true }],
-        rows: [{ name: 'alpha' }],
-        mobileMode: 'cards',
+        columns: [{ key: "name", label: "Name", mobileTitle: true }],
+        rows: [{ name: "alpha" }],
+        mobileMode: "cards",
         rowActions: makeRowActions(),
-        rowActionsLabel: 'Row actions'
+        rowActionsLabel: "Row actions",
       });
 
       const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
       const actionsGroup = cardsEl?.querySelector('[role="group"]');
       expect(actionsGroup).toBeInTheDocument();
-      expect(actionsGroup).toHaveAttribute('aria-label', 'Row actions');
-      expect(actionsGroup?.querySelector('button')).toHaveTextContent('Inspect alpha');
+      expect(actionsGroup).toHaveAttribute("aria-label", "Row actions");
+      expect(actionsGroup?.querySelector("button")).toHaveTextContent(
+        "Inspect alpha",
+      );
     });
   });
   ```
@@ -254,6 +274,7 @@
 ## Task 3: Implement DataTable Responsive Extension
 
 **Files:**
+
 - Modify: `frontend/src/lib/components/ui/DataTable.svelte`
 
 - [ ] **Step 1: Replace the full file with the updated implementation**
@@ -500,6 +521,7 @@
 ## Task 4: Create `SoftwareGroupList.svelte` with Desktop Layout
 
 **Files:**
+
 - Create: `frontend/src/lib/components/ui/SoftwareGroupList.svelte`
 
 This task extracts the existing desktop grid layout from `software/+page.svelte` into a standalone component. No behaviour changes — the desktop layout is an exact copy. Mobile layout is added in Task 5.
@@ -967,7 +989,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   Open `frontend/src/lib/components/ui/index.ts`. Add this line after the `DataTable` export:
 
   ```typescript
-  export { default as SoftwareGroupList } from './SoftwareGroupList.svelte';
+  export { default as SoftwareGroupList } from "./SoftwareGroupList.svelte";
   ```
 
 - [ ] **Step 3: Type-check the new file**
@@ -991,6 +1013,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 ## Task 5: Add Mobile Card Layout to `SoftwareGroupList`
 
 **Files:**
+
 - Modify: `frontend/src/lib/components/ui/SoftwareGroupList.svelte`
 
 - [ ] **Step 1: Add the mobile card layout block**
@@ -1205,6 +1228,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 ## Task 6: Wire `SoftwareGroupList` into the Software Page
 
 **Files:**
+
 - Modify: `frontend/src/routes/software/+page.svelte`
 
 - [ ] **Step 1: Add SoftwareGroupList import**
@@ -1213,49 +1237,48 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
   ```typescript
   import {
-  	ActionBadge,
-  	Callout,
-  	ContextMenuItem,
-  	ContextMenuShell,
-  	EmptyState,
-  	FormFieldRow,
-  	ModalShell,
-  	PageShell,
-  	PillBadge,
-  	SectionCard,
-  	StatusBadge,
-  	TableFooterBar,
-  	TabStrip,
-  	type TabStripItem
-  } from '$lib/components/ui';
+    ActionBadge,
+    Callout,
+    ContextMenuItem,
+    ContextMenuShell,
+    EmptyState,
+    FormFieldRow,
+    ModalShell,
+    PageShell,
+    PillBadge,
+    SectionCard,
+    StatusBadge,
+    TableFooterBar,
+    TabStrip,
+    type TabStripItem,
+  } from "$lib/components/ui";
   ```
 
   Replace with:
 
   ```typescript
   import {
-  	ActionBadge,
-  	Callout,
-  	ContextMenuItem,
-  	ContextMenuShell,
-  	EmptyState,
-  	FormFieldRow,
-  	ModalShell,
-  	PageShell,
-  	PillBadge,
-  	SectionCard,
-  	SoftwareGroupList,
-  	StatusBadge,
-  	TableFooterBar,
-  	TabStrip,
-  	type TabStripItem
-  } from '$lib/components/ui';
+    ActionBadge,
+    Callout,
+    ContextMenuItem,
+    ContextMenuShell,
+    EmptyState,
+    FormFieldRow,
+    ModalShell,
+    PageShell,
+    PillBadge,
+    SectionCard,
+    SoftwareGroupList,
+    StatusBadge,
+    TableFooterBar,
+    TabStrip,
+    type TabStripItem,
+  } from "$lib/components/ui";
   ```
 
 - [ ] **Step 2: Remove helper functions that moved into SoftwareGroupList**
 
   In `frontend/src/routes/software/+page.svelte`, delete the following function definitions from the `<script>` block (they are now inside `SoftwareGroupList.svelte`):
-
   - `detailHosts` (currently at line ~383)
   - `updateableHostCount` (currently at line ~387)
   - `hasAnyUpdateableHosts` (currently at line ~395)
@@ -1277,7 +1300,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
   Keep `toggleGroupCollapsed` and `toggleGroupOverflow` as they are called from onToggleGroup/onToggleOverflow callbacks.
 
-  Actually — keep `toggleGroupCollapsed` and `toggleGroupOverflow` in the page. They mutate `collapsedGroupIds` and `expandedOverflowGroupIds` which are declared in the page. Only the *read* helpers (`groupIsOpen`, `visibleHosts`, etc.) move to the component.
+  Actually — keep `toggleGroupCollapsed` and `toggleGroupOverflow` in the page. They mutate `collapsedGroupIds` and `expandedOverflowGroupIds` which are declared in the page. Only the _read_ helpers (`groupIsOpen`, `visibleHosts`, etc.) move to the component.
 
   Functions to delete from the page (read-only helpers that moved into the component):
   - `detailHosts`
@@ -1384,6 +1407,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 ## Task 7: Add Mobile Snapshot Tests
 
 **Files:**
+
 - Modify: `frontend/tests/e2e/software-area.spec.ts`
 
 - [ ] **Step 1: Add mobile viewport snapshots to the existing spec**
@@ -1392,26 +1416,58 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
   ```typescript
   const SNAPSHOTS = [
-    { name: 'software-list-dark', route: '/software?tab=all', theme: 'dark' as const },
-    { name: 'software-list-light', route: '/software?tab=all', theme: 'light' as const },
-    { name: 'software-ignores-dark', route: '/software?tab=ignores', theme: 'dark' as const },
-    { name: 'software-ignores-light', route: '/software?tab=ignores', theme: 'light' as const },
-    { name: 'software-detail-dark', route: '/software/test-item-id', theme: 'dark' as const },
-    { name: 'software-detail-light', route: '/software/test-item-id', theme: 'light' as const }
+    {
+      name: "software-list-dark",
+      route: "/software?tab=all",
+      theme: "dark" as const,
+    },
+    {
+      name: "software-list-light",
+      route: "/software?tab=all",
+      theme: "light" as const,
+    },
+    {
+      name: "software-ignores-dark",
+      route: "/software?tab=ignores",
+      theme: "dark" as const,
+    },
+    {
+      name: "software-ignores-light",
+      route: "/software?tab=ignores",
+      theme: "light" as const,
+    },
+    {
+      name: "software-detail-dark",
+      route: "/software/test-item-id",
+      theme: "dark" as const,
+    },
+    {
+      name: "software-detail-light",
+      route: "/software/test-item-id",
+      theme: "light" as const,
+    },
   ];
 
   const MOBILE_SNAPSHOTS = [
-    { name: 'software-list-mobile-dark', route: '/software?tab=all', theme: 'dark' as const },
-    { name: 'software-list-mobile-light', route: '/software?tab=all', theme: 'light' as const }
+    {
+      name: "software-list-mobile-dark",
+      route: "/software?tab=all",
+      theme: "dark" as const,
+    },
+    {
+      name: "software-list-mobile-light",
+      route: "/software?tab=all",
+      theme: "light" as const,
+    },
   ];
   ```
 
   Keep the existing `SNAPSHOTS` constant unchanged. Add `MOBILE_SNAPSHOTS` as a separate constant. Then add a second describe block after the existing one to consume it with a project guard:
 
   ```typescript
-  test.describe('software area mobile snapshots', () => {
+  test.describe("software area mobile snapshots", () => {
     test.beforeEach(({}, testInfo) => {
-      if (!testInfo.project.name.includes('mobile')) test.skip();
+      if (!testInfo.project.name.includes("mobile")) test.skip();
     });
 
     for (const snap of MOBILE_SNAPSHOTS) {
@@ -1419,15 +1475,17 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
         await mockAuthApi(page);
         await setTheme(page, snap.theme);
         await page.goto(snap.route);
-        await page.waitForSelector('[data-ui="page-shell"]', { timeout: 10000 });
+        await page.waitForSelector('[data-ui="page-shell"]', {
+          timeout: 10000,
+        });
         await expect(page).toHaveScreenshot(`${snap.name}.png`, {
           threshold: 0.02,
           mask: [
             page.locator('[aria-busy="true"]'),
-            page.locator('td.font-mono'),
+            page.locator("td.font-mono"),
             page.locator('[data-ui="toast"]'),
-            page.locator('time')
-          ]
+            page.locator("time"),
+          ],
         });
       });
     }
@@ -1441,13 +1499,17 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   Add this test after the existing `describe('software area snapshots', ...)` block:
 
   ```typescript
-  test.describe('software area mobile layout', () => {
-    test('mobile: software group list renders card layout at 393px', async ({ page }) => {
+  test.describe("software area mobile layout", () => {
+    test("mobile: software group list renders card layout at 393px", async ({
+      page,
+    }) => {
       await mockAuthApi(page);
-      await setTheme(page, 'light');
+      await setTheme(page, "light");
       await page.setViewportSize({ width: 393, height: 852 });
-      await page.goto('/software?tab=all');
-      await page.waitForSelector('[data-ui="software-group-list-mobile"]', { timeout: 10000 });
+      await page.goto("/software?tab=all");
+      await page.waitForSelector('[data-ui="software-group-list-mobile"]', {
+        timeout: 10000,
+      });
 
       const mobileList = page.locator('[data-ui="software-group-list-mobile"]');
       await expect(mobileList).toBeVisible();
@@ -1460,14 +1522,18 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
       const firstCard = mobileList.locator('[role="listitem"]').first();
       await expect(firstCard).toBeVisible();
       // Software name link is in the card
-      await expect(firstCard.getByRole('link', { name: 'Firefox' })).toBeVisible();
+      await expect(
+        firstCard.getByRole("link", { name: "Firefox" }),
+      ).toBeVisible();
     });
 
-    test('mobile: software group list desktop layout is hidden at 393px', async ({ page }) => {
+    test("mobile: software group list desktop layout is hidden at 393px", async ({
+      page,
+    }) => {
       await mockAuthApi(page);
-      await setTheme(page, 'light');
+      await setTheme(page, "light");
       await page.setViewportSize({ width: 393, height: 852 });
-      await page.goto('/software?tab=all');
+      await page.goto("/software?tab=all");
       await page.waitForSelector('[data-ui="page-shell"]', { timeout: 10000 });
 
       // Desktop list uses max-sm:hidden — hidden at 393px
@@ -1475,12 +1541,16 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
       await expect(desktopList).toBeHidden();
     });
 
-    test('desktop: software group list desktop layout is visible at 1280px', async ({ page }) => {
+    test("desktop: software group list desktop layout is visible at 1280px", async ({
+      page,
+    }) => {
       await mockAuthApi(page);
-      await setTheme(page, 'light');
+      await setTheme(page, "light");
       // Default viewport is desktop width; ensure mobile list is hidden
-      await page.goto('/software?tab=all');
-      await page.waitForSelector('[data-ui="software-group-list"]', { timeout: 10000 });
+      await page.goto("/software?tab=all");
+      await page.waitForSelector('[data-ui="software-group-list"]', {
+        timeout: 10000,
+      });
 
       const desktopList = page.locator('[data-ui="software-group-list"]');
       await expect(desktopList).toBeVisible();
@@ -1512,6 +1582,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 ## Task 8: Update Layout Docs
 
 **Files:**
+
 - Modify: `docs/development/ui/layout.md`
 
 - [ ] **Step 1: Update the responsive layout status**
@@ -1611,20 +1682,20 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
 **Spec coverage:**
 
-| Spec requirement | Task |
-| --- | --- |
-| `chromium-mobile` + `chromium-mobile-dark` projects at 393×852 DPR=1 | Task 1 |
-| `DataTableColumn.mobileHide`, `mobileTitle` | Tasks 2–3 |
-| `DataTable` `mobileMode='scroll'` with `w-max` | Tasks 2–3 |
-| `DataTable` `mobileMode='cards'` dual-DOM rendering | Tasks 2–3 |
-| `DataTable` `mobileRow` custom card snippet | Tasks 2–3 |
-| Dev-mode fallback warning | Tasks 2–3 |
-| `<dl>/<dt>/<dd>` card anatomy with `role="list"` | Tasks 2–3 |
-| `SoftwareGroupList` extracted from software page | Tasks 4–6 |
-| `SoftwareGroupList` mobile card layout | Task 5 |
-| Software page wired to `SoftwareGroupList` | Task 6 |
-| Mobile snapshot tests | Tasks 7, 9 |
-| `layout.md` status updated | Task 8 |
+| Spec requirement                                                     | Task       |
+| -------------------------------------------------------------------- | ---------- |
+| `chromium-mobile` + `chromium-mobile-dark` projects at 393×852 DPR=1 | Task 1     |
+| `DataTableColumn.mobileHide`, `mobileTitle`                          | Tasks 2–3  |
+| `DataTable` `mobileMode='scroll'` with `w-max`                       | Tasks 2–3  |
+| `DataTable` `mobileMode='cards'` dual-DOM rendering                  | Tasks 2–3  |
+| `DataTable` `mobileRow` custom card snippet                          | Tasks 2–3  |
+| Dev-mode fallback warning                                            | Tasks 2–3  |
+| `<dl>/<dt>/<dd>` card anatomy with `role="list"`                     | Tasks 2–3  |
+| `SoftwareGroupList` extracted from software page                     | Tasks 4–6  |
+| `SoftwareGroupList` mobile card layout                               | Task 5     |
+| Software page wired to `SoftwareGroupList`                           | Task 6     |
+| Mobile snapshot tests                                                | Tasks 7, 9 |
+| `layout.md` status updated                                           | Task 8     |
 
 **No placeholders:** All steps contain actual code. No TBDs.
 

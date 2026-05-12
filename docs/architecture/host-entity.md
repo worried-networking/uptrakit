@@ -109,15 +109,15 @@ Key types (defined in `crates/shared/wire/src/envelope.rs`, re-exported via `cra
 
 The controller enforces several connection-level limits on the WebSocket endpoint (`/api/v1/ws/service`):
 
-| Limit | Value | Purpose |
-| --- | --- | --- |
-| Max incoming message size | 1 MB | Prevents memory exhaustion from oversized messages |
-| Anonymous connection timeout | 30 seconds | Closes unauthenticated connections that don't enroll in time |
-| Approval polling interval | 5 seconds | Rate-limits DB polling for approval status (decoupled from client-controlled pings) |
-| Update output cap | 1 MB | Caps accumulated `UpdateOutput` per update record to prevent unbounded DB growth |
-| Enrollment TCP connect timeout | 30 seconds | Prevents blocking on unreachable controllers during enrollment |
-| Enrollment response timeout | 60 seconds | Prevents blocking on unresponsive controllers during Enroll/RequestCertificate exchanges |
-| Enrollment approval timeout | 30 minutes | Prevents indefinite blocking while waiting for human approval |
+| Limit                          | Value      | Purpose                                                                                  |
+| ------------------------------ | ---------- | ---------------------------------------------------------------------------------------- |
+| Max incoming message size      | 1 MB       | Prevents memory exhaustion from oversized messages                                       |
+| Anonymous connection timeout   | 30 seconds | Closes unauthenticated connections that don't enroll in time                             |
+| Approval polling interval      | 5 seconds  | Rate-limits DB polling for approval status (decoupled from client-controlled pings)      |
+| Update output cap              | 1 MB       | Caps accumulated `UpdateOutput` per update record to prevent unbounded DB growth         |
+| Enrollment TCP connect timeout | 30 seconds | Prevents blocking on unreachable controllers during enrollment                           |
+| Enrollment response timeout    | 60 seconds | Prevents blocking on unresponsive controllers during Enroll/RequestCertificate exchanges |
+| Enrollment approval timeout    | 30 minutes | Prevents indefinite blocking while waiting for human approval                            |
 
 These limits are defined as constants in `service_ws/connection.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`),
 `service_ws/handler/mod.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `enrollment/src/ws.rs`
@@ -254,12 +254,12 @@ See [unified software tracking](unified-software-tracking.md) for the full data 
 
 ## REST API
 
-| Method | Path | Permission | Action |
-| :----- | :--------------------- | :----------- | :-------------------------------------------- |
-| GET | `/api/v1/hosts` | ViewHosts | List non-deactivated hosts with linked agents |
-| GET | `/api/v1/hosts/{id}` | ViewHosts | Get single host with linked agents |
-| PUT | `/api/v1/hosts/{id}` | ManageHosts | Update friendly_name |
-| DELETE | `/api/v1/hosts/{id}` | ManageHosts | Soft-delete (set deactivated_at) |
-| PUT | `/api/v1/hosts/{id}/tags` | ManageHosts | Set (replace-all) tags on a host |
+| Method | Path                      | Permission  | Action                                        |
+| :----- | :------------------------ | :---------- | :-------------------------------------------- |
+| GET    | `/api/v1/hosts`           | ViewHosts   | List non-deactivated hosts with linked agents |
+| GET    | `/api/v1/hosts/{id}`      | ViewHosts   | Get single host with linked agents            |
+| PUT    | `/api/v1/hosts/{id}`      | ManageHosts | Update friendly_name                          |
+| DELETE | `/api/v1/hosts/{id}`      | ManageHosts | Soft-delete (set deactivated_at)              |
+| PUT    | `/api/v1/hosts/{id}/tags` | ManageHosts | Set (replace-all) tags on a host              |
 
 See also [host tags API](../api/host-tags.md) for tag management endpoints.

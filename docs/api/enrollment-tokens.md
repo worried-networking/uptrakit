@@ -8,11 +8,11 @@ All endpoints require the `ManageEnrollmentTokens` permission.
 
 ## Overview
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/api/v1/enrollment-tokens` | POST | Create a new enrollment token |
-| `/api/v1/enrollment-tokens` | GET | List enrollment tokens (paginated) |
-| `/api/v1/enrollment-tokens/{id}` | GET | Get a single enrollment token |
+| Endpoint                         | Method | Description                              |
+| -------------------------------- | ------ | ---------------------------------------- |
+| `/api/v1/enrollment-tokens`      | POST   | Create a new enrollment token            |
+| `/api/v1/enrollment-tokens`      | GET    | List enrollment tokens (paginated)       |
+| `/api/v1/enrollment-tokens/{id}` | GET    | Get a single enrollment token            |
 | `/api/v1/enrollment-tokens/{id}` | DELETE | Revoke an enrollment token (soft-delete) |
 
 ## `POST /api/v1/enrollment-tokens`
@@ -31,12 +31,12 @@ once; it cannot be retrieved later.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes | Human-readable label for the token |
-| `allowed_capabilities` | string[] | No | Restrict to services with at least one overlapping capability. Omit or `null` for a wildcard token that matches any service. |
-| `max_uses` | u32 | No | Maximum number of enrollments. Omit or `null` for unlimited. |
-| `expires_in_seconds` | u64 | No | Token TTL in seconds from creation. Omit or `null` for no expiration. |
+| Field                  | Type     | Required | Description                                                                                                                  |
+| ---------------------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `name`                 | string   | Yes      | Human-readable label for the token                                                                                           |
+| `allowed_capabilities` | string[] | No       | Restrict to services with at least one overlapping capability. Omit or `null` for a wildcard token that matches any service. |
+| `max_uses`             | u32      | No       | Maximum number of enrollments. Omit or `null` for unlimited.                                                                 |
+| `expires_in_seconds`   | u64      | No       | Token TTL in seconds from creation. Omit or `null` for no expiration.                                                        |
 
 **Response** (`201`): `EnrollmentTokenCreatedResponse`
 
@@ -138,44 +138,44 @@ and requires manual approval.
 
 Tokens can restrict which service types they approve by listing allowed capabilities:
 
-| Token `allowed_capabilities` | Service capabilities | Result |
-| --- | --- | --- |
-| `null` (wildcard) | any | Match |
-| `["software_discovery"]` | `["software_discovery", "update_hooks"]` | Match (intersection: `software_discovery`) |
-| `["update_tracking"]` | `["software_discovery"]` | No match (empty intersection) |
-| `["software_discovery", "update_tracking"]` | `["update_tracking"]` | Match (intersection: `update_tracking`) |
+| Token `allowed_capabilities`                | Service capabilities                     | Result                                     |
+| ------------------------------------------- | ---------------------------------------- | ------------------------------------------ |
+| `null` (wildcard)                           | any                                      | Match                                      |
+| `["software_discovery"]`                    | `["software_discovery", "update_hooks"]` | Match (intersection: `software_discovery`) |
+| `["update_tracking"]`                       | `["software_discovery"]`                 | No match (empty intersection)              |
+| `["software_discovery", "update_tracking"]` | `["update_tracking"]`                    | Match (intersection: `update_tracking`)    |
 
 ## Token Lifecycle States
 
-| State | Condition | Can enroll? |
-| --- | --- | --- |
-| Active | Not revoked, not expired, uses remaining | Yes |
-| Revoked | `revoked_at` is set | No |
-| Expired | `expires_at` is in the past | No |
-| Exhausted | `current_uses >= max_uses` | No |
+| State     | Condition                                | Can enroll? |
+| --------- | ---------------------------------------- | ----------- |
+| Active    | Not revoked, not expired, uses remaining | Yes         |
+| Revoked   | `revoked_at` is set                      | No          |
+| Expired   | `expires_at` is in the past              | No          |
+| Exhausted | `current_uses >= max_uses`               | No          |
 
 ## Response Types
 
 Types are defined in `crates/shared/web-api-types/src/enrollment_tokens.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `CreateEnrollmentTokenRequest` | `name`, `allowed_capabilities?`, `max_uses?`, `expires_in_seconds?` |
+| Type                             | Fields                                                                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CreateEnrollmentTokenRequest`   | `name`, `allowed_capabilities?`, `max_uses?`, `expires_in_seconds?`                                                                        |
 | `EnrollmentTokenCreatedResponse` | `id`, `token` (SecretString), `name`, `allowed_capabilities`, `max_uses`, `current_uses`, `expires_at`, `created_at`, `created_by_user_id` |
-| `EnrollmentTokenResponse` | `id`, `name`, `allowed_capabilities`, `max_uses`, `current_uses`, `expires_at`, `created_at`, `revoked_at`, `created_by_user_id` |
-| `EnrollmentTokensSummary` | `active_count` |
-| `ListEnrollmentTokensQuery` | `page?`, `per_page?` |
+| `EnrollmentTokenResponse`        | `id`, `name`, `allowed_capabilities`, `max_uses`, `current_uses`, `expires_at`, `created_at`, `revoked_at`, `created_by_user_id`           |
+| `EnrollmentTokensSummary`        | `active_count`                                                                                                                             |
+| `ListEnrollmentTokensQuery`      | `page?`, `per_page?`                                                                                                                       |
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/db/src/entity/enrollment_token.rs` | SeaORM entity |
-| `crates/shared/db/src/migration/m20260227_000001_enrollment_tokens.rs` | Database migration |
-| `crates/shared/web-api-types/src/enrollment_tokens.rs` | Request/response types |
-| `crates/ui/web-api/src/routes/enrollment_tokens.rs` | Route handlers |
-| `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs` | Database queries |
-| `crates/shared/openapi-client/src/enrollment_tokens.rs` | Typed client methods |
+| File                                                                   | Purpose                |
+| ---------------------------------------------------------------------- | ---------------------- |
+| `crates/shared/db/src/entity/enrollment_token.rs`                      | SeaORM entity          |
+| `crates/shared/db/src/migration/m20260227_000001_enrollment_tokens.rs` | Database migration     |
+| `crates/shared/web-api-types/src/enrollment_tokens.rs`                 | Request/response types |
+| `crates/ui/web-api/src/routes/enrollment_tokens.rs`                    | Route handlers         |
+| `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs`           | Database queries       |
+| `crates/shared/openapi-client/src/enrollment_tokens.rs`                | Typed client methods   |
 
 ## Related Documentation
 

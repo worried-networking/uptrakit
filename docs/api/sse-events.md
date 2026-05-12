@@ -1,70 +1,7 @@
 # SSE Events API Reference
 
-This document covers the two Server-Sent Events (SSE) endpoints for real-time event streaming.
+This document covers the Server-Sent Events (SSE) endpoint for real-time event streaming.
 For update output streaming and batch progress streaming, see [HTTP Web API](http-web-api.md).
-
-## Device Auth SSE
-
-Real-time stream for device authorization flow status. The CLI connects to this endpoint
-after initiating a device flow to receive the API token as soon as the user approves
-the request in the browser.
-
-### Endpoint
-
-```text
-GET /api/v1/auth/device/stream?device_code=<raw_code>
-```
-
-### Authentication
-
-None. This is a public endpoint.
-
-### Query Parameters
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `device_code` | string | Yes | The `device_code` returned by `POST /api/v1/auth/device` |
-
-### Keep-Alive
-
-A `: keep-alive` comment is sent every 15 seconds to prevent proxies from closing
-idle connections.
-
-### Events
-
-**`authorized`** -- the device code was approved. The stream closes after this event.
-
-```text
-event: authorized
-data: {"token":"...","token_name":"..."}
-```
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `token` | string | The API token |
-| `token_name` | string | The token name |
-
-**`expired`** -- the device flow expired (10-minute TTL reached). The stream closes
-after this event.
-
-```text
-event: expired
-data: {"message":"..."}
-```
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `message` | string | Human-readable expiration message |
-
-### Timeout
-
-The stream has a 600-second timeout, matching the device flow TTL.
-
-### Error Responses
-
-| Status | Condition |
-| --- | --- |
-| 404 | `device_code` not found or already consumed |
 
 ## Admin Events SSE
 
@@ -92,24 +29,24 @@ idle connections.
 All events use the SSE `event:` field to identify the event type and the `data:` field
 to carry a JSON payload.
 
-| Event Type | Data Fields | Description |
-| --- | --- | --- |
-| `host_updated` | `{"id":"<uuid>"}` | Host metadata updated |
-| `host_created` | `{"id":"<uuid>"}` | New host created |
-| `host_deleted` | `{"id":"<uuid>"}` | Host deactivated |
-| `service_status_changed` | `{"id":"<uuid>","status":"<string>"}` | Service approved/rejected/deactivated |
-| `software_item_updated` | `{"id":"<uuid>"}` | Software item updated |
-| `software_item_created` | `{"id":"<uuid>"}` | New software item created |
-| `version_check_completed` | `{"host_id":"<uuid>","software_item_id":"<uuid>"}` | Version check done |
-| `update_triggered` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>"}` | Update dispatched to agent (status `Pending`/`Queued`) |
-| `update_started` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","interactive":<bool>}` | Update execution started by agent |
-| `update_completed` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","status":"<string>"}` | Update done |
-| `discovery_completed` | `{"host_id":"<uuid>"}` | Autodiscovery done for host |
-| `host_software_changed` | `{"host_id":"<uuid>"}` | Host software items updated |
-| `batch_update_completed` | `{"host_id":"<uuid>"}` | Batch update done |
-| `system_service_status_changed` | `{"id":"<uuid>","status":"<string>"}` | System service status changed |
-| `scheduler_task_completed` | `{"task_id":"<uuid>"}` | Scheduled task done |
-| `stdin_attention` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","hint":"<string or null>"}` | Interactive update waiting for stdin input |
+| Event Type                      | Data Fields                                                                                               | Description                                            |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `host_updated`                  | `{"id":"<uuid>"}`                                                                                         | Host metadata updated                                  |
+| `host_created`                  | `{"id":"<uuid>"}`                                                                                         | New host created                                       |
+| `host_deleted`                  | `{"id":"<uuid>"}`                                                                                         | Host deactivated                                       |
+| `service_status_changed`        | `{"id":"<uuid>","status":"<string>"}`                                                                     | Service approved/rejected/deactivated                  |
+| `software_item_updated`         | `{"id":"<uuid>"}`                                                                                         | Software item updated                                  |
+| `software_item_created`         | `{"id":"<uuid>"}`                                                                                         | New software item created                              |
+| `version_check_completed`       | `{"host_id":"<uuid>","software_item_id":"<uuid>"}`                                                        | Version check done                                     |
+| `update_triggered`              | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>"}`                           | Update dispatched to agent (status `Pending`/`Queued`) |
+| `update_started`                | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","interactive":<bool>}`      | Update execution started by agent                      |
+| `update_completed`              | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","status":"<string>"}`       | Update done                                            |
+| `discovery_completed`           | `{"host_id":"<uuid>"}`                                                                                    | Autodiscovery done for host                            |
+| `host_software_changed`         | `{"host_id":"<uuid>"}`                                                                                    | Host software items updated                            |
+| `batch_update_completed`        | `{"host_id":"<uuid>"}`                                                                                    | Batch update done                                      |
+| `system_service_status_changed` | `{"id":"<uuid>","status":"<string>"}`                                                                     | System service status changed                          |
+| `scheduler_task_completed`      | `{"task_id":"<uuid>"}`                                                                                    | Scheduled task done                                    |
+| `stdin_attention`               | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","hint":"<string or null>"}` | Interactive update waiting for stdin input             |
 
 ## Event Format Example
 

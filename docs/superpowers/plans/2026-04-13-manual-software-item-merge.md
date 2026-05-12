@@ -193,7 +193,9 @@ export function getSoftwareItems(
   return request(`/software-items${qs ? `?${qs}` : ""}`);
 }
 
-export function previewSoftwareItemMerge(req: MergeSoftwareItemsPreviewRequest): Promise<MergeSoftwareItemsPreviewResponse> {
+export function previewSoftwareItemMerge(
+  req: MergeSoftwareItemsPreviewRequest,
+): Promise<MergeSoftwareItemsPreviewResponse> {
   return request("/software-items/merge/preview", {
     method: "POST",
     body: JSON.stringify(req),
@@ -668,7 +670,11 @@ git commit -m "feat: add software merge wizard"
 
 ```ts
 it("keeps a multi-item initial selection and lets the user choose a different survivor", async () => {
-  const items = [candidate("apt-node"), candidate("docker-node"), candidate("npm-node")];
+  const items = [
+    candidate("apt-node"),
+    candidate("docker-node"),
+    candidate("npm-node"),
+  ];
   render(SoftwareMergeWizard, {
     props: {
       initialCandidates: items,

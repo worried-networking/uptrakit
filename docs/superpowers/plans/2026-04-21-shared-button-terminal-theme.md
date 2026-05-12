@@ -26,43 +26,43 @@ virtual-module CSS cascade (sub-spec #1).
 
 ### New files (PR1)
 
-| Path | Responsibility |
-| --- | --- |
-| `frontend/src/lib/components/Button.svelte` | Prop-driven button primitive; dual render branches (`<button>` / `<a>`). |
-| `frontend/src/lib/components/Button.test.ts` | Variant × size matrix, TS type gates, loading/disabled gating. |
-| `frontend/src/lib/components/UpdateAllButton.svelte` | Row-level "update all" badge primitive; idle vs dim states. |
-| `frontend/src/lib/components/UpdateAllButton.test.ts` | State branches, count suffix, dim-click gating. |
-| `frontend/src/theme/terminal-palette.ts` | Exports `TERMINAL_THEME: ITheme` bound to `tokens.ts` dark values + local ANSI hex. |
-| `frontend/src/theme/terminal-palette.test.ts` | Per-slot parent-spec §6 binding checks + full inline snapshot. |
+| Path                                                  | Responsibility                                                                      |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `frontend/src/lib/components/Button.svelte`           | Prop-driven button primitive; dual render branches (`<button>` / `<a>`).            |
+| `frontend/src/lib/components/Button.test.ts`          | Variant × size matrix, TS type gates, loading/disabled gating.                      |
+| `frontend/src/lib/components/UpdateAllButton.svelte`  | Row-level "update all" badge primitive; idle vs dim states.                         |
+| `frontend/src/lib/components/UpdateAllButton.test.ts` | State branches, count suffix, dim-click gating.                                     |
+| `frontend/src/theme/terminal-palette.ts`              | Exports `TERMINAL_THEME: ITheme` bound to `tokens.ts` dark values + local ANSI hex. |
+| `frontend/src/theme/terminal-palette.test.ts`         | Per-slot parent-spec §6 binding checks + full inline snapshot.                      |
 
 ### Modified files (PR1)
 
-| Path | Change |
-| --- | --- |
-| `frontend/src/theme/tokens.ts` | Add `--color-error-bg-hover`, `--color-error-border-hover`; extend `TokenName`. |
-| `frontend/src/theme/tokens.test.ts` | Extend `EXPECTED` table; preserve all existing tests. |
-| `frontend/src/lib/theme/design-token-values.test.ts` | Extend `SPEC` table; regenerate both inline CSS snapshots. |
-| `frontend/vite-plugins/theme-tokens.test.ts` | Regenerate the spec-pinned golden CSS block. |
+| Path                                                 | Change                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `frontend/src/theme/tokens.ts`                       | Add `--color-error-bg-hover`, `--color-error-border-hover`; extend `TokenName`. |
+| `frontend/src/theme/tokens.test.ts`                  | Extend `EXPECTED` table; preserve all existing tests.                           |
+| `frontend/src/lib/theme/design-token-values.test.ts` | Extend `SPEC` table; regenerate both inline CSS snapshots.                      |
+| `frontend/vite-plugins/theme-tokens.test.ts`         | Regenerate the spec-pinned golden CSS block.                                    |
 
 ### New files (PR2)
 
-| Path | Responsibility |
-| --- | --- |
+| Path                                                  | Responsibility                                                       |
+| ----------------------------------------------------- | -------------------------------------------------------------------- |
 | `frontend/src/routes/dev/button-preview/+page.svelte` | Dev-only gallery rendering every variant × size × state permutation. |
-| `frontend/tests/e2e/button-primitive.spec.ts` | Playwright snapshots of `/dev/button-preview` in dark + light. |
+| `frontend/tests/e2e/button-primitive.spec.ts`         | Playwright snapshots of `/dev/button-preview` in dark + light.       |
 
 ### Modified files (PR2)
 
-| Path | Change |
-| --- | --- |
-| `frontend/src/lib/components/TerminalOutput.svelte` | Delete inline `TERMINAL_THEME` literal; import from `../../theme/terminal-palette`. |
-| `frontend/src/lib/components/TerminalOutput.test.ts` | Add one `it` asserting reference identity (`===`) against the imported constant. |
-| `frontend/src/routes/profile/+page.svelte` | "Create" modal button → `<Button variant="primary" loading={creating}>`. |
-| `frontend/src/lib/components/ConfirmDialog.svelte` | Cancel button → `<Button variant="ghost">`. |
-| `frontend/src/routes/register/+page.svelte` | "Login" footer link → `<Button variant="ghost" href="/login">`. |
-| `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` | First "Revoke" action → `<Button variant="danger" size="sm" leadingIcon={…}>`. |
-| `frontend/src/routes/software/+page.svelte` | Header "Update all" → `<UpdateAllButton state={…} count={…} onclick={…} />`. |
-| `frontend/tests/e2e/ui-parity.test.ts-snapshots/` + `ui-parity-responsive.test.ts-snapshots/` | Re-baseline the five canary scenes (macOS + Chromium only). |
+| Path                                                                                          | Change                                                                              |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `frontend/src/lib/components/TerminalOutput.svelte`                                           | Delete inline `TERMINAL_THEME` literal; import from `../../theme/terminal-palette`. |
+| `frontend/src/lib/components/TerminalOutput.test.ts`                                          | Add one `it` asserting reference identity (`===`) against the imported constant.    |
+| `frontend/src/routes/profile/+page.svelte`                                                    | "Create" modal button → `<Button variant="primary" loading={creating}>`.            |
+| `frontend/src/lib/components/ConfirmDialog.svelte`                                            | Cancel button → `<Button variant="ghost">`.                                         |
+| `frontend/src/routes/register/+page.svelte`                                                   | "Login" footer link → `<Button variant="ghost" href="/login">`.                     |
+| `frontend/src/routes/settings/EnrollmentTokenSettings.svelte`                                 | First "Revoke" action → `<Button variant="danger" size="sm" leadingIcon={…}>`.      |
+| `frontend/src/routes/software/+page.svelte`                                                   | Header "Update all" → `<UpdateAllButton state={…} count={…} onclick={…} />`.        |
+| `frontend/tests/e2e/ui-parity.test.ts-snapshots/` + `ui-parity-responsive.test.ts-snapshots/` | Re-baseline the five canary scenes (macOS + Chromium only).                         |
 
 ---
 
@@ -100,34 +100,34 @@ Edit `frontend/src/theme/tokens.ts`:
 
 ```ts
 export type TokenName =
-  | '--bg-base'
-  | '--bg-surface'
-  | '--bg-raised'
-  | '--border-subtle'
-  | '--border-default'
-  | '--text-muted'
-  | '--text-secondary'
-  | '--text-primary'
-  | '--text-inverted'
-  | '--accent'
-  | '--accent-rgb'
-  | '--accent-bright'
-  | '--accent-dark'
-  | '--accent-deep'
-  | '--color-success'
-  | '--color-success-bg'
-  | '--color-success-border'
-  | '--color-warning'
-  | '--color-warning-bg'
-  | '--color-warning-border'
-  | '--color-error'
-  | '--color-error-bg'
-  | '--color-error-border'
-  | '--color-error-bg-hover'
-  | '--color-error-border-hover'
-  | '--color-info'
-  | '--color-info-bg'
-  | '--color-info-border';
+  | "--bg-base"
+  | "--bg-surface"
+  | "--bg-raised"
+  | "--border-subtle"
+  | "--border-default"
+  | "--text-muted"
+  | "--text-secondary"
+  | "--text-primary"
+  | "--text-inverted"
+  | "--accent"
+  | "--accent-rgb"
+  | "--accent-bright"
+  | "--accent-dark"
+  | "--accent-deep"
+  | "--color-success"
+  | "--color-success-bg"
+  | "--color-success-border"
+  | "--color-warning"
+  | "--color-warning-bg"
+  | "--color-warning-border"
+  | "--color-error"
+  | "--color-error-bg"
+  | "--color-error-border"
+  | "--color-error-bg-hover"
+  | "--color-error-border-hover"
+  | "--color-info"
+  | "--color-info-bg"
+  | "--color-info-border";
 ```
 
 Inside the `tokens` record literal, immediately after the existing `'--color-error-border'` entry (current line 84-87), insert:
@@ -435,171 +435,201 @@ git commit -m "feat(ui): add Button primitive component (sub-spec #2 PR1)"
 Write `frontend/src/lib/components/Button.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
-import { createRawSnippet } from 'svelte';
-import Button from './Button.svelte';
-import type { ButtonProps } from './Button.svelte';
+import { describe, expect, it, vi } from "vitest";
+import { render, fireEvent } from "@testing-library/svelte";
+import { createRawSnippet } from "svelte";
+import Button from "./Button.svelte";
+import type { ButtonProps } from "./Button.svelte";
 
 function textSnippet(value: string) {
   return createRawSnippet(() => ({
-    render: () => `<span>${value}</span>`
+    render: () => `<span>${value}</span>`,
   }));
 }
 
 function mdButton(extra: Partial<ButtonProps> = {}) {
   return {
-    variant: 'primary' as const,
-    children: textSnippet('Go'),
-    ...extra
+    variant: "primary" as const,
+    children: textSnippet("Go"),
+    ...extra,
   };
 }
 
-describe('Button primitive', () => {
+describe("Button primitive", () => {
   it('renders a <button type="button"> by default when href is omitted', () => {
     const { container } = render(Button, mdButton());
-    const btn = container.querySelector('button');
+    const btn = container.querySelector("button");
     expect(btn).not.toBeNull();
-    expect(btn?.getAttribute('type')).toBe('button');
+    expect(btn?.getAttribute("type")).toBe("button");
   });
 
   it('honours explicit type="submit" on the button branch', () => {
-    const { container } = render(Button, mdButton({ type: 'submit' }));
-    expect(container.querySelector('button')?.getAttribute('type')).toBe('submit');
+    const { container } = render(Button, mdButton({ type: "submit" }));
+    expect(container.querySelector("button")?.getAttribute("type")).toBe(
+      "submit",
+    );
   });
 
   it('renders an <a role="button"> when href is set', () => {
-    const { container } = render(Button, mdButton({ href: '/login', variant: 'ghost' }));
-    const link = container.querySelector('a');
+    const { container } = render(
+      Button,
+      mdButton({ href: "/login", variant: "ghost" }),
+    );
+    const link = container.querySelector("a");
     expect(link).not.toBeNull();
-    expect(link?.getAttribute('href')).toBe('/login');
-    expect(link?.getAttribute('role')).toBe('button');
+    expect(link?.getAttribute("href")).toBe("/login");
+    expect(link?.getAttribute("role")).toBe("button");
   });
 
-  it('applies md size classes by default', () => {
+  it("applies md size classes by default", () => {
     const { container } = render(Button, mdButton());
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('h-[23px]');
-    expect(cls).toContain('px-3');
-    expect(cls).toContain('text-[9px]');
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("h-[23px]");
+    expect(cls).toContain("px-3");
+    expect(cls).toContain("text-[9px]");
   });
 
   it('applies sm size classes when size="sm"', () => {
-    const { container } = render(Button, mdButton({ size: 'sm' }));
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('h-[19px]');
-    expect(cls).toContain('px-2');
-    expect(cls).toContain('text-[8.5px]');
+    const { container } = render(Button, mdButton({ size: "sm" }));
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("h-[19px]");
+    expect(cls).toContain("px-2");
+    expect(cls).toContain("text-[8.5px]");
   });
 
-  it('primary variant uses accent-gradient background classes', () => {
-    const { container } = render(Button, mdButton({ variant: 'primary' }));
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-    expect(cls).toContain('text-[var(--text-inverted)]');
+  it("primary variant uses accent-gradient background classes", () => {
+    const { container } = render(Button, mdButton({ variant: "primary" }));
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
+    expect(cls).toContain("text-[var(--text-inverted)]");
   });
 
-  it('ghost variant uses transparent bg + border-default', () => {
-    const { container } = render(Button, mdButton({ variant: 'ghost' }));
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('bg-transparent');
-    expect(cls).toContain('border-[var(--border-default)]');
-    expect(cls).toContain('text-[var(--text-primary)]');
+  it("ghost variant uses transparent bg + border-default", () => {
+    const { container } = render(Button, mdButton({ variant: "ghost" }));
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("bg-transparent");
+    expect(cls).toContain("border-[var(--border-default)]");
+    expect(cls).toContain("text-[var(--text-primary)]");
   });
 
-  it('danger variant uses error tokens including new hover tokens', () => {
-    const { container } = render(Button, mdButton({ variant: 'danger' }));
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('bg-[var(--color-error-bg)]');
-    expect(cls).toContain('border-[var(--color-error-border)]');
-    expect(cls).toContain('text-[var(--color-error)]');
-    expect(cls).toContain('hover:bg-[var(--color-error-bg-hover)]');
-    expect(cls).toContain('hover:border-[var(--color-error-border-hover)]');
+  it("danger variant uses error tokens including new hover tokens", () => {
+    const { container } = render(Button, mdButton({ variant: "danger" }));
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("bg-[var(--color-error-bg)]");
+    expect(cls).toContain("border-[var(--color-error-border)]");
+    expect(cls).toContain("text-[var(--color-error)]");
+    expect(cls).toContain("hover:bg-[var(--color-error-bg-hover)]");
+    expect(cls).toContain("hover:border-[var(--color-error-border-hover)]");
   });
 
-  it('sets disabled attr when disabled prop is true', () => {
+  it("sets disabled attr when disabled prop is true", () => {
     const { container } = render(Button, mdButton({ disabled: true }));
-    expect(container.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+    expect(container.querySelector("button")?.hasAttribute("disabled")).toBe(
+      true,
+    );
   });
 
-  it('sets disabled + aria-busy when loading=true', () => {
+  it("sets disabled + aria-busy when loading=true", () => {
     const { container } = render(Button, mdButton({ loading: true }));
-    const btn = container.querySelector('button')!;
-    expect(btn.hasAttribute('disabled')).toBe(true);
-    expect(btn.getAttribute('aria-busy')).toBe('true');
+    const btn = container.querySelector("button")!;
+    expect(btn.hasAttribute("disabled")).toBe(true);
+    expect(btn.getAttribute("aria-busy")).toBe("true");
   });
 
-  it('swaps leadingIcon for an animate-spin spinner when loading=true', () => {
-    const leadingIcon = textSnippet('ICON');
-    const { container } = render(Button, mdButton({ loading: true, leadingIcon }));
-    const btn = container.querySelector('button')!;
-    expect(btn.querySelector('.animate-spin')).not.toBeNull();
-    expect(btn.innerHTML).not.toContain('ICON');
+  it("swaps leadingIcon for an animate-spin spinner when loading=true", () => {
+    const leadingIcon = textSnippet("ICON");
+    const { container } = render(
+      Button,
+      mdButton({ loading: true, leadingIcon }),
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.querySelector(".animate-spin")).not.toBeNull();
+    expect(btn.innerHTML).not.toContain("ICON");
   });
 
-  it('does not fire consumer onclick when loading=true', async () => {
+  it("does not fire consumer onclick when loading=true", async () => {
     const onclick = vi.fn();
     const { container } = render(Button, mdButton({ loading: true, onclick }));
-    await fireEvent.click(container.querySelector('button')!);
+    await fireEvent.click(container.querySelector("button")!);
     expect(onclick).not.toHaveBeenCalled();
   });
 
-  it('does not fire consumer onclick when disabled=true', async () => {
+  it("does not fire consumer onclick when disabled=true", async () => {
     const onclick = vi.fn();
     const { container } = render(Button, mdButton({ disabled: true, onclick }));
-    await fireEvent.click(container.querySelector('button')!);
+    await fireEvent.click(container.querySelector("button")!);
     expect(onclick).not.toHaveBeenCalled();
   });
 
-  it('fires consumer onclick in normal state', async () => {
+  it("fires consumer onclick in normal state", async () => {
     const onclick = vi.fn();
     const { container } = render(Button, mdButton({ onclick }));
-    await fireEvent.click(container.querySelector('button')!);
+    await fireEvent.click(container.querySelector("button")!);
     expect(onclick).toHaveBeenCalledTimes(1);
   });
 
-  it('link branch sets aria-disabled when disabled + preventDefault on click', async () => {
+  it("link branch sets aria-disabled when disabled + preventDefault on click", async () => {
     const { container } = render(
       Button,
-      mdButton({ variant: 'ghost', href: '/x', disabled: true })
+      mdButton({ variant: "ghost", href: "/x", disabled: true }),
     );
-    const link = container.querySelector('a')!;
-    expect(link.getAttribute('aria-disabled')).toBe('true');
-    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    const link = container.querySelector("a")!;
+    expect(link.getAttribute("aria-disabled")).toBe("true");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     link.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it('link branch preventDefaults Enter/Space keydown when loading', () => {
+  it("link branch preventDefaults Enter/Space keydown when loading", () => {
     const { container } = render(
       Button,
-      mdButton({ variant: 'ghost', href: '/x', loading: true })
+      mdButton({ variant: "ghost", href: "/x", loading: true }),
     );
-    const link = container.querySelector('a')!;
-    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    const link = container.querySelector("a")!;
+    const enter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
     link.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
-    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    const space = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+    });
     link.dispatchEvent(space);
     expect(space.defaultPrevented).toBe(true);
   });
 
-  it('concatenates consumer class after internal classes', () => {
-    const { container } = render(Button, mdButton({ class: 'extra-marker' }));
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('extra-marker');
-    expect(cls).toContain('h-[23px]');
+  it("concatenates consumer class after internal classes", () => {
+    const { container } = render(Button, mdButton({ class: "extra-marker" }));
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("extra-marker");
+    expect(cls).toContain("h-[23px]");
   });
 
-  it('rejects invalid prop combinations at the TS level', () => {
+  it("rejects invalid prop combinations at the TS level", () => {
     // These assignments exist only to document the discriminated-union contract.
     // `@ts-expect-error` forces the test file to fail type-check if the union ever
     // loosens to accept these shapes.
-    const children = textSnippet('x');
+    const children = textSnippet("x");
     // @ts-expect-error — href + type must not coexist
-    const _bad1: ButtonProps = { variant: 'primary', href: '/x', type: 'submit', children };
+    const _bad1: ButtonProps = {
+      variant: "primary",
+      href: "/x",
+      type: "submit",
+      children,
+    };
     // @ts-expect-error — href + onclick must not coexist
-    const _bad2: ButtonProps = { variant: 'primary', href: '/x', onclick: () => {}, children };
+    const _bad2: ButtonProps = {
+      variant: "primary",
+      href: "/x",
+      onclick: () => {},
+      children,
+    };
     void _bad1;
     void _bad2;
   });
@@ -722,112 +752,160 @@ Write `frontend/src/lib/components/UpdateAllButton.svelte`:
 Write `frontend/src/lib/components/UpdateAllButton.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
-import { createRawSnippet } from 'svelte';
-import UpdateAllButton from './UpdateAllButton.svelte';
+import { describe, expect, it, vi } from "vitest";
+import { render, fireEvent } from "@testing-library/svelte";
+import { createRawSnippet } from "svelte";
+import UpdateAllButton from "./UpdateAllButton.svelte";
 
 function noop() {}
 
-describe('UpdateAllButton primitive', () => {
+describe("UpdateAllButton primitive", () => {
   it('renders <button type="button">', () => {
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
-    const btn = container.querySelector('button');
+    const { container } = render(UpdateAllButton, {
+      state: "idle",
+      onclick: noop,
+    });
+    const btn = container.querySelector("button");
     expect(btn).not.toBeNull();
-    expect(btn?.getAttribute('type')).toBe('button');
+    expect(btn?.getAttribute("type")).toBe("button");
   });
 
   it('renders "↑ Update all" as default children', () => {
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
-    expect(container.querySelector('button')!.textContent).toContain('↑ Update all');
-  });
-
-  it('appends " · {count}" when count is provided', () => {
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop, count: 7 });
-    const text = container.querySelector('button')!.textContent!.replace(/\s+/g, ' ').trim();
-    expect(text).toBe('↑ Update all · 7');
-  });
-
-  it('renders custom children when provided', () => {
-    const children = createRawSnippet(() => ({ render: () => '<span>CUSTOM</span>' }));
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop, children });
-    expect(container.querySelector('button')!.textContent).toContain('CUSTOM');
-  });
-
-  it('applies idle-state classes including accent-rgb backgrounds', () => {
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('bg-[rgba(var(--accent-rgb),0.06)]');
-    expect(cls).toContain('border-[rgba(var(--accent-rgb),0.20)]');
-    expect(cls).toContain('text-[var(--accent)]');
-    expect(cls).toContain('hover:bg-[rgba(var(--accent-rgb),0.18)]');
-    expect(cls).toContain('hover:text-[var(--accent-bright)]');
-  });
-
-  it('applies dim-state classes including pointer-events-none', () => {
-    const { container } = render(UpdateAllButton, { state: 'dim', onclick: noop });
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('bg-transparent');
-    expect(cls).toContain('border-[var(--border-default)]');
-    expect(cls).toContain('text-[var(--text-muted)]');
-    expect(cls).toContain('pointer-events-none');
-  });
-
-  it('sets aria-disabled="true" in dim state', () => {
-    const { container } = render(UpdateAllButton, { state: 'dim', onclick: noop });
-    expect(container.querySelector('button')!.getAttribute('aria-disabled')).toBe('true');
-  });
-
-  it('omits aria-disabled attr in idle state', () => {
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
-    expect(container.querySelector('button')!.hasAttribute('aria-disabled')).toBe(false);
-  });
-
-  it('passes ariaLabel through when provided', () => {
     const { container } = render(UpdateAllButton, {
-      state: 'dim',
+      state: "idle",
       onclick: noop,
-      ariaLabel: 'No updates available'
     });
-    expect(container.querySelector('button')!.getAttribute('aria-label')).toBe(
-      'No updates available'
+    expect(container.querySelector("button")!.textContent).toContain(
+      "↑ Update all",
     );
   });
 
-  it('does not fire onclick in dim state under pointer activation', async () => {
+  it('appends " · {count}" when count is provided', () => {
+    const { container } = render(UpdateAllButton, {
+      state: "idle",
+      onclick: noop,
+      count: 7,
+    });
+    const text = container
+      .querySelector("button")!
+      .textContent!.replace(/\s+/g, " ")
+      .trim();
+    expect(text).toBe("↑ Update all · 7");
+  });
+
+  it("renders custom children when provided", () => {
+    const children = createRawSnippet(() => ({
+      render: () => "<span>CUSTOM</span>",
+    }));
+    const { container } = render(UpdateAllButton, {
+      state: "idle",
+      onclick: noop,
+      children,
+    });
+    expect(container.querySelector("button")!.textContent).toContain("CUSTOM");
+  });
+
+  it("applies idle-state classes including accent-rgb backgrounds", () => {
+    const { container } = render(UpdateAllButton, {
+      state: "idle",
+      onclick: noop,
+    });
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("bg-[rgba(var(--accent-rgb),0.06)]");
+    expect(cls).toContain("border-[rgba(var(--accent-rgb),0.20)]");
+    expect(cls).toContain("text-[var(--accent)]");
+    expect(cls).toContain("hover:bg-[rgba(var(--accent-rgb),0.18)]");
+    expect(cls).toContain("hover:text-[var(--accent-bright)]");
+  });
+
+  it("applies dim-state classes including pointer-events-none", () => {
+    const { container } = render(UpdateAllButton, {
+      state: "dim",
+      onclick: noop,
+    });
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("bg-transparent");
+    expect(cls).toContain("border-[var(--border-default)]");
+    expect(cls).toContain("text-[var(--text-muted)]");
+    expect(cls).toContain("pointer-events-none");
+  });
+
+  it('sets aria-disabled="true" in dim state', () => {
+    const { container } = render(UpdateAllButton, {
+      state: "dim",
+      onclick: noop,
+    });
+    expect(
+      container.querySelector("button")!.getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
+  it("omits aria-disabled attr in idle state", () => {
+    const { container } = render(UpdateAllButton, {
+      state: "idle",
+      onclick: noop,
+    });
+    expect(
+      container.querySelector("button")!.hasAttribute("aria-disabled"),
+    ).toBe(false);
+  });
+
+  it("passes ariaLabel through when provided", () => {
+    const { container } = render(UpdateAllButton, {
+      state: "dim",
+      onclick: noop,
+      ariaLabel: "No updates available",
+    });
+    expect(container.querySelector("button")!.getAttribute("aria-label")).toBe(
+      "No updates available",
+    );
+  });
+
+  it("does not fire onclick in dim state under pointer activation", async () => {
     const onclick = vi.fn();
-    const { container } = render(UpdateAllButton, { state: 'dim', onclick });
-    await fireEvent.click(container.querySelector('button')!);
+    const { container } = render(UpdateAllButton, { state: "dim", onclick });
+    await fireEvent.click(container.querySelector("button")!);
     expect(onclick).not.toHaveBeenCalled();
   });
 
-  it('preventDefaults Enter/Space keydown in dim state', () => {
-    const { container } = render(UpdateAllButton, { state: 'dim', onclick: noop });
-    const btn = container.querySelector('button')!;
-    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  it("preventDefaults Enter/Space keydown in dim state", () => {
+    const { container } = render(UpdateAllButton, {
+      state: "dim",
+      onclick: noop,
+    });
+    const btn = container.querySelector("button")!;
+    const enter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
     btn.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
-    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    const space = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+    });
     btn.dispatchEvent(space);
     expect(space.defaultPrevented).toBe(true);
   });
 
-  it('fires onclick in idle state', async () => {
+  it("fires onclick in idle state", async () => {
     const onclick = vi.fn();
-    const { container } = render(UpdateAllButton, { state: 'idle', onclick });
-    await fireEvent.click(container.querySelector('button')!);
+    const { container } = render(UpdateAllButton, { state: "idle", onclick });
+    await fireEvent.click(container.querySelector("button")!);
     expect(onclick).toHaveBeenCalledTimes(1);
   });
 
-  it('concatenates consumer class after internal classes', () => {
+  it("concatenates consumer class after internal classes", () => {
     const { container } = render(UpdateAllButton, {
-      state: 'idle',
+      state: "idle",
       onclick: noop,
-      class: 'extra-marker'
+      class: "extra-marker",
     });
-    const cls = container.querySelector('button')!.className;
-    expect(cls).toContain('extra-marker');
-    expect(cls).toContain('h-[19px]');
+    const cls = container.querySelector("button")!.className;
+    expect(cls).toContain("extra-marker");
+    expect(cls).toContain("h-[19px]");
   });
 });
 ```
@@ -864,34 +942,34 @@ git commit -m "feat(ui): add UpdateAllButton primitive (sub-spec #2 PR1)"
 Write `frontend/src/theme/terminal-palette.ts`:
 
 ```ts
-import type { ITheme } from '@xterm/xterm';
-import { tokens } from './tokens';
+import type { ITheme } from "@xterm/xterm";
+import { tokens } from "./tokens";
 
-const SUCCESS = tokens['--color-success'].dark;
-const ACCENT_BRIGHT = tokens['--accent-bright'].dark;
-const MUTED = tokens['--text-muted'].dark;
-const PRIMARY = tokens['--text-primary'].dark;
-const INVERTED = tokens['--text-inverted'].dark;
-const INFO = tokens['--color-info'].dark;
+const SUCCESS = tokens["--color-success"].dark;
+const ACCENT_BRIGHT = tokens["--accent-bright"].dark;
+const MUTED = tokens["--text-muted"].dark;
+const PRIMARY = tokens["--text-primary"].dark;
+const INVERTED = tokens["--text-inverted"].dark;
+const INFO = tokens["--color-info"].dark;
 
 // ANSI-only colors — not part of design language, kept local.
-const TERM_BG = '#0c0c0e';
-const TERM_FG = '#d4d4d8';
-const SELECTION = '#3f3f46';
-const ANSI_BLACK = '#18181b';
-const ANSI_RED = '#f87171';
-const ANSI_BLUE = '#60a5fa';
-const ANSI_MAGENTA = '#c084fc';
-const ANSI_BRIGHT_RED = '#fb7185';
-const ANSI_BRIGHT_GREEN = '#86efac';
-const ANSI_BRIGHT_YELLOW = '#fde68a';
-const ANSI_BRIGHT_BLUE = '#93c5fd';
-const ANSI_BRIGHT_MAGENTA = '#d8b4fe';
+const TERM_BG = "#0c0c0e";
+const TERM_FG = "#d4d4d8";
+const SELECTION = "#3f3f46";
+const ANSI_BLACK = "#18181b";
+const ANSI_RED = "#f87171";
+const ANSI_BLUE = "#60a5fa";
+const ANSI_MAGENTA = "#c084fc";
+const ANSI_BRIGHT_RED = "#fb7185";
+const ANSI_BRIGHT_GREEN = "#86efac";
+const ANSI_BRIGHT_YELLOW = "#fde68a";
+const ANSI_BRIGHT_BLUE = "#93c5fd";
+const ANSI_BRIGHT_MAGENTA = "#d8b4fe";
 
 // Parent spec §6 pins terminal yellow at `#fcd34d` (progress / in-flight
 // layers). This is distinct from `--color-warning` dark (`#fbbf24`) by
 // design — terminal amber sits higher on the ramp for readability.
-const TERMINAL_AMBER = '#fcd34d';
+const TERMINAL_AMBER = "#fcd34d";
 
 export const TERMINAL_THEME: ITheme = {
   background: TERM_BG,
@@ -913,7 +991,7 @@ export const TERMINAL_THEME: ITheme = {
   brightBlue: ANSI_BRIGHT_BLUE,
   brightMagenta: ANSI_BRIGHT_MAGENTA,
   brightCyan: INFO,
-  brightWhite: INVERTED
+  brightWhite: INVERTED,
 };
 ```
 
@@ -922,45 +1000,45 @@ export const TERMINAL_THEME: ITheme = {
 Write `frontend/src/theme/terminal-palette.test.ts`:
 
 ```ts
-import { describe, expect, it } from 'vitest';
-import { TERMINAL_THEME } from './terminal-palette';
-import { tokens } from './tokens';
+import { describe, expect, it } from "vitest";
+import { TERMINAL_THEME } from "./terminal-palette";
+import { tokens } from "./tokens";
 
-describe('TERMINAL_THEME bindings to tokens.ts (parent spec §6)', () => {
-  it('brightBlack — timestamps / layer IDs — uses --text-muted dark', () => {
-    expect(TERMINAL_THEME.brightBlack).toBe(tokens['--text-muted'].dark);
+describe("TERMINAL_THEME bindings to tokens.ts (parent spec §6)", () => {
+  it("brightBlack — timestamps / layer IDs — uses --text-muted dark", () => {
+    expect(TERMINAL_THEME.brightBlack).toBe(tokens["--text-muted"].dark);
   });
 
-  it('cyan — uptrakit annotations — uses --accent-bright dark', () => {
-    expect(TERMINAL_THEME.cyan).toBe(tokens['--accent-bright'].dark);
+  it("cyan — uptrakit annotations — uses --accent-bright dark", () => {
+    expect(TERMINAL_THEME.cyan).toBe(tokens["--accent-bright"].dark);
   });
 
-  it('brightWhite — Docker status lines — uses --text-inverted dark', () => {
-    expect(TERMINAL_THEME.brightWhite).toBe(tokens['--text-inverted'].dark);
+  it("brightWhite — Docker status lines — uses --text-inverted dark", () => {
+    expect(TERMINAL_THEME.brightWhite).toBe(tokens["--text-inverted"].dark);
   });
 
-  it('green — success lines — uses --color-success dark', () => {
-    expect(TERMINAL_THEME.green).toBe(tokens['--color-success'].dark);
+  it("green — success lines — uses --color-success dark", () => {
+    expect(TERMINAL_THEME.green).toBe(tokens["--color-success"].dark);
   });
 
-  it('white — default text — uses --text-primary dark', () => {
-    expect(TERMINAL_THEME.white).toBe(tokens['--text-primary'].dark);
+  it("white — default text — uses --text-primary dark", () => {
+    expect(TERMINAL_THEME.white).toBe(tokens["--text-primary"].dark);
   });
 
-  it('brightCyan — bright info — uses --color-info dark', () => {
-    expect(TERMINAL_THEME.brightCyan).toBe(tokens['--color-info'].dark);
+  it("brightCyan — bright info — uses --color-info dark", () => {
+    expect(TERMINAL_THEME.brightCyan).toBe(tokens["--color-info"].dark);
   });
 
-  it('yellow — terminal amber — pins #fcd34d per §6 (distinct from --color-warning)', () => {
-    expect(TERMINAL_THEME.yellow).toBe('#fcd34d');
-    expect(TERMINAL_THEME.yellow).not.toBe(tokens['--color-warning'].dark);
+  it("yellow — terminal amber — pins #fcd34d per §6 (distinct from --color-warning)", () => {
+    expect(TERMINAL_THEME.yellow).toBe("#fcd34d");
+    expect(TERMINAL_THEME.yellow).not.toBe(tokens["--color-warning"].dark);
   });
 
-  it('background — #0c0c0e — always-dark body per §6', () => {
-    expect(TERMINAL_THEME.background).toBe('#0c0c0e');
+  it("background — #0c0c0e — always-dark body per §6", () => {
+    expect(TERMINAL_THEME.background).toBe("#0c0c0e");
   });
 
-  it('snapshot: full TERMINAL_THEME object', () => {
+  it("snapshot: full TERMINAL_THEME object", () => {
     expect(TERMINAL_THEME).toMatchInlineSnapshot(`
 {
   "background": "#0c0c0e",
@@ -1085,33 +1163,33 @@ Edit `frontend/src/lib/components/TerminalOutput.svelte`:
 Near the top of the `<script lang="ts">` block (with the existing `import` lines), add:
 
 ```ts
-import { TERMINAL_THEME } from '../../theme/terminal-palette';
+import { TERMINAL_THEME } from "../../theme/terminal-palette";
 ```
 
 Delete the entire inline literal (lines 75-96 of the current file):
 
 ```ts
 const TERMINAL_THEME = {
-  background: '#0c0c0e',
-  foreground: '#d4d4d8',
-  cursor: '#d4d4d8',
-  selectionBackground: '#3f3f46',
-  black: '#18181b',
-  red: '#f87171',
-  green: '#4ade80',
-  yellow: '#fcd34d',
-  blue: '#60a5fa',
-  magenta: '#c084fc',
-  cyan: '#22d3ee',
-  white: '#e4e4e7',
-  brightBlack: '#3f3f46',
-  brightRed: '#fb7185',
-  brightGreen: '#86efac',
-  brightYellow: '#fde68a',
-  brightBlue: '#93c5fd',
-  brightMagenta: '#d8b4fe',
-  brightCyan: '#67e8f9',
-  brightWhite: '#fafafa'
+  background: "#0c0c0e",
+  foreground: "#d4d4d8",
+  cursor: "#d4d4d8",
+  selectionBackground: "#3f3f46",
+  black: "#18181b",
+  red: "#f87171",
+  green: "#4ade80",
+  yellow: "#fcd34d",
+  blue: "#60a5fa",
+  magenta: "#c084fc",
+  cyan: "#22d3ee",
+  white: "#e4e4e7",
+  brightBlack: "#3f3f46",
+  brightRed: "#fb7185",
+  brightGreen: "#86efac",
+  brightYellow: "#fde68a",
+  brightBlue: "#93c5fd",
+  brightMagenta: "#d8b4fe",
+  brightCyan: "#67e8f9",
+  brightWhite: "#fafafa",
 };
 ```
 
@@ -1125,8 +1203,8 @@ Terminal constructor arguments already (the existing tests verify lifecycle).
 Add a new `it` block inside the existing `describe` that exercises xterm mounting, after the last existing assertion on the mocked constructor:
 
 ```ts
-it('passes the same TERMINAL_THEME reference from the module to xterm', async () => {
-  const { TERMINAL_THEME } = await import('../../theme/terminal-palette');
+it("passes the same TERMINAL_THEME reference from the module to xterm", async () => {
+  const { TERMINAL_THEME } = await import("../../theme/terminal-palette");
   // `terminalCtorMock` is the shared mock captured by the existing `vi.mock` block.
   // If the existing test file names it differently, use the local name.
   const ctorArg = terminalCtorMock.mock.calls.at(-1)?.[0];
@@ -1189,7 +1267,7 @@ Expected: finds the "Create" button around line 208-213:
 Add to the top of the `<script lang="ts">` block:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 Replace the existing Create button block with:
@@ -1246,7 +1324,7 @@ Expected: current line 59 is `<button class="btn preset-tonal-surface" onclick={
 Add to `<script lang="ts">` imports:
 
 ```ts
-import Button from './Button.svelte';
+import Button from "./Button.svelte";
 ```
 
 Replace the existing line:
@@ -1301,7 +1379,7 @@ Expected: finds line ~198: `Already have an account? <a href="/login" class={PUB
 Add to `<script lang="ts">` imports:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 Replace:
@@ -1356,7 +1434,7 @@ Expected: finds the per-row Revoke button using `class="btn btn-sm preset-tonal-
 Add to `<script lang="ts">` imports:
 
 ```ts
-import Button from '$lib/components/Button.svelte';
+import Button from "$lib/components/Button.svelte";
 ```
 
 The existing Revoke button markup is something like:
@@ -1425,7 +1503,7 @@ Typically the handler is `onclick={() => triggerUpdateAll(...)}` and the pending
 Add to imports:
 
 ```ts
-import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
+import UpdateAllButton from "$lib/components/UpdateAllButton.svelte";
 ```
 
 Replace the existing Update-all markup (including any `{#if pendingCount > 0}…{:else}…{/if}` split) with a single call:
@@ -1574,31 +1652,34 @@ Note the conventions: theme-toggle helper, screenshot tolerance `threshold: 0.00
 Write `frontend/tests/e2e/button-primitive.spec.ts`:
 
 ```ts
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
-const ROUTE = '/dev/button-preview';
+const ROUTE = "/dev/button-preview";
 
 const SECTIONS = [
-  { id: 'button-variants', name: 'variants' },
-  { id: 'button-states', name: 'states' },
-  { id: 'button-link', name: 'link' },
-  { id: 'updateall-states', name: 'updateall' }
+  { id: "button-variants", name: "variants" },
+  { id: "button-states", name: "states" },
+  { id: "button-link", name: "link" },
+  { id: "updateall-states", name: "updateall" },
 ];
 
-async function setTheme(page: import('@playwright/test').Page, theme: 'dark' | 'light') {
+async function setTheme(
+  page: import("@playwright/test").Page,
+  theme: "dark" | "light",
+) {
   await page.addInitScript((t) => {
-    if (t === 'dark') document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
+    if (t === "dark") document.documentElement.classList.add("dark");
+    else document.documentElement.classList.remove("dark");
     try {
-      localStorage.setItem('theme', t);
+      localStorage.setItem("theme", t);
     } catch {
       /* ignore */
     }
   }, theme);
 }
 
-test.describe('button primitive preview', () => {
-  for (const theme of ['dark', 'light'] as const) {
+test.describe("button primitive preview", () => {
+  for (const theme of ["dark", "light"] as const) {
     test.describe(theme, () => {
       test.beforeEach(async ({ page }) => {
         await setTheme(page, theme);
@@ -1611,7 +1692,7 @@ test.describe('button primitive preview', () => {
           const region = page.locator(`[data-testid="${section.id}"]`);
           await expect(region).toHaveScreenshot(
             `${theme}-${section.name}.png`,
-            { threshold: 0.005 }
+            { threshold: 0.005 },
           );
         });
       }
@@ -1653,7 +1734,7 @@ git commit -m "test(e2e): baseline Button + UpdateAllButton preview snapshots (s
 - Modify: `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` (regenerated bytes, if any touch the five canary scenes)
 
 **Rationale:** The five canary call sites now render the primitives' gradient / ghost / danger / update-all classes. Existing snapshots assume the
-preset-* classes and will fail visual diff. Parent spec §9 requires each delta be enumerated in the PR description.
+preset-\* classes and will fail visual diff. Parent spec §9 requires each delta be enumerated in the PR description.
 
 - [ ] **Step 1: Run the full e2e suite to see the pre-regen failures**
 

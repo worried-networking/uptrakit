@@ -28,12 +28,12 @@ cargo build -p uptrakit-controller
 
 ### Behavior changes
 
-| Aspect | Without feature | With `embed-frontend` |
-| --- | --- | --- |
-| `--static-dir` CLI arg | Available | Available; **overrides** embedded assets when set |
-| Frontend auto-detection | Probes `frontend/build/`, `frontend/` | Skipped unless `--static-dir` is provided |
-| Frontend source | Filesystem | Embedded in binary (or filesystem if `--static-dir` given) |
-| Binary size impact | N/A | ~400-500 KB larger (compressed SPA output) |
+| Aspect                  | Without feature                       | With `embed-frontend`                                      |
+| ----------------------- | ------------------------------------- | ---------------------------------------------------------- |
+| `--static-dir` CLI arg  | Available                             | Available; **overrides** embedded assets when set          |
+| Frontend auto-detection | Probes `frontend/build/`, `frontend/` | Skipped unless `--static-dir` is provided                  |
+| Frontend source         | Filesystem                            | Embedded in binary (or filesystem if `--static-dir` given) |
+| Binary size impact      | N/A                                   | ~400-500 KB larger (compressed SPA output)                 |
 
 The `--static-dir` argument is always compiled into the binary regardless of whether
 `embed-frontend` is active. When both are present and `--static-dir` is specified, the

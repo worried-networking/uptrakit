@@ -45,23 +45,23 @@ for theme setup during parity captures.
 
 ```typescript
 // frontend/tests/e2e/parity-fixtures.ts
-import { test as base } from '@playwright/test';
-import type { Page, TestInfo } from '@playwright/test';
+import { test as base } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
-export type ParityTheme = 'light' | 'dark';
+export type ParityTheme = "light" | "dark";
 
 export const parityTest = base.extend<{ parityTheme: ParityTheme }>({
-	parityTheme: async ({}, use, testInfo: TestInfo) => {
-		const theme = testInfo.project.name.includes('dark') ? 'dark' : 'light';
-		await use(theme);
-	}
+  parityTheme: async ({}, use, testInfo: TestInfo) => {
+    const theme = testInfo.project.name.includes("dark") ? "dark" : "light";
+    await use(theme);
+  },
 });
 
 export async function freezeParityInputs(page: Page, theme: ParityTheme) {
-	await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-	await page.addInitScript((t) => {
-		localStorage.setItem('theme-mode', t);
-	}, theme);
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+  await page.addInitScript((t) => {
+    localStorage.setItem("theme-mode", t);
+  }, theme);
 }
 ```
 
@@ -153,13 +153,13 @@ Replace the function body:
 
 ```typescript
 function assertProjectGuard() {
-	const projectName = test.info().project.name;
-	if (!projectName.startsWith(PARITY_REQUIRED_PROJECT)) {
-		throw new Error(
-			`ui parity harness requires Playwright project "${PARITY_REQUIRED_PROJECT}" ` +
-				`(or a variant), received "${projectName}".`
-		);
-	}
+  const projectName = test.info().project.name;
+  if (!projectName.startsWith(PARITY_REQUIRED_PROJECT)) {
+    throw new Error(
+      `ui parity harness requires Playwright project "${PARITY_REQUIRED_PROJECT}" ` +
+        `(or a variant), received "${projectName}".`,
+    );
+  }
 }
 ```
 
@@ -168,13 +168,13 @@ function assertProjectGuard() {
 Replace the `page.evaluate` call:
 
 ```typescript
-	const env = await page.evaluate(() => ({
-		language: navigator.language,
-		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-		reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-		devicePixelRatio: window.devicePixelRatio,
-		prefersDark: window.matchMedia('(prefers-color-scheme: dark)').matches
-	}));
+const env = await page.evaluate(() => ({
+  language: navigator.language,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  devicePixelRatio: window.devicePixelRatio,
+  prefersDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
+}));
 ```
 
 - [ ] **Step 3: Add colorScheme enforcement inside `assertDeterministicCaptureProfile`**
@@ -196,15 +196,15 @@ after it. Locate:
 Insert between the DPR block and the function's closing brace:
 
 ```typescript
-	const projectName = test.info().project.name;
-	const expectedDark = projectName.includes('dark');
-	if (env.prefersDark !== expectedDark) {
-		throw new Error(
-			`ui parity colorScheme mismatch: project "${projectName}" expects ` +
-				`${expectedDark ? 'dark' : 'light'} but page has ` +
-				`${env.prefersDark ? 'dark' : 'light'}.`
-		);
-	}
+const projectName = test.info().project.name;
+const expectedDark = projectName.includes("dark");
+if (env.prefersDark !== expectedDark) {
+  throw new Error(
+    `ui parity colorScheme mismatch: project "${projectName}" expects ` +
+      `${expectedDark ? "dark" : "light"} but page has ` +
+      `${env.prefersDark ? "dark" : "light"}.`,
+  );
+}
 ```
 
 - [ ] **Step 4: Verify TypeScript compiles**
@@ -246,14 +246,14 @@ from `test.use`, update `beforeEach`, fix governance `reject reduced-motion` tes
 Replace:
 
 ```typescript
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 ```
 
 With:
 
 ```typescript
-import { expect } from '@playwright/test';
-import { parityTest as test, freezeParityInputs } from './parity-fixtures';
+import { expect } from "@playwright/test";
+import { parityTest as test, freezeParityInputs } from "./parity-fixtures";
 ```
 
 - [ ] **Step 2: Remove `colorScheme: 'light'` from `test.use` (lines 21–26)**
@@ -262,9 +262,9 @@ Replace the `test.use` block:
 
 ```typescript
 test.use({
-	viewport: PARITY_VIEWPORT_PRESETS.desktop,
-	locale: 'en-US',
-	timezoneId: 'UTC'
+  viewport: PARITY_VIEWPORT_PRESETS.desktop,
+  locale: "en-US",
+  timezoneId: "UTC",
 });
 ```
 
@@ -276,10 +276,10 @@ Delete these lines entirely — the function is now imported:
 
 ```typescript
 async function freezeParityInputs(page: Page) {
-	await page.addInitScript(() => {
-		localStorage.setItem('theme-mode', 'light');
-	});
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    localStorage.setItem("theme-mode", "light");
+  });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 ```
 
@@ -289,8 +289,8 @@ Replace:
 
 ```typescript
 test.beforeEach(async ({ page }) => {
-	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page);
+  test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
+  await freezeParityInputs(page);
 });
 ```
 
@@ -298,8 +298,8 @@ With:
 
 ```typescript
 test.beforeEach(async ({ page, parityTheme }) => {
-	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page, parityTheme);
+  test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
+  await freezeParityInputs(page, parityTheme);
 });
 ```
 
@@ -308,13 +308,16 @@ test.beforeEach(async ({ page, parityTheme }) => {
 Inside the `'ui parity governance: reject reduced-motion drift'` test, find:
 
 ```typescript
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+await page.emulateMedia({
+  colorScheme: "light",
+  reducedMotion: "no-preference",
+});
 ```
 
 Replace with:
 
 ```typescript
-	await page.emulateMedia({ reducedMotion: 'no-preference' });
+await page.emulateMedia({ reducedMotion: "no-preference" });
 ```
 
 (`colorScheme` must not be hardcoded — it follows the project config so the dark project
@@ -358,14 +361,14 @@ Three changes: import swap, delete local `freezeParityInputs`, update `beforeEac
 Replace:
 
 ```typescript
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 ```
 
 With:
 
 ```typescript
-import { expect } from '@playwright/test';
-import { parityTest as test, freezeParityInputs } from './parity-fixtures';
+import { expect } from "@playwright/test";
+import { parityTest as test, freezeParityInputs } from "./parity-fixtures";
 ```
 
 - [ ] **Step 2: Delete the local `freezeParityInputs` function (lines 143–148)**
@@ -374,10 +377,10 @@ Delete these lines entirely — the function is now imported:
 
 ```typescript
 async function freezeParityInputs(page: Page) {
-	await page.addInitScript(() => {
-		localStorage.setItem('theme-mode', 'light');
-	});
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    localStorage.setItem("theme-mode", "light");
+  });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 ```
 
@@ -387,8 +390,8 @@ Replace:
 
 ```typescript
 test.beforeEach(async ({ page }) => {
-	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page);
+  test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
+  await freezeParityInputs(page);
 });
 ```
 
@@ -396,8 +399,8 @@ With:
 
 ```typescript
 test.beforeEach(async ({ page, parityTheme }) => {
-	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page, parityTheme);
+  test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
+  await freezeParityInputs(page, parityTheme);
 });
 ```
 

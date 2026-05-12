@@ -91,7 +91,9 @@ describe("software nav badge navigation", () => {
     expect(badgeLink).not.toBeNull();
     expect(badgeLink?.tagName.toLowerCase()).toBe("a");
     expect(badgeLink?.getAttribute("href")).toBe("/software?updatable=true");
-    expect(badgeLink?.getAttribute("aria-label")).toBe("View software updates available");
+    expect(badgeLink?.getAttribute("aria-label")).toBe(
+      "View software updates available",
+    );
   });
 
   it("badge link text shows formatted count", () => {
@@ -190,7 +192,9 @@ const navItems = $derived(
     ...builtInNavItems
       .filter((item) => {
         if (!item.permission) return true;
-        const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
+        const perms = Array.isArray(item.permission)
+          ? item.permission
+          : [item.permission];
         return perms.some((p) => getUser()?.permissions.includes(p));
       })
       .map(
@@ -201,7 +205,10 @@ const navItems = $derived(
           origin: "built-in",
           stableId: item.href,
           icon: item.icon,
-          badge: item.href === "/software" ? formatBadge(getUpdatableSoftwareCount()) : undefined,
+          badge:
+            item.href === "/software"
+              ? formatBadge(getUpdatableSoftwareCount())
+              : undefined,
         }),
       ),
     ...surfacePageNavItems.map(
@@ -227,7 +234,9 @@ const navItems = $derived.by(() => {
     ...builtInNavItems
       .filter((item) => {
         if (!item.permission) return true;
-        const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
+        const perms = Array.isArray(item.permission)
+          ? item.permission
+          : [item.permission];
         return perms.some((p) => getUser()?.permissions.includes(p));
       })
       .map(
@@ -238,9 +247,14 @@ const navItems = $derived.by(() => {
           origin: "built-in",
           stableId: item.href,
           icon: item.icon,
-          badge: item.href === "/software" ? formatBadge(softwareUpdateCount) : undefined,
+          badge:
+            item.href === "/software"
+              ? formatBadge(softwareUpdateCount)
+              : undefined,
           badgeHref:
-            item.href === "/software" && softwareUpdateCount ? UPDATES_AVAILABLE_HREF : undefined,
+            item.href === "/software" && softwareUpdateCount
+              ? UPDATES_AVAILABLE_HREF
+              : undefined,
           badgeAriaLabel:
             item.href === "/software" && softwareUpdateCount
               ? "View software updates available"

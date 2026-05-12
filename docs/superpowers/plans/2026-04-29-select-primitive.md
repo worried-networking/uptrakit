@@ -107,13 +107,13 @@ git mv src/lib/components/ui/FormFieldRow.test.ts src/lib/components/forms/FormF
 In `src/lib/components/forms/CheckboxList.svelte`, line 2 currently reads:
 
 ```ts
-import Checkbox from '$lib/components/Checkbox.svelte';
+import Checkbox from "$lib/components/Checkbox.svelte";
 ```
 
 Change to:
 
 ```ts
-import Checkbox from './Checkbox.svelte';
+import Checkbox from "./Checkbox.svelte";
 ```
 
 - [ ] **Step 3: Create forms/index.ts barrel (without Select — added in Task 6)**
@@ -121,19 +121,19 @@ import Checkbox from './Checkbox.svelte';
 Create `src/lib/components/forms/index.ts`:
 
 ```ts
-export { default as Input } from './Input.svelte';
-export type { InputProps, InputType } from './Input.svelte';
+export { default as Input } from "./Input.svelte";
+export type { InputProps, InputType } from "./Input.svelte";
 
-export { default as Textarea } from './Textarea.svelte';
-export type { TextareaProps, TextareaVariant } from './Textarea.svelte';
+export { default as Textarea } from "./Textarea.svelte";
+export type { TextareaProps, TextareaVariant } from "./Textarea.svelte";
 
-export { default as Checkbox } from './Checkbox.svelte';
-export type { CheckboxProps } from './Checkbox.svelte';
+export { default as Checkbox } from "./Checkbox.svelte";
+export type { CheckboxProps } from "./Checkbox.svelte";
 
-export { default as CheckboxList } from './CheckboxList.svelte';
-export type { CheckboxListItem } from './CheckboxList.svelte';
+export { default as CheckboxList } from "./CheckboxList.svelte";
+export type { CheckboxListItem } from "./CheckboxList.svelte";
 
-export { default as FormFieldRow } from './FormFieldRow.svelte';
+export { default as FormFieldRow } from "./FormFieldRow.svelte";
 ```
 
 - [ ] **Step 4: Commit**
@@ -158,7 +158,7 @@ git commit -m "refactor(forms): move form primitives into forms/ subfolder with 
 In `src/lib/components/ui/index.ts`, remove this line:
 
 ```ts
-export { default as FormFieldRow } from './FormFieldRow.svelte';
+export { default as FormFieldRow } from "./FormFieldRow.svelte";
 ```
 
 - [ ] **Step 2: Fix SoftwareGroupList.svelte Checkbox import**
@@ -166,13 +166,13 @@ export { default as FormFieldRow } from './FormFieldRow.svelte';
 In `src/lib/components/ui/SoftwareGroupList.svelte`, change:
 
 ```ts
-import Checkbox from '$lib/components/Checkbox.svelte';
+import Checkbox from "$lib/components/Checkbox.svelte";
 ```
 
 to:
 
 ```ts
-import { Checkbox } from '$lib/components/forms';
+import { Checkbox } from "$lib/components/forms";
 ```
 
 - [ ] **Step 3: Fix public-entry.test.ts Checkbox import**
@@ -180,13 +180,13 @@ import { Checkbox } from '$lib/components/forms';
 In `src/routes/public-entry.test.ts`, change:
 
 ```ts
-import Checkbox from '$lib/components/Checkbox.svelte';
+import Checkbox from "$lib/components/Checkbox.svelte";
 ```
 
 to:
 
 ```ts
-import { Checkbox } from '$lib/components/forms';
+import { Checkbox } from "$lib/components/forms";
 ```
 
 - [ ] **Step 4: Commit**
@@ -208,26 +208,31 @@ git commit -m "refactor(forms): update ui/index.ts and non-route import sites"
 
 ```ts
 // Before (any combination):
-import Input from '$lib/components/Input.svelte';
-import Textarea from '$lib/components/Textarea.svelte';
-import Checkbox from '$lib/components/Checkbox.svelte';
-import CheckboxList from '$lib/components/CheckboxList.svelte';
-import type { InputType } from '$lib/components/Input.svelte';
+import Input from "$lib/components/Input.svelte";
+import Textarea from "$lib/components/Textarea.svelte";
+import Checkbox from "$lib/components/Checkbox.svelte";
+import CheckboxList from "$lib/components/CheckboxList.svelte";
+import type { InputType } from "$lib/components/Input.svelte";
 
 // After (barrel import, combine all into one line):
-import { Input, Textarea, Checkbox, CheckboxList } from '$lib/components/forms';
-import type { InputType } from '$lib/components/forms';
+import { Input, Textarea, Checkbox, CheckboxList } from "$lib/components/forms";
+import type { InputType } from "$lib/components/forms";
 ```
 
 **Pattern B — FormFieldRow from ui barrel (split import):**
 
 ```ts
 // Before:
-import { PageShell, SectionCard, FormFieldRow, StatusBadge } from '$lib/components/ui';
+import {
+  PageShell,
+  SectionCard,
+  FormFieldRow,
+  StatusBadge,
+} from "$lib/components/ui";
 
 // After (remove FormFieldRow from ui import, add separate forms import):
-import { PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
-import { FormFieldRow } from '$lib/components/forms';
+import { PageShell, SectionCard, StatusBadge } from "$lib/components/ui";
+import { FormFieldRow } from "$lib/components/forms";
 ```
 
 - [ ] **Step 1: Find all import sites**
@@ -287,169 +292,197 @@ git commit -m "refactor(forms): update all import sites to use forms/ barrel"
 Create `src/lib/components/forms/Select.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
-import Select from './Select.svelte';
+import { describe, expect, it, vi } from "vitest";
+import { render, fireEvent } from "@testing-library/svelte";
+import Select from "./Select.svelte";
 
 type SelectOption = { value: string; label: string };
 type SelectProps = {
-	id: string;
-	value: string;
-	options: SelectOption[];
-	name?: string;
-	placeholder?: string;
-	disabled?: boolean;
-	required?: boolean;
-	error?: string;
-	onchange?: (e: Event) => void;
-	onblur?: (e: FocusEvent) => void;
-	'aria-describedby'?: string;
-	'aria-label'?: string;
-	class?: string;
+  id: string;
+  value: string;
+  options: SelectOption[];
+  name?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  required?: boolean;
+  error?: string;
+  onchange?: (e: Event) => void;
+  onblur?: (e: FocusEvent) => void;
+  "aria-describedby"?: string;
+  "aria-label"?: string;
+  class?: string;
 };
 
 const OPTS: SelectOption[] = [
-	{ value: 'a', label: 'Option A' },
-	{ value: 'b', label: 'Option B' },
+  { value: "a", label: "Option A" },
+  { value: "b", label: "Option B" },
 ];
 
 function baseSelect(extra: Partial<SelectProps> = {}): SelectProps {
-	return { id: 'test-select', value: 'a', options: OPTS, ...extra };
+  return { id: "test-select", value: "a", options: OPTS, ...extra };
 }
 
-describe('Select primitive', () => {
-	it('renders a <select> element', () => {
-		const { container } = render(Select, baseSelect());
-		expect(container.querySelector('select')).not.toBeNull();
-	});
+describe("Select primitive", () => {
+  it("renders a <select> element", () => {
+    const { container } = render(Select, baseSelect());
+    expect(container.querySelector("select")).not.toBeNull();
+  });
 
-	it('forwards the id prop to the underlying select', () => {
-		const { container } = render(Select, baseSelect({ id: 'my-field' }));
-		expect(container.querySelector('select')!.getAttribute('id')).toBe('my-field');
-	});
+  it("forwards the id prop to the underlying select", () => {
+    const { container } = render(Select, baseSelect({ id: "my-field" }));
+    expect(container.querySelector("select")!.getAttribute("id")).toBe(
+      "my-field",
+    );
+  });
 
-	it('renders option elements from options prop', () => {
-		const { container } = render(Select, baseSelect());
-		const opts = container.querySelectorAll('option');
-		expect(opts.length).toBe(2);
-		expect(opts[0].value).toBe('a');
-		expect(opts[0].textContent).toBe('Option A');
-		expect(opts[1].value).toBe('b');
-		expect(opts[1].textContent).toBe('Option B');
-	});
+  it("renders option elements from options prop", () => {
+    const { container } = render(Select, baseSelect());
+    const opts = container.querySelectorAll("option");
+    expect(opts.length).toBe(2);
+    expect(opts[0].value).toBe("a");
+    expect(opts[0].textContent).toBe("Option A");
+    expect(opts[1].value).toBe("b");
+    expect(opts[1].textContent).toBe("Option B");
+  });
 
-	it('renders placeholder as first disabled option when provided', () => {
-		const { container } = render(Select, baseSelect({ placeholder: 'Pick one' }));
-		const opts = container.querySelectorAll('option');
-		expect(opts.length).toBe(3);
-		expect(opts[0].value).toBe('');
-		expect(opts[0].textContent).toBe('Pick one');
-		expect(opts[0].disabled).toBe(true);
-	});
+  it("renders placeholder as first disabled option when provided", () => {
+    const { container } = render(
+      Select,
+      baseSelect({ placeholder: "Pick one" }),
+    );
+    const opts = container.querySelectorAll("option");
+    expect(opts.length).toBe(3);
+    expect(opts[0].value).toBe("");
+    expect(opts[0].textContent).toBe("Pick one");
+    expect(opts[0].disabled).toBe(true);
+  });
 
-	it('does not render placeholder option when placeholder is not provided', () => {
-		const { container } = render(Select, baseSelect());
-		const opts = container.querySelectorAll('option');
-		expect(opts.length).toBe(2);
-	});
+  it("does not render placeholder option when placeholder is not provided", () => {
+    const { container } = render(Select, baseSelect());
+    const opts = container.querySelectorAll("option");
+    expect(opts.length).toBe(2);
+  });
 
-	it('applies base class tokens', () => {
-		const { container } = render(Select, baseSelect());
-		const cls = container.querySelector('select')!.className;
-		expect(cls).toContain('h-8');
-		expect(cls).toContain('w-full');
-		expect(cls).toContain('bg-[var(--bg-surface)]');
-		expect(cls).toContain('border-[var(--border-default)]');
-		expect(cls).toContain('text-sm');
-		expect(cls).toContain('text-[var(--text-primary)]');
-	});
+  it("applies base class tokens", () => {
+    const { container } = render(Select, baseSelect());
+    const cls = container.querySelector("select")!.className;
+    expect(cls).toContain("h-8");
+    expect(cls).toContain("w-full");
+    expect(cls).toContain("bg-[var(--bg-surface)]");
+    expect(cls).toContain("border-[var(--border-default)]");
+    expect(cls).toContain("text-sm");
+    expect(cls).toContain("text-[var(--text-primary)]");
+  });
 
-	it('does not include placeholder: pseudo-class token in class string', () => {
-		const { container } = render(Select, baseSelect());
-		expect(container.querySelector('select')!.className).not.toContain('placeholder:');
-	});
+  it("does not include placeholder: pseudo-class token in class string", () => {
+    const { container } = render(Select, baseSelect());
+    expect(container.querySelector("select")!.className).not.toContain(
+      "placeholder:",
+    );
+  });
 
-	it('applies focus-visible ring class', () => {
-		const { container } = render(Select, baseSelect());
-		expect(container.querySelector('select')!.className).toContain(
-			'focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]'
-		);
-	});
+  it("applies focus-visible ring class", () => {
+    const { container } = render(Select, baseSelect());
+    expect(container.querySelector("select")!.className).toContain(
+      "focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]",
+    );
+  });
 
-	it('applies disabled utility classes in class string', () => {
-		const { container } = render(Select, baseSelect());
-		const cls = container.querySelector('select')!.className;
-		expect(cls).toContain('disabled:opacity-40');
-		expect(cls).toContain('disabled:cursor-not-allowed');
-	});
+  it("applies disabled utility classes in class string", () => {
+    const { container } = render(Select, baseSelect());
+    const cls = container.querySelector("select")!.className;
+    expect(cls).toContain("disabled:opacity-40");
+    expect(cls).toContain("disabled:cursor-not-allowed");
+  });
 
-	it('applies aria-invalid error classes in class string', () => {
-		const { container } = render(Select, baseSelect());
-		const cls = container.querySelector('select')!.className;
-		expect(cls).toContain('aria-[invalid=true]:border-[var(--color-danger-border)]');
-		expect(cls).toContain('aria-[invalid=true]:bg-[var(--color-danger-bg)]');
-	});
+  it("applies aria-invalid error classes in class string", () => {
+    const { container } = render(Select, baseSelect());
+    const cls = container.querySelector("select")!.className;
+    expect(cls).toContain(
+      "aria-[invalid=true]:border-[var(--color-danger-border)]",
+    );
+    expect(cls).toContain("aria-[invalid=true]:bg-[var(--color-danger-bg)]");
+  });
 
-	it('sets aria-invalid="true" when error prop is non-empty', () => {
-		const { container } = render(Select, baseSelect({ error: 'Required' }));
-		expect(container.querySelector('select')!.getAttribute('aria-invalid')).toBe('true');
-	});
+  it('sets aria-invalid="true" when error prop is non-empty', () => {
+    const { container } = render(Select, baseSelect({ error: "Required" }));
+    expect(
+      container.querySelector("select")!.getAttribute("aria-invalid"),
+    ).toBe("true");
+  });
 
-	it('omits aria-invalid attribute when error is undefined', () => {
-		const { container } = render(Select, baseSelect());
-		expect(container.querySelector('select')!.hasAttribute('aria-invalid')).toBe(false);
-	});
+  it("omits aria-invalid attribute when error is undefined", () => {
+    const { container } = render(Select, baseSelect());
+    expect(
+      container.querySelector("select")!.hasAttribute("aria-invalid"),
+    ).toBe(false);
+  });
 
-	it('omits aria-invalid attribute when error is empty string', () => {
-		const { container } = render(Select, baseSelect({ error: '' }));
-		expect(container.querySelector('select')!.hasAttribute('aria-invalid')).toBe(false);
-	});
+  it("omits aria-invalid attribute when error is empty string", () => {
+    const { container } = render(Select, baseSelect({ error: "" }));
+    expect(
+      container.querySelector("select")!.hasAttribute("aria-invalid"),
+    ).toBe(false);
+  });
 
-	it('sets disabled attribute when disabled prop is true', () => {
-		const { container } = render(Select, baseSelect({ disabled: true }));
-		expect(container.querySelector('select')!.hasAttribute('disabled')).toBe(true);
-	});
+  it("sets disabled attribute when disabled prop is true", () => {
+    const { container } = render(Select, baseSelect({ disabled: true }));
+    expect(container.querySelector("select")!.hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
 
-	it('sets required attribute when required prop is true', () => {
-		const { container } = render(Select, baseSelect({ required: true }));
-		expect(container.querySelector('select')!.hasAttribute('required')).toBe(true);
-	});
+  it("sets required attribute when required prop is true", () => {
+    const { container } = render(Select, baseSelect({ required: true }));
+    expect(container.querySelector("select")!.hasAttribute("required")).toBe(
+      true,
+    );
+  });
 
-	it('forwards name to the select element', () => {
-		const { container } = render(Select, baseSelect({ name: 'sort' }));
-		expect(container.querySelector('select')!.getAttribute('name')).toBe('sort');
-	});
+  it("forwards name to the select element", () => {
+    const { container } = render(Select, baseSelect({ name: "sort" }));
+    expect(container.querySelector("select")!.getAttribute("name")).toBe(
+      "sort",
+    );
+  });
 
-	it('forwards aria-describedby to the select element', () => {
-		const { container } = render(Select, baseSelect({ 'aria-describedby': 'hint-id' }));
-		expect(container.querySelector('select')!.getAttribute('aria-describedby')).toBe('hint-id');
-	});
+  it("forwards aria-describedby to the select element", () => {
+    const { container } = render(
+      Select,
+      baseSelect({ "aria-describedby": "hint-id" }),
+    );
+    expect(
+      container.querySelector("select")!.getAttribute("aria-describedby"),
+    ).toBe("hint-id");
+  });
 
-	it('omits aria-describedby when not provided', () => {
-		const { container } = render(Select, baseSelect());
-		expect(container.querySelector('select')!.hasAttribute('aria-describedby')).toBe(false);
-	});
+  it("omits aria-describedby when not provided", () => {
+    const { container } = render(Select, baseSelect());
+    expect(
+      container.querySelector("select")!.hasAttribute("aria-describedby"),
+    ).toBe(false);
+  });
 
-	it('fires onchange callback on change event', async () => {
-		const onchange = vi.fn();
-		const { container } = render(Select, baseSelect({ onchange }));
-		await fireEvent.change(container.querySelector('select')!);
-		expect(onchange).toHaveBeenCalledTimes(1);
-	});
+  it("fires onchange callback on change event", async () => {
+    const onchange = vi.fn();
+    const { container } = render(Select, baseSelect({ onchange }));
+    await fireEvent.change(container.querySelector("select")!);
+    expect(onchange).toHaveBeenCalledTimes(1);
+  });
 
-	it('fires onblur callback on blur event', async () => {
-		const onblur = vi.fn();
-		const { container } = render(Select, baseSelect({ onblur }));
-		await fireEvent.blur(container.querySelector('select')!);
-		expect(onblur).toHaveBeenCalledTimes(1);
-	});
+  it("fires onblur callback on blur event", async () => {
+    const onblur = vi.fn();
+    const { container } = render(Select, baseSelect({ onblur }));
+    await fireEvent.blur(container.querySelector("select")!);
+    expect(onblur).toHaveBeenCalledTimes(1);
+  });
 
-	it('concatenates consumer class after internal classes', () => {
-		const { container } = render(Select, baseSelect({ class: 'extra-marker' }));
-		const cls = container.querySelector('select')!.className;
-		expect(cls).toContain('extra-marker');
-		expect(cls).toContain('h-8');
-	});
+  it("concatenates consumer class after internal classes", () => {
+    const { container } = render(Select, baseSelect({ class: "extra-marker" }));
+    const cls = container.querySelector("select")!.className;
+    expect(cls).toContain("extra-marker");
+    expect(cls).toContain("h-8");
+  });
 });
 ```
 
@@ -585,8 +618,8 @@ git commit -m "feat(forms): add Select primitive component"
 Append to the end of `src/lib/components/forms/index.ts`:
 
 ```ts
-export { default as Select } from './Select.svelte';
-export type { SelectProps, SelectOption } from './Select.svelte';
+export { default as Select } from "./Select.svelte";
+export type { SelectProps, SelectOption } from "./Select.svelte";
 ```
 
 - [ ] **Step 2: Run full test suite**
@@ -620,7 +653,13 @@ components (e.g., `import { Input, ... } from '$lib/components/forms'` — alrea
 in Task 3). Add `Select` to the import:
 
 ```ts
-import { Input, Textarea, CheckboxList, FormFieldRow, Select } from '$lib/components/forms';
+import {
+  Input,
+  Textarea,
+  CheckboxList,
+  FormFieldRow,
+  Select,
+} from "$lib/components/forms";
 ```
 
 - [ ] **Step 2: Replace the inline `<select>` block**
@@ -686,7 +725,7 @@ git commit -m "feat(forms): migrate SchemaForm select to Select primitive"
 In `src/routes/audit-logs/+page.svelte`, add `Select` to the existing forms import:
 
 ```ts
-import { Input, Select } from '$lib/components/forms';
+import { Input, Select } from "$lib/components/forms";
 ```
 
 - [ ] **Step 2: Replace filter-outcome select**
@@ -772,7 +811,7 @@ git commit -m "feat(forms): migrate audit-logs filter selects to Select primitiv
 Add `Select` to existing forms import in `AssignToHostModal.svelte`:
 
 ```ts
-import { Input, Checkbox, Select } from '$lib/components/forms';
+import { Input, Checkbox, Select } from "$lib/components/forms";
 ```
 
 - [ ] **Step 2: Migrate line ~318 — plugin_config_id for multi-role table**
@@ -951,7 +990,7 @@ pre_update_hook in step 3 but with `hookRole === 'post_update_hook'`). Replace w
 Add `Select` to existing forms import in `EditHostAssignmentModal.svelte`:
 
 ```ts
-import { Input, Textarea, Checkbox, Select } from '$lib/components/forms';
+import { Input, Textarea, Checkbox, Select } from "$lib/components/forms";
 ```
 
 - [ ] **Step 8: Migrate line ~752 — execution_site for fetch_releases (flat static options)**
@@ -1475,14 +1514,14 @@ In `src/routes/dev/form-primitive-preview/+page.svelte`, add `Select` to the exi
 forms import:
 
 ```ts
-import { Input, Checkbox, Textarea, Select } from '$lib/components/forms';
+import { Input, Checkbox, Textarea, Select } from "$lib/components/forms";
 ```
 
 Add demo state variables in the `<script>` block (near existing state vars):
 
 ```ts
-let selectVal = $state('b');
-let selectValEmpty = $state('');
+let selectVal = $state("b");
+let selectValEmpty = $state("");
 ```
 
 - [ ] **Step 2: Add Select demo section to template**

@@ -77,12 +77,12 @@ your terminal. Press Ctrl+C to detach — the update continues in the background
 
 Each history entry has one of the following statuses:
 
-| Status | Meaning |
-| --- | --- |
-| `pending` | Update has been queued but not yet dispatched to the agent |
-| `in_progress` | Update command is currently executing on the host |
-| `completed` | Update finished successfully |
-| `failed` | Update encountered an error; see the entry details for the captured output |
+| Status        | Meaning                                                                    |
+| ------------- | -------------------------------------------------------------------------- |
+| `pending`     | Update has been queued but not yet dispatched to the agent                 |
+| `in_progress` | Update command is currently executing on the host                          |
+| `completed`   | Update finished successfully                                               |
+| `failed`      | Update encountered an error; see the entry details for the captured output |
 
 An update entry moves from `pending` to `in_progress` when the agent acknowledges and begins
 execution, then to `completed` or `failed` when the agent reports the result.
@@ -132,11 +132,11 @@ lines to stdout in real time. Status changes print to stderr. Press Ctrl+C to de
 
 Each history entry records who initiated the update:
 
-| Initiator | Meaning |
-| --- | --- |
-| User UUID | A specific user triggered the update from the Web UI or CLI |
-| `scheduler` | Reserved; the scheduler does not trigger updates |
-| `mqtt` | Update was triggered via the Home Assistant / MQTT integration |
+| Initiator   | Meaning                                                        |
+| ----------- | -------------------------------------------------------------- |
+| User UUID   | A specific user triggered the update from the Web UI or CLI    |
+| `scheduler` | Reserved; the scheduler does not trigger updates               |
+| `mqtt`      | Update was triggered via the Home Assistant / MQTT integration |
 
 ## Related Documentation
 

@@ -63,21 +63,21 @@ When a check fails, its value is `"unavailable"` and `status` becomes `"unavaila
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/health.rs` | `healthz` and `readyz` handlers |
-| `crates/ui/web-api/src/router.rs` | Route registration on both routers |
+| File                                     | Purpose                            |
+| ---------------------------------------- | ---------------------------------- |
+| `crates/ui/web-api/src/routes/health.rs` | `healthz` and `readyz` handlers    |
+| `crates/ui/web-api/src/router.rs`        | Route registration on both routers |
 
 ## Authentication Endpoints
 
-- `POST /api/v1/auth/device`: start a device authorization flow (RFC 8628). Returns `device_code`, `user_code`, `verification_url`, `expires_in`,
-  `interval`.
-- `POST /api/v1/auth/device/poll`: poll for approval status. The `status` field is a typed `DeviceAuthStatus` enum
-  (`pending`, `authorized`, `expired`) defined in `uptrakit-shared-types`. Returns the API token once status is
-  `authorized`.
-- `POST /api/v1/auth/device/approve`: browser-side approval using Bearer token.
-- `GET /api/v1/auth/device/stream?device_code=<code>`: SSE stream for device auth status updates. Returns `authorized` (with
-  API token) or `expired` events. See [SSE Events API](sse-events.md#device-auth-sse).
+- `POST /api/v1/oauth/device_authorization`: start a device authorization flow (RFC 8628 §3.1). Returns `device_code`,
+  `user_code`, `verification_uri`, `verification_uri_complete`, `expires_in`, `interval`.
+- `POST /api/v1/oauth/token`: RFC 6749 §5 token endpoint; supports `grant_type=urn:ietf:params:oauth:grant-type:device_code`
+  (RFC 8628 §3.4). Success returns `access_token`/`token_type: "Bearer"`; failure returns HTTP 400 with `{"error": "<code>"}`.
+  Pending returns `{"error": "authorization_pending"}`; slow-down returns `{"error": "slow_down"}`.
+- `GET /.well-known/oauth-authorization-server`: RFC 8414 authorization server metadata.
+- `POST /api/v1/auth/device/deny`: Operator-driven denial of a pending device flow. Requires Bearer token.
+- `GET /api/v1/auth/device/lookup`: Look up a pending device flow by user code. Requires Bearer token.
 - `POST /api/v1/auth/token`: exchange credentials for tokens (when allowed).
 
 Access tokens are short-lived, refresh tokens rotate on each use, and logout adds entries to the in-memory `TokenDenylist`.
@@ -89,12 +89,12 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/registration`
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
-- *(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)*
-- GET/PUT `/api/v1/settings/nats` *(feature: `nats`)* — NATS server URL (requires `CanManageGlobalSettings`).
+- _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_
+- GET/PUT `/api/v1/settings/nats` _(feature: `nats`)_ — NATS server URL (requires `CanManageGlobalSettings`).
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See
   [Settings Runtime — NATS settings](settings-runtime.md#nats-settings-feature-nats) for full details.
-- POST `/api/v1/settings/reset-data` *(feature: `reset-data`)* — destructive reset of all tenant-scoped
+- POST `/api/v1/settings/reset-data` _(feature: `reset-data`)_ — destructive reset of all tenant-scoped
   data (requires `CanManageGlobalSettings`). See [Reset Data](#reset-data) below.
 
 Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in
@@ -143,7 +143,7 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/plugin-configs/test`: test a plugin configuration without saving it (dry-run). Requires
   `test_plugin_configs`. See [Plugin Config Test Endpoint](#plugin-config-test-endpoint) below.
 
-`PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake\_case capability strings
+`PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake_case capability strings
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
 which actions are valid for a given config — for example, only showing a **Discover** button
 when `"discover_local_software"` is present, or a **Test** button when `"config_test"` is present.
@@ -222,21 +222,21 @@ Update a service's configurable settings. Requires the `UpdateServices` permissi
 
 Types are defined in `crates/shared/web-api-types/src/services.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `UpdateServiceRequest` | `ping_interval_seconds` (`Option<u32>`) |
-| `ServiceResponse` | `id`, `capabilities`, `service_label`, `hostname`, `friendly_name`, `is_embedded`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds`, `cert_lifetime_hours`, `yielded_to` |
+| Type                   | Fields                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UpdateServiceRequest` | `ping_interval_seconds` (`Option<u32>`)                                                                                                                                                                                               |
+| `ServiceResponse`      | `id`, `capabilities`, `service_label`, `hostname`, `friendly_name`, `is_embedded`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds`, `cert_lifetime_hours`, `yielded_to` |
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/services.rs` | Route handler (`update_service`) |
-| `crates/shared/web-api-types/src/services.rs` | Request/response types |
+| File                                          | Purpose                          |
+| --------------------------------------------- | -------------------------------- |
+| `crates/ui/web-api/src/routes/services.rs`    | Route handler (`update_service`) |
+| `crates/shared/web-api-types/src/services.rs` | Request/response types           |
 
 ## Reset Data
 
-`POST /api/v1/settings/reset-data` *(feature: `reset-data`)* -- irreversibly deletes all tenant-scoped data
+`POST /api/v1/settings/reset-data` _(feature: `reset-data`)_ -- irreversibly deletes all tenant-scoped data
 including hosts, software items, plugin configs, host tags, update history, update batches, notification
 channels/rules/logs, discovery allowlists, proxmox host mappings, software ignore rules, and plugin type
 settings. The operation runs in a single database transaction. After the database is cleared, the controller
@@ -273,11 +273,11 @@ The `confirm` field must be exactly `"RESET"` (case-sensitive). Any other value 
 **Feature gate**: the endpoint is only compiled when the `reset-data` Cargo feature is enabled on
 `uptrakit-web-api` (propagated from `uptrakit-controller`). It is enabled by default.
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/settings_reset.rs` | Route handler |
+| File                                                  | Purpose                                      |
+| ----------------------------------------------------- | -------------------------------------------- |
+| `crates/ui/web-api/src/routes/settings_reset.rs`      | Route handler                                |
 | `crates/ui/web-api-queries/src/queries/reset_data.rs` | Query logic (FK-safe transactional deletion) |
-| `crates/shared/web-api-types/src/settings_reset.rs` | Request/response types |
+| `crates/shared/web-api-types/src/settings_reset.rs`   | Request/response types                       |
 
 ## Multi-Tenancy
 
@@ -334,18 +334,18 @@ data: {"status":"completed","error":null}
 
 Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `OutputLineSSE` | `id` (Uuid), `text` (String), `stream` (String), `timestamp` (OffsetDateTime), `seq` (u64) |
-| `UpdateCompletedSSE` | `status` (String), `error` (Option&lt;String&gt;) |
+| Type                 | Fields                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| `OutputLineSSE`      | `id` (Uuid), `text` (String), `stream` (String), `timestamp` (OffsetDateTime), `seq` (u64) |
+| `UpdateCompletedSSE` | `status` (String), `error` (Option&lt;String&gt;)                                          |
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/update_history.rs` | SSE handler (`stream_update_output`) |
+| File                                                 | Purpose                                                   |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/update_history.rs`     | SSE handler (`stream_update_output`)                      |
 | `crates/ui/web-api/src/update_output_broadcaster.rs` | In-process broadcast registry (`UpdateOutputBroadcaster`) |
-| `crates/shared/web-api-types/src/update_history.rs` | SSE event types (`OutputLineSSE`, `UpdateCompletedSSE`) |
+| `crates/shared/web-api-types/src/update_history.rs`  | SSE event types (`OutputLineSSE`, `UpdateCompletedSSE`)   |
 
 ## Interactive Update WebSocket
 
@@ -359,10 +359,10 @@ for the full protocol reference.
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/interactive_ws.rs` | WebSocket endpoint handler |
-| `crates/ui/web-api/src/interactive_sessions.rs` | Single-writer session registry |
+| File                                             | Purpose                        |
+| ------------------------------------------------ | ------------------------------ |
+| `crates/ui/web-api/src/routes/interactive_ws.rs` | WebSocket endpoint handler     |
+| `crates/ui/web-api/src/interactive_sessions.rs`  | Single-writer session registry |
 
 ## Batch Update Endpoints
 
@@ -505,23 +505,23 @@ data: {"status":"completed"}
 
 Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `HostBatchUpdateRequest` | `category_filter?`, `exclude_item_ids?` |
-| `ItemBatchUpdateRequest` | `to_version`, `host_ids?` |
-| `BatchUpdateResponse` | `batch_id?`, `total_created`, `updates`, `skipped` |
+| Type                         | Fields                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `HostBatchUpdateRequest`     | `category_filter?`, `exclude_item_ids?`                                    |
+| `ItemBatchUpdateRequest`     | `to_version`, `host_ids?`                                                  |
+| `BatchUpdateResponse`        | `batch_id?`, `total_created`, `updates`, `skipped`                         |
 | `UpdateBatchSummaryResponse` | `id`, `batch_type`, `status`, counts, `actor_type`, `actor_id`, timestamps |
-| `UpdateBatchDetailResponse` | Extends summary with `updates: Vec<UpdateBatchItemDetail>` |
+| `UpdateBatchDetailResponse`  | Extends summary with `updates: Vec<UpdateBatchItemDetail>`                 |
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/update_batches.rs` | Route handlers and SSE endpoint |
-| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch query logic |
-| `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process broadcast registry |
-| `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
-| `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
+| File                                                      | Purpose                         |
+| --------------------------------------------------------- | ------------------------------- |
+| `crates/ui/web-api/src/routes/update_batches.rs`          | Route handlers and SSE endpoint |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch query logic               |
+| `crates/ui/web-api/src/batch_progress_broadcaster.rs`     | In-process broadcast registry   |
+| `crates/shared/web-api-types/src/update_batches.rs`       | Request/response types          |
+| `crates/shared/db/src/entity/update_batch.rs`             | SeaORM entity                   |
 
 ## Plugin Config Test Endpoint
 
@@ -547,14 +547,14 @@ specified host, waits for the `test_plugin_config_result` response, and returns 
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | :---: | --- |
-| `plugin_type` | string | Yes | Plugin type to test (e.g. `"generic_shell"`, `"releases_github"`). |
-| `config` | object | Yes | Plugin configuration JSON to test. |
-| `plugin_config_id` | UUID | No | Existing config ID. When provided, the saved config is loaded and `config` is shallow-merged on top (same merge semantics as the three-layer config model). |
-| `host_id` | UUID | No | Target host for agent-side tests. Required for plugins that run on the agent (Shell, APT, Homebrew, etc.). Not required for controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm). |
-| `test_kind` | string | No | What to test. Auto-detected from plugin capabilities when omitted. Values: `"version_detection"`, `"update_command_validation"`, `"pre_update_hook"`, `"post_update_hook"`, `"connectivity"`. |
-| `package_identifier` | string | No | Package identifier for testing (e.g. `"nginx"`, `"owner/repo"`). Required for version detection tests. |
+| Field                | Type   | Required | Description                                                                                                                                                                                   |
+| -------------------- | ------ | :------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin_type`        | string |   Yes    | Plugin type to test (e.g. `"generic_shell"`, `"releases_github"`).                                                                                                                            |
+| `config`             | object |   Yes    | Plugin configuration JSON to test.                                                                                                                                                            |
+| `plugin_config_id`   | UUID   |    No    | Existing config ID. When provided, the saved config is loaded and `config` is shallow-merged on top (same merge semantics as the three-layer config model).                                   |
+| `host_id`            | UUID   |    No    | Target host for agent-side tests. Required for plugins that run on the agent (Shell, APT, Homebrew, etc.). Not required for controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm).   |
+| `test_kind`          | string |    No    | What to test. Auto-detected from plugin capabilities when omitted. Values: `"version_detection"`, `"update_command_validation"`, `"pre_update_hook"`, `"post_update_hook"`, `"connectivity"`. |
+| `package_identifier` | string |    No    | Package identifier for testing (e.g. `"nginx"`, `"owner/repo"`). Required for version detection tests.                                                                                        |
 
 **Response** (`200`) (`TestPluginConfigResponse`):
 
@@ -568,14 +568,14 @@ specified host, waits for the `test_plugin_config_result` response, and returns 
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `success` | boolean | Whether the test passed. |
-| `test_kind` | string | The kind of test that was executed. |
-| `output` | string? | Command output or connectivity response (absent when empty). |
-| `error` | string? | Error message when the test failed (absent on success). |
+| Field              | Type    | Description                                                   |
+| ------------------ | ------- | ------------------------------------------------------------- |
+| `success`          | boolean | Whether the test passed.                                      |
+| `test_kind`        | string  | The kind of test that was executed.                           |
+| `output`           | string? | Command output or connectivity response (absent when empty).  |
+| `error`            | string? | Error message when the test failed (absent on success).       |
 | `detected_version` | string? | Detected version string (only for `version_detection` tests). |
-| `duration_ms` | integer | Test duration in milliseconds. |
+| `duration_ms`      | integer | Test duration in milliseconds.                                |
 
 **Error responses**:
 
@@ -586,12 +586,12 @@ specified host, waits for the `test_plugin_config_result` response, and returns 
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/plugin_configs.rs` | Route handler (`test_plugin_config`) |
-| `crates/ui/web-api/src/config_test_proxy.rs` | Request/response correlation proxy |
-| `crates/shared/web-api-types/src/plugin_config_test.rs` | Request/response types |
-| `crates/shared/wire/src/payloads.rs` | `TestPluginConfigPayload`, `TestPluginConfigResultPayload`, `ConfigTestKind` |
+| File                                                    | Purpose                                                                      |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/plugin_configs.rs`        | Route handler (`test_plugin_config`)                                         |
+| `crates/ui/web-api/src/config_test_proxy.rs`            | Request/response correlation proxy                                           |
+| `crates/shared/web-api-types/src/plugin_config_test.rs` | Request/response types                                                       |
+| `crates/shared/wire/src/payloads.rs`                    | `TestPluginConfigPayload`, `TestPluginConfigResultPayload`, `ConfigTestKind` |
 
 ## Batch Action Endpoints
 
@@ -599,15 +599,15 @@ Batch actions allow performing the same operation on multiple entities in a sing
 Unlike batch updates (which create tracked update batches with progress streaming), batch
 actions are simple multi-ID operations that return per-item success/failure results.
 
-| Method | Path | Supported actions | Permission |
-| --- | --- | --- | --- |
-| `POST` | `/api/v1/services/batch` | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveServices`, `RemoveServices`) |
-| `POST` | `/api/v1/system-services/batch` | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveSystemServices`, `RemoveSystemServices`) |
-| `POST` | `/api/v1/hosts/batch` | `deactivate`, `delete` | `DeactivateHosts` |
-| `POST` | `/api/v1/software-items/batch` | `delete` | `DeleteSoftware` |
-| `POST` | `/api/v1/plugin-configs/batch` | `delete` | `DeleteSoftware` |
-| `POST` | `/api/v1/software-ignores/batch` | `delete` | `ManageIgnores` |
-| `POST` | `/api/v1/host-tags/batch` | `delete` | `DeactivateHosts` |
+| Method | Path                             | Supported actions                           | Permission                                                        |
+| ------ | -------------------------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| `POST` | `/api/v1/services/batch`         | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveServices`, `RemoveServices`)             |
+| `POST` | `/api/v1/system-services/batch`  | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveSystemServices`, `RemoveSystemServices`) |
+| `POST` | `/api/v1/hosts/batch`            | `deactivate`, `delete`                      | `DeactivateHosts`                                                 |
+| `POST` | `/api/v1/software-items/batch`   | `delete`                                    | `DeleteSoftware`                                                  |
+| `POST` | `/api/v1/plugin-configs/batch`   | `delete`                                    | `DeleteSoftware`                                                  |
+| `POST` | `/api/v1/software-ignores/batch` | `delete`                                    | `ManageIgnores`                                                   |
+| `POST` | `/api/v1/host-tags/batch`        | `delete`                                    | `DeactivateHosts`                                                 |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
 
@@ -627,12 +627,12 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/host_tags.rs` | Route handlers |
-| `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions |
-| `crates/shared/web-api-types/src/host_tags.rs` | Request/response types |
-| `crates/shared/openapi-client/src/host_tags.rs` | Typed API client |
+| File                                                 | Purpose                |
+| ---------------------------------------------------- | ---------------------- |
+| `crates/ui/web-api/src/routes/host_tags.rs`          | Route handlers         |
+| `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions        |
+| `crates/shared/web-api-types/src/host_tags.rs`       | Request/response types |
+| `crates/shared/openapi-client/src/host_tags.rs`      | Typed API client       |
 
 ## User Management Endpoints
 
@@ -652,13 +652,13 @@ request/response examples.
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/users.rs` | Route handlers |
-| `crates/ui/web-api/src/routes/access_presets.rs` | Preset route handlers |
-| `crates/shared/web-api-types/src/users.rs` | Request/response types |
-| `crates/shared/web-api-types/src/access_presets.rs` | Preset response types |
-| `crates/shared/types/src/access_preset.rs` | `AccessPreset` enum |
+| File                                                | Purpose                |
+| --------------------------------------------------- | ---------------------- |
+| `crates/ui/web-api/src/routes/users.rs`             | Route handlers         |
+| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers  |
+| `crates/shared/web-api-types/src/users.rs`          | Request/response types |
+| `crates/shared/web-api-types/src/access_presets.rs` | Preset response types  |
+| `crates/shared/types/src/access_preset.rs`          | `AccessPreset` enum    |
 
 ## System Services Endpoints
 
@@ -728,21 +728,21 @@ tokens. All endpoints require `manage_system_services`.
 
 #### Enrollment behaviour
 
-| Scenario | Result |
-| --- | --- |
-| No token provided | `Pending` — requires manual approval |
+| Scenario                                                                                   | Result                                                                         |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| No token provided                                                                          | `Pending` — requires manual approval                                           |
 | Token matches an active (non-expired, non-revoked, uses remaining) system enrollment token | `Approved` — `current_uses` incremented, `system_enrollment_token_id` recorded |
-| Token provided but no match | `403 Forbidden` |
+| Token provided but no match                                                                | `403 Forbidden`                                                                |
 
 #### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/system_enrollment_tokens.rs` | Route handlers |
-| `crates/ui/web-api-queries/src/queries/system_enrollment_tokens.rs` | DB query helpers |
-| `crates/shared/web-api-types/src/system_enrollment_tokens.rs` | Request/response types |
-| `crates/shared/db/src/entity/system_enrollment_token.rs` | SeaORM entity |
-| `crates/shared/openapi-client/src/system_enrollment_tokens.rs` | Typed HTTP client methods |
+| File                                                                | Purpose                   |
+| ------------------------------------------------------------------- | ------------------------- |
+| `crates/ui/web-api/src/routes/system_enrollment_tokens.rs`          | Route handlers            |
+| `crates/ui/web-api-queries/src/queries/system_enrollment_tokens.rs` | DB query helpers          |
+| `crates/shared/web-api-types/src/system_enrollment_tokens.rs`       | Request/response types    |
+| `crates/shared/db/src/entity/system_enrollment_token.rs`            | SeaORM entity             |
+| `crates/shared/openapi-client/src/system_enrollment_tokens.rs`      | Typed HTTP client methods |
 
 ### Audit Log Endpoints
 
@@ -757,33 +757,33 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 ### `SystemServiceResponse` fields
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | System service identifier |
-| `capabilities` | `string[]` | Snake-case capability strings (e.g. `["update_tracking","graceful_shutdown"]`) |
-| `hostname` | string | Hostname reported at enrollment |
-| `friendly_name` | string | Human-readable display name |
-| `ip_address` | `string?` | Client IP address |
-| `status` | string | `pending`, `approved`, `rejected`, or `deactivated` |
-| `client_version` | `string?` | Client software version |
-| `last_seen_at` | `datetime?` | Last connect or heartbeat time |
-| `created_at` | datetime | Row creation time |
-| `updated_at` | datetime | Last modification time |
-| `ping_interval_seconds` | `u32?` | Per-service ping interval override (omitted when using the default) |
-| `cert_lifetime_hours` | `u32?` | Per-service certificate lifetime override in hours (omitted when using the default) |
-| `is_embedded` | `bool` | `true` when the service runs inside the controller process |
-| `yielded_to` | `Uuid[]?` | External service IDs that caused this embedded service to yield. `null` when not applicable |
+| Field                   | Type        | Description                                                                                 |
+| ----------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| `id`                    | UUID        | System service identifier                                                                   |
+| `capabilities`          | `string[]`  | Snake-case capability strings (e.g. `["update_tracking","graceful_shutdown"]`)              |
+| `hostname`              | string      | Hostname reported at enrollment                                                             |
+| `friendly_name`         | string      | Human-readable display name                                                                 |
+| `ip_address`            | `string?`   | Client IP address                                                                           |
+| `status`                | string      | `pending`, `approved`, `rejected`, or `deactivated`                                         |
+| `client_version`        | `string?`   | Client software version                                                                     |
+| `last_seen_at`          | `datetime?` | Last connect or heartbeat time                                                              |
+| `created_at`            | datetime    | Row creation time                                                                           |
+| `updated_at`            | datetime    | Last modification time                                                                      |
+| `ping_interval_seconds` | `u32?`      | Per-service ping interval override (omitted when using the default)                         |
+| `cert_lifetime_hours`   | `u32?`      | Per-service certificate lifetime override in hours (omitted when using the default)         |
+| `is_embedded`           | `bool`      | `true` when the service runs inside the controller process                                  |
+| `yielded_to`            | `Uuid[]?`   | External service IDs that caused this embedded service to yield. `null` when not applicable |
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/system_services.rs` | Route handlers |
-| `crates/ui/web-api-queries/src/queries/system_services.rs` | DB query helpers |
-| `crates/shared/web-api-types/src/system_services.rs` | Request/response types |
-| `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` |
+| File                                                        | Purpose                                         |
+| ----------------------------------------------------------- | ----------------------------------------------- |
+| `crates/ui/web-api/src/routes/system_services.rs`           | Route handlers                                  |
+| `crates/ui/web-api-queries/src/queries/system_services.rs`  | DB query helpers                                |
+| `crates/shared/web-api-types/src/system_services.rs`        | Request/response types                          |
+| `crates/shared/db/src/entity/system_service.rs`             | SeaORM entity for `system_services`             |
 | `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` |
-| `crates/shared/openapi-client/src/system_services.rs` | Typed HTTP client methods |
+| `crates/shared/openapi-client/src/system_services.rs`       | Typed HTTP client methods                       |
 
 ## Service Operations
 
@@ -796,35 +796,35 @@ Update history records each attempt and stores the full command output for audit
 **`UpdateHistoryResponse` fields** (returned by `GET /api/v1/update-history` and
 `GET /api/v1/update-history/{id}`):
 
-| Field | Type | Description |
-| :---- | :--- | :---------- |
-| `id` | UUID | Update history record ID |
-| `host_id` | UUID | Target host |
-| `host_name` | String | Display name of the target host |
-| `software_item_id` | UUID | Software item that was updated |
-| `software_item_name` | String | Name of the software item |
-| `from_version` | String? | Version before the update (`null` if unknown) |
-| `to_version` | String | Requested target version |
-| `status` | UpdateStatus | Current status — see table below |
-| `output` | String | Captured output (up to 50 MB; see `output_truncated`) |
-| `actor_type` | String | Who initiated the update (`user`, `scheduler`, `mqtt`) |
-| `actor_id` | String | UUID of the initiating user (empty for non-user actors) |
-| `started_at` | DateTime (RFC 3339) | When the update started |
-| `completed_at` | DateTime (RFC 3339)? | When the update finished (`null` if still running) |
-| `created_at` | DateTime (RFC 3339) | When the history record was created |
-| `update_category` | String | Classification: `security`, `bugfix`, `feature`, `unknown` |
-| `interactive` | bool | Whether a PTY was allocated (shows "Input Required" badge in UI) |
-| `output_truncated` | bool | `true` if some output was dropped because it exceeded the 50 MB cap. A system notice line appears at the truncation point in `output` and the UI shows an amber warning banner. |
+| Field                | Type                 | Description                                                                                                                                                                     |
+| :------------------- | :------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                 | UUID                 | Update history record ID                                                                                                                                                        |
+| `host_id`            | UUID                 | Target host                                                                                                                                                                     |
+| `host_name`          | String               | Display name of the target host                                                                                                                                                 |
+| `software_item_id`   | UUID                 | Software item that was updated                                                                                                                                                  |
+| `software_item_name` | String               | Name of the software item                                                                                                                                                       |
+| `from_version`       | String?              | Version before the update (`null` if unknown)                                                                                                                                   |
+| `to_version`         | String               | Requested target version                                                                                                                                                        |
+| `status`             | UpdateStatus         | Current status — see table below                                                                                                                                                |
+| `output`             | String               | Captured output (up to 50 MB; see `output_truncated`)                                                                                                                           |
+| `actor_type`         | String               | Who initiated the update (`user`, `scheduler`, `mqtt`)                                                                                                                          |
+| `actor_id`           | String               | UUID of the initiating user (empty for non-user actors)                                                                                                                         |
+| `started_at`         | DateTime (RFC 3339)  | When the update started                                                                                                                                                         |
+| `completed_at`       | DateTime (RFC 3339)? | When the update finished (`null` if still running)                                                                                                                              |
+| `created_at`         | DateTime (RFC 3339)  | When the history record was created                                                                                                                                             |
+| `update_category`    | String               | Classification: `security`, `bugfix`, `feature`, `unknown`                                                                                                                      |
+| `interactive`        | bool                 | Whether a PTY was allocated (shows "Input Required" badge in UI)                                                                                                                |
+| `output_truncated`   | bool                 | `true` if some output was dropped because it exceeded the 50 MB cap. A system notice line appears at the truncation point in `output` and the UI shows an amber warning banner. |
 
 **`UpdateStatus` values** in history responses:
 
-| Value | Meaning |
-| :---- | :------ |
-| `queued` | Batch item waiting for a preceding item on the same host to complete. Counts as `update_in_progress` in MQTT state. |
-| `pending` | Dispatched to the agent; not yet started. Holds the per-host active lock. |
-| `in_progress` | Agent is executing the update. Holds the per-host active lock. |
-| `completed` | Update succeeded (terminal). |
-| `failed` | Update failed (terminal). |
+| Value         | Meaning                                                                                                             |
+| :------------ | :------------------------------------------------------------------------------------------------------------------ |
+| `queued`      | Batch item waiting for a preceding item on the same host to complete. Counts as `update_in_progress` in MQTT state. |
+| `pending`     | Dispatched to the agent; not yet started. Holds the per-host active lock.                                           |
+| `in_progress` | Agent is executing the update. Holds the per-host active lock.                                                      |
+| `completed`   | Update succeeded (terminal).                                                                                        |
+| `failed`      | Update failed (terminal).                                                                                           |
 
 Triggers return **HTTP 409** if another update (`pending` or `in_progress`) already exists for the target host,
 across all update types.
@@ -889,18 +889,18 @@ plugin assignments on the host and routes work the same way as the bulk endpoint
 
 Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `TriggerVersionCheckResponse` | `agents_notified` (u32), `controller_checks_run` (u32, default `0`), `message` (String) |
-| `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `featured`, `last_checked_at`, `host_count`, `installed_version` (Option -- present only when `host_id` filter is used), `latest_version` (Option), `update_available`, `created_at`, `updated_at`, `icon_url` (Option&lt;String&gt; -- HTTPS URL to an icon/logo image) |
-| `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
-| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at` |
-| `HostPluginRoleSummary` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config_name` (Option), `plugin_type`, `package_identifier`, `config` (Option), `execution_site` |
-| `HostSoftwareAssignment` | `host_id`, `plugins` (Vec&lt;HostPluginRoleAssignment&gt;) |
-| `HostPluginRoleAssignment` | `role` (PluginRole), `plugin_type`, `plugin_config_id` (Option), `plugin_config` (Option -- inline create), `package_identifier`, `config` (Option), `execution_site` (default `"auto"`) |
-| `UpdateHostAssignmentRequest` | `role` (PluginRole), `plugin_type` (Option), `plugin_config_id` (Option), `plugin_config` (Option), `package_identifier` (Option), `config` (Option), `execution_site` (Option) |
-| `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option -- `{ tag, release_url, assets }`) |
-| `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus -- `pending`, `queued`) |
+| Type                          | Fields                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TriggerVersionCheckResponse` | `agents_notified` (u32), `controller_checks_run` (u32, default `0`), `message` (String)                                                                                                                                                                                                                                                                   |
+| `SoftwareItemResponse`        | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `featured`, `last_checked_at`, `host_count`, `installed_version` (Option -- present only when `host_id` filter is used), `latest_version` (Option), `update_available`, `created_at`, `updated_at`, `icon_url` (Option&lt;String&gt; -- HTTPS URL to an icon/logo image) |
+| `SoftwareItemDetailResponse`  | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>`                                                                                                                                                                                                                                                                                 |
+| `SoftwareItemHostSummary`     | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at`                                                                                             |
+| `HostPluginRoleSummary`       | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config_name` (Option), `plugin_type`, `package_identifier`, `config` (Option), `execution_site`                                                                                                                                                                                                 |
+| `HostSoftwareAssignment`      | `host_id`, `plugins` (Vec&lt;HostPluginRoleAssignment&gt;)                                                                                                                                                                                                                                                                                                |
+| `HostPluginRoleAssignment`    | `role` (PluginRole), `plugin_type`, `plugin_config_id` (Option), `plugin_config` (Option -- inline create), `package_identifier`, `config` (Option), `execution_site` (default `"auto"`)                                                                                                                                                                  |
+| `UpdateHostAssignmentRequest` | `role` (PluginRole), `plugin_type` (Option), `plugin_config_id` (Option), `plugin_config` (Option), `package_identifier` (Option), `config` (Option), `execution_site` (Option)                                                                                                                                                                           |
+| `TriggerUpdateRequest`        | `to_version` (String), `release_info` (Option -- `{ tag, release_url, assets }`)                                                                                                                                                                                                                                                                          |
+| `TriggerUpdateResponse`       | `update_history_id` (Uuid), `status` (TriggerUpdateStatus -- `pending`, `queued`)                                                                                                                                                                                                                                                                         |
 
 **`latest_version` and `update_available`** are populated by the controller at read time:
 
@@ -911,6 +911,7 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
     (either explicitly `"controller"`, or `"auto"` with `ControllerSideFetchReleases` capability).
 
   `null` when no upstream version has been resolved yet.
+
 - At the item level (`SoftwareItemResponse`), `latest_version` is derived as the maximum across all
   hosts' per-host `latest_version` values.
 - `update_available` at the item level is `true` if any assigned host has an `installed_version`
@@ -925,11 +926,11 @@ See [Software Item Entity](../architecture/software-item-entity.md) for the full
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`, `trigger_update`) |
-| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
-| `crates/shared/web-api-types/src/software_items.rs` | Response and request types |
+| File                                                          | Purpose                                                                    |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/software_items.rs`              | Route handlers (`check_versions`, `check_versions_host`, `trigger_update`) |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | `VersionCheckResults` handler (updates `last_checked_at`)                  |
+| `crates/shared/web-api-types/src/software_items.rs`           | Response and request types                                                 |
 
 ## Scheduler Endpoints
 
@@ -1007,19 +1008,19 @@ Trigger immediate execution. Sets `next_run_at = now` so the task becomes eligib
 
 Types are defined in `crates/shared/web-api-types/src/scheduler.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `ScheduledTaskResponse` | `id`, `task_type`, `label`, `interval_seconds`, `jitter_seconds`, `enabled`, `task_config`, `last_run_at`, `next_run_at`, `is_running`, `last_error`, `run_count`, `created_at`, `updated_at` |
-| `UpdateScheduledTaskRequest` | `interval_seconds?`, `jitter_seconds?`, `enabled?`, `task_config?` |
-| `TriggerScheduledTaskResponse` | `triggered`, `message` |
+| Type                           | Fields                                                                                                                                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ScheduledTaskResponse`        | `id`, `task_type`, `label`, `interval_seconds`, `jitter_seconds`, `enabled`, `task_config`, `last_run_at`, `next_run_at`, `is_running`, `last_error`, `run_count`, `created_at`, `updated_at` |
+| `UpdateScheduledTaskRequest`   | `interval_seconds?`, `jitter_seconds?`, `enabled?`, `task_config?`                                                                                                                            |
+| `TriggerScheduledTaskResponse` | `triggered`, `message`                                                                                                                                                                        |
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/scheduler.rs` | Route handlers |
-| `crates/shared/web-api-types/src/scheduler.rs` | Request/response types |
-| `crates/shared/db/src/entity/scheduled_task.rs` | SeaORM entity |
+| File                                            | Purpose                |
+| ----------------------------------------------- | ---------------------- |
+| `crates/ui/web-api/src/routes/scheduler.rs`     | Route handlers         |
+| `crates/shared/web-api-types/src/scheduler.rs`  | Request/response types |
+| `crates/shared/db/src/entity/scheduled_task.rs` | SeaORM entity          |
 
 ## Notification Endpoints
 
@@ -1092,13 +1093,13 @@ controller instances.
 
 ### Rate-limited endpoints
 
-| Endpoint | Limit | Key format |
-| --- | --- | --- |
-| `POST /api/v1/auth/login` | 10 req/min/IP | `/api/v1/auth/login:{ip}` |
-| `POST /api/v1/auth/register` | 10 req/min/IP | `/api/v1/auth/register:{ip}` |
-| `POST /api/v1/auth/refresh` | 10 req/min/IP | `/api/v1/auth/refresh:{ip}` |
-| `POST /api/v1/auth/device` | 10 req/min/IP | `/api/v1/auth/device:{ip}` |
-| `POST /api/v1/auth/device/poll` | 12 req/min/IP | `/api/v1/auth/device/poll:{ip}` |
+| Endpoint                                  | Limit         | Key format                                |
+| ----------------------------------------- | ------------- | ----------------------------------------- |
+| `POST /api/v1/auth/login`                 | 10 req/min/IP | `/api/v1/auth/login:{ip}`                 |
+| `POST /api/v1/auth/register`              | 10 req/min/IP | `/api/v1/auth/register:{ip}`              |
+| `POST /api/v1/auth/refresh`               | 10 req/min/IP | `/api/v1/auth/refresh:{ip}`               |
+| `POST /api/v1/oauth/device_authorization` | 10 req/min/IP | `/api/v1/oauth/device_authorization:{ip}` |
+| `POST /api/v1/oauth/token`                | 12 req/min/IP | `/api/v1/oauth/token:{ip}`                |
 
 Endpoints **not** rate-limited: logout (requires valid refresh token), device/approve (requires auth), OIDC (external
 IdP interaction), all authenticated endpoints (require valid JWT/API token).
@@ -1107,9 +1108,9 @@ IdP interaction), all authenticated endpoints (require valid JWT/API token).
 
 The `/api/v1/ws/service` WebSocket endpoint has its own per-IP rate limiting, applied **before** the WebSocket upgrade:
 
-| Key format | Limit | Trigger | Fail mode |
-| --- | --- | --- | --- |
-| `ws_connect:{ip}` | 30 req/60s | Every connection attempt | Fail-closed (503 on DB error) |
+| Key format          | Limit       | Trigger                    | Fail mode                     |
+| ------------------- | ----------- | -------------------------- | ----------------------------- |
+| `ws_connect:{ip}`   | 30 req/60s  | Every connection attempt   | Fail-closed (503 on DB error) |
 | `ws_auth_fail:{ip}` | 10 req/300s | After failed bearer lookup | Fail-closed (503 on DB error) |
 
 Unlike the HTTP rate limiter middleware (which fails open), the WebSocket rate limiter **fails closed** on DB errors.
@@ -1147,10 +1148,10 @@ types are defined in `crates/shared/web-api-types/src/pagination.rs`.
 
 ### Query parameters
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `page` | u64 | 1 | Page number (1-indexed) |
-| `per_page` | u64 | 20 | Items per page (clamped to 1–1000) |
+| Parameter  | Type | Default | Description                        |
+| ---------- | ---- | ------- | ---------------------------------- |
+| `page`     | u64  | 1       | Page number (1-indexed)            |
+| `per_page` | u64  | 20      | Items per page (clamped to 1–1000) |
 
 ### Response envelope
 
@@ -1168,27 +1169,27 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 
 ### Paginated endpoints
 
-| Endpoint | Query struct | Notes |
-| --- | --- | --- |
-| `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
-| `GET /api/v1/system-services` | `ListSystemServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
-| `GET /api/v1/hosts` | `PaginationParams` | |
-| `GET /api/v1/software-items` | `ListSoftwareItemsParams` | Filterable by `featured` (bool), `host_id` (UUID), `updatable` (bool) |
-| `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
-| `GET /api/v1/plugin-configs` | `PaginationParams` | |
-| `GET /api/v1/enrollment-tokens` | `ListEnrollmentTokensQuery` (includes `page`/`per_page`) | |
-| `GET /api/v1/notifications/channels` | `PaginationParams` | |
-| `GET /api/v1/notifications/rules` | `ListRulesQuery` (includes `page`/`per_page`) | Filterable by `channel_id`, `event_type` |
-| `GET /api/v1/notifications/log` | `PaginationParams` | |
-| `GET /api/v1/update-batches` | `UpdateBatchListQuery` (includes `page`/`per_page`) | Filterable by `status` |
-| `GET /api/v1/software-ignores` | `PaginationParams` | |
+| Endpoint                             | Query struct                                             | Notes                                                                 |
+| ------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/v1/services`               | `ListServicesQuery` (includes `page`/`per_page`)         | Filterable by `capability`, `status`                                  |
+| `GET /api/v1/system-services`        | `ListSystemServicesQuery` (includes `page`/`per_page`)   | Filterable by `capability`, `status`                                  |
+| `GET /api/v1/hosts`                  | `PaginationParams`                                       |                                                                       |
+| `GET /api/v1/software-items`         | `ListSoftwareItemsParams`                                | Filterable by `featured` (bool), `host_id` (UUID), `updatable` (bool) |
+| `GET /api/v1/update-history`         | `UpdateHistoryQuery` (includes `page`/`per_page`)        | Filterable by `host_id`, `software_item_id`, `status`                 |
+| `GET /api/v1/plugin-configs`         | `PaginationParams`                                       |                                                                       |
+| `GET /api/v1/enrollment-tokens`      | `ListEnrollmentTokensQuery` (includes `page`/`per_page`) |                                                                       |
+| `GET /api/v1/notifications/channels` | `PaginationParams`                                       |                                                                       |
+| `GET /api/v1/notifications/rules`    | `ListRulesQuery` (includes `page`/`per_page`)            | Filterable by `channel_id`, `event_type`                              |
+| `GET /api/v1/notifications/log`      | `PaginationParams`                                       |                                                                       |
+| `GET /api/v1/update-batches`         | `UpdateBatchListQuery` (includes `page`/`per_page`)      | Filterable by `status`                                                |
+| `GET /api/v1/software-ignores`       | `PaginationParams`                                       |                                                                       |
 
 ### Endpoints NOT paginated (already bounded)
 
-| Endpoint | Reason |
-| --- | --- |
-| `GET /api/v1/settings/mqtt` | Bounded by `MqttMaxClientsPerTenant` (default 10) |
-| `GET /api/v1/auth/api-tokens` | Per-user, typically small |
+| Endpoint                      | Reason                                            |
+| ----------------------------- | ------------------------------------------------- |
+| `GET /api/v1/settings/mqtt`   | Bounded by `MqttMaxClientsPerTenant` (default 10) |
+| `GET /api/v1/auth/api-tokens` | Per-user, typically small                         |
 
 ### Adding pagination to a new endpoint
 
@@ -1198,17 +1199,15 @@ without an existing query struct, use `Query<PaginationParams>` as a new extract
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>` |
-| `crates/shared/web-api-types/src/prelude.rs` | Convenience re-exports of ~35 commonly used request/response types (`use uptrakit_web_api_types::prelude::*`) |
+| File                                            | Purpose                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>`                                              |
+| `crates/shared/web-api-types/src/prelude.rs`    | Convenience re-exports of ~35 commonly used request/response types (`use uptrakit_web_api_types::prelude::*`) |
 
 ## SSE Endpoints
 
 Two SSE (Server-Sent Events) endpoints provide real-time push notifications:
 
-- `GET /api/v1/auth/device/stream?device_code=<code>` — Unauthenticated. Pushes `authorized` or `expired` events
-  for the device authorization flow.
 - `GET /api/v1/events/stream` — Authenticated (requires `ViewServices` permission). Pushes admin events for the
   user's tenant (host/service/software changes, version checks, updates, discovery).
 

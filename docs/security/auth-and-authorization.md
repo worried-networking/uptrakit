@@ -6,32 +6,32 @@ description: Authentication methods, JWT access token claims, role and permissio
 
 # Authentication and Authorization
 
-| Method | Scope | Details |
-| --- | --- | --- |
-| Password (Argon2id) | User login | Local accounts with hashed passwords. |
-| OIDC | User login | External identity providers with auto-create or account linking. Requires the `oidc` Cargo feature (enabled by default). |
-| Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`). |
-| JWT access tokens | API requests | Short-lived tokens that carry resolved permissions (never stored). |
-| Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. Session integrity validated on every use (see below). |
-| API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |
-| mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
-| Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
-| Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/). |
-| System enrollment tokens | System service onboarding | Global (non-tenant) named tokens stored in the `system_enrollment_tokens` table (Argon2id hashed). Supports usage limits and TTL. See [System Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/). |
+| Method                   | Scope                     | Details                                                                                                                                                                                                                                          |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Password (Argon2id)      | User login                | Local accounts with hashed passwords.                                                                                                                                                                                                            |
+| OIDC                     | User login                | External identity providers with auto-create or account linking. Requires the `oidc` Cargo feature (enabled by default).                                                                                                                         |
+| Device authorization     | CLI login                 | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`).                                                                                         |
+| JWT access tokens        | API requests              | Short-lived tokens that carry resolved permissions (never stored).                                                                                                                                                                               |
+| Refresh tokens           | API requests              | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. Session integrity validated on every use (see below).                                                                                       |
+| API tokens               | Programmatic access       | Long-lived, revocable bearer tokens stored in the database.                                                                                                                                                                                      |
+| mTLS client certs        | Agent/MQTT connections    | Issued after CSR approval and validated per connection.                                                                                                                                                                                          |
+| Forwarded cert headers   | Reverse proxy             | Trusted proxies forward cert info/PEM; issuer CN verified.                                                                                                                                                                                       |
+| Enrollment tokens        | Service onboarding        | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/). |
+| System enrollment tokens | System service onboarding | Global (non-tenant) named tokens stored in the `system_enrollment_tokens` table (Argon2id hashed). Supports usage limits and TTL. See [System Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).        |
 
 ## JWT Access Token Claims Contract
 
 Every access token minted by `JwtManager::create_access_token` includes:
 
-| Claim | Value | Purpose |
-| --- | --- | --- |
-| `iss` | `"uptrakit"` | Identifies the issuing deployment. |
-| `aud` | `["uptrakit"]` | Restricts token acceptance to Uptrakit instances. |
-| `sub` | User UUID | Identifies the subject user. |
-| `exp` | Unix timestamp | Token expiry (15 minutes from issuance). |
-| `jti` | UUID | Per-token unique identifier used for denylist lookups. |
-| `permissions` | `string[]` | Resolved permissions embedded at issuance time. |
-| `auth_method` | `"password"` \| `"oidc"` \| `"api_token"` | How the user authenticated. |
+| Claim         | Value                                     | Purpose                                                |
+| ------------- | ----------------------------------------- | ------------------------------------------------------ |
+| `iss`         | `"uptrakit"`                              | Identifies the issuing deployment.                     |
+| `aud`         | `["uptrakit"]`                            | Restricts token acceptance to Uptrakit instances.      |
+| `sub`         | User UUID                                 | Identifies the subject user.                           |
+| `exp`         | Unix timestamp                            | Token expiry (15 minutes from issuance).               |
+| `jti`         | UUID                                      | Per-token unique identifier used for denylist lookups. |
+| `permissions` | `string[]`                                | Resolved permissions embedded at issuance time.        |
+| `auth_method` | `"password"` \| `"oidc"` \| `"api_token"` | How the user authenticated.                            |
 
 `decode_access_token` validates **all three** of `exp`, `iss`, and `aud`. Tokens that lack any of
 these claims, or that carry the wrong values (e.g. tokens issued by a different deployment sharing the
@@ -76,11 +76,11 @@ See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for encry
 `resolve_oidc_user` checks the `email_verified` claim from the OIDC ID token before performing any database
 lookup. This prevents account creation or matching for addresses that the identity provider has not confirmed.
 
-| `email_verified` claim | Behavior |
-| --- | --- |
-| `true` | Accepted — proceeds to user resolution |
-| `false` | **Rejected** — returns `OidcUserResolution::EmailNotVerified`; user is redirected to the login page with `error=email_not_verified` |
-| absent / `null` | **Rejected** — treated the same as `false`. A rogue IdP that omits the claim cannot bypass verification. Providers that omit the claim for confirmed accounts must be configured to always include `email_verified: true`. |
+| `email_verified` claim | Behavior                                                                                                                                                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true`                 | Accepted — proceeds to user resolution                                                                                                                                                                                     |
+| `false`                | **Rejected** — returns `OidcUserResolution::EmailNotVerified`; user is redirected to the login page with `error=email_not_verified`                                                                                        |
+| absent / `null`        | **Rejected** — treated the same as `false`. A rogue IdP that omits the claim cannot bypass verification. Providers that omit the claim for confirmed accounts must be configured to always include `email_verified: true`. |
 
 The check occurs at the entry point of `resolve_oidc_user` before any DB query, ensuring no account is created
 or linked for an unverified email regardless of `auto_create` or role-mapping configuration.
@@ -96,11 +96,11 @@ graceful fallback.**
 
 ### Why defaults are dangerous
 
-| Site | Anti-pattern | Effect |
-| --- | --- | --- |
+| Site                                      | Anti-pattern           | Effect                                                                                 |
+| ----------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------- |
 | `require_auth.rs` — load user permissions | `.unwrap_or_default()` | DB outage → empty permission set → 403 Forbidden; legitimate requests blocked silently |
-| `oidc_auth.rs` — count existing users | `.unwrap_or(false)` | DB outage → assume zero users → unintended first-admin OIDC registration allowed |
-| `oidc_auth.rs` — list OIDC providers | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked |
+| `oidc_auth.rs` — count existing users     | `.unwrap_or(false)`    | DB outage → assume zero users → unintended first-admin OIDC registration allowed       |
+| `oidc_auth.rs` — list OIDC providers      | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked             |
 
 ### Required pattern
 
@@ -159,60 +159,60 @@ permissions organized by domain:
 
 #### Services
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewServices` | `view_services` | View tenant services and their status |
-| `ApproveServices` | `approve_services` | Approve pending service enrollments |
-| `RejectServices` | `reject_services` | Reject pending service enrollments |
-| `RemoveServices` | `remove_services` | Deactivate/remove services |
-| `UpdateServices` | `update_services` | Update service settings (ping interval, freeze, merge) |
+| Permission        | Serialized name    | Purpose                                                |
+| ----------------- | ------------------ | ------------------------------------------------------ |
+| `ViewServices`    | `view_services`    | View tenant services and their status                  |
+| `ApproveServices` | `approve_services` | Approve pending service enrollments                    |
+| `RejectServices`  | `reject_services`  | Reject pending service enrollments                     |
+| `RemoveServices`  | `remove_services`  | Deactivate/remove services                             |
+| `UpdateServices`  | `update_services`  | Update service settings (ping interval, freeze, merge) |
 
 #### System services
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewSystemServices` | `view_system_services` | View system services (MQTT bridge, external scheduler) |
-| `ApproveSystemServices` | `approve_system_services` | Approve pending system services |
-| `RejectSystemServices` | `reject_system_services` | Reject pending system services |
-| `RemoveSystemServices` | `remove_system_services` | Deactivate system services |
-| `UpdateSystemServices` | `update_system_services` | Update system service settings |
+| Permission              | Serialized name           | Purpose                                                |
+| ----------------------- | ------------------------- | ------------------------------------------------------ |
+| `ViewSystemServices`    | `view_system_services`    | View system services (MQTT bridge, external scheduler) |
+| `ApproveSystemServices` | `approve_system_services` | Approve pending system services                        |
+| `RejectSystemServices`  | `reject_system_services`  | Reject pending system services                         |
+| `RemoveSystemServices`  | `remove_system_services`  | Deactivate system services                             |
+| `UpdateSystemServices`  | `update_system_services`  | Update system service settings                         |
 
 #### Software
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewSoftware` | `view_software` | View software items, plugin configs, history |
-| `CreateSoftware` | `create_software` | Create software items and plugin configs |
-| `UpdateSoftware` | `update_software` | Edit software items and plugin configs |
-| `DeleteSoftware` | `delete_software` | Delete software items and plugin configs |
-| `TriggerChecks` | `trigger_checks` | Trigger version checks and autodiscovery |
-| `TriggerUpdates` | `trigger_updates` | Trigger update execution (single and batch) |
-| `ManageScheduler` | `manage_scheduler` | Manage scheduled tasks |
+| Permission        | Serialized name    | Purpose                                      |
+| ----------------- | ------------------ | -------------------------------------------- |
+| `ViewSoftware`    | `view_software`    | View software items, plugin configs, history |
+| `CreateSoftware`  | `create_software`  | Create software items and plugin configs     |
+| `UpdateSoftware`  | `update_software`  | Edit software items and plugin configs       |
+| `DeleteSoftware`  | `delete_software`  | Delete software items and plugin configs     |
+| `TriggerChecks`   | `trigger_checks`   | Trigger version checks and autodiscovery     |
+| `TriggerUpdates`  | `trigger_updates`  | Trigger update execution (single and batch)  |
+| `ManageScheduler` | `manage_scheduler` | Manage scheduled tasks                       |
 
 #### Hosts
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewHosts` | `view_hosts` | View hosts |
-| `UpdateHosts` | `update_hosts` | Update host properties and tags |
-| `DeactivateHosts` | `deactivate_hosts` | Deactivate hosts |
+| Permission        | Serialized name    | Purpose                         |
+| ----------------- | ------------------ | ------------------------------- |
+| `ViewHosts`       | `view_hosts`       | View hosts                      |
+| `UpdateHosts`     | `update_hosts`     | Update host properties and tags |
+| `DeactivateHosts` | `deactivate_hosts` | Deactivate hosts                |
 
 #### Settings
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewSettings` | `view_settings` | View all tenant settings (unified read) |
-| `ManageAuthSettings` | `manage_auth_settings` | Manage registration, authentication, OIDC providers |
-| `ManageEnrollmentTokens` | `manage_enrollment_tokens` | Manage tenant enrollment tokens |
-| `ManageAgentCerts` | `manage_agent_certs` | Manage agent certificate settings |
-| `ManageGlobalSettings` | `manage_global_settings` | Manage global infrastructure settings |
+| Permission               | Serialized name            | Purpose                                             |
+| ------------------------ | -------------------------- | --------------------------------------------------- |
+| `ViewSettings`           | `view_settings`            | View all tenant settings (unified read)             |
+| `ManageAuthSettings`     | `manage_auth_settings`     | Manage registration, authentication, OIDC providers |
+| `ManageEnrollmentTokens` | `manage_enrollment_tokens` | Manage tenant enrollment tokens                     |
+| `ManageAgentCerts`       | `manage_agent_certs`       | Manage agent certificate settings                   |
+| `ManageGlobalSettings`   | `manage_global_settings`   | Manage global infrastructure settings               |
 
 #### Commands
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ManageCommands` | `manage_commands` | Modify command-bearing plugin config fields (code execution authority) |
-| `TestPluginConfigs` | `test_plugin_configs` | Test plugin configurations against hosts (dry-run validation) |
+| Permission          | Serialized name       | Purpose                                                                |
+| ------------------- | --------------------- | ---------------------------------------------------------------------- |
+| `ManageCommands`    | `manage_commands`     | Modify command-bearing plugin config fields (code execution authority) |
+| `TestPluginConfigs` | `test_plugin_configs` | Test plugin configurations against hosts (dry-run validation)          |
 
 > [!CAUTION]
 > `ManageCommands` grants effective code-execution authority on all managed hosts
@@ -221,43 +221,43 @@ permissions organized by domain:
 
 #### Notifications
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewNotifications` | `view_notifications` | View notification channels, rules, log |
+| Permission            | Serialized name        | Purpose                                                      |
+| --------------------- | ---------------------- | ------------------------------------------------------------ |
+| `ViewNotifications`   | `view_notifications`   | View notification channels, rules, log                       |
 | `ManageNotifications` | `manage_notifications` | Create/modify notification channels and rules; SMTP settings |
 
 #### Audit logs
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ViewAuditLogs` | `view_audit_logs` | View tenant-scoped audit log entries |
-| `ViewSystemAuditLogs` | `view_system_audit_logs` | View system-level audit log entries |
+| Permission            | Serialized name          | Purpose                              |
+| --------------------- | ------------------------ | ------------------------------------ |
+| `ViewAuditLogs`       | `view_audit_logs`        | View tenant-scoped audit log entries |
+| `ViewSystemAuditLogs` | `view_system_audit_logs` | View system-level audit log entries  |
 
 #### User management
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
-| `ManageUsers` | `manage_users` | Manage user roles and access |
+| Permission    | Serialized name | Purpose                      |
+| ------------- | --------------- | ---------------------------- |
+| `ManageUsers` | `manage_users`  | Manage user roles and access |
 
 #### Autodiscovery
 
-| Permission | Serialized name | Purpose |
-| --- | --- | --- |
+| Permission      | Serialized name  | Purpose                           |
+| --------------- | ---------------- | --------------------------------- |
 | `ManageIgnores` | `manage_ignores` | Manage autodiscovery ignore rules |
 
 ### Built-in roles
 
 Eight built-in roles group permissions into logical responsibilities:
 
-| Role | Permissions |
-| --- | --- |
-| `viewer` | `view_services`, `view_software`, `view_hosts`, `view_settings` |
-| `operator` | `approve_services`, `reject_services`, `trigger_checks`, `trigger_updates` |
-| `service_manager` | `approve_services`, `reject_services`, `remove_services`, `update_services` |
-| `software_manager` | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores`, `test_plugin_configs` |
-| `host_manager` | `update_hosts`, `deactivate_hosts` |
-| `settings_manager` | `manage_auth_settings`, `manage_enrollment_tokens`, `manage_agent_certs`, `view_notifications`, `manage_notifications`, `view_audit_logs`, `manage_users` |
-| `command_manager` | `manage_commands`, `test_plugin_configs` |
+| Role                   | Permissions                                                                                                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `viewer`               | `view_services`, `view_software`, `view_hosts`, `view_settings`                                                                                                                     |
+| `operator`             | `approve_services`, `reject_services`, `trigger_checks`, `trigger_updates`                                                                                                          |
+| `service_manager`      | `approve_services`, `reject_services`, `remove_services`, `update_services`                                                                                                         |
+| `software_manager`     | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores`, `test_plugin_configs`                           |
+| `host_manager`         | `update_hosts`, `deactivate_hosts`                                                                                                                                                  |
+| `settings_manager`     | `manage_auth_settings`, `manage_enrollment_tokens`, `manage_agent_certs`, `view_notifications`, `manage_notifications`, `view_audit_logs`, `manage_users`                           |
+| `command_manager`      | `manage_commands`, `test_plugin_configs`                                                                                                                                            |
 | `system_administrator` | `manage_global_settings`, `view_system_services`, `approve_system_services`, `reject_system_services`, `remove_system_services`, `update_system_services`, `view_system_audit_logs` |
 
 Built-in roles are marked with `is_built_in = true` in the `roles` table.
@@ -268,13 +268,13 @@ Access presets are code-defined bundles (not stored in the database) that assign
 in a single operation. They are exposed via the `GET /api/v1/access-presets` and
 `POST /api/v1/users/{id}/apply-preset` endpoints.
 
-| Preset | Roles assigned | Use case |
-| --- | --- | --- |
-| `read_only` | `viewer` | Dashboard viewers, stakeholders |
-| `operator` | `viewer`, `operator` | On-call staff |
-| `manager` | `viewer`, `service_manager`, `software_manager`, `host_manager` | Team leads |
-| `administrator` | `viewer`, `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager` | Tenant administrators |
-| `owner` | All 8 roles | System owner |
+| Preset          | Roles assigned                                                                                         | Use case                        |
+| --------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| `read_only`     | `viewer`                                                                                               | Dashboard viewers, stakeholders |
+| `operator`      | `viewer`, `operator`                                                                                   | On-call staff                   |
+| `manager`       | `viewer`, `service_manager`, `software_manager`, `host_manager`                                        | Team leads                      |
+| `administrator` | `viewer`, `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager` | Tenant administrators           |
+| `owner`         | All 8 roles                                                                                            | System owner                    |
 
 See [User Management API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the full endpoint reference and
 [User Management Guide](../end-user/user-management.md) for the end-user documentation.
@@ -326,41 +326,41 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 
 ### Permission extractor reference
 
-| Extractor | Permission checked |
-| --- | --- |
-| `CanViewSettings` | `Permission::ViewSettings` |
-| `CanManageAuthSettings` | `Permission::ManageAuthSettings` |
+| Extractor                   | Permission checked                   |
+| --------------------------- | ------------------------------------ |
+| `CanViewSettings`           | `Permission::ViewSettings`           |
+| `CanManageAuthSettings`     | `Permission::ManageAuthSettings`     |
 | `CanManageEnrollmentTokens` | `Permission::ManageEnrollmentTokens` |
-| `CanManageAgentCerts` | `Permission::ManageAgentCerts` |
-| `CanManageGlobalSettings` | `Permission::ManageGlobalSettings` |
-| `CanViewServices` | `Permission::ViewServices` |
-| `CanApproveServices` | `Permission::ApproveServices` |
-| `CanRejectServices` | `Permission::RejectServices` |
-| `CanRemoveServices` | `Permission::RemoveServices` |
-| `CanUpdateServices` | `Permission::UpdateServices` |
-| `CanViewSoftware` | `Permission::ViewSoftware` |
-| `CanCreateSoftware` | `Permission::CreateSoftware` |
-| `CanUpdateSoftware` | `Permission::UpdateSoftware` |
-| `CanDeleteSoftware` | `Permission::DeleteSoftware` |
-| `CanTriggerChecks` | `Permission::TriggerChecks` |
-| `CanTriggerUpdates` | `Permission::TriggerUpdates` |
-| `CanManageScheduler` | `Permission::ManageScheduler` |
-| `CanManageCommands` | `Permission::ManageCommands` |
-| `CanTestPluginConfigs` | `Permission::TestPluginConfigs` |
-| `CanViewHosts` | `Permission::ViewHosts` |
-| `CanUpdateHosts` | `Permission::UpdateHosts` |
-| `CanDeactivateHosts` | `Permission::DeactivateHosts` |
-| `CanViewNotifications` | `Permission::ViewNotifications` |
-| `CanManageNotifications` | `Permission::ManageNotifications` |
-| `CanViewSystemServices` | `Permission::ViewSystemServices` |
-| `CanApproveSystemServices` | `Permission::ApproveSystemServices` |
-| `CanRejectSystemServices` | `Permission::RejectSystemServices` |
-| `CanRemoveSystemServices` | `Permission::RemoveSystemServices` |
-| `CanUpdateSystemServices` | `Permission::UpdateSystemServices` |
-| `CanViewAuditLogs` | `Permission::ViewAuditLogs` |
-| `CanViewSystemAuditLogs` | `Permission::ViewSystemAuditLogs` |
-| `CanManageUsers` | `Permission::ManageUsers` |
-| `CanManageIgnores` | `Permission::ManageIgnores` |
+| `CanManageAgentCerts`       | `Permission::ManageAgentCerts`       |
+| `CanManageGlobalSettings`   | `Permission::ManageGlobalSettings`   |
+| `CanViewServices`           | `Permission::ViewServices`           |
+| `CanApproveServices`        | `Permission::ApproveServices`        |
+| `CanRejectServices`         | `Permission::RejectServices`         |
+| `CanRemoveServices`         | `Permission::RemoveServices`         |
+| `CanUpdateServices`         | `Permission::UpdateServices`         |
+| `CanViewSoftware`           | `Permission::ViewSoftware`           |
+| `CanCreateSoftware`         | `Permission::CreateSoftware`         |
+| `CanUpdateSoftware`         | `Permission::UpdateSoftware`         |
+| `CanDeleteSoftware`         | `Permission::DeleteSoftware`         |
+| `CanTriggerChecks`          | `Permission::TriggerChecks`          |
+| `CanTriggerUpdates`         | `Permission::TriggerUpdates`         |
+| `CanManageScheduler`        | `Permission::ManageScheduler`        |
+| `CanManageCommands`         | `Permission::ManageCommands`         |
+| `CanTestPluginConfigs`      | `Permission::TestPluginConfigs`      |
+| `CanViewHosts`              | `Permission::ViewHosts`              |
+| `CanUpdateHosts`            | `Permission::UpdateHosts`            |
+| `CanDeactivateHosts`        | `Permission::DeactivateHosts`        |
+| `CanViewNotifications`      | `Permission::ViewNotifications`      |
+| `CanManageNotifications`    | `Permission::ManageNotifications`    |
+| `CanViewSystemServices`     | `Permission::ViewSystemServices`     |
+| `CanApproveSystemServices`  | `Permission::ApproveSystemServices`  |
+| `CanRejectSystemServices`   | `Permission::RejectSystemServices`   |
+| `CanRemoveSystemServices`   | `Permission::RemoveSystemServices`   |
+| `CanUpdateSystemServices`   | `Permission::UpdateSystemServices`   |
+| `CanViewAuditLogs`          | `Permission::ViewAuditLogs`          |
+| `CanViewSystemAuditLogs`    | `Permission::ViewSystemAuditLogs`    |
+| `CanManageUsers`            | `Permission::ManageUsers`            |
+| `CanManageIgnores`          | `Permission::ManageIgnores`          |
 
 All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
 `::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
@@ -385,12 +385,12 @@ for the permission pattern conventions.
 
 Four capabilities grant access to sensitive infrastructure secrets:
 
-| Capability | Secret delivered |
-| --- | --- |
-| `database_access` | Database connection URL |
-| `nats_access` | NATS server URL |
+| Capability          | Secret delivered                    |
+| ------------------- | ----------------------------------- |
+| `database_access`   | Database connection URL             |
+| `nats_access`       | NATS server URL                     |
 | `master_key_access` | Master AES-256 encryption key (hex) |
-| `ca_management` | Permission to request CA rotation |
+| `ca_management`     | Permission to request CA rotation   |
 
 These credentials are delivered via `ServiceCredentials` after mTLS authentication and are never
 published to NATS. Because they provide privileged access to the entire infrastructure, a service
@@ -420,11 +420,11 @@ and two-tier service model.
 Services connect to the controller WebSocket endpoint at `/api/v1/ws/service`. Three authentication
 paths exist:
 
-| Path | When | How |
-| --- | --- | --- |
-| mTLS | Post-enrollment | Client certificate issued after CSR approval; identity is cryptographically tied to the certificate serial number and service ID. |
-| Bearer token | Enrollment window | `Authorization: Bearer <enrollment_secret>` header; secret is SHA-256 hashed and compared against the database. |
-| Anonymous | Pre-enrollment | No credentials; only `enroll` messages are accepted. |
+| Path         | When              | How                                                                                                                               |
+| ------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| mTLS         | Post-enrollment   | Client certificate issued after CSR approval; identity is cryptographically tied to the certificate serial number and service ID. |
+| Bearer token | Enrollment window | `Authorization: Bearer <enrollment_secret>` header; secret is SHA-256 hashed and compared against the database.                   |
+| Anonymous    | Pre-enrollment    | No credentials; only `enroll` messages are accepted.                                                                              |
 
 ### Bearer token lookup and the `service_id` query parameter
 

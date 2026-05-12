@@ -8,12 +8,12 @@ Uptrakit ships built-in plugins for common Linux package managers. Each plugin p
 documents the configuration schema, supported options, and behavior notes specific to
 that package manager.
 
-| Plugin | Description |
-| --- | --- |
-| [APT](apt.md) | Debian and Ubuntu package management via `apt`. |
-| [DNF](dnf.md) | Fedora and RHEL package management via `dnf`. |
-| [Docker](docker.md) | Docker image and container update tracking. |
-| [Pacman](pacman.md) | Arch Linux package management via `pacman`. |
+| Plugin              | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| [APT](apt.md)       | Debian and Ubuntu package management via `apt`. |
+| [DNF](dnf.md)       | Fedora and RHEL package management via `dnf`.   |
+| [Docker](docker.md) | Docker image and container update tracking.     |
+| [Pacman](pacman.md) | Arch Linux package management via `pacman`.     |
 
 ## Related Documentation
 

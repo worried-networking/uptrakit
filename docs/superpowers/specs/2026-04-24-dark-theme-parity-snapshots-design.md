@@ -27,14 +27,14 @@ Add `chromium-dark` project:
 ```ts
 projects: [
   {
-    name: 'chromium',
-    use: { ...devices['Desktop Chrome'], colorScheme: 'light' }
+    name: "chromium",
+    use: { ...devices["Desktop Chrome"], colorScheme: "light" },
   },
   {
-    name: 'chromium-dark',
-    use: { ...devices['Desktop Chrome'], colorScheme: 'dark' }
-  }
-]
+    name: "chromium-dark",
+    use: { ...devices["Desktop Chrome"], colorScheme: "dark" },
+  },
+];
 ```
 
 ### `frontend/tests/e2e/parity-config.ts`
@@ -52,7 +52,7 @@ Three changes:
      if (!projectName.startsWith(PARITY_REQUIRED_PROJECT)) {
        throw new Error(
          `ui parity harness requires Playwright project "${PARITY_REQUIRED_PROJECT}" ` +
-         `(or a variant), received "${projectName}".`
+           `(or a variant), received "${projectName}".`,
        );
      }
    }
@@ -65,9 +65,10 @@ Three changes:
    const env = await page.evaluate(() => ({
      language: navigator.language,
      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-     reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)")
+       .matches,
      devicePixelRatio: window.devicePixelRatio,
-     prefersDark: window.matchMedia('(prefers-color-scheme: dark)').matches   // ADD
+     prefersDark: window.matchMedia("(prefers-color-scheme: dark)").matches, // ADD
    }));
    ```
 
@@ -77,12 +78,12 @@ Three changes:
 
    ```ts
    const projectName = test.info().project.name;
-   const expectedDark = projectName.includes('dark');
+   const expectedDark = projectName.includes("dark");
    if (env.prefersDark !== expectedDark) {
      throw new Error(
        `ui parity colorScheme mismatch: project "${projectName}" expects ` +
-       `${expectedDark ? 'dark' : 'light'} but page has ` +
-       `${env.prefersDark ? 'dark' : 'light'}.`
+         `${expectedDark ? "dark" : "light"} but page has ` +
+         `${env.prefersDark ? "dark" : "light"}.`,
      );
    }
    ```
@@ -103,22 +104,22 @@ the system-preference media query listener — it does not re-apply the theme on
 Combined with `emulateMedia({ colorScheme: 'dark' })`, this fully activates dark tokens.
 
 ```ts
-import { test as base } from '@playwright/test';
-import type { Page, TestInfo } from '@playwright/test';
+import { test as base } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
-export type ParityTheme = 'light' | 'dark';
+export type ParityTheme = "light" | "dark";
 
 export const parityTest = base.extend<{ parityTheme: ParityTheme }>({
   parityTheme: async ({}, use, testInfo: TestInfo) => {
-    const theme = testInfo.project.name.includes('dark') ? 'dark' : 'light';
+    const theme = testInfo.project.name.includes("dark") ? "dark" : "light";
     await use(theme);
-  }
+  },
 });
 
 export async function freezeParityInputs(page: Page, theme: ParityTheme) {
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
   await page.addInitScript((t) => {
-    localStorage.setItem('theme-mode', t);
+    localStorage.setItem("theme-mode", t);
   }, theme);
 }
 ```
@@ -147,10 +148,13 @@ export async function freezeParityInputs(page: Page, theme: ParityTheme) {
 
   ```ts
   // Before (line 639):
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.emulateMedia({
+    colorScheme: "light",
+    reducedMotion: "no-preference",
+  });
 
   // After:
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   ```
 
 ### `frontend/tests/e2e/ui-parity-responsive.test.ts`

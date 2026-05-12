@@ -2947,49 +2947,49 @@ git commit --only \
 
 ### Spec Coverage
 
-| Spec requirement | Task |
-| --- | --- |
-| `awaiting_restart_timeout` column on `software_item` | Task 1 |
-| `awaiting_restart_since` column on `update_history` | Task 1 |
-| `UpdateStatus::AwaitingRestart` in both enums | Task 2 |
-| `UpdateResultPayload.resumable` wire field | Task 3 |
-| `VersionCheckResult.not_ready` wire field | Task 3 |
-| `execute_update` plugin trait returns `ExecuteUpdateResult` | Task 4 |
-| All existing plugins return `ExecuteUpdateResult { resumable: false }` | Task 5 |
-| `execute_update_pipeline` moves post-hooks out | Task 6 |
-| Resumable path spawns post-hooks, sends early result before them | Task 6 |
-| Early result channel in `InFlightUpdate` | Task 7 |
-| `try_recv` drain in JoinHandle completion arm | Task 7 |
-| `handle_graceful_shutdown` skips send when `early_sent` | Task 7 |
-| `transition_to_awaiting_restart` CAS function | Task 8 |
-| `handle_update_result` resumable branch (no dispatch) | Task 8 |
-| `has_active_update_for_host` includes `AwaitingRestart` | Task 9 |
-| `maybe_complete_batch` includes `AwaitingRestart` as non-terminal | Task 9 |
-| Unique constraint violation handled as debug/skip | Task 9 |
-| `handle_version_check_results` AwaitingRestart correlation | Task 10 |
-| All 5 `not_ready`/error/version evaluation rules | Task 10 |
-| CAS loser must not dispatch | Task 8 + 10 |
-| `TickExecutor` trait with 60s per-tick timeout | Task 11 |
-| `Scheduler.register_tick_executor` | Task 11 |
-| `SchedulerNotifier::signal_host_progression` | Task 11 |
-| `AwaitingRestartExecutor` verification polling | Task 12 |
-| `AwaitingRestartExecutor` timeout enforcement (`IS NOT NULL` guard) | Task 12 |
-| Register `AwaitingRestartExecutor` in controller scheduler | Task 12 |
-| `ServiceMetadata`, `ServiceMetadataProvider`, `DeploymentTopology` | Task 13 |
-| `HostRuntime::metadata_provider()` default returns `None` | Task 13 |
-| `MetadataAwareHostRuntime` + `ControllerMetadataProvider` | Task 14 |
-| Shell plugin `resumable: bool` config field | Task 15 |
-| Docker plugin `resumable: bool` config field | Task 15 |
-| Self-update plugin crate with `enabled: false` default | Task 16 |
-| `detect_host_compatibility` (disabled + no provider) | Task 17 |
-| `build_software_item` with `awaiting_restart_timeout: 120` | Task 17 |
-| `tag_strip_prefix: "v"` in generated `releases_github` config | Task 17 |
-| `version_regex` for shell `detect_version` | Task 17 |
-| Topology-specific update script generation (reuseport + fallback) | Task 17 |
-| Same-directory temp file (`binary_path.new-$$`) | Task 17 |
-| `codesign` portable no-op guard | Task 17 |
-| Register plugin in controller-standalone | Task 18 |
-| Partial unique index migration for `awaiting_restart` | Task 1 |
+| Spec requirement                                                       | Task        |
+| ---------------------------------------------------------------------- | ----------- |
+| `awaiting_restart_timeout` column on `software_item`                   | Task 1      |
+| `awaiting_restart_since` column on `update_history`                    | Task 1      |
+| `UpdateStatus::AwaitingRestart` in both enums                          | Task 2      |
+| `UpdateResultPayload.resumable` wire field                             | Task 3      |
+| `VersionCheckResult.not_ready` wire field                              | Task 3      |
+| `execute_update` plugin trait returns `ExecuteUpdateResult`            | Task 4      |
+| All existing plugins return `ExecuteUpdateResult { resumable: false }` | Task 5      |
+| `execute_update_pipeline` moves post-hooks out                         | Task 6      |
+| Resumable path spawns post-hooks, sends early result before them       | Task 6      |
+| Early result channel in `InFlightUpdate`                               | Task 7      |
+| `try_recv` drain in JoinHandle completion arm                          | Task 7      |
+| `handle_graceful_shutdown` skips send when `early_sent`                | Task 7      |
+| `transition_to_awaiting_restart` CAS function                          | Task 8      |
+| `handle_update_result` resumable branch (no dispatch)                  | Task 8      |
+| `has_active_update_for_host` includes `AwaitingRestart`                | Task 9      |
+| `maybe_complete_batch` includes `AwaitingRestart` as non-terminal      | Task 9      |
+| Unique constraint violation handled as debug/skip                      | Task 9      |
+| `handle_version_check_results` AwaitingRestart correlation             | Task 10     |
+| All 5 `not_ready`/error/version evaluation rules                       | Task 10     |
+| CAS loser must not dispatch                                            | Task 8 + 10 |
+| `TickExecutor` trait with 60s per-tick timeout                         | Task 11     |
+| `Scheduler.register_tick_executor`                                     | Task 11     |
+| `SchedulerNotifier::signal_host_progression`                           | Task 11     |
+| `AwaitingRestartExecutor` verification polling                         | Task 12     |
+| `AwaitingRestartExecutor` timeout enforcement (`IS NOT NULL` guard)    | Task 12     |
+| Register `AwaitingRestartExecutor` in controller scheduler             | Task 12     |
+| `ServiceMetadata`, `ServiceMetadataProvider`, `DeploymentTopology`     | Task 13     |
+| `HostRuntime::metadata_provider()` default returns `None`              | Task 13     |
+| `MetadataAwareHostRuntime` + `ControllerMetadataProvider`              | Task 14     |
+| Shell plugin `resumable: bool` config field                            | Task 15     |
+| Docker plugin `resumable: bool` config field                           | Task 15     |
+| Self-update plugin crate with `enabled: false` default                 | Task 16     |
+| `detect_host_compatibility` (disabled + no provider)                   | Task 17     |
+| `build_software_item` with `awaiting_restart_timeout: 120`             | Task 17     |
+| `tag_strip_prefix: "v"` in generated `releases_github` config          | Task 17     |
+| `version_regex` for shell `detect_version`                             | Task 17     |
+| Topology-specific update script generation (reuseport + fallback)      | Task 17     |
+| Same-directory temp file (`binary_path.new-$$`)                        | Task 17     |
+| `codesign` portable no-op guard                                        | Task 17     |
+| Register plugin in controller-standalone                               | Task 18     |
+| Partial unique index migration for `awaiting_restart`                  | Task 1      |
 
 ### Known Gaps (deferred per spec)
 

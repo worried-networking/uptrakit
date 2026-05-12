@@ -48,9 +48,9 @@ Examples: `@angular/cli`, `@nestjs/cli`, `@scope/my-tool`
 
 ## Configuration
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `include_prereleases` | No | `false` | Include pre-release dist-tags (`next`, `beta`, `alpha`, `rc`, `canary`) in upstream release results. When `false`, only the `latest` dist-tag is returned. |
+| Field                 | Required | Default | Description                                                                                                                                                |
+| --------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `include_prereleases` | No       | `false` | Include pre-release dist-tags (`next`, `beta`, `alpha`, `rc`, `canary`) in upstream release results. When `false`, only the `latest` dist-tag is returned. |
 
 **Minimal configuration (all defaults):**
 

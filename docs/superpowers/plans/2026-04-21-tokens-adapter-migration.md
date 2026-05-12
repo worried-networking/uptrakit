@@ -74,7 +74,7 @@ npm run build
 
 - `frontend/src/app.css` — delete literal `:root`/`.dark` blocks, delete
   `--theme-accent*`/`--theme-info*` intermediaries, add `@import
-  'virtual:theme/tokens.css'`, update `.skip-link`.
+'virtual:theme/tokens.css'`, update `.skip-link`.
 - `frontend/src/lib/theme/design-token-values.test.ts` — rewrite to import
   from `tokens.ts` instead of reading `app.css`.
 
@@ -188,90 +188,99 @@ produce the same pixels.
 Create `frontend/src/theme/tokens.test.ts`:
 
 ```ts
-import { describe, expect, it } from 'vitest';
-import { tokens, cssForTheme, getToken, type TokenName, type Theme } from './tokens';
+import { describe, expect, it } from "vitest";
+import {
+  tokens,
+  cssForTheme,
+  getToken,
+  type TokenName,
+  type Theme,
+} from "./tokens";
 
 const EXPECTED: Record<TokenName, Record<Theme, string>> = {
-  '--bg-base': { dark: '#09090b', light: '#f8fafc' },
-  '--bg-surface': { dark: '#111113', light: '#ffffff' },
-  '--bg-raised': { dark: '#18181b', light: '#f1f5f9' },
-  '--border-subtle': { dark: '#1c1c1f', light: '#e2e8f0' },
-  '--border-default': { dark: '#27272a', light: '#cbd5e1' },
-  '--text-muted': { dark: '#52525b', light: '#94a3b8' },
-  '--text-secondary': { dark: '#a1a1aa', light: '#64748b' },
-  '--text-primary': { dark: '#e4e4e7', light: '#0f172a' },
-  '--text-inverted': { dark: '#fafafa', light: '#ffffff' },
-  '--accent': { dark: '#06b6d4', light: '#2563eb' },
-  '--accent-rgb': { dark: '6 182 212', light: '37 99 235' },
-  '--accent-bright': { dark: '#22d3ee', light: '#3b82f6' },
-  '--accent-dark': { dark: '#0891b2', light: '#1d4ed8' },
-  '--accent-deep': { dark: '#0e7490', light: '#1e40af' },
-  '--color-success': { dark: '#4ade80', light: '#16a34a' },
-  '--color-success-bg': {
-    dark: 'rgba(74, 222, 128, 0.1)',
-    light: 'rgba(22, 163, 74, 0.08)'
+  "--bg-base": { dark: "#09090b", light: "#f8fafc" },
+  "--bg-surface": { dark: "#111113", light: "#ffffff" },
+  "--bg-raised": { dark: "#18181b", light: "#f1f5f9" },
+  "--border-subtle": { dark: "#1c1c1f", light: "#e2e8f0" },
+  "--border-default": { dark: "#27272a", light: "#cbd5e1" },
+  "--text-muted": { dark: "#52525b", light: "#94a3b8" },
+  "--text-secondary": { dark: "#a1a1aa", light: "#64748b" },
+  "--text-primary": { dark: "#e4e4e7", light: "#0f172a" },
+  "--text-inverted": { dark: "#fafafa", light: "#ffffff" },
+  "--accent": { dark: "#06b6d4", light: "#2563eb" },
+  "--accent-rgb": { dark: "6 182 212", light: "37 99 235" },
+  "--accent-bright": { dark: "#22d3ee", light: "#3b82f6" },
+  "--accent-dark": { dark: "#0891b2", light: "#1d4ed8" },
+  "--accent-deep": { dark: "#0e7490", light: "#1e40af" },
+  "--color-success": { dark: "#4ade80", light: "#16a34a" },
+  "--color-success-bg": {
+    dark: "rgba(74, 222, 128, 0.1)",
+    light: "rgba(22, 163, 74, 0.08)",
   },
-  '--color-success-border': {
-    dark: 'rgba(74, 222, 128, 0.25)',
-    light: 'rgba(22, 163, 74, 0.3)'
+  "--color-success-border": {
+    dark: "rgba(74, 222, 128, 0.25)",
+    light: "rgba(22, 163, 74, 0.3)",
   },
-  '--color-warning': { dark: '#fbbf24', light: '#d97706' },
-  '--color-warning-bg': {
-    dark: 'rgba(251, 191, 36, 0.12)',
-    light: 'rgba(217, 119, 6, 0.08)'
+  "--color-warning": { dark: "#fbbf24", light: "#d97706" },
+  "--color-warning-bg": {
+    dark: "rgba(251, 191, 36, 0.12)",
+    light: "rgba(217, 119, 6, 0.08)",
   },
-  '--color-warning-border': {
-    dark: 'rgba(251, 191, 36, 0.3)',
-    light: 'rgba(217, 119, 6, 0.28)'
+  "--color-warning-border": {
+    dark: "rgba(251, 191, 36, 0.3)",
+    light: "rgba(217, 119, 6, 0.28)",
   },
-  '--color-error': { dark: '#fdba74', light: '#dc2626' },
-  '--color-error-bg': {
-    dark: 'rgba(234, 88, 12, 0.15)',
-    light: 'rgba(220, 38, 38, 0.07)'
+  "--color-error": { dark: "#fdba74", light: "#dc2626" },
+  "--color-error-bg": {
+    dark: "rgba(234, 88, 12, 0.15)",
+    light: "rgba(220, 38, 38, 0.07)",
   },
-  '--color-error-border': {
-    dark: 'rgba(234, 88, 12, 0.35)',
-    light: 'rgba(220, 38, 38, 0.3)'
+  "--color-error-border": {
+    dark: "rgba(234, 88, 12, 0.35)",
+    light: "rgba(220, 38, 38, 0.3)",
   },
-  '--color-info': { dark: '#67e8f9', light: '#0891b2' },
-  '--color-info-bg': {
-    dark: 'rgba(6, 182, 212, 0.1)',
-    light: 'rgba(8, 145, 178, 0.08)'
+  "--color-info": { dark: "#67e8f9", light: "#0891b2" },
+  "--color-info-bg": {
+    dark: "rgba(6, 182, 212, 0.1)",
+    light: "rgba(8, 145, 178, 0.08)",
   },
-  '--color-info-border': {
-    dark: 'rgba(6, 182, 212, 0.22)',
-    light: 'rgba(8, 145, 178, 0.22)'
-  }
+  "--color-info-border": {
+    dark: "rgba(6, 182, 212, 0.22)",
+    light: "rgba(8, 145, 178, 0.22)",
+  },
 };
 
 const EXPECTED_TOKEN_NAMES = Object.keys(EXPECTED) as TokenName[];
 
-describe('tokens', () => {
-  it('defines every TokenName for both dark and light themes', () => {
+describe("tokens", () => {
+  it("defines every TokenName for both dark and light themes", () => {
     for (const name of EXPECTED_TOKEN_NAMES) {
       expect(tokens[name], `missing entry for ${name}`).toBeDefined();
       expect(tokens[name].dark, `missing dark value for ${name}`).toBeTruthy();
-      expect(tokens[name].light, `missing light value for ${name}`).toBeTruthy();
+      expect(
+        tokens[name].light,
+        `missing light value for ${name}`,
+      ).toBeTruthy();
     }
   });
 
-  it('pins every (name, theme) pair to the spec-approved value', () => {
+  it("pins every (name, theme) pair to the spec-approved value", () => {
     for (const name of EXPECTED_TOKEN_NAMES) {
       expect(tokens[name].dark, `dark ${name}`).toBe(EXPECTED[name].dark);
       expect(tokens[name].light, `light ${name}`).toBe(EXPECTED[name].light);
     }
   });
 
-  it('exposes getToken as a lookup helper equivalent to the table', () => {
+  it("exposes getToken as a lookup helper equivalent to the table", () => {
     for (const name of EXPECTED_TOKEN_NAMES) {
-      expect(getToken(name, 'dark')).toBe(EXPECTED[name].dark);
-      expect(getToken(name, 'light')).toBe(EXPECTED[name].light);
+      expect(getToken(name, "dark")).toBe(EXPECTED[name].dark);
+      expect(getToken(name, "light")).toBe(EXPECTED[name].light);
     }
   });
 
-  it('accent-rgb values parse as three integers in 0..255 separated by single spaces', () => {
-    for (const theme of ['dark', 'light'] as const) {
-      const parts = tokens['--accent-rgb'][theme].split(' ');
+  it("accent-rgb values parse as three integers in 0..255 separated by single spaces", () => {
+    for (const theme of ["dark", "light"] as const) {
+      const parts = tokens["--accent-rgb"][theme].split(" ");
       expect(parts).toHaveLength(3);
       for (const part of parts) {
         const n = Number(part);
@@ -282,8 +291,8 @@ describe('tokens', () => {
     }
   });
 
-  it('cssForTheme emits every TokenName exactly once for the given theme', () => {
-    for (const theme of ['dark', 'light'] as const) {
+  it("cssForTheme emits every TokenName exactly once for the given theme", () => {
+    for (const theme of ["dark", "light"] as const) {
       const css = cssForTheme(theme);
       for (const name of EXPECTED_TOKEN_NAMES) {
         const occurrences = css.split(`${name}:`).length - 1;
@@ -292,8 +301,8 @@ describe('tokens', () => {
     }
   });
 
-  it('cssForTheme emits each pair as `  --name: value;` on its own line', () => {
-    const css = cssForTheme('dark');
+  it("cssForTheme emits each pair as `  --name: value;` on its own line", () => {
+    const css = cssForTheme("dark");
     for (const name of EXPECTED_TOKEN_NAMES) {
       expect(css).toContain(`  ${name}: ${EXPECTED[name].dark};`);
     }
@@ -311,109 +320,111 @@ Expected: FAIL — `Cannot find module './tokens'` or similar.
 Create `frontend/src/theme/tokens.ts`:
 
 ```ts
-export type Theme = 'dark' | 'light';
+export type Theme = "dark" | "light";
 
 export type TokenName =
-  | '--bg-base'
-  | '--bg-surface'
-  | '--bg-raised'
-  | '--border-subtle'
-  | '--border-default'
-  | '--text-muted'
-  | '--text-secondary'
-  | '--text-primary'
-  | '--text-inverted'
-  | '--accent'
-  | '--accent-rgb'
-  | '--accent-bright'
-  | '--accent-dark'
-  | '--accent-deep'
-  | '--color-success'
-  | '--color-success-bg'
-  | '--color-success-border'
-  | '--color-warning'
-  | '--color-warning-bg'
-  | '--color-warning-border'
-  | '--color-error'
-  | '--color-error-bg'
-  | '--color-error-border'
-  | '--color-info'
-  | '--color-info-bg'
-  | '--color-info-border';
+  | "--bg-base"
+  | "--bg-surface"
+  | "--bg-raised"
+  | "--border-subtle"
+  | "--border-default"
+  | "--text-muted"
+  | "--text-secondary"
+  | "--text-primary"
+  | "--text-inverted"
+  | "--accent"
+  | "--accent-rgb"
+  | "--accent-bright"
+  | "--accent-dark"
+  | "--accent-deep"
+  | "--color-success"
+  | "--color-success-bg"
+  | "--color-success-border"
+  | "--color-warning"
+  | "--color-warning-bg"
+  | "--color-warning-border"
+  | "--color-error"
+  | "--color-error-bg"
+  | "--color-error-border"
+  | "--color-info"
+  | "--color-info-bg"
+  | "--color-info-border";
 
 export type TokenValue = string;
 
 /** Emit `rgba(R, G, B, A)` from a space-separated RGB base and an alpha. */
 function rgba(base: string, alpha: number): TokenValue {
-  const [r, g, b] = base.split(' ');
+  const [r, g, b] = base.split(" ");
   // Strip trailing zeros so `0.10` → `0.1` and `0.30` → `0.3`.
   const a = String(Number(alpha.toFixed(3)));
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
-const successBase = { dark: '74 222 128', light: '22 163 74' };
-const warningBase = { dark: '251 191 36', light: '217 119 6' };
-const errorBase = { dark: '234 88 12', light: '220 38 38' };
-const infoBase = { dark: '6 182 212', light: '8 145 178' };
+const successBase = { dark: "74 222 128", light: "22 163 74" };
+const warningBase = { dark: "251 191 36", light: "217 119 6" };
+const errorBase = { dark: "234 88 12", light: "220 38 38" };
+const infoBase = { dark: "6 182 212", light: "8 145 178" };
 
 export const tokens: Record<TokenName, Record<Theme, TokenValue>> = {
-  '--bg-base': { dark: '#09090b', light: '#f8fafc' },
-  '--bg-surface': { dark: '#111113', light: '#ffffff' },
-  '--bg-raised': { dark: '#18181b', light: '#f1f5f9' },
-  '--border-subtle': { dark: '#1c1c1f', light: '#e2e8f0' },
-  '--border-default': { dark: '#27272a', light: '#cbd5e1' },
-  '--text-muted': { dark: '#52525b', light: '#94a3b8' },
-  '--text-secondary': { dark: '#a1a1aa', light: '#64748b' },
-  '--text-primary': { dark: '#e4e4e7', light: '#0f172a' },
-  '--text-inverted': { dark: '#fafafa', light: '#ffffff' },
-  '--accent': { dark: '#06b6d4', light: '#2563eb' },
-  '--accent-rgb': { dark: '6 182 212', light: '37 99 235' },
-  '--accent-bright': { dark: '#22d3ee', light: '#3b82f6' },
-  '--accent-dark': { dark: '#0891b2', light: '#1d4ed8' },
-  '--accent-deep': { dark: '#0e7490', light: '#1e40af' },
-  '--color-success': { dark: '#4ade80', light: '#16a34a' },
-  '--color-success-bg': {
+  "--bg-base": { dark: "#09090b", light: "#f8fafc" },
+  "--bg-surface": { dark: "#111113", light: "#ffffff" },
+  "--bg-raised": { dark: "#18181b", light: "#f1f5f9" },
+  "--border-subtle": { dark: "#1c1c1f", light: "#e2e8f0" },
+  "--border-default": { dark: "#27272a", light: "#cbd5e1" },
+  "--text-muted": { dark: "#52525b", light: "#94a3b8" },
+  "--text-secondary": { dark: "#a1a1aa", light: "#64748b" },
+  "--text-primary": { dark: "#e4e4e7", light: "#0f172a" },
+  "--text-inverted": { dark: "#fafafa", light: "#ffffff" },
+  "--accent": { dark: "#06b6d4", light: "#2563eb" },
+  "--accent-rgb": { dark: "6 182 212", light: "37 99 235" },
+  "--accent-bright": { dark: "#22d3ee", light: "#3b82f6" },
+  "--accent-dark": { dark: "#0891b2", light: "#1d4ed8" },
+  "--accent-deep": { dark: "#0e7490", light: "#1e40af" },
+  "--color-success": { dark: "#4ade80", light: "#16a34a" },
+  "--color-success-bg": {
     dark: rgba(successBase.dark, 0.1),
-    light: rgba(successBase.light, 0.08)
+    light: rgba(successBase.light, 0.08),
   },
-  '--color-success-border': {
+  "--color-success-border": {
     dark: rgba(successBase.dark, 0.25),
-    light: rgba(successBase.light, 0.3)
+    light: rgba(successBase.light, 0.3),
   },
-  '--color-warning': { dark: '#fbbf24', light: '#d97706' },
-  '--color-warning-bg': {
+  "--color-warning": { dark: "#fbbf24", light: "#d97706" },
+  "--color-warning-bg": {
     dark: rgba(warningBase.dark, 0.12),
-    light: rgba(warningBase.light, 0.08)
+    light: rgba(warningBase.light, 0.08),
   },
-  '--color-warning-border': {
+  "--color-warning-border": {
     dark: rgba(warningBase.dark, 0.3),
-    light: rgba(warningBase.light, 0.28)
+    light: rgba(warningBase.light, 0.28),
   },
-  '--color-error': { dark: '#fdba74', light: '#dc2626' },
-  '--color-error-bg': {
+  "--color-error": { dark: "#fdba74", light: "#dc2626" },
+  "--color-error-bg": {
     dark: rgba(errorBase.dark, 0.15),
-    light: rgba(errorBase.light, 0.07)
+    light: rgba(errorBase.light, 0.07),
   },
-  '--color-error-border': {
+  "--color-error-border": {
     dark: rgba(errorBase.dark, 0.35),
-    light: rgba(errorBase.light, 0.3)
+    light: rgba(errorBase.light, 0.3),
   },
-  '--color-info': { dark: '#67e8f9', light: '#0891b2' },
-  '--color-info-bg': {
+  "--color-info": { dark: "#67e8f9", light: "#0891b2" },
+  "--color-info-bg": {
     dark: rgba(infoBase.dark, 0.1),
-    light: rgba(infoBase.light, 0.08)
+    light: rgba(infoBase.light, 0.08),
   },
-  '--color-info-border': {
+  "--color-info-border": {
     dark: rgba(infoBase.dark, 0.22),
-    light: rgba(infoBase.light, 0.22)
-  }
+    light: rgba(infoBase.light, 0.22),
+  },
 };
 
 const TOKEN_NAMES = Object.keys(tokens) as TokenName[];
 
 /** Emit `  --name: value;` lines for one theme block. */
 export function cssForTheme(theme: Theme): string {
-  return TOKEN_NAMES.map((name) => `  ${name}: ${tokens[name][theme]};`).join('\n');
+  return TOKEN_NAMES.map((name) => `  ${name}: ${tokens[name][theme]};`).join(
+    "\n",
+  );
 }
 
 /** Lookup helper for programmatic consumers (terminal shell, xterm theme). */
@@ -463,86 +474,87 @@ creation will establish it.
 Create `frontend/vite-plugins/theme-tokens.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { themeTokensPlugin, VIRTUAL_ID } from './theme-tokens';
-import { tokens } from '../src/theme/tokens';
+import { describe, expect, it, vi } from "vitest";
+import { themeTokensPlugin, VIRTUAL_ID } from "./theme-tokens";
+import { tokens } from "../src/theme/tokens";
 
 type VitePluginHook<K extends keyof ReturnType<typeof themeTokensPlugin>> =
   ReturnType<typeof themeTokensPlugin>[K];
 
 function callResolveId(id: string): string | undefined {
   const plugin = themeTokensPlugin();
-  const resolveId = plugin.resolveId as VitePluginHook<'resolveId'>;
-  if (typeof resolveId !== 'function') return undefined;
+  const resolveId = plugin.resolveId as VitePluginHook<"resolveId">;
+  if (typeof resolveId !== "function") return undefined;
   const result = resolveId.call({} as never, id, undefined, {} as never);
-  return typeof result === 'string' ? result : undefined;
+  return typeof result === "string" ? result : undefined;
 }
 
 function callLoad(id: string): string | undefined {
   const plugin = themeTokensPlugin();
-  const load = plugin.load as VitePluginHook<'load'>;
-  if (typeof load !== 'function') return undefined;
+  const load = plugin.load as VitePluginHook<"load">;
+  if (typeof load !== "function") return undefined;
   const result = load.call({} as never, id, undefined);
-  return typeof result === 'string' ? result : undefined;
+  return typeof result === "string" ? result : undefined;
 }
 
-describe('theme-tokens Vite plugin', () => {
-  it('exposes the canonical virtual id constant', () => {
-    expect(VIRTUAL_ID).toBe('virtual:theme/tokens.css');
+describe("theme-tokens Vite plugin", () => {
+  it("exposes the canonical virtual id constant", () => {
+    expect(VIRTUAL_ID).toBe("virtual:theme/tokens.css");
   });
 
-  it('resolveId returns the resolved id for the virtual module', () => {
-    expect(callResolveId(VIRTUAL_ID)).toBe('\0' + VIRTUAL_ID);
+  it("resolveId returns the resolved id for the virtual module", () => {
+    expect(callResolveId(VIRTUAL_ID)).toBe("\0" + VIRTUAL_ID);
   });
 
-  it('resolveId returns undefined for unrelated ids', () => {
-    expect(callResolveId('some-other-module')).toBeUndefined();
-    expect(callResolveId('virtual:theme/other.css')).toBeUndefined();
+  it("resolveId returns undefined for unrelated ids", () => {
+    expect(callResolveId("some-other-module")).toBeUndefined();
+    expect(callResolveId("virtual:theme/other.css")).toBeUndefined();
   });
 
-  it('load returns undefined for unrelated ids', () => {
-    expect(callLoad('\0virtual:theme/other.css')).toBeUndefined();
+  it("load returns undefined for unrelated ids", () => {
+    expect(callLoad("\0virtual:theme/other.css")).toBeUndefined();
   });
 
-  it('load emits :root and .dark blocks for the resolved virtual id', () => {
-    const css = callLoad('\0' + VIRTUAL_ID);
+  it("load emits :root and .dark blocks for the resolved virtual id", () => {
+    const css = callLoad("\0" + VIRTUAL_ID);
     expect(css).toBeDefined();
-    expect(css).toContain(':root {');
-    expect(css).toContain('color-scheme: light;');
-    expect(css).toContain('.dark {');
-    expect(css).toContain('color-scheme: dark;');
+    expect(css).toContain(":root {");
+    expect(css).toContain("color-scheme: light;");
+    expect(css).toContain(".dark {");
+    expect(css).toContain("color-scheme: dark;");
   });
 
-  it('load declares every TokenName twice (once per theme)', () => {
-    const css = callLoad('\0' + VIRTUAL_ID)!;
+  it("load declares every TokenName twice (once per theme)", () => {
+    const css = callLoad("\0" + VIRTUAL_ID)!;
     for (const name of Object.keys(tokens)) {
       const occurrences = css.split(`${name}:`).length - 1;
       expect(occurrences, `${name} declaration count`).toBe(2);
     }
   });
 
-  it('handleHotUpdate invalidates the virtual module when tokens.ts changes', () => {
+  it("handleHotUpdate invalidates the virtual module when tokens.ts changes", () => {
     const plugin = themeTokensPlugin();
     const invalidateModule = vi.fn();
-    const virtualModule = { id: '\0' + VIRTUAL_ID };
+    const virtualModule = { id: "\0" + VIRTUAL_ID };
     const server = {
       moduleGraph: {
         getModuleById: vi.fn().mockReturnValue(virtualModule),
-        invalidateModule
-      }
+        invalidateModule,
+      },
     };
 
-    const handleHotUpdate = plugin.handleHotUpdate as VitePluginHook<'handleHotUpdate'>;
-    if (typeof handleHotUpdate !== 'function') {
-      throw new Error('handleHotUpdate hook missing');
+    const handleHotUpdate =
+      plugin.handleHotUpdate as VitePluginHook<"handleHotUpdate">;
+    if (typeof handleHotUpdate !== "function") {
+      throw new Error("handleHotUpdate hook missing");
     }
 
     const ctx = {
-      file: '/abs/path/to/frontend/src/theme/tokens.ts',
+      file: "/abs/path/to/frontend/src/theme/tokens.ts",
       server,
       modules: [],
-      read: async () => '',
-      timestamp: Date.now()
+      read: async () => "",
+      timestamp: Date.now(),
     } as never;
     const result = handleHotUpdate.call({} as never, ctx);
 
@@ -550,27 +562,28 @@ describe('theme-tokens Vite plugin', () => {
     expect(Array.isArray(result) ? result : [result]).toContain(virtualModule);
   });
 
-  it('handleHotUpdate ignores unrelated file changes', () => {
+  it("handleHotUpdate ignores unrelated file changes", () => {
     const plugin = themeTokensPlugin();
     const invalidateModule = vi.fn();
     const server = {
       moduleGraph: {
         getModuleById: vi.fn(),
-        invalidateModule
-      }
+        invalidateModule,
+      },
     };
 
-    const handleHotUpdate = plugin.handleHotUpdate as VitePluginHook<'handleHotUpdate'>;
-    if (typeof handleHotUpdate !== 'function') {
-      throw new Error('handleHotUpdate hook missing');
+    const handleHotUpdate =
+      plugin.handleHotUpdate as VitePluginHook<"handleHotUpdate">;
+    if (typeof handleHotUpdate !== "function") {
+      throw new Error("handleHotUpdate hook missing");
     }
 
     const ctx = {
-      file: '/abs/path/to/frontend/src/routes/+page.svelte',
+      file: "/abs/path/to/frontend/src/routes/+page.svelte",
       server,
       modules: [],
-      read: async () => '',
-      timestamp: Date.now()
+      read: async () => "",
+      timestamp: Date.now(),
     } as never;
     handleHotUpdate.call({} as never, ctx);
 
@@ -589,16 +602,16 @@ Expected: FAIL — module not found.
 Create `frontend/vite-plugins/theme-tokens.ts`:
 
 ```ts
-import type { Plugin } from 'vite';
-import { cssForTheme } from '../src/theme/tokens';
+import type { Plugin } from "vite";
+import { cssForTheme } from "../src/theme/tokens";
 
-export const VIRTUAL_ID = 'virtual:theme/tokens.css';
-const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
-const TOKENS_SOURCE_SUFFIX = 'src/theme/tokens.ts';
+export const VIRTUAL_ID = "virtual:theme/tokens.css";
+const RESOLVED_VIRTUAL_ID = "\0" + VIRTUAL_ID;
+const TOKENS_SOURCE_SUFFIX = "src/theme/tokens.ts";
 
 export function themeTokensPlugin(): Plugin {
   return {
-    name: 'uptrakit:theme-tokens',
+    name: "uptrakit:theme-tokens",
     resolveId(id) {
       if (id === VIRTUAL_ID) return RESOLVED_VIRTUAL_ID;
       return undefined;
@@ -606,24 +619,25 @@ export function themeTokensPlugin(): Plugin {
     load(id) {
       if (id !== RESOLVED_VIRTUAL_ID) return undefined;
       return [
-        ':root {',
-        '  color-scheme: light;',
-        cssForTheme('light'),
-        '}',
-        '.dark {',
-        '  color-scheme: dark;',
-        cssForTheme('dark'),
-        '}',
-        ''
-      ].join('\n');
+        ":root {",
+        "  color-scheme: light;",
+        cssForTheme("light"),
+        "}",
+        ".dark {",
+        "  color-scheme: dark;",
+        cssForTheme("dark"),
+        "}",
+        "",
+      ].join("\n");
     },
     handleHotUpdate({ file, server }) {
       if (!file.endsWith(TOKENS_SOURCE_SUFFIX)) return;
-      const virtualModule = server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
+      const virtualModule =
+        server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
       if (!virtualModule) return;
       server.moduleGraph.invalidateModule(virtualModule);
       return [virtualModule];
-    }
+    },
   };
 }
 ```
@@ -686,10 +700,10 @@ shows no additional fields.
 Replace the contents of `frontend/vite.config.ts`:
 
 ```ts
-import tailwindcss from '@tailwindcss/vite';
-import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
-import { themeTokensPlugin } from './vite-plugins/theme-tokens';
+import tailwindcss from "@tailwindcss/vite";
+import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from "vite";
+import { themeTokensPlugin } from "./vite-plugins/theme-tokens";
 
 export default defineConfig({
   plugins: [themeTokensPlugin(), tailwindcss(), sveltekit()],
@@ -698,17 +712,17 @@ export default defineConfig({
       // The polyfill injects scripts via blob: URLs, which would require
       // 'blob:' in script-src and weaken the CSP. All browsers that can run
       // this app support <link rel="modulepreload"> natively.
-      polyfill: false
-    }
+      polyfill: false,
+    },
   },
   server: {
     proxy: {
-      '/api': {
-        target: 'https://localhost:8443',
-        secure: false
-      }
-    }
-  }
+      "/api": {
+        target: "https://localhost:8443",
+        secure: false,
+      },
+    },
+  },
 });
 ```
 
@@ -799,69 +813,69 @@ existing `it('handleHotUpdate ignores unrelated file changes', ...)` block
 and before the closing `});` of the `describe`:
 
 ```ts
-it('emits the spec-pinned golden CSS for both themes', () => {
-  const css = callLoad('\0' + VIRTUAL_ID)!;
+it("emits the spec-pinned golden CSS for both themes", () => {
+  const css = callLoad("\0" + VIRTUAL_ID)!;
   const expected = [
-    ':root {',
-    '  color-scheme: light;',
-    '  --bg-base: #f8fafc;',
-    '  --bg-surface: #ffffff;',
-    '  --bg-raised: #f1f5f9;',
-    '  --border-subtle: #e2e8f0;',
-    '  --border-default: #cbd5e1;',
-    '  --text-muted: #94a3b8;',
-    '  --text-secondary: #64748b;',
-    '  --text-primary: #0f172a;',
-    '  --text-inverted: #ffffff;',
-    '  --accent: #2563eb;',
-    '  --accent-rgb: 37 99 235;',
-    '  --accent-bright: #3b82f6;',
-    '  --accent-dark: #1d4ed8;',
-    '  --accent-deep: #1e40af;',
-    '  --color-success: #16a34a;',
-    '  --color-success-bg: rgba(22, 163, 74, 0.08);',
-    '  --color-success-border: rgba(22, 163, 74, 0.3);',
-    '  --color-warning: #d97706;',
-    '  --color-warning-bg: rgba(217, 119, 6, 0.08);',
-    '  --color-warning-border: rgba(217, 119, 6, 0.28);',
-    '  --color-error: #dc2626;',
-    '  --color-error-bg: rgba(220, 38, 38, 0.07);',
-    '  --color-error-border: rgba(220, 38, 38, 0.3);',
-    '  --color-info: #0891b2;',
-    '  --color-info-bg: rgba(8, 145, 178, 0.08);',
-    '  --color-info-border: rgba(8, 145, 178, 0.22);',
-    '}',
-    '.dark {',
-    '  color-scheme: dark;',
-    '  --bg-base: #09090b;',
-    '  --bg-surface: #111113;',
-    '  --bg-raised: #18181b;',
-    '  --border-subtle: #1c1c1f;',
-    '  --border-default: #27272a;',
-    '  --text-muted: #52525b;',
-    '  --text-secondary: #a1a1aa;',
-    '  --text-primary: #e4e4e7;',
-    '  --text-inverted: #fafafa;',
-    '  --accent: #06b6d4;',
-    '  --accent-rgb: 6 182 212;',
-    '  --accent-bright: #22d3ee;',
-    '  --accent-dark: #0891b2;',
-    '  --accent-deep: #0e7490;',
-    '  --color-success: #4ade80;',
-    '  --color-success-bg: rgba(74, 222, 128, 0.1);',
-    '  --color-success-border: rgba(74, 222, 128, 0.25);',
-    '  --color-warning: #fbbf24;',
-    '  --color-warning-bg: rgba(251, 191, 36, 0.12);',
-    '  --color-warning-border: rgba(251, 191, 36, 0.3);',
-    '  --color-error: #fdba74;',
-    '  --color-error-bg: rgba(234, 88, 12, 0.15);',
-    '  --color-error-border: rgba(234, 88, 12, 0.35);',
-    '  --color-info: #67e8f9;',
-    '  --color-info-bg: rgba(6, 182, 212, 0.1);',
-    '  --color-info-border: rgba(6, 182, 212, 0.22);',
-    '}',
-    ''
-  ].join('\n');
+    ":root {",
+    "  color-scheme: light;",
+    "  --bg-base: #f8fafc;",
+    "  --bg-surface: #ffffff;",
+    "  --bg-raised: #f1f5f9;",
+    "  --border-subtle: #e2e8f0;",
+    "  --border-default: #cbd5e1;",
+    "  --text-muted: #94a3b8;",
+    "  --text-secondary: #64748b;",
+    "  --text-primary: #0f172a;",
+    "  --text-inverted: #ffffff;",
+    "  --accent: #2563eb;",
+    "  --accent-rgb: 37 99 235;",
+    "  --accent-bright: #3b82f6;",
+    "  --accent-dark: #1d4ed8;",
+    "  --accent-deep: #1e40af;",
+    "  --color-success: #16a34a;",
+    "  --color-success-bg: rgba(22, 163, 74, 0.08);",
+    "  --color-success-border: rgba(22, 163, 74, 0.3);",
+    "  --color-warning: #d97706;",
+    "  --color-warning-bg: rgba(217, 119, 6, 0.08);",
+    "  --color-warning-border: rgba(217, 119, 6, 0.28);",
+    "  --color-error: #dc2626;",
+    "  --color-error-bg: rgba(220, 38, 38, 0.07);",
+    "  --color-error-border: rgba(220, 38, 38, 0.3);",
+    "  --color-info: #0891b2;",
+    "  --color-info-bg: rgba(8, 145, 178, 0.08);",
+    "  --color-info-border: rgba(8, 145, 178, 0.22);",
+    "}",
+    ".dark {",
+    "  color-scheme: dark;",
+    "  --bg-base: #09090b;",
+    "  --bg-surface: #111113;",
+    "  --bg-raised: #18181b;",
+    "  --border-subtle: #1c1c1f;",
+    "  --border-default: #27272a;",
+    "  --text-muted: #52525b;",
+    "  --text-secondary: #a1a1aa;",
+    "  --text-primary: #e4e4e7;",
+    "  --text-inverted: #fafafa;",
+    "  --accent: #06b6d4;",
+    "  --accent-rgb: 6 182 212;",
+    "  --accent-bright: #22d3ee;",
+    "  --accent-dark: #0891b2;",
+    "  --accent-deep: #0e7490;",
+    "  --color-success: #4ade80;",
+    "  --color-success-bg: rgba(74, 222, 128, 0.1);",
+    "  --color-success-border: rgba(74, 222, 128, 0.25);",
+    "  --color-warning: #fbbf24;",
+    "  --color-warning-bg: rgba(251, 191, 36, 0.12);",
+    "  --color-warning-border: rgba(251, 191, 36, 0.3);",
+    "  --color-error: #fdba74;",
+    "  --color-error-bg: rgba(234, 88, 12, 0.15);",
+    "  --color-error-border: rgba(234, 88, 12, 0.35);",
+    "  --color-info: #67e8f9;",
+    "  --color-info-bg: rgba(6, 182, 212, 0.1);",
+    "  --color-info-border: rgba(6, 182, 212, 0.22);",
+    "}",
+    "",
+  ].join("\n");
 
   expect(css).toBe(expected);
 });
@@ -943,84 +957,89 @@ intentional deviation.
 Overwrite `frontend/src/lib/theme/design-token-values.test.ts` with:
 
 ```ts
-import { describe, expect, it } from 'vitest';
-import { cssForTheme, tokens, type TokenName, type Theme } from '../../theme/tokens';
+import { describe, expect, it } from "vitest";
+import {
+  cssForTheme,
+  tokens,
+  type TokenName,
+  type Theme,
+} from "../../theme/tokens";
 
 const SPEC: Record<TokenName, Record<Theme, string>> = {
-  '--bg-base': { dark: '#09090b', light: '#f8fafc' },
-  '--bg-surface': { dark: '#111113', light: '#ffffff' },
-  '--bg-raised': { dark: '#18181b', light: '#f1f5f9' },
-  '--border-subtle': { dark: '#1c1c1f', light: '#e2e8f0' },
-  '--border-default': { dark: '#27272a', light: '#cbd5e1' },
-  '--text-muted': { dark: '#52525b', light: '#94a3b8' },
-  '--text-secondary': { dark: '#a1a1aa', light: '#64748b' },
-  '--text-primary': { dark: '#e4e4e7', light: '#0f172a' },
-  '--text-inverted': { dark: '#fafafa', light: '#ffffff' },
-  '--accent': { dark: '#06b6d4', light: '#2563eb' },
-  '--accent-rgb': { dark: '6 182 212', light: '37 99 235' },
-  '--accent-bright': { dark: '#22d3ee', light: '#3b82f6' },
-  '--accent-dark': { dark: '#0891b2', light: '#1d4ed8' },
-  '--accent-deep': { dark: '#0e7490', light: '#1e40af' },
-  '--color-success': { dark: '#4ade80', light: '#16a34a' },
-  '--color-success-bg': {
-    dark: 'rgba(74, 222, 128, 0.1)',
-    light: 'rgba(22, 163, 74, 0.08)'
+  "--bg-base": { dark: "#09090b", light: "#f8fafc" },
+  "--bg-surface": { dark: "#111113", light: "#ffffff" },
+  "--bg-raised": { dark: "#18181b", light: "#f1f5f9" },
+  "--border-subtle": { dark: "#1c1c1f", light: "#e2e8f0" },
+  "--border-default": { dark: "#27272a", light: "#cbd5e1" },
+  "--text-muted": { dark: "#52525b", light: "#94a3b8" },
+  "--text-secondary": { dark: "#a1a1aa", light: "#64748b" },
+  "--text-primary": { dark: "#e4e4e7", light: "#0f172a" },
+  "--text-inverted": { dark: "#fafafa", light: "#ffffff" },
+  "--accent": { dark: "#06b6d4", light: "#2563eb" },
+  "--accent-rgb": { dark: "6 182 212", light: "37 99 235" },
+  "--accent-bright": { dark: "#22d3ee", light: "#3b82f6" },
+  "--accent-dark": { dark: "#0891b2", light: "#1d4ed8" },
+  "--accent-deep": { dark: "#0e7490", light: "#1e40af" },
+  "--color-success": { dark: "#4ade80", light: "#16a34a" },
+  "--color-success-bg": {
+    dark: "rgba(74, 222, 128, 0.1)",
+    light: "rgba(22, 163, 74, 0.08)",
   },
-  '--color-success-border': {
-    dark: 'rgba(74, 222, 128, 0.25)',
-    light: 'rgba(22, 163, 74, 0.3)'
+  "--color-success-border": {
+    dark: "rgba(74, 222, 128, 0.25)",
+    light: "rgba(22, 163, 74, 0.3)",
   },
-  '--color-warning': { dark: '#fbbf24', light: '#d97706' },
-  '--color-warning-bg': {
-    dark: 'rgba(251, 191, 36, 0.12)',
-    light: 'rgba(217, 119, 6, 0.08)'
+  "--color-warning": { dark: "#fbbf24", light: "#d97706" },
+  "--color-warning-bg": {
+    dark: "rgba(251, 191, 36, 0.12)",
+    light: "rgba(217, 119, 6, 0.08)",
   },
-  '--color-warning-border': {
-    dark: 'rgba(251, 191, 36, 0.3)',
-    light: 'rgba(217, 119, 6, 0.28)'
+  "--color-warning-border": {
+    dark: "rgba(251, 191, 36, 0.3)",
+    light: "rgba(217, 119, 6, 0.28)",
   },
-  '--color-error': { dark: '#fdba74', light: '#dc2626' },
-  '--color-error-bg': {
-    dark: 'rgba(234, 88, 12, 0.15)',
-    light: 'rgba(220, 38, 38, 0.07)'
+  "--color-error": { dark: "#fdba74", light: "#dc2626" },
+  "--color-error-bg": {
+    dark: "rgba(234, 88, 12, 0.15)",
+    light: "rgba(220, 38, 38, 0.07)",
   },
-  '--color-error-border': {
-    dark: 'rgba(234, 88, 12, 0.35)',
-    light: 'rgba(220, 38, 38, 0.3)'
+  "--color-error-border": {
+    dark: "rgba(234, 88, 12, 0.35)",
+    light: "rgba(220, 38, 38, 0.3)",
   },
-  '--color-info': { dark: '#67e8f9', light: '#0891b2' },
-  '--color-info-bg': {
-    dark: 'rgba(6, 182, 212, 0.1)',
-    light: 'rgba(8, 145, 178, 0.08)'
+  "--color-info": { dark: "#67e8f9", light: "#0891b2" },
+  "--color-info-bg": {
+    dark: "rgba(6, 182, 212, 0.1)",
+    light: "rgba(8, 145, 178, 0.08)",
   },
-  '--color-info-border': {
-    dark: 'rgba(6, 182, 212, 0.22)',
-    light: 'rgba(8, 145, 178, 0.22)'
-  }
+  "--color-info-border": {
+    dark: "rgba(6, 182, 212, 0.22)",
+    light: "rgba(8, 145, 178, 0.22)",
+  },
 };
 
 const SPEC_NAMES = Object.keys(SPEC) as TokenName[];
 
-describe('design token values', () => {
-  it('pins every dark-theme token to the approved spec value', () => {
+describe("design token values", () => {
+  it("pins every dark-theme token to the approved spec value", () => {
     for (const name of SPEC_NAMES) {
       expect(tokens[name].dark, `dark ${name}`).toBe(SPEC[name].dark);
     }
   });
 
-  it('pins every light-theme token to the approved spec value', () => {
+  it("pins every light-theme token to the approved spec value", () => {
     for (const name of SPEC_NAMES) {
       expect(tokens[name].light, `light ${name}`).toBe(SPEC[name].light);
     }
   });
 
-  it('keeps info tokens distinct from accent tokens in both themes', () => {
-    expect(tokens['--color-info'].dark).not.toBe(tokens['--accent'].dark);
-    expect(tokens['--color-info'].light).not.toBe(tokens['--accent'].light);
+  it("keeps info tokens distinct from accent tokens in both themes", () => {
+    expect(tokens["--color-info"].dark).not.toBe(tokens["--accent"].dark);
+    expect(tokens["--color-info"].light).not.toBe(tokens["--accent"].light);
   });
 
-  it('snapshot: cssForTheme(light) output matches the canonical form', () => {
-    expect(cssForTheme('light')).toMatchInlineSnapshot(`
+  it("snapshot: cssForTheme(light) output matches the canonical form", () => {
+    expect(cssForTheme("light")).toMatchInlineSnapshot(`
 "  --bg-base: #f8fafc;
   --bg-surface: #ffffff;
   --bg-raised: #f1f5f9;
@@ -1050,8 +1069,8 @@ describe('design token values', () => {
 `);
   });
 
-  it('snapshot: cssForTheme(dark) output matches the canonical form', () => {
-    expect(cssForTheme('dark')).toMatchInlineSnapshot(`
+  it("snapshot: cssForTheme(dark) output matches the canonical form", () => {
+    expect(cssForTheme("dark")).toMatchInlineSnapshot(`
 "  --bg-base: #09090b;
   --bg-surface: #111113;
   --bg-raised: #18181b;
@@ -1127,45 +1146,59 @@ Overwrite `frontend/src/lib/theme/css-contract.test.ts` with (the two
 manifest `it` blocks removed; structural app.css assertions preserved):
 
 ```ts
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 // @ts-expect-error node:fs is not part of the browser-focused frontend type environment
-const { readFileSync } = await import('node:fs');
+const { readFileSync } = await import("node:fs");
 // @ts-expect-error node:url is not part of the browser-focused frontend type environment
-const { fileURLToPath } = await import('node:url');
+const { fileURLToPath } = await import("node:url");
 
 function resolveFromThisTest(relativePath: string): string {
   const resolved = new URL(relativePath, import.meta.url);
-  if (resolved.protocol === 'file:') {
+  if (resolved.protocol === "file:") {
     return fileURLToPath(resolved);
   }
 
   // Vitest can expose non-file module URLs; keep resolution anchored to this test URL.
-  return decodeURIComponent(resolved.pathname).replace(/^\/@fs/, '');
+  return decodeURIComponent(resolved.pathname).replace(/^\/@fs/, "");
 }
 
-const appCss = readFileSync(resolveFromThisTest('../../app.css'), 'utf8');
+const appCss = readFileSync(resolveFromThisTest("../../app.css"), "utf8");
 
-describe('app.css structural contract', () => {
-  it('pins the shared layering z-index contract in app.css', () => {
-    expect(appCss).toMatch(/\[data-ui='app-shell-header'\][\s\S]*?z-index:\s*10;/);
-    expect(appCss).toMatch(/\[data-ui='app-shell-sidebar'\][\s\S]*?z-index:\s*20;/);
-    expect(appCss).toMatch(/\[data-ui='context-menu-shell'\][\s\S]*?z-index:\s*100;/);
-    expect(appCss).toMatch(/\[data-ui='toast-notifications'\][\s\S]*?z-index:\s*500;/);
-    expect(appCss).toMatch(/\[data-ui='modal-backdrop'\][\s\S]*?z-index:\s*900;/);
+describe("app.css structural contract", () => {
+  it("pins the shared layering z-index contract in app.css", () => {
+    expect(appCss).toMatch(
+      /\[data-ui='app-shell-header'\][\s\S]*?z-index:\s*10;/,
+    );
+    expect(appCss).toMatch(
+      /\[data-ui='app-shell-sidebar'\][\s\S]*?z-index:\s*20;/,
+    );
+    expect(appCss).toMatch(
+      /\[data-ui='context-menu-shell'\][\s\S]*?z-index:\s*100;/,
+    );
+    expect(appCss).toMatch(
+      /\[data-ui='toast-notifications'\][\s\S]*?z-index:\s*500;/,
+    );
+    expect(appCss).toMatch(
+      /\[data-ui='modal-backdrop'\][\s\S]*?z-index:\s*900;/,
+    );
     expect(appCss).toMatch(/\[data-ui='modal-shell'\][\s\S]*?z-index:\s*910;/);
   });
 
-  it('pins global transition and focus-visible interaction rules', () => {
-    const transitionDeclarations = [...appCss.matchAll(/transition:\s*([^;]+);/g)].map(
-      (match) => match[1]
-    );
+  it("pins global transition and focus-visible interaction rules", () => {
+    const transitionDeclarations = [
+      ...appCss.matchAll(/transition:\s*([^;]+);/g),
+    ].map((match) => match[1]);
     expect(transitionDeclarations.length).toBeGreaterThan(0);
 
-    const allowedTransitionProperties = new Set(['background', 'border-color', 'color']);
+    const allowedTransitionProperties = new Set([
+      "background",
+      "border-color",
+      "color",
+    ]);
     for (const declaration of transitionDeclarations) {
       const properties = declaration
-        .split(',')
+        .split(",")
         .map((segment: string) => segment.trim().split(/\s+/)[0])
         .filter(Boolean);
 
@@ -1175,10 +1208,10 @@ describe('app.css structural contract', () => {
     }
 
     expect(appCss).toMatch(
-      /:is\(button, \[href\], input, select, textarea, summary, \[role='button'\], \[role='tab'\]\):focus-visible[\s\S]*?outline:\s*none;[\s\S]*?box-shadow:\s*0 0 0 3px rgba\(var\(--accent-rgb\), 0.25\);/
+      /:is\(button, \[href\], input, select, textarea, summary, \[role='button'\], \[role='tab'\]\):focus-visible[\s\S]*?outline:\s*none;[\s\S]*?box-shadow:\s*0 0 0 3px rgba\(var\(--accent-rgb\), 0.25\);/,
     );
     expect(appCss).toMatch(
-      /:is\(input, select, textarea\)\[aria-invalid='true'\]:focus-visible[\s\S]*?border-color:\s*var\(--color-error-border\);/
+      /:is\(input, select, textarea\)\[aria-invalid='true'\]:focus-visible[\s\S]*?border-color:\s*var\(--color-error-border\);/,
     );
   });
 });
@@ -1264,17 +1297,17 @@ diff shows the file matches this snippet exactly.
 Overwrite `frontend/src/app.css` with:
 
 ```css
-@import 'tailwindcss';
+@import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @plugin '@tailwindcss/forms';
 
-@import '@skeletonlabs/skeleton';
-@import '@skeletonlabs/skeleton-svelte';
-@import '@skeletonlabs/skeleton/themes/cerberus';
+@import "@skeletonlabs/skeleton";
+@import "@skeletonlabs/skeleton-svelte";
+@import "@skeletonlabs/skeleton/themes/cerberus";
 
-@import 'virtual:theme/tokens.css';
+@import "virtual:theme/tokens.css";
 
 .input,
 .textarea,
@@ -1282,24 +1315,42 @@ select {
   padding: 0.5rem 0.75rem;
 }
 
-:is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']) {
+:is(
+  button,
+  [href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="tab"]
+) {
   transition:
     background 0.12s,
     border-color 0.12s,
     color 0.12s;
 }
 
-:is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']):focus-visible {
+:is(
+  button,
+  [href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="tab"]
+):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 
-:is(input, select, textarea)[aria-invalid='true']:focus-visible {
+:is(input, select, textarea)[aria-invalid="true"]:focus-visible {
   border-color: var(--color-error-border);
 }
 
-:is(button, [role='button'], [role='tab'])[disabled],
-:is(button, [role='button'], [role='tab'])[aria-disabled='true'] {
+:is(button, [role="button"], [role="tab"])[disabled],
+:is(button, [role="button"], [role="tab"])[aria-disabled="true"] {
   opacity: 0.4;
   pointer-events: none;
 }
@@ -1321,31 +1372,31 @@ select {
   transform: translateY(0);
 }
 
-[data-ui='app-shell-header'] {
+[data-ui="app-shell-header"] {
   z-index: 10;
 }
 
-[data-ui='app-shell-sidebar'],
-[data-ui='app-shell-sidebar-backdrop'],
-[data-ui='app-shell-mobile-nav'],
-[data-ui='app-shell-mobile-overflow-backdrop'],
-[data-ui='app-shell-mobile-overflow-sheet'] {
+[data-ui="app-shell-sidebar"],
+[data-ui="app-shell-sidebar-backdrop"],
+[data-ui="app-shell-mobile-nav"],
+[data-ui="app-shell-mobile-overflow-backdrop"],
+[data-ui="app-shell-mobile-overflow-sheet"] {
   z-index: 20;
 }
 
-[data-ui='context-menu-shell'] {
+[data-ui="context-menu-shell"] {
   z-index: 100;
 }
 
-[data-ui='toast-notifications'] {
+[data-ui="toast-notifications"] {
   z-index: 500;
 }
 
-[data-ui='modal-backdrop'] {
+[data-ui="modal-backdrop"] {
   z-index: 900;
 }
 
-[data-ui='modal-shell'] {
+[data-ui="modal-shell"] {
   z-index: 910;
 }
 ```
@@ -1439,7 +1490,9 @@ While a dev server is running, open the browser devtools console on the app
 and execute:
 
 ```js
-getComputedStyle(document.documentElement).getPropertyValue('--color-error-bg').trim();
+getComputedStyle(document.documentElement)
+  .getPropertyValue("--color-error-bg")
+  .trim();
 ```
 
 Expected (light theme, default): `rgba(220, 38, 38, 0.07)`. Toggle the
@@ -1471,51 +1524,51 @@ and calls out the known-delta snapshots.
 ### Spec coverage checklist
 
 - [x] Goal 1 (spec-correct values, both themes) — Task 1 pins values in
-  `tokens.ts`; Task 4 golden CSS locks emission; Task 6 rewrites
-  `design-token-values.test.ts` to enforce values against the module.
+      `tokens.ts`; Task 4 golden CSS locks emission; Task 6 rewrites
+      `design-token-values.test.ts` to enforce values against the module.
 - [x] Goal 2 (built-in + surface UI consume same adapter) — Tasks 1–3 ship
-  the adapter layer; Task 9 wires `app.css` through it.
+      the adapter layer; Task 9 wires `app.css` through it.
 - [x] Goal 3 (drift prevented structurally) — Task 1's `Record<TokenName,
-  Record<Theme, TokenValue>>` + typed union catches missing tokens at
-  compile time; Task 4 golden CSS catches format drift.
+Record<Theme, TokenValue>>` + typed union catches missing tokens at
+      compile time; Task 4 golden CSS catches format drift.
 - [x] Goal 4 (`getToken(name, theme)` available) — Task 1 exports
-  `getToken`; Task 1 Step 1 test asserts it is equivalent to the table.
+      `getToken`; Task 1 Step 1 test asserts it is equivalent to the table.
 - [x] Non-goals honored — plan touches no Skeleton config, no call sites,
-  no new tokens, no theme switcher, no fixtures.
+      no new tokens, no theme switcher, no fixtures.
 - [x] Current-state drift entries all corrected — Task 1 `tokens.ts` uses
-  spec values for every drifted entry (light `--color-success-border` .3,
-  light `--color-warning-bg` .08, light `--color-warning-border` .28, light
-  `--color-error-bg` .07, light `--color-error-border` .3, light
-  `--text-inverted` `#ffffff`, dark `--color-success-bg` .10, dark
-  `--color-success-border` .25, dark `--color-warning-bg` .12, dark
-  `--color-warning-border` .30, dark `--color-error-bg` orange-600 .15,
-  dark `--color-error-border` orange-600 .35, dark `--text-inverted`
-  `#fafafa`).
+      spec values for every drifted entry (light `--color-success-border` .3,
+      light `--color-warning-bg` .08, light `--color-warning-border` .28, light
+      `--color-error-bg` .07, light `--color-error-border` .3, light
+      `--text-inverted` `#ffffff`, dark `--color-success-bg` .10, dark
+      `--color-success-border` .25, dark `--color-warning-bg` .12, dark
+      `--color-warning-border` .30, dark `--color-error-bg` orange-600 .15,
+      dark `--color-error-border` orange-600 .35, dark `--text-inverted`
+      `#fafafa`).
 - [x] Architecture — Tasks 1–3 build `tokens.ts` → plugin → `@import`
-  chain; Task 9 wires the `@import`.
+      chain; Task 9 wires the `@import`.
 - [x] Components section — every file listed in spec §Components has a
-  corresponding task: `tokens.ts` (Task 1), `tokens.test.ts` (Task 1),
-  `theme-tokens.ts` (Task 2), `theme-tokens.test.ts` (Task 2), modified
-  `app.css` (Task 9), modified `design-token-values.test.ts` (Task 6),
-  renamed `css-contract.test.ts` (Task 7), deleted `adapter-manifest.json`
-  (Task 8).
+      corresponding task: `tokens.ts` (Task 1), `tokens.test.ts` (Task 1),
+      `theme-tokens.ts` (Task 2), `theme-tokens.test.ts` (Task 2), modified
+      `app.css` (Task 9), modified `design-token-values.test.ts` (Task 6),
+      renamed `css-contract.test.ts` (Task 7), deleted `adapter-manifest.json`
+      (Task 8).
 - [x] Data flow — build-time path verified by Task 9 Step 4 build; runtime
-  path verified by Task 9 Step 5 dev smoke; test-time path verified by
-  Tasks 1, 4, 6.
+      path verified by Task 9 Step 5 dev smoke; test-time path verified by
+      Tasks 1, 4, 6.
 - [x] Error handling — TS union + `Record` enforces completeness (compile-
-  time); drift-detection (test-time) by Tasks 1 Step 1 and 6 Step 1; Task
-  10 Step 3 confirms runtime resolution.
+      time); drift-detection (test-time) by Tasks 1 Step 1 and 6 Step 1; Task
+      10 Step 3 confirms runtime resolution.
 - [x] Testing — unit (Tasks 1, 2, 4), integration (Task 6), e2e (Task 10
-  Step 2), structural app.css (Task 7).
+      Step 2), structural app.css (Task 7).
 - [x] Rollout PR1/PR2 split — honored (divergence called out in Rollout
-  structure above).
+      structure above).
 - [x] Intermediary removal (`--theme-accent*`, `--theme-info*`) — Task 9
-  removes them with the literal blocks; Task 10 Step 4 greps for leftovers.
+      removes them with the literal blocks; Task 10 Step 4 greps for leftovers.
 - [x] Skip-link fix — Task 9 Step 1.
 - [x] CI gate "no raw hex/rgba outside `frontend/src/theme/`" — parent
-  spec calls this out as a new CI gate but scopes its wiring to later
-  sub-specs; not in this plan's scope. Task 10 Step 4 covers the immediate
-  regression check for `--theme-accent*` / `--theme-info*` leftovers.
+      spec calls this out as a new CI gate but scopes its wiring to later
+      sub-specs; not in this plan's scope. Task 10 Step 4 covers the immediate
+      regression check for `--theme-accent*` / `--theme-info*` leftovers.
 
 **Placeholder scan:** No "TBD", "TODO", or unfilled blocks. Every code
 step carries the full code to paste.

@@ -12,36 +12,36 @@ model.
 
 ### Channels
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| POST | `/api/v1/notifications/channels` | `ManageNotifications` | Create a channel |
-| GET | `/api/v1/notifications/channels` | `ViewNotifications` | List channels (paginated) |
-| GET | `/api/v1/notifications/channels/{id}` | `ViewNotifications` | Get channel by ID |
-| PUT | `/api/v1/notifications/channels/{id}` | `ManageNotifications` | Update channel |
-| DELETE | `/api/v1/notifications/channels/{id}` | `ManageNotifications` | Delete channel |
-| POST | `/api/v1/notifications/channels/{id}/test` | `ManageNotifications` | Test channel delivery |
+| Method | Path                                       | Permission            | Description               |
+| ------ | ------------------------------------------ | --------------------- | ------------------------- |
+| POST   | `/api/v1/notifications/channels`           | `ManageNotifications` | Create a channel          |
+| GET    | `/api/v1/notifications/channels`           | `ViewNotifications`   | List channels (paginated) |
+| GET    | `/api/v1/notifications/channels/{id}`      | `ViewNotifications`   | Get channel by ID         |
+| PUT    | `/api/v1/notifications/channels/{id}`      | `ManageNotifications` | Update channel            |
+| DELETE | `/api/v1/notifications/channels/{id}`      | `ManageNotifications` | Delete channel            |
+| POST   | `/api/v1/notifications/channels/{id}/test` | `ManageNotifications` | Test channel delivery     |
 
 ### Rules
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| POST | `/api/v1/notifications/rules` | `ManageNotifications` | Create a rule |
-| GET | `/api/v1/notifications/rules` | `ViewNotifications` | List rules (paginated, filterable) |
-| GET | `/api/v1/notifications/rules/{id}` | `ViewNotifications` | Get rule by ID |
-| PUT | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Update rule |
-| DELETE | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Delete rule |
+| Method | Path                               | Permission            | Description                        |
+| ------ | ---------------------------------- | --------------------- | ---------------------------------- |
+| POST   | `/api/v1/notifications/rules`      | `ManageNotifications` | Create a rule                      |
+| GET    | `/api/v1/notifications/rules`      | `ViewNotifications`   | List rules (paginated, filterable) |
+| GET    | `/api/v1/notifications/rules/{id}` | `ViewNotifications`   | Get rule by ID                     |
+| PUT    | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Update rule                        |
+| DELETE | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Delete rule                        |
 
 ### Log
 
-| Method | Path | Permission | Description |
-| --- | --- | --- | --- |
-| GET | `/api/v1/notifications/log` | `ViewNotifications` | List delivery log (paginated) |
+| Method | Path                        | Permission          | Description                   |
+| ------ | --------------------------- | ------------------- | ----------------------------- |
+| GET    | `/api/v1/notifications/log` | `ViewNotifications` | List delivery log (paginated) |
 
 ### Public (not JWT-authenticated)
 
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| POST | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Plugin-specific (e.g. `X-Telegram-Bot-Api-Secret-Token` header for Telegram) | Generic notification callback |
+| Method | Path                                                         | Auth                                                                         | Description                   |
+| ------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------- | ----------------------------- |
+| POST   | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Plugin-specific (e.g. `X-Telegram-Bot-Api-Secret-Token` header for Telegram) | Generic notification callback |
 
 ## Channel Endpoints
 
@@ -67,12 +67,12 @@ implementation before storage. Config secrets are encrypted at rest.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `name` | string | Yes | -- | Human-readable label. Must not be empty or whitespace-only. |
-| `channel_type` | string | Yes | -- | Channel type identifier (e.g. `"webhook"`, `"telegram"`, `"email"`). Must be one of the types returned by `notification_supported_types()`. |
-| `config` | object | Yes | -- | Channel-specific configuration (see [Channel Config](#channel-config)). Must be a JSON object. |
-| `enabled` | bool | No | `true` | Whether the channel is active. |
+| Field          | Type   | Required | Default | Description                                                                                                                                 |
+| -------------- | ------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | string | Yes      | --      | Human-readable label. Must not be empty or whitespace-only.                                                                                 |
+| `channel_type` | string | Yes      | --      | Channel type identifier (e.g. `"webhook"`, `"telegram"`, `"email"`). Must be one of the types returned by `notification_supported_types()`. |
+| `config`       | object | Yes      | --      | Channel-specific configuration (see [Channel Config](#channel-config)). Must be a JSON object.                                              |
+| `enabled`      | bool   | No       | `true`  | Whether the channel is active.                                                                                                              |
 
 **Response** (`201`): `NotificationChannelResponse`
 
@@ -166,11 +166,11 @@ channel type implementation.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | No | Updated label. Must not be empty or whitespace-only when provided. |
-| `config` | object | No | Replacement config. Must be a JSON object when provided. |
-| `enabled` | bool | No | Toggle channel on/off. |
+| Field     | Type   | Required | Description                                                        |
+| --------- | ------ | -------- | ------------------------------------------------------------------ |
+| `name`    | string | No       | Updated label. Must not be empty or whitespace-only when provided. |
+| `config`  | object | No       | Replacement config. Must be a JSON object when provided.           |
+| `enabled` | bool   | No       | Toggle channel on/off.                                             |
 
 **Response** (`200`): `NotificationChannelResponse`
 
@@ -242,14 +242,14 @@ Create a notification rule that links an event type to a channel. Optional scope
 }
 ```
 
-| Field | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `channel_id` | UUID | Yes | -- | Target channel. Must exist in the same tenant. |
-| `event_type` | string | Yes | -- | One of the [event types](#event-types). |
-| `host_id` | UUID | No | `null` | Scope to a specific host. `null` matches all hosts. |
-| `software_item_id` | UUID | No | `null` | Scope to a specific software item. `null` matches all items. |
-| `plugin_type` | string | No | `null` | Scope to a specific plugin type (e.g. `"releases_github"`). `null` matches all plugin types. |
-| `enabled` | bool | No | `true` | Whether the rule is active. |
+| Field              | Type   | Required | Default | Description                                                                                  |
+| ------------------ | ------ | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `channel_id`       | UUID   | Yes      | --      | Target channel. Must exist in the same tenant.                                               |
+| `event_type`       | string | Yes      | --      | One of the [event types](#event-types).                                                      |
+| `host_id`          | UUID   | No       | `null`  | Scope to a specific host. `null` matches all hosts.                                          |
+| `software_item_id` | UUID   | No       | `null`  | Scope to a specific software item. `null` matches all items.                                 |
+| `plugin_type`      | string | No       | `null`  | Scope to a specific plugin type (e.g. `"releases_github"`). `null` matches all plugin types. |
+| `enabled`          | bool   | No       | `true`  | Whether the rule is active.                                                                  |
 
 **Response** (`201`): `NotificationRuleResponse`
 
@@ -278,12 +278,12 @@ filtering by channel and event type.
 
 **Query parameters**:
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `channel_id` | UUID | -- | Filter rules by channel ID |
-| `event_type` | string | -- | Filter rules by event type (e.g. `update_available`) |
-| `page` | u64 | 1 | Page number (1-indexed) |
-| `per_page` | u64 | 20 | Items per page (clamped to 1--1000) |
+| Parameter    | Type   | Default | Description                                          |
+| ------------ | ------ | ------- | ---------------------------------------------------- |
+| `channel_id` | UUID   | --      | Filter rules by channel ID                           |
+| `event_type` | string | --      | Filter rules by event type (e.g. `update_available`) |
+| `page`       | u64    | 1       | Page number (1-indexed)                              |
+| `per_page`   | u64    | 20      | Items per page (clamped to 1--1000)                  |
 
 **Response** (`200`): `PaginatedResponse<NotificationRuleResponse>`
 
@@ -336,13 +336,13 @@ Update a notification rule. All fields are optional; only provided fields are ch
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `event_type` | string | No | Updated event type. |
-| `host_id` | UUID | No | Updated host scope. |
-| `software_item_id` | UUID | No | Updated software item scope. |
-| `plugin_type` | string | No | Updated plugin type scope. |
-| `enabled` | bool | No | Toggle rule on/off. |
+| Field              | Type   | Required | Description                  |
+| ------------------ | ------ | -------- | ---------------------------- |
+| `event_type`       | string | No       | Updated event type.          |
+| `host_id`          | UUID   | No       | Updated host scope.          |
+| `software_item_id` | UUID   | No       | Updated software item scope. |
+| `plugin_type`      | string | No       | Updated plugin type scope.   |
+| `enabled`          | bool   | No       | Toggle rule on/off.          |
 
 **Response** (`200`): `NotificationRuleResponse`
 
@@ -440,14 +440,14 @@ are passed to the plugin's `handle_callback` action for verification and process
 The `NotificationEventType` enum (`#[non_exhaustive]`) defines which system events can trigger
 notifications:
 
-| Value | Description |
-| --- | --- |
-| `update_available` | A new version is available for a software item |
-| `update_completed` | An update finished successfully |
-| `update_failed` | An update failed |
-| `new_software_discovered` | A new software item was discovered by autodiscovery |
-| `new_service_enrolled` | A new service (agent, MQTT bridge, SSH agent) enrolled |
-| `ca_rotated` | The CA certificate was rotated |
+| Value                     | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `update_available`        | A new version is available for a software item         |
+| `update_completed`        | An update finished successfully                        |
+| `update_failed`           | An update failed                                       |
+| `new_software_discovered` | A new software item was discovered by autodiscovery    |
+| `new_service_enrolled`    | A new service (agent, MQTT bridge, SSH agent) enrolled |
+| `ca_rotated`              | The CA certificate was rotated                         |
 
 ### Channel Types
 
@@ -458,22 +458,22 @@ without modifying shared type definitions.
 
 Currently supported types:
 
-| Value | Description |
-| --- | --- |
-| `webhook` | HTTP POST with JSON payload and optional HMAC-SHA256 signature |
+| Value      | Description                                                              |
+| ---------- | ------------------------------------------------------------------------ |
+| `webhook`  | HTTP POST with JSON payload and optional HMAC-SHA256 signature           |
 | `telegram` | Telegram Bot API `sendMessage` with HTML formatting and inline keyboards |
-| `email` | SMTP email with multipart/alternative (plain text + HTML) |
+| `email`    | SMTP email with multipart/alternative (plain text + HTML)                |
 
 ### Delivery Statuses
 
 The `NotificationDeliveryStatus` enum (`#[non_exhaustive]`) tracks the outcome of each
 delivery attempt:
 
-| Value | Description |
-| --- | --- |
-| `pending` | Queued for delivery, not yet attempted |
-| `delivered` | Successfully delivered to the channel |
-| `failed` | Delivery failed (see `error_message` for details) |
+| Value       | Description                                       |
+| ----------- | ------------------------------------------------- |
+| `pending`   | Queued for delivery, not yet attempted            |
+| `delivered` | Successfully delivered to the channel             |
+| `failed`    | Delivery failed (see `error_message` for details) |
 
 ## Channel Config
 
@@ -485,11 +485,11 @@ the request body is signed with HMAC-SHA256 and the signature is included in the
 
 **Config fields**:
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `url` | string | Yes | Destination URL. Must start with `http://` or `https://`. |
-| `secret` | string | No | HMAC-SHA256 signing secret for payload verification. |
-| `headers` | object | No | Additional HTTP headers to include in the request. Keys are header names, values are header values. |
+| Field     | Type   | Required | Description                                                                                         |
+| --------- | ------ | -------- | --------------------------------------------------------------------------------------------------- |
+| `url`     | string | Yes      | Destination URL. Must start with `http://` or `https://`.                                           |
+| `secret`  | string | No       | HMAC-SHA256 signing secret for payload verification.                                                |
+| `headers` | object | No       | Additional HTTP headers to include in the request. Keys are header names, values are header values. |
 
 **Example config**:
 
@@ -531,11 +531,11 @@ Action buttons are rendered as Telegram inline keyboard buttons.
 
 **Config fields**:
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `bot_token` | string | Yes | Telegram Bot API token (e.g. `123456:ABC-DEF`). Must not be empty. |
-| `chat_id` | string | Yes | Telegram chat ID (e.g. `"-100123456789"` for a group). Must not be empty. |
-| `webhook_secret` | string | No | Secret for verifying Telegram callback requests. Required if using interactive buttons. |
+| Field            | Type   | Required | Description                                                                             |
+| ---------------- | ------ | -------- | --------------------------------------------------------------------------------------- |
+| `bot_token`      | string | Yes      | Telegram Bot API token (e.g. `123456:ABC-DEF`). Must not be empty.                      |
+| `chat_id`        | string | Yes      | Telegram chat ID (e.g. `"-100123456789"` for a group). Must not be empty.               |
+| `webhook_secret` | string | No       | Secret for verifying Telegram callback requests. Required if using interactive buttons. |
 
 **Example config**:
 
@@ -551,10 +551,10 @@ Action buttons are rendered as Telegram inline keyboard buttons.
 
 Config secrets are masked in all API responses. The following fields are replaced with `"***"`:
 
-| Channel type | Masked fields |
-| --- | --- |
-| `webhook` | `secret` |
-| `telegram` | `bot_token`, `webhook_secret` |
+| Channel type | Masked fields                 |
+| ------------ | ----------------------------- |
+| `webhook`    | `secret`                      |
+| `telegram`   | `bot_token`, `webhook_secret` |
 
 Non-secret fields (e.g. `url`, `chat_id`, `headers`) are returned as-is.
 
@@ -567,35 +567,35 @@ and callback verification.
 
 Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 
-| Type | Fields |
-| --- | --- |
-| `CreateNotificationChannelRequest` | `name` (String), `channel_type` (String), `config` (JSON object), `enabled` (bool, default `true`) |
-| `UpdateNotificationChannelRequest` | `name?` (String), `config?` (JSON object), `enabled?` (bool) |
-| `NotificationChannelResponse` | `id` (Uuid), `name` (String), `channel_type` (String), `config` (JSON, masked), `enabled` (bool), `created_at` (OffsetDateTime), `updated_at` (OffsetDateTime) |
-| `CreateNotificationRuleRequest` | `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool, default `true`) |
-| `UpdateNotificationRuleRequest` | `event_type?` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled?` (bool) |
-| `NotificationRuleResponse` | `id` (Uuid), `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool), `created_at` (OffsetDateTime) |
-| `NotificationLogResponse` | `id` (Uuid), `channel_id` (Uuid), `rule_id` (Uuid), `event_type` (NotificationEventType), `event_payload` (JSON), `status` (NotificationDeliveryStatus), `error_message?` (String), `action_token?` (Uuid), `action_taken?` (String), `created_at` (OffsetDateTime), `delivered_at?` (OffsetDateTime) |
-| `TestNotificationResponse` | `success` (bool), `message` (String) |
+| Type                               | Fields                                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CreateNotificationChannelRequest` | `name` (String), `channel_type` (String), `config` (JSON object), `enabled` (bool, default `true`)                                                                                                                                                                                                    |
+| `UpdateNotificationChannelRequest` | `name?` (String), `config?` (JSON object), `enabled?` (bool)                                                                                                                                                                                                                                          |
+| `NotificationChannelResponse`      | `id` (Uuid), `name` (String), `channel_type` (String), `config` (JSON, masked), `enabled` (bool), `created_at` (OffsetDateTime), `updated_at` (OffsetDateTime)                                                                                                                                        |
+| `CreateNotificationRuleRequest`    | `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool, default `true`)                                                                                                                                   |
+| `UpdateNotificationRuleRequest`    | `event_type?` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled?` (bool)                                                                                                                                                                      |
+| `NotificationRuleResponse`         | `id` (Uuid), `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool), `created_at` (OffsetDateTime)                                                                                                       |
+| `NotificationLogResponse`          | `id` (Uuid), `channel_id` (Uuid), `rule_id` (Uuid), `event_type` (NotificationEventType), `event_payload` (JSON), `status` (NotificationDeliveryStatus), `error_message?` (String), `action_token?` (Uuid), `action_taken?` (String), `created_at` (OffsetDateTime), `delivered_at?` (OffsetDateTime) |
+| `TestNotificationResponse`         | `success` (bool), `message` (String)                                                                                                                                                                                                                                                                  |
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, generic notification callback) |
-| `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types |
-| `crates/shared/web-api-types/src/notifications.rs` | Request/response types (channel_type is `String`, not an enum) |
-| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `NotificationOps` and catalog operation traits |
-| `crates/plugins/infrastructure/core/src/roles.rs` | `NotificationTransport` role trait |
-| `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
-| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper for surface actions |
-| `crates/plugins/notifications/webhook/src/plugin.rs` | Webhook plugin implementation |
-| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
-| `crates/plugins/notifications/telegram/src/plugin.rs` | Telegram plugin implementation |
-| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback) |
-| `crates/plugins/notifications/email/src/plugin.rs` | Email plugin implementation |
-| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (including SMTP settings) |
-| `crates/shared/db/src/entity/notification_channel.rs` | SeaORM entity for `notification_channels` table |
+| File                                                     | Purpose                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/notifications.rs`          | Route handlers (channels, rules, log, generic notification callback) |
+| `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types                               |
+| `crates/shared/web-api-types/src/notifications.rs`       | Request/response types (channel_type is `String`, not an enum)       |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs`   | `NotificationOps` and catalog operation traits                       |
+| `crates/plugins/infrastructure/core/src/roles.rs`        | `NotificationTransport` role trait                                   |
+| `crates/plugins/notifications/core/src/lib.rs`           | `DeliveryMessage`, `NotificationPluginError`, `escape_html()`        |
+| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper for surface actions                    |
+| `crates/plugins/notifications/webhook/src/plugin.rs`     | Webhook plugin implementation                                        |
+| `crates/plugins/notifications/webhook/src/surfaces.rs`   | Webhook surface action handler                                       |
+| `crates/plugins/notifications/telegram/src/plugin.rs`    | Telegram plugin implementation                                       |
+| `crates/plugins/notifications/telegram/src/surfaces.rs`  | Telegram surface action handler (including callback)                 |
+| `crates/plugins/notifications/email/src/plugin.rs`       | Email plugin implementation                                          |
+| `crates/plugins/notifications/email/src/surfaces.rs`     | Email surface action handler (including SMTP settings)               |
+| `crates/shared/db/src/entity/notification_channel.rs`    | SeaORM entity for `notification_channels` table                      |
 
 ## Related Documentation
 

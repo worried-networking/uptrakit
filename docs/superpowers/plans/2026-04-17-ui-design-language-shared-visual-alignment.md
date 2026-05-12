@@ -91,16 +91,24 @@ describe("design token CSS values", () => {
     expect(rootBlock).toContain("--theme-accent-deep: #1e40af;");
     expect(rootBlock).toContain("--color-success: #16a34a;");
     expect(rootBlock).toContain("--color-success-bg: rgba(22, 163, 74, 0.08);");
-    expect(rootBlock).toContain("--color-success-border: rgba(22, 163, 74, 0.2);");
+    expect(rootBlock).toContain(
+      "--color-success-border: rgba(22, 163, 74, 0.2);",
+    );
     expect(rootBlock).toContain("--color-warning: #d97706;");
     expect(rootBlock).toContain("--color-warning-bg: rgba(217, 119, 6, 0.1);");
-    expect(rootBlock).toContain("--color-warning-border: rgba(217, 119, 6, 0.22);");
+    expect(rootBlock).toContain(
+      "--color-warning-border: rgba(217, 119, 6, 0.22);",
+    );
     expect(rootBlock).toContain("--color-error: #dc2626;");
     expect(rootBlock).toContain("--color-error-bg: rgba(220, 38, 38, 0.08);");
-    expect(rootBlock).toContain("--color-error-border: rgba(220, 38, 38, 0.2);");
+    expect(rootBlock).toContain(
+      "--color-error-border: rgba(220, 38, 38, 0.2);",
+    );
     expect(rootBlock).toContain("--theme-info: #0891b2;");
     expect(rootBlock).toContain("--theme-info-bg: rgba(8, 145, 178, 0.08);");
-    expect(rootBlock).toContain("--theme-info-border: rgba(8, 145, 178, 0.22);");
+    expect(rootBlock).toContain(
+      "--theme-info-border: rgba(8, 145, 178, 0.22);",
+    );
   });
 
   it("pins the approved dark-theme semantic color values inside .dark", () => {
@@ -119,17 +127,29 @@ describe("design token CSS values", () => {
     expect(darkBlock).toContain("--theme-accent-dark: #0891b2;");
     expect(darkBlock).toContain("--theme-accent-deep: #0e7490;");
     expect(darkBlock).toContain("--color-success: #4ade80;");
-    expect(darkBlock).toContain("--color-success-bg: rgba(74, 222, 128, 0.14);");
-    expect(darkBlock).toContain("--color-success-border: rgba(74, 222, 128, 0.22);");
+    expect(darkBlock).toContain(
+      "--color-success-bg: rgba(74, 222, 128, 0.14);",
+    );
+    expect(darkBlock).toContain(
+      "--color-success-border: rgba(74, 222, 128, 0.22);",
+    );
     expect(darkBlock).toContain("--color-warning: #fbbf24;");
-    expect(darkBlock).toContain("--color-warning-bg: rgba(251, 191, 36, 0.14);");
-    expect(darkBlock).toContain("--color-warning-border: rgba(251, 191, 36, 0.24);");
+    expect(darkBlock).toContain(
+      "--color-warning-bg: rgba(251, 191, 36, 0.14);",
+    );
+    expect(darkBlock).toContain(
+      "--color-warning-border: rgba(251, 191, 36, 0.24);",
+    );
     expect(darkBlock).toContain("--color-error: #fdba74;");
     expect(darkBlock).toContain("--color-error-bg: rgba(253, 186, 116, 0.14);");
-    expect(darkBlock).toContain("--color-error-border: rgba(253, 186, 116, 0.22);");
+    expect(darkBlock).toContain(
+      "--color-error-border: rgba(253, 186, 116, 0.22);",
+    );
     expect(darkBlock).toContain("--theme-info: #67e8f9;");
     expect(darkBlock).toContain("--theme-info-bg: rgba(6, 182, 212, 0.1);");
-    expect(darkBlock).toContain("--theme-info-border: rgba(6, 182, 212, 0.22);");
+    expect(darkBlock).toContain(
+      "--theme-info-border: rgba(6, 182, 212, 0.22);",
+    );
   });
 
   it("keeps info tokens distinct from accent tokens in both theme blocks", () => {
@@ -275,7 +295,10 @@ render(ActionBadge, {
   hoverLabel: "→ History",
 });
 
-expect(screen.getByRole("button", { name: "1 error" })).toHaveAttribute("data-tone", "danger");
+expect(screen.getByRole("button", { name: "1 error" })).toHaveAttribute(
+  "data-tone",
+  "danger",
+);
 
 render(PillBadge, { label: "SSH Agent" });
 const pill = screen.getByText("SSH Agent");
@@ -303,7 +326,9 @@ render(TableFooterBar, {
 });
 
 expect(screen.getByText("42 total")).toBeInTheDocument();
-expect(screen.getByRole("navigation", { name: /pagination/i })).toBeInTheDocument();
+expect(
+  screen.getByRole("navigation", { name: /pagination/i }),
+).toBeInTheDocument();
 ```
 
 Run:
@@ -407,8 +432,13 @@ As part of this step, extend `frontend/src/lib/components/Pagination.test.ts` an
 explicit pagination-alignment assertion each:
 
 ```ts
-expect(screen.getByRole("navigation", { name: /pagination/i }).className).not.toContain("mt-4");
-expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass("items-center", "justify-between");
+expect(
+  screen.getByRole("navigation", { name: /pagination/i }).className,
+).not.toContain("mt-4");
+expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass(
+  "items-center",
+  "justify-between",
+);
 ```
 
 Document the additions in `docs/development/frontend-components.md` with a section shaped like:
@@ -463,9 +493,15 @@ Add screenshot slices for:
 Add Playwright assertions shaped like:
 
 ```ts
-await expect(page.getByTestId("parity-context-menu")).toHaveScreenshot("ui-parity-context-menu-shell.png");
-await expect(page.getByTestId("parity-clickable-badge")).toHaveScreenshot("ui-parity-clickable-badge.png");
-await expect(page.getByTestId("parity-table-footer")).toHaveScreenshot("ui-parity-table-footer.png");
+await expect(page.getByTestId("parity-context-menu")).toHaveScreenshot(
+  "ui-parity-context-menu-shell.png",
+);
+await expect(page.getByTestId("parity-clickable-badge")).toHaveScreenshot(
+  "ui-parity-clickable-badge.png",
+);
+await expect(page.getByTestId("parity-table-footer")).toHaveScreenshot(
+  "ui-parity-table-footer.png",
+);
 ```
 
 Run:

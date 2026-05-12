@@ -86,12 +86,12 @@ Each plugin may declare the `DetectHostCompatibility` capability and implement
 The check runs over the same SSH session used for bootstrapping, so it reflects
 the actual remote environment.
 
-| Plugin | Compatibility check |
-| --- | --- |
+| Plugin                 | Compatibility check                                              |
+| ---------------------- | ---------------------------------------------------------------- |
 | Proxmox Helper Scripts | Tests for `/usr/bin/update` (PHS update script, Proxmox VE only) |
-| APT | Tests for `apt-get` via `which` |
-| Homebrew | Tests for `brew` via `which` |
-| npm | Tests for `npm` via `which` |
+| APT                    | Tests for `apt-get` via `which`                                  |
+| Homebrew               | Tests for `brew` via `which`                                     |
+| npm                    | Tests for `npm` via `which`                                      |
 
 Plugins that fail their compatibility check are **not** included in the sudoers
 file and their helper scripts are **not** installed. This is important for hosts
@@ -196,24 +196,24 @@ those commands are. The table below documents the exact sudoers patterns generat
 plugin. Wildcards participate in sudoers' normal positional argument matching, so they can
 appear in the middle or at the end of a command spec.
 
-| Plugin | Sudoers pattern | Notes |
-| --- | --- | --- |
-| **APT** | `SETENV: /usr/bin/apt-get update *` | Index refresh; `SETENV:` required for `DEBIAN_FRONTEND=noninteractive` |
-| **APT** | `SETENV: /usr/bin/apt-get install *` | Single-package install |
-| **APT** | `SETENV: /usr/bin/apt-get -o Dir\:\:Etc\:\:Preferences\=/tmp/uptrakit-apt-batch.pref upgrade *` | Batch upgrade via pinned preferences file; uses `upgrade` (not `install`) to preserve apt manual/auto marks |
-| **APK** | `/usr/sbin/apk update` | Index refresh; no wildcard needed |
-| **APK** | `/usr/sbin/apk add *` | Package installation |
-| **Pacman** | `/usr/bin/pacman -Sy` | Database sync; no wildcard |
-| **Pacman** | `/usr/bin/pacman -S --noconfirm *` | Package installation (single and batch) |
-| **BSD pkg** | `/usr/local/sbin/pkg update *` | Index refresh |
-| **BSD pkg** | `/usr/local/sbin/pkg install -y *` | Package installation |
-| **Snap** | `/usr/bin/snap refresh *` | Package refresh; covers `snap refresh PKG`, `snap refresh PKG --channel=stable`, and batch |
-| **npm** | `/usr/bin/npm install -g *` | Global package install (single and batch) |
-| **GitHub Releases** | `/usr/bin/install` | Asset installation; no restriction on arguments |
-| **GitHub Releases** | `/usr/bin/systemctl stop *` | Stop services before asset installation |
-| **GitHub Releases** | `/usr/bin/systemctl start *` | Start services after asset installation |
-| **Proxmox Helper Scripts** | `/usr/local/bin/uptrakit-phs-version` | Version detection helper script |
-| **Proxmox Helper Scripts** | `SETENV: /usr/bin/update` | PHS update execution |
+| Plugin                     | Sudoers pattern                                                                                 | Notes                                                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **APT**                    | `SETENV: /usr/bin/apt-get update *`                                                             | Index refresh; `SETENV:` required for `DEBIAN_FRONTEND=noninteractive`                                      |
+| **APT**                    | `SETENV: /usr/bin/apt-get install *`                                                            | Single-package install                                                                                      |
+| **APT**                    | `SETENV: /usr/bin/apt-get -o Dir\:\:Etc\:\:Preferences\=/tmp/uptrakit-apt-batch.pref upgrade *` | Batch upgrade via pinned preferences file; uses `upgrade` (not `install`) to preserve apt manual/auto marks |
+| **APK**                    | `/usr/sbin/apk update`                                                                          | Index refresh; no wildcard needed                                                                           |
+| **APK**                    | `/usr/sbin/apk add *`                                                                           | Package installation                                                                                        |
+| **Pacman**                 | `/usr/bin/pacman -Sy`                                                                           | Database sync; no wildcard                                                                                  |
+| **Pacman**                 | `/usr/bin/pacman -S --noconfirm *`                                                              | Package installation (single and batch)                                                                     |
+| **BSD pkg**                | `/usr/local/sbin/pkg update *`                                                                  | Index refresh                                                                                               |
+| **BSD pkg**                | `/usr/local/sbin/pkg install -y *`                                                              | Package installation                                                                                        |
+| **Snap**                   | `/usr/bin/snap refresh *`                                                                       | Package refresh; covers `snap refresh PKG`, `snap refresh PKG --channel=stable`, and batch                  |
+| **npm**                    | `/usr/bin/npm install -g *`                                                                     | Global package install (single and batch)                                                                   |
+| **GitHub Releases**        | `/usr/bin/install`                                                                              | Asset installation; no restriction on arguments                                                             |
+| **GitHub Releases**        | `/usr/bin/systemctl stop *`                                                                     | Stop services before asset installation                                                                     |
+| **GitHub Releases**        | `/usr/bin/systemctl start *`                                                                    | Start services after asset installation                                                                     |
+| **Proxmox Helper Scripts** | `/usr/local/bin/uptrakit-phs-version`                                                           | Version detection helper script                                                                             |
+| **Proxmox Helper Scripts** | `SETENV: /usr/bin/update`                                                                       | PHS update execution                                                                                        |
 
 > [!NOTE]
 > Note on APT batch upgrade: `apt-get upgrade` is used (not `apt-get install pkg=version`)
@@ -265,11 +265,11 @@ This writes `NOPASSWD: ALL` instead of per-command entries. Use only when:
 Each enrolled host stores a `sudo_policy` that controls how the SSH agent
 prepends `sudo` at runtime (when executing plugin commands over SSH):
 
-| Policy | CLI value | Behavior |
-| --- | --- | --- |
-| `Auto` (default) | `auto` | Prepend `sudo` when agent user is not root **and** `sudo_available` is true in the database |
-| `ForceWith` | `force-with` | Always prepend `sudo` (unless agent user is UID 0) |
-| `ForceWithout` | `force-without` | Never prepend `sudo` |
+| Policy           | CLI value       | Behavior                                                                                    |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------------- |
+| `Auto` (default) | `auto`          | Prepend `sudo` when agent user is not root **and** `sudo_available` is true in the database |
+| `ForceWith`      | `force-with`    | Always prepend `sudo` (unless agent user is UID 0)                                          |
+| `ForceWithout`   | `force-without` | Never prepend `sudo`                                                                        |
 
 Change the policy with:
 

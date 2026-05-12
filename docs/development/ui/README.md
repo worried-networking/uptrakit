@@ -32,23 +32,23 @@ Use this guide when:
 
 ## Status Model
 
-| Status | Meaning |
-| --- | --- |
-| `Implemented` | Part of the current contract; required now. |
-| `Transitional` | Present in the runtime but still converging on the final target. |
-| `Target` | Approved future state; do not assume the current runtime already matches it. |
+| Status         | Meaning                                                                      |
+| -------------- | ---------------------------------------------------------------------------- |
+| `Implemented`  | Part of the current contract; required now.                                  |
+| `Transitional` | Present in the runtime but still converging on the final target.             |
+| `Target`       | Approved future state; do not assume the current runtime already matches it. |
 
 Sections without an explicit status label are `Implemented`.
 
 ## Technology Stack
 
-| Concern | Technology |
-| --- | --- |
+| Concern             | Technology                                                                  |
+| ------------------- | --------------------------------------------------------------------------- |
 | Component framework | Svelte 5 (runes API: `$props`, `$bindable`, `$derived`, `$state`, Snippets) |
-| Styling | Tailwind CSS v4 with semantic CSS custom properties |
-| Form styling | `@tailwindcss/forms` plugin |
-| Theme adapter | CSS custom properties via `frontend/src/theme/` |
-| Visual regression | Playwright (macOS + Chromium, reduced-motion, DPR 1) |
+| Styling             | Tailwind CSS v4 with semantic CSS custom properties                         |
+| Form styling        | `@tailwindcss/forms` plugin                                                 |
+| Theme adapter       | CSS custom properties via `frontend/src/theme/`                             |
+| Visual regression   | Playwright (macOS + Chromium, reduced-motion, DPR 1)                        |
 
 ## Themes
 
@@ -65,12 +65,12 @@ Sections without an explicit status label are `Implemented`.
 
 Read in this order when onboarding:
 
-| Order | Page | Content |
-| --- | --- | --- |
-| 1 | [tokens.md](tokens.md) | Design tokens, typography, border-radius, transitions, focus states, z-index, runtime adapter |
-| 2 | [primitives.md](primitives.md) | All shared UI components — props, variants, usage rules |
-| 3 | [layout.md](layout.md) | App shell measurements, sidebar, public entry shell, responsive layout, page patterns |
-| 4 | [surfaces.md](surfaces.md) | Surface parity contract, slot registry, runtime states, verification, waivers (read last — assumes knowledge of tokens and primitives) |
+| Order | Page                           | Content                                                                                                                                |
+| ----- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | [tokens.md](tokens.md)         | Design tokens, typography, border-radius, transitions, focus states, z-index, runtime adapter                                          |
+| 2     | [primitives.md](primitives.md) | All shared UI components — props, variants, usage rules                                                                                |
+| 3     | [layout.md](layout.md)         | App shell measurements, sidebar, public entry shell, responsive layout, page patterns                                                  |
+| 4     | [surfaces.md](surfaces.md)     | Surface parity contract, slot registry, runtime states, verification, waivers (read last — assumes knowledge of tokens and primitives) |
 
 ## Interaction Conventions
 
@@ -85,23 +85,23 @@ Read in this order when onboarding:
 
 ## Quick Reference: What To Use
 
-| Need | Use |
-| --- | --- |
-| Section header + contained body | `SectionCard` |
-| Full page with eyebrow + actions | `PageShell` |
-| Tab switching | `TabStrip` |
-| Semantic callout (info/warning/danger/success) | `Callout` |
-| No-data placeholder | `EmptyState` |
-| Status indicator label | `StatusBadge` |
-| Navigable or action-triggering badge | `ActionBadge` |
-| Categorical pill label | `PillBadge` |
-| Labeled form field + validation | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` |
-| Data listing with pagination | `DataTable` + `TableFooterBar` |
-| Navigable summary stat card | `StatCard` |
-| Context action in a dropdown | `ContextMenuItem` inside `ContextMenuShell` |
-| Destructive confirmation | `ConfirmDialog` (import directly, not from barrel) |
-| Arbitrary / form dialog | `ModalShell` |
-| Primary / ghost / secondary / danger action | `Button` |
-| Targeted provider selection | `ProviderSelector` (surfaces only) |
+| Need                                           | Use                                                |
+| ---------------------------------------------- | -------------------------------------------------- |
+| Section header + contained body                | `SectionCard`                                      |
+| Full page with eyebrow + actions               | `PageShell`                                        |
+| Tab switching                                  | `TabStrip`                                         |
+| Semantic callout (info/warning/danger/success) | `Callout`                                          |
+| No-data placeholder                            | `EmptyState`                                       |
+| Status indicator label                         | `StatusBadge`                                      |
+| Navigable or action-triggering badge           | `ActionBadge`                                      |
+| Categorical pill label                         | `PillBadge`                                        |
+| Labeled form field + validation                | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` |
+| Data listing with pagination                   | `DataTable` + `TableFooterBar`                     |
+| Navigable summary stat card                    | `StatCard`                                         |
+| Context action in a dropdown                   | `ContextMenuItem` inside `ContextMenuShell`        |
+| Destructive confirmation                       | `ConfirmDialog` (import directly, not from barrel) |
+| Arbitrary / form dialog                        | `ModalShell`                                       |
+| Primary / ghost / secondary / danger action    | `Button`                                           |
+| Targeted provider selection                    | `ProviderSelector` (surfaces only)                 |
 
 See `frontend/src/lib/components/ui/index.ts` for all barrel exports.

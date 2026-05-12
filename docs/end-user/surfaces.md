@@ -12,12 +12,12 @@ which services are connected and what capabilities they provide.
 
 ## What surfaces can add
 
-| Surface type | Where it appears | Example |
-| --- | --- | --- |
-| Page | Sidebar navigation item, opens a full page | SSH Host Management page |
-| Panel | Tab or section on an existing detail page | LXC matching panel on host detail |
-| Context menu group | Submenu in an entity's right-click menu | "SSH Agent" actions on host rows |
-| Table columns | Extra columns in an existing list table | "SSH Status" column on hosts table |
+| Surface type       | Where it appears                           | Example                            |
+| ------------------ | ------------------------------------------ | ---------------------------------- |
+| Page               | Sidebar navigation item, opens a full page | SSH Host Management page           |
+| Panel              | Tab or section on an existing detail page  | LXC matching panel on host detail  |
+| Context menu group | Submenu in an entity's right-click menu    | "SSH Agent" actions on host rows   |
+| Table columns      | Extra columns in an existing list table    | "SSH Status" column on hosts table |
 
 Surfaces only appear when at least one service instance that provides them is connected.
 When all providers disconnect, the surface is removed from the UI until a provider reconnects.
@@ -153,10 +153,10 @@ permission.
 
 ## Targeted vs universal surfaces
 
-| Mode | Behaviour |
-| --- | --- |
-| Universal | Any connected provider can handle the action. The system picks one automatically. |
-| Targeted | You must select a specific service instance. The UI shows a dropdown when multiple providers are available. |
+| Mode      | Behaviour                                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| Universal | Any connected provider can handle the action. The system picks one automatically.                           |
+| Targeted  | You must select a specific service instance. The UI shows a dropdown when multiple providers are available. |
 
 **Example**: An SSH agent surface is typically **targeted** because each agent manages
 different hosts. A monitoring dashboard surface might be **universal** because any

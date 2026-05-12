@@ -49,13 +49,13 @@ curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/proxy/ssl/ca.crl && n
 
 ### Proxy matrix
 
-| Proxy | OCSP | CRL | Notes |
-| --- | --- | --- | --- |
-| Nginx | yes | yes | OCSP requires `http://` responder. |
-| HAProxy | no | yes | Refresh CRL manually. |
-| Envoy | no | yes | Refresh CRL manually. |
-| Traefik | no | no | Rely on controller-side checks. |
-| Caddy | no | no | Rely on controller-side checks. |
+| Proxy   | OCSP | CRL | Notes                              |
+| ------- | ---- | --- | ---------------------------------- |
+| Nginx   | yes  | yes | OCSP requires `http://` responder. |
+| HAProxy | no   | yes | Refresh CRL manually.              |
+| Envoy   | no   | yes | Refresh CRL manually.              |
+| Traefik | no   | no  | Rely on controller-side checks.    |
+| Caddy   | no   | no  | Rely on controller-side checks.    |
 
 See each per-proxy guide for detailed configuration examples: [Traefik](../end-user/deployment/traefik.md), [Caddy](../end-user/deployment/caddy.md),
 [Nginx](../end-user/deployment/nginx.md), [Nginx Proxy Manager](../end-user/deployment/nginx-proxy-manager.md),

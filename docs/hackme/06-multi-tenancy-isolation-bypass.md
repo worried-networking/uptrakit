@@ -1,11 +1,11 @@
 # ATK-06: Multi-Tenancy Isolation Bypass
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Database / API (future multi-tenancy) |
-| Prerequisites | Authenticated user in one tenant; multi-tenancy enabled (future) |
-| STRIDE | Information Disclosure |
+| Field          | Value                                                            |
+| -------------- | ---------------------------------------------------------------- |
+| Severity       | Medium                                                           |
+| Attack surface | Database / API (future multi-tenancy)                            |
+| Prerequisites  | Authenticated user in one tenant; multi-tenancy enabled (future) |
+| STRIDE         | Information Disclosure                                           |
 
 ## Attack description
 

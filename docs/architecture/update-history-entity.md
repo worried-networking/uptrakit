@@ -7,24 +7,24 @@ Records are immutable — once created they are not modified or soft-deleted.
 
 ### `update_history`
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | UUIDv7 |
-| `tenant_id` | UUID FK → `tenants.id` | NOT NULL; ON DELETE RESTRICT |
-| `host_id` | UUID FK → `hosts.id` | ON DELETE CASCADE |
-| `software_item_id` | UUID FK → `software_items.id` | ON DELETE CASCADE |
-| `host_software_item_id` | UUID FK → `host_software_items.id` | Nullable; ON DELETE SET NULL |
-| `from_version` | TEXT | Nullable; version before update |
-| `to_version` | TEXT | Nullable; target version (null for batch updates where the target is implicit) |
-| `status` | TEXT | String-backed enum: `queued`, `pending`, `in_progress`, `completed`, `failed` |
-| `output` | TEXT | NOT NULL; full command output |
-| `actor_type` | TEXT | NOT NULL; `"user"`, `"mqtt"`, `"scheduler"`, or `"legacy"` |
-| `actor_id` | TEXT | NOT NULL; user UUID, MQTT client UUID, or empty string |
-| `update_category` | TEXT | Nullable; update category (e.g. `security`, `bugfix`, `feature`, `unknown`) |
-| `batch_id` | UUID FK → `update_batches.id` | Nullable; ON DELETE SET NULL |
-| `started_at` | TIMESTAMP | Nullable |
-| `completed_at` | TIMESTAMP | Nullable |
-| `created_at` | TIMESTAMP | |
+| Column                  | Type                               | Notes                                                                          |
+| ----------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `id`                    | UUID PK                            | UUIDv7                                                                         |
+| `tenant_id`             | UUID FK → `tenants.id`             | NOT NULL; ON DELETE RESTRICT                                                   |
+| `host_id`               | UUID FK → `hosts.id`               | ON DELETE CASCADE                                                              |
+| `software_item_id`      | UUID FK → `software_items.id`      | ON DELETE CASCADE                                                              |
+| `host_software_item_id` | UUID FK → `host_software_items.id` | Nullable; ON DELETE SET NULL                                                   |
+| `from_version`          | TEXT                               | Nullable; version before update                                                |
+| `to_version`            | TEXT                               | Nullable; target version (null for batch updates where the target is implicit) |
+| `status`                | TEXT                               | String-backed enum: `queued`, `pending`, `in_progress`, `completed`, `failed`  |
+| `output`                | TEXT                               | NOT NULL; full command output                                                  |
+| `actor_type`            | TEXT                               | NOT NULL; `"user"`, `"mqtt"`, `"scheduler"`, or `"legacy"`                     |
+| `actor_id`              | TEXT                               | NOT NULL; user UUID, MQTT client UUID, or empty string                         |
+| `update_category`       | TEXT                               | Nullable; update category (e.g. `security`, `bugfix`, `feature`, `unknown`)    |
+| `batch_id`              | UUID FK → `update_batches.id`      | Nullable; ON DELETE SET NULL                                                   |
+| `started_at`            | TIMESTAMP                          | Nullable                                                                       |
+| `completed_at`          | TIMESTAMP                          | Nullable                                                                       |
+| `created_at`            | TIMESTAMP                          |                                                                                |
 
 Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 `idx_update_history_status`, `idx_update_history_host_software_item` (composite),
@@ -33,19 +33,19 @@ Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 
 ### `update_batches`
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | UUIDv7 |
-| `tenant_id` | UUID FK → `tenants.id` | NOT NULL; ON DELETE RESTRICT |
-| `batch_type` | TEXT | `"host_update"` or `"item_rollout"` |
-| `status` | TEXT | `"in_progress"`, `"completed"`, `"partially_completed"` |
-| `total_count` | INTEGER | Set at creation time |
-| `actor_type` | TEXT | `"user"` or `"mqtt"` |
-| `actor_id` | TEXT | User UUID or MQTT client ID |
-| `output` | TEXT | Nullable; aggregated batch output |
-| `output_bytes` | INTEGER | Nullable; byte count for streaming |
-| `created_at` | TIMESTAMP | |
-| `completed_at` | TIMESTAMP | Nullable |
+| Column         | Type                   | Notes                                                   |
+| -------------- | ---------------------- | ------------------------------------------------------- |
+| `id`           | UUID PK                | UUIDv7                                                  |
+| `tenant_id`    | UUID FK → `tenants.id` | NOT NULL; ON DELETE RESTRICT                            |
+| `batch_type`   | TEXT                   | `"host_update"` or `"item_rollout"`                     |
+| `status`       | TEXT                   | `"in_progress"`, `"completed"`, `"partially_completed"` |
+| `total_count`  | INTEGER                | Set at creation time                                    |
+| `actor_type`   | TEXT                   | `"user"` or `"mqtt"`                                    |
+| `actor_id`     | TEXT                   | User UUID or MQTT client ID                             |
+| `output`       | TEXT                   | Nullable; aggregated batch output                       |
+| `output_bytes` | INTEGER                | Nullable; byte count for streaming                      |
+| `created_at`   | TIMESTAMP              |                                                         |
+| `completed_at` | TIMESTAMP              | Nullable                                                |
 
 Indexes: `idx_ub_tenant_status` on `(tenant_id, status)`.
 
@@ -62,13 +62,13 @@ The `UpdateStatus` enum is defined in two places:
   `as_str()` / `from_str()` methods. Conversion between DB and API enums happens in the route handler's
   `db_status_to_api` helper.
 
-| Variant | String | Meaning | Terminal? | Active lock? |
-| :------ | :----- | :------ | :-------: | :----------: |
-| `Queued` | `queued` | Waiting for host to become free (batch or single update) | No | No |
-| `Pending` | `pending` | Dispatched; agent not yet started | No | **Yes** |
-| `InProgress` | `in_progress` | Agent executing the update | No | **Yes** |
-| `Completed` | `completed` | Update succeeded | Yes | No |
-| `Failed` | `failed` | Update failed | Yes | No |
+| Variant      | String        | Meaning                                                  | Terminal? | Active lock? |
+| :----------- | :------------ | :------------------------------------------------------- | :-------: | :----------: |
+| `Queued`     | `queued`      | Waiting for host to become free (batch or single update) |    No     |      No      |
+| `Pending`    | `pending`     | Dispatched; agent not yet started                        |    No     |   **Yes**    |
+| `InProgress` | `in_progress` | Agent executing the update                               |    No     |   **Yes**    |
+| `Completed`  | `completed`   | Update succeeded                                         |    Yes    |      No      |
+| `Failed`     | `failed`      | Update failed                                            |    Yes    |      No      |
 
 **Active lock** means the row counts toward the per-host lock (i.e. no further update may be
 triggered for that host while such a row exists). The partial unique index
@@ -128,15 +128,15 @@ directly. The get endpoint verifies the record's tenant matches the requesting t
 
 ## REST API
 
-| Method | Path | Permission | Description |
-| :----- | :----------------------------------------------- | :------------- | :--------------------------------------------------------------- |
-| GET | `/api/v1/update-history` | ViewSoftware | List records (filterable by host_id, software_item_id, status) |
-| GET | `/api/v1/update-history/{id}` | ViewSoftware | Get single record |
-| POST | `/api/v1/hosts/{host_id}/batch-update` | ManageSoftware | Trigger host-wide batch update |
-| POST | `/api/v1/software-items/{id}/batch-update` | ManageSoftware | Trigger item-wide batch update |
-| GET | `/api/v1/update-batches` | ViewSoftware | List batches (filterable by status) |
-| GET | `/api/v1/update-batches/{id}` | ViewSoftware | Get batch with per-item details |
-| GET | `/api/v1/update-batches/{id}/stream` | ViewSoftware | SSE stream for batch progress |
+| Method | Path                                       | Permission     | Description                                                    |
+| :----- | :----------------------------------------- | :------------- | :------------------------------------------------------------- |
+| GET    | `/api/v1/update-history`                   | ViewSoftware   | List records (filterable by host_id, software_item_id, status) |
+| GET    | `/api/v1/update-history/{id}`              | ViewSoftware   | Get single record                                              |
+| POST   | `/api/v1/hosts/{host_id}/batch-update`     | ManageSoftware | Trigger host-wide batch update                                 |
+| POST   | `/api/v1/software-items/{id}/batch-update` | ManageSoftware | Trigger item-wide batch update                                 |
+| GET    | `/api/v1/update-batches`                   | ViewSoftware   | List batches (filterable by status)                            |
+| GET    | `/api/v1/update-batches/{id}`              | ViewSoftware   | Get batch with per-item details                                |
+| GET    | `/api/v1/update-batches/{id}/stream`       | ViewSoftware   | SSE stream for batch progress                                  |
 
 Responses include denormalized `host_name` and `software_item_name` fields.
 
@@ -144,17 +144,17 @@ See [Batch Update Endpoints](../api/http-web-api.md#batch-update-endpoints) for 
 
 ## Key files
 
-| File | Purpose |
-| :----------------------------------------------------------------- | :----------------------------------------------- |
-| `crates/shared/db/src/entity/update_history.rs` | SeaORM entity with `UpdateStatus` enum |
-| `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity with `BatchStatus` enum |
-| `crates/shared/db/src/migration/m20260209_000001_initial.rs` | DB migration (initial) |
-| `crates/shared/db/src/migration/m20260301_000001_update_category.rs` | Migration: update_category column |
-| `crates/shared/db/src/migration/m20260301_000002_update_batches.rs` | Migration: update_batches table, batch_id FK |
+| File                                                                         | Purpose                                                          |
+| :--------------------------------------------------------------------------- | :--------------------------------------------------------------- |
+| `crates/shared/db/src/entity/update_history.rs`                              | SeaORM entity with `UpdateStatus` enum                           |
+| `crates/shared/db/src/entity/update_batch.rs`                                | SeaORM entity with `BatchStatus` enum                            |
+| `crates/shared/db/src/migration/m20260209_000001_initial.rs`                 | DB migration (initial)                                           |
+| `crates/shared/db/src/migration/m20260301_000001_update_category.rs`         | Migration: update_category column                                |
+| `crates/shared/db/src/migration/m20260301_000002_update_batches.rs`          | Migration: update_batches table, batch_id FK                     |
 | `crates/shared/db/src/migration/m20260313_000001_per_host_update_locking.rs` | Migration: partial unique index `uix_update_history_host_active` |
-| `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
-| `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (requests, responses) |
-| `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |
-| `crates/ui/web-api/src/routes/update_batches.rs` | Batch route handlers + SSE endpoint |
-| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch query logic |
-| `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process SSE broadcast registry |
+| `crates/shared/web-api-types/src/update_history.rs`                          | API types (response, query, status enum)                         |
+| `crates/shared/web-api-types/src/update_batches.rs`                          | Batch API types (requests, responses)                            |
+| `crates/ui/web-api/src/routes/update_history.rs`                             | Route handlers + unit tests                                      |
+| `crates/ui/web-api/src/routes/update_batches.rs`                             | Batch route handlers + SSE endpoint                              |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs`                    | Batch query logic                                                |
+| `crates/ui/web-api/src/batch_progress_broadcaster.rs`                        | In-process SSE broadcast registry                                |

@@ -1362,4 +1362,4 @@ git commit --only crates/core/controller-runtime/Cargo.toml \
 - [ ] `crates/ui/web-api/src/mcp/` directory does not exist
 - [ ] `crates/ui/mcp/` exists with 8 source files
 - [ ] `mcp_compat.rs` in `web-api` exports `McpRequestContext`, `McpAuthError`,
-  `McpTriggerError`, `validate_api_token_for_mcp`, `mcp_trigger_update`
+      `McpTriggerError`, `validate_api_token_for_mcp`, `mcp_trigger_update`

@@ -1,11 +1,11 @@
 # ATK-17: RCE on Agents via Compromised Controller
 
-| Field | Value |
-| --- | --- |
-| Severity | Critical |
-| Attack surface | Controller / wire protocol |
-| Prerequisites | Compromise of the controller or ability to inject `ControllerMessage` payloads |
-| STRIDE | Elevation of Privilege |
+| Field          | Value                                                                          |
+| -------------- | ------------------------------------------------------------------------------ |
+| Severity       | Critical                                                                       |
+| Attack surface | Controller / wire protocol                                                     |
+| Prerequisites  | Compromise of the controller or ability to inject `ControllerMessage` payloads |
+| STRIDE         | Elevation of Privilege                                                         |
 
 ## Attack description
 
@@ -77,42 +77,42 @@ The same attack applies via:
 - **Controller access protection.** The controller is protected by HTTPS, JWT
   authentication, RBAC permissions, and rate limiting. Multiple layers must be
   breached to reach the message injection point.
-- **Agent-side execution freeze file.** *(Implemented)* Both the `uptrakit-agent`
+- **Agent-side execution freeze file.** _(Implemented)_ Both the `uptrakit-agent`
   and `uptrakit-agent-ssh` binaries check for the presence of a freeze file at
   `<state-dir>/update-freeze` before processing any `ExecuteUpdate` or
   `ExecuteBatchUpdate` message. If the file exists the message is silently
   dropped and the operation is logged. Creating this file (`touch
-  <state-dir>/update-freeze`) allows an operator to halt update execution from the
+<state-dir>/update-freeze`) allows an operator to halt update execution from the
   agent side, independently of and without modifying the controller, while the
   WebSocket connection and all other agent functionality remain active. The freeze
   applies immediately with no restart required.
-- **SSH agent batch update handler.** *(Implemented)* The SSH agent now explicitly
+- **SSH agent batch update handler.** _(Implemented)_ The SSH agent now explicitly
   handles `ExecuteBatchUpdate` messages with the same freeze file check
   as `ExecuteUpdate`. Previously, batch update messages were silently dropped by the
   wildcard `_ =>` arm.
-- **Per-hook timeout.** *(Implemented)* Individual pre/post-update hooks have a
+- **Per-hook timeout.** _(Implemented)_ Individual pre/post-update hooks have a
   5-minute timeout (`HOOK_TIMEOUT = 300s`). A single hook cannot consume the entire
   update timeout budget. On timeout, the hook is killed (via `kill_on_drop(true)`)
   and `UpdateError::HookFailed` is returned. See `crates/shared/agent-core/src/update.rs`.
-- **Agent-side update rate limiting.** *(Implemented)* Both agents enforce an
+- **Agent-side update rate limiting.** _(Implemented)_ Both agents enforce an
   `UPDATE_COOLDOWN` of 5 seconds between consecutive update executions. For the SSH
   agent, cooldown is tracked per-host. Rapid-fire updates from a compromised
   controller are rejected with a `security_audit:` warning.
-- **Remote freeze via `SetUpdateFreeze` wire message.** *(Implemented)* The
+- **Remote freeze via `SetUpdateFreeze` wire message.** _(Implemented)_ The
   controller can remotely create or remove the freeze file on agents via the
   `set_update_freeze` message. When `enabled: true`, the agent creates the freeze
   file; when `false`, it removes it. The optional `reason` field is logged. This
   removes the requirement for local shell access during an incident.
-- **REST API for remote freeze.** *(Implemented)* The
+- **REST API for remote freeze.** _(Implemented)_ The
   `POST /api/v1/services/{id}/update-freeze` endpoint allows administrators with
   `manage_agents` permission to enable or disable the update freeze on connected
   agents via the web API or CLI (`uptrakit-cli services update-freeze`). The
   endpoint validates that the service exists, is connected, and sends the wire
   message over the active WebSocket.
-- **Hook audit logging.** *(Implemented)* Before executing pre/post-update hooks,
+- **Hook audit logging.** _(Implemented)_ Before executing pre/post-update hooks,
   agents emit a `security_audit:` warning listing the hook count and command
   summaries, enabling forensic analysis of executed commands.
-- **`NoopCommandExecutor` returns error instead of panic.** *(Implemented)* The
+- **`NoopCommandExecutor` returns error instead of panic.** _(Implemented)_ The
   controller's `NoopCommandExecutor` (used for API-based plugins that should never
   execute local commands) now returns `CommandError::UnsupportedOperation` instead of
   calling `unreachable!()`. This prevents a controller crash if a code path

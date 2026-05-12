@@ -1,11 +1,11 @@
 # ATK-10: OIDC Provider Compromise
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | Authentication / OIDC |
-| Prerequisites | Compromise of a configured OIDC identity provider |
-| STRIDE | Spoofing, Elevation of Privilege |
+| Field          | Value                                             |
+| -------------- | ------------------------------------------------- |
+| Severity       | High                                              |
+| Attack surface | Authentication / OIDC                             |
+| Prerequisites  | Compromise of a configured OIDC identity provider |
+| STRIDE         | Spoofing, Elevation of Privilege                  |
 
 ## Attack description
 
@@ -57,7 +57,7 @@
 - **OIDC client secret encryption.** Provider client secrets are stored encrypted
   (`EncryptedString`) in the database, protected by the master key.
 - **Session integrity validation.** OIDC sessions enforce `oidc_provider_id IS NOT
-  NULL` via a database CHECK constraint. Tokens with `auth_method = "oidc"` but
+NULL` via a database CHECK constraint. Tokens with `auth_method = "oidc"` but
   missing `oidc_provider_id` are rejected.
 - **Rate limiting on OIDC endpoints.** Exchange, link, and complete-registration
   endpoints are rate-limited (5-10 requests per 60 seconds per IP).

@@ -64,21 +64,21 @@ This design ensures that compromise of the controller's master key does not expo
 
 ### Protected Against
 
-| Threat | Mitigation |
-| --- | --- |
-| Database file theft | AES-256-GCM encryption with per-value random nonces |
-| Memory dump of DB values | Encrypted at rest; plaintext only in application memory during use |
-| Key reuse attacks | Random 12-byte nonce per encryption; same plaintext produces different ciphertext |
-| Tampering | GCM authentication tag detects any modification |
-| Controller compromise | Independent master key; controller never sees SSH private keys |
+| Threat                   | Mitigation                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| Database file theft      | AES-256-GCM encryption with per-value random nonces                               |
+| Memory dump of DB values | Encrypted at rest; plaintext only in application memory during use                |
+| Key reuse attacks        | Random 12-byte nonce per encryption; same plaintext produces different ciphertext |
+| Tampering                | GCM authentication tag detects any modification                                   |
+| Controller compromise    | Independent master key; controller never sees SSH private keys                    |
 
 ### Not Protected Against (Requires Additional Controls)
 
-| Threat | Required Control |
-| --- | --- |
-| Master key file theft | OS-level file permissions (0o600), restrict access to service user |
-| Root access on SSH agent host | Full-disk encryption, host hardening, access controls |
-| Memory dump of running process | Process isolation, no core dumps in production |
+| Threat                         | Required Control                                                   |
+| ------------------------------ | ------------------------------------------------------------------ |
+| Master key file theft          | OS-level file permissions (0o600), restrict access to service user |
+| Root access on SSH agent host  | Full-disk encryption, host hardening, access controls              |
+| Memory dump of running process | Process isolation, no core dumps in production                     |
 
 ## File Permissions
 
@@ -130,10 +130,10 @@ point where the raw value is needed (e.g., passing to the SSH transport layer).
 The `host add` and bootstrap operations support two host key verification
 modes, controlled by the `--strict-host-key-checking` flag:
 
-| Mode | Flags | Security Level |
-| --- | --- | --- |
-| **Strict** | `--strict-host-key-checking --host-key-fingerprint SHA256:...` | Strong — rejects mismatched keys; TOFU disabled |
-| **TOFU** (trust-on-first-use) | (neither flag, or `--host-key-fingerprint` alone) | Weaker — accepts any key on first connection |
+| Mode                          | Flags                                                          | Security Level                                  |
+| ----------------------------- | -------------------------------------------------------------- | ----------------------------------------------- |
+| **Strict**                    | `--strict-host-key-checking --host-key-fingerprint SHA256:...` | Strong — rejects mismatched keys; TOFU disabled |
+| **TOFU** (trust-on-first-use) | (neither flag, or `--host-key-fingerprint` alone)              | Weaker — accepts any key on first connection    |
 
 When `--strict-host-key-checking` is set, `--host-key-fingerprint` becomes
 **required**. The command exits with an error if the fingerprint is not provided:

@@ -42,14 +42,14 @@ docker compose logs controller | grep "registration token"
 
 Docker Compose profiles control which services run alongside the controller.
 
-| Profile | Services started | Description |
-| --- | --- | --- |
-| *(default)* | controller | Controller with SQLite and embedded scheduler |
-| `postgres` | controller, postgres | Controller with PostgreSQL |
-| `mqtt` | controller, mqtt | Controller + MQTT/HA bridge |
-| `ssh` | controller, agent-ssh | Controller + SSH agent |
-| `scheduler` | controller, scheduler, nats | Controller + external scheduler + NATS |
-| `full` | all services | Everything |
+| Profile     | Services started            | Description                                   |
+| ----------- | --------------------------- | --------------------------------------------- |
+| _(default)_ | controller                  | Controller with SQLite and embedded scheduler |
+| `postgres`  | controller, postgres        | Controller with PostgreSQL                    |
+| `mqtt`      | controller, mqtt            | Controller + MQTT/HA bridge                   |
+| `ssh`       | controller, agent-ssh       | Controller + SSH agent                        |
+| `scheduler` | controller, scheduler, nats | Controller + external scheduler + NATS        |
+| `full`      | all services                | Everything                                    |
 
 ```bash
 # Controller with PostgreSQL
@@ -132,26 +132,26 @@ and cannot be enabled.
 
 Each service uses named volumes for persistent data:
 
-| Volume | Service | Contents |
-| --- | --- | --- |
+| Volume              | Service    | Contents                          |
+| ------------------- | ---------- | --------------------------------- |
 | `controller-config` | controller | CA certificates, TLS certificates |
-| `controller-state` | controller | SQLite database, JWT signing key |
-| `postgres-data` | postgres | PostgreSQL data |
-| `nats-data` | nats | JetStream storage |
-| `scheduler-state` | scheduler | Enrollment state |
-| `mqtt-state` | mqtt | Enrollment state |
-| `agent-ssh-state` | agent-ssh | Enrollment state, SSH keys |
+| `controller-state`  | controller | SQLite database, JWT signing key  |
+| `postgres-data`     | postgres   | PostgreSQL data                   |
+| `nats-data`         | nats       | JetStream storage                 |
+| `scheduler-state`   | scheduler  | Enrollment state                  |
+| `mqtt-state`        | mqtt       | Enrollment state                  |
+| `agent-ssh-state`   | agent-ssh  | Enrollment state, SSH keys        |
 
 ## Available Images
 
-| Image | Description |
-| --- | --- |
-| `uptrakit-controller` | Controller with embedded frontend and scheduler |
-| `uptrakit-controller-swagger` | Controller with Swagger UI enabled |
-| `uptrakit-scheduler` | External scheduler |
-| `uptrakit-mqtt` | MQTT/Home Assistant bridge |
-| `uptrakit-agent-ssh` | SSH agent |
-| `uptrakit-cli` | CLI tool |
+| Image                         | Description                                     |
+| ----------------------------- | ----------------------------------------------- |
+| `uptrakit-controller`         | Controller with embedded frontend and scheduler |
+| `uptrakit-controller-swagger` | Controller with Swagger UI enabled              |
+| `uptrakit-scheduler`          | External scheduler                              |
+| `uptrakit-mqtt`               | MQTT/Home Assistant bridge                      |
+| `uptrakit-agent-ssh`          | SSH agent                                       |
+| `uptrakit-cli`                | CLI tool                                        |
 
 All images are published for `linux/amd64` and `linux/arm64`.
 

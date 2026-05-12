@@ -18,20 +18,20 @@ The orchestrator-owned sentinel is `status = InProgress` + `execution_owner_serv
 
 ## File Map
 
-| File | Action | Responsibility |
-| --- | --- | --- |
-| `crates/plugins/infrastructure/core/src/roles.rs` | Modify | Add `output_tx` field + `with_output_tx()` to `ControllerProtectionContext` |
-| `crates/plugins/infrastructure/proxmox/src/update_protection.rs` | Modify | Send status lines to `ctx.output_tx` at protection milestones |
-| `crates/shared/web-api-types/src/events.rs` | Modify | Add `AdminEvent::UpdateProtectionStarted` variant |
-| `crates/ui/web-api-queries/src/queries/update_dispatch.rs` | Modify | `Clone` on `ValidatedUpdateTarget`; new helpers `set_inprogress_for_orchestrator`, `insert_protection_output_line`; promote `fail_before_agent_dispatch` to `pub`; add `output_tx` param to `prepare_pre_update_protection` |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | Modify | Add `PendingProtectionWork`; update `TriggerUpdateResult`; remove inline protection+dispatch from `trigger_update_for_host` |
-| `crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs` | Modify | New orchestrator-InProgress CAS case in `claim_or_replay_update_start_db`; add `mark_orchestrator_inprogress_as_failed_on_reconnect`; pass `output_tx: None` to updated `prepare_pre_update_protection` call |
-| `crates/ui/web-api/src/update_orchestrator.rs` | Create | `spawn_protection_and_dispatch`, `run_protection_and_dispatch`, `forward_protection_output` |
-| `crates/ui/web-api/src/lib.rs` | Modify | Declare `pub(crate) mod update_orchestrator` |
-| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Modify | `handle_update_started` Claimed arm → `get_or_create_channel`; reconnect recovery for orchestrator InProgress; `prepare_pending_replay_messages` spawns orchestrator for Pending+unprotected; `dispatch_next_queued_update_with_notifier` drops `notifier`/`protection` params |
-| `crates/ui/web-api/src/routes/software_items/mod.rs` | Modify | Spawn orchestrator when `pending_protection_work.is_some()` |
-| `crates/ui/web-api/src/routes/service_ws/handler/update_tracking.rs` | Modify | Same pattern |
-| `crates/ui/web-api/src/actions/software_items.rs` | Modify | Drop `protection` param from `trigger_update` |
+| File                                                                 | Action | Responsibility                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `crates/plugins/infrastructure/core/src/roles.rs`                    | Modify | Add `output_tx` field + `with_output_tx()` to `ControllerProtectionContext`                                                                                                                                                                                                    |
+| `crates/plugins/infrastructure/proxmox/src/update_protection.rs`     | Modify | Send status lines to `ctx.output_tx` at protection milestones                                                                                                                                                                                                                  |
+| `crates/shared/web-api-types/src/events.rs`                          | Modify | Add `AdminEvent::UpdateProtectionStarted` variant                                                                                                                                                                                                                              |
+| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`           | Modify | `Clone` on `ValidatedUpdateTarget`; new helpers `set_inprogress_for_orchestrator`, `insert_protection_output_line`; promote `fail_before_agent_dispatch` to `pub`; add `output_tx` param to `prepare_pre_update_protection`                                                    |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs`           | Modify | Add `PendingProtectionWork`; update `TriggerUpdateResult`; remove inline protection+dispatch from `trigger_update_for_host`                                                                                                                                                    |
+| `crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs`   | Modify | New orchestrator-InProgress CAS case in `claim_or_replay_update_start_db`; add `mark_orchestrator_inprogress_as_failed_on_reconnect`; pass `output_tx: None` to updated `prepare_pre_update_protection` call                                                                   |
+| `crates/ui/web-api/src/update_orchestrator.rs`                       | Create | `spawn_protection_and_dispatch`, `run_protection_and_dispatch`, `forward_protection_output`                                                                                                                                                                                    |
+| `crates/ui/web-api/src/lib.rs`                                       | Modify | Declare `pub(crate) mod update_orchestrator`                                                                                                                                                                                                                                   |
+| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs`         | Modify | `handle_update_started` Claimed arm → `get_or_create_channel`; reconnect recovery for orchestrator InProgress; `prepare_pending_replay_messages` spawns orchestrator for Pending+unprotected; `dispatch_next_queued_update_with_notifier` drops `notifier`/`protection` params |
+| `crates/ui/web-api/src/routes/software_items/mod.rs`                 | Modify | Spawn orchestrator when `pending_protection_work.is_some()`                                                                                                                                                                                                                    |
+| `crates/ui/web-api/src/routes/service_ws/handler/update_tracking.rs` | Modify | Same pattern                                                                                                                                                                                                                                                                   |
+| `crates/ui/web-api/src/actions/software_items.rs`                    | Modify | Drop `protection` param from `trigger_update`                                                                                                                                                                                                                                  |
 
 ---
 
@@ -596,7 +596,6 @@ helpers (`set_inprogress_for_orchestrator`, `insert_protection_output_line`), an
 - [ ] **Step 7: Add `output_tx` line sending to Proxmox plugin**
 
   In `crates/plugins/infrastructure/proxmox/src/update_protection.rs`, in `prepare_snapshot_protection`:
-
   - After `"creating Proxmox snapshot for pre-update protection"` tracing (around line 318), add:
 
     ```rust
@@ -639,7 +638,6 @@ helpers (`set_inprogress_for_orchestrator`, `insert_protection_output_line`), an
     ```
 
   Apply the same pattern in `prepare_backup_protection`:
-
   - After `"starting Proxmox backup for pre-update protection"` tracing (around line 506):
 
     ```rust
@@ -953,7 +951,6 @@ helpers (`set_inprogress_for_orchestrator`, `insert_protection_output_line`), an
   The test file uses `insert_base_fixture` — tests that called `trigger_update_for_host` with
   `DispatchContext` need updating to the new signature. Remove the `DispatchContext` arg from
   all existing test calls:
-
   - `trigger_update_queued_when_host_busy` (line 691): remove
     `DispatchContext { notifier: &NoopNotifier, protection: None }` arg
   - `trigger_update_pending_when_host_free` (line 733): same
@@ -2039,25 +2036,25 @@ This task has three independent sub-changes in the same file.
 
 Checking spec coverage:
 
-| Spec requirement | Task |
-| --- | --- |
-| HTTP trigger returns immediately | Task 5 (no inline protection), Task 8 (spawn after return) |
-| Protection in background task | Task 7 (`tokio::spawn` in orchestrator) |
-| Record transitions Pending→InProgress when protection starts | Task 7 (step 2, `set_inprogress_for_orchestrator`) |
-| Every protection output line persisted + broadcast | Task 7 (`forward_protection_output`), Task 3 (`insert_protection_output_line`) |
-| Agent dispatch only after protection succeeds | Task 7 (step 9 match) |
-| Queued promotion through orchestrator | Task 9 sub-change D |
-| Agent offline → stay Pending | Task 7 (step 1, connectivity check) |
-| Crash recovery → orchestrator InProgress marked Failed | Task 6 (`mark_orchestrator_inprogress_as_failed_on_reconnect`), Task 9 sub-change B |
-| `AdminEvent::UpdateProtectionStarted` | Task 2, Task 7 (emitted at step 5) |
-| `claim_or_replay` new InProgress+no_owner CAS | Task 6 |
-| `handle_update_started` Claimed → `get_or_create_channel` | Task 9 sub-change A |
-| `ControllerProtectionContext` `output_tx` field | Task 1 |
-| Proxmox plugin streams lines via `output_tx` | Task 4 |
-| `fail_before_agent_dispatch` → `pub` | Task 3 |
-| `ValidatedUpdateTarget` → `Clone` | Task 3 |
-| `TriggerUpdateResult` + `PendingProtectionWork` types | Task 5 |
-| `prepare_pending_replay_messages` Pending+unprotected → orchestrator | Task 9 sub-change C |
-| `DispatchContext` stays for batch path | Not changed — `dispatch_next_in_batch` untouched |
+| Spec requirement                                                     | Task                                                                                |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| HTTP trigger returns immediately                                     | Task 5 (no inline protection), Task 8 (spawn after return)                          |
+| Protection in background task                                        | Task 7 (`tokio::spawn` in orchestrator)                                             |
+| Record transitions Pending→InProgress when protection starts         | Task 7 (step 2, `set_inprogress_for_orchestrator`)                                  |
+| Every protection output line persisted + broadcast                   | Task 7 (`forward_protection_output`), Task 3 (`insert_protection_output_line`)      |
+| Agent dispatch only after protection succeeds                        | Task 7 (step 9 match)                                                               |
+| Queued promotion through orchestrator                                | Task 9 sub-change D                                                                 |
+| Agent offline → stay Pending                                         | Task 7 (step 1, connectivity check)                                                 |
+| Crash recovery → orchestrator InProgress marked Failed               | Task 6 (`mark_orchestrator_inprogress_as_failed_on_reconnect`), Task 9 sub-change B |
+| `AdminEvent::UpdateProtectionStarted`                                | Task 2, Task 7 (emitted at step 5)                                                  |
+| `claim_or_replay` new InProgress+no_owner CAS                        | Task 6                                                                              |
+| `handle_update_started` Claimed → `get_or_create_channel`            | Task 9 sub-change A                                                                 |
+| `ControllerProtectionContext` `output_tx` field                      | Task 1                                                                              |
+| Proxmox plugin streams lines via `output_tx`                         | Task 4                                                                              |
+| `fail_before_agent_dispatch` → `pub`                                 | Task 3                                                                              |
+| `ValidatedUpdateTarget` → `Clone`                                    | Task 3                                                                              |
+| `TriggerUpdateResult` + `PendingProtectionWork` types                | Task 5                                                                              |
+| `prepare_pending_replay_messages` Pending+unprotected → orchestrator | Task 9 sub-change C                                                                 |
+| `DispatchContext` stays for batch path                               | Not changed — `dispatch_next_in_batch` untouched                                    |
 
 All requirements covered.

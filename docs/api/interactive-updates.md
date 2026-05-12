@@ -37,13 +37,13 @@ equivalent to code execution on the target host.
 
 The endpoint validates the following before upgrading:
 
-| Check | Error |
-| --- | --- |
-| Update history record exists | 404 Not Found |
-| Record belongs to the authenticated tenant | 404 Not Found |
-| Update status is `in_progress` | 409 Conflict ("update is not in progress") |
-| Agent is connected to this controller | 409 Conflict ("agent not connected") |
-| No other interactive session is active | 409 Conflict ("another interactive session is active") |
+| Check                                      | Error                                                  |
+| ------------------------------------------ | ------------------------------------------------------ |
+| Update history record exists               | 404 Not Found                                          |
+| Record belongs to the authenticated tenant | 404 Not Found                                          |
+| Update status is `in_progress`             | 409 Conflict ("update is not in progress")             |
+| Agent is connected to this controller      | 409 Conflict ("agent not connected")                   |
+| No other interactive session is active     | 409 Conflict ("another interactive session is active") |
 
 ### Rate Limits
 
@@ -61,13 +61,13 @@ Send raw terminal input (keystrokes) to the update process.
 
 ```json
 {
-    "type": "stdin",
-    "data": "<base64-encoded bytes>"
+  "type": "stdin",
+  "data": "<base64-encoded bytes>"
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field  | Type   | Description                                                                                            |
+| ------ | ------ | ------------------------------------------------------------------------------------------------------ |
 | `data` | string | Base64-encoded raw bytes. Supports binary data including control characters (e.g., `\x03` for Ctrl+C). |
 
 ### `signal`
@@ -76,13 +76,13 @@ Send a signal to the update process group.
 
 ```json
 {
-    "type": "signal",
-    "signal": 2
+  "type": "signal",
+  "signal": 2
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field    | Type    | Description                                  |
+| -------- | ------- | -------------------------------------------- |
 | `signal` | integer | Signal number: `2` = SIGINT, `15` = SIGTERM. |
 
 For SSH agents, signals are translated to the corresponding terminal control character
@@ -96,12 +96,12 @@ A line of update output from the process.
 
 ```json
 {
-    "type": "output",
-    "id": "<uuid>",
-    "text": "Installing package...\n",
-    "stream": "stdout",
-    "timestamp": "2026-02-27T12:00:00Z",
-    "seq": 42
+  "type": "output",
+  "id": "<uuid>",
+  "text": "Installing package...\n",
+  "stream": "stdout",
+  "timestamp": "2026-02-27T12:00:00Z",
+  "seq": 42
 }
 ```
 
@@ -114,9 +114,9 @@ The update has finished. The WebSocket closes after this message.
 
 ```json
 {
-    "type": "completed",
-    "status": "completed",
-    "error": null
+  "type": "completed",
+  "status": "completed",
+  "error": null
 }
 ```
 
@@ -127,13 +127,13 @@ while the process is still running).
 
 ```json
 {
-    "type": "stdin_attention",
-    "hint": "Configuration file '/etc/foo.conf' has been modified..."
+  "type": "stdin_attention",
+  "hint": "Configuration file '/etc/foo.conf' has been modified..."
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field  | Type           | Description                                                |
+| ------ | -------------- | ---------------------------------------------------------- |
 | `hint` | string or null | Optional hint about what the process might be waiting for. |
 
 ### `error`
@@ -142,8 +142,8 @@ An error occurred (e.g., agent disconnected).
 
 ```json
 {
-    "type": "error",
-    "message": "agent disconnected"
+  "type": "error",
+  "message": "agent disconnected"
 }
 ```
 
@@ -168,10 +168,10 @@ Carries stdin data or a signal to the agent for a specific update.
 
 ```json
 {
-    "type": "update_stdin_data",
-    "update_history_id": "<uuid>",
-    "data": "<base64>",
-    "signal": null
+  "type": "update_stdin_data",
+  "update_history_id": "<uuid>",
+  "data": "<base64>",
+  "signal": null
 }
 ```
 
@@ -184,9 +184,9 @@ Sent when the agent detects the process may be waiting for stdin input.
 
 ```json
 {
-    "type": "stdin_attention",
-    "update_history_id": "<uuid>",
-    "hint": "optional context"
+  "type": "stdin_attention",
+  "update_history_id": "<uuid>",
+  "hint": "optional context"
 }
 ```
 
@@ -195,13 +195,13 @@ the interactive WebSocket session.
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/interactive_ws.rs` | WebSocket endpoint handler |
-| `crates/ui/web-api/src/interactive_sessions.rs` | Single-writer session registry |
-| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | `StdinAttention` handler |
-| `crates/shared/wire/src/payloads.rs` | `UpdateStdinDataPayload`, `StdinAttentionPayload` |
-| `crates/shared/wire/src/messages.rs` | `UpdateStdinData`, `StdinAttention` message variants |
+| File                                                         | Purpose                                              |
+| ------------------------------------------------------------ | ---------------------------------------------------- |
+| `crates/ui/web-api/src/routes/interactive_ws.rs`             | WebSocket endpoint handler                           |
+| `crates/ui/web-api/src/interactive_sessions.rs`              | Single-writer session registry                       |
+| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | `StdinAttention` handler                             |
+| `crates/shared/wire/src/payloads.rs`                         | `UpdateStdinDataPayload`, `StdinAttentionPayload`    |
+| `crates/shared/wire/src/messages.rs`                         | `UpdateStdinData`, `StdinAttention` message variants |
 
 ## See Also
 

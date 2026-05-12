@@ -31,18 +31,18 @@ custom domain (`uptrakit.org`) that:
 
 ### Stack and location
 
-| Concern | Decision |
-| --- | --- |
-| Generator | Zola (single Rust binary, version pinned, `0.22.1` at spec time) |
-| Source location | New top-level `website/` directory in this monorepo |
-| Pages source mode | GitHub Actions artifact (`actions/upload-pages-artifact` + `actions/deploy-pages`) |
-| CI tool installer | `taiki-e/install-action@v2` with `tool: zola@<version>` |
-| Bumps | Dependabot for `package-ecosystem: github-actions` (action versions). Zola version is bumped manually in PR; cadence is slow enough that automation is not justified |
-| Custom domain | `uptrakit.org` (committed `website/static/CNAME`) |
-| Fallback host | `<user>.github.io/uptrakit` accepted to have absolute-link drift relative to canonical |
-| HTTPS | GitHub-provisioned Let's Encrypt; "Enforce HTTPS" enabled after DNS propagates |
-| Analytics | None |
-| Tailwind / Node | Not used. Plain CSS in `website/static/css/site.css` |
+| Concern           | Decision                                                                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generator         | Zola (single Rust binary, version pinned, `0.22.1` at spec time)                                                                                                     |
+| Source location   | New top-level `website/` directory in this monorepo                                                                                                                  |
+| Pages source mode | GitHub Actions artifact (`actions/upload-pages-artifact` + `actions/deploy-pages`)                                                                                   |
+| CI tool installer | `taiki-e/install-action@v2` with `tool: zola@<version>`                                                                                                              |
+| Bumps             | Dependabot for `package-ecosystem: github-actions` (action versions). Zola version is bumped manually in PR; cadence is slow enough that automation is not justified |
+| Custom domain     | `uptrakit.org` (committed `website/static/CNAME`)                                                                                                                    |
+| Fallback host     | `<user>.github.io/uptrakit` accepted to have absolute-link drift relative to canonical                                                                               |
+| HTTPS             | GitHub-provisioned Let's Encrypt; "Enforce HTTPS" enabled after DNS propagates                                                                                       |
+| Analytics         | None                                                                                                                                                                 |
+| Tailwind / Node   | Not used. Plain CSS in `website/static/css/site.css`                                                                                                                 |
 
 ### Why Zola, not Jekyll / plain HTML / SvelteKit reuse
 
@@ -113,13 +113,13 @@ repo-root/
 
 ### Routes
 
-| Route | Source | Purpose |
-| --- | --- | --- |
-| `/` | `content/_index.md` + `landing.html` | Marketing landing (single page, scrollable) |
-| `/install/` | `content/install/_index.md` + `install.html` | Thin alpha install page |
-| `/404.html` | `templates/404.html` (Zola convention) | Custom 404, served by GitHub Pages on unmatched paths |
-| `/sitemap.xml` | Zola built-in | Generated automatically |
-| `/robots.txt` | `static/robots.txt` | Allow-all |
+| Route          | Source                                       | Purpose                                               |
+| -------------- | -------------------------------------------- | ----------------------------------------------------- |
+| `/`            | `content/_index.md` + `landing.html`         | Marketing landing (single page, scrollable)           |
+| `/install/`    | `content/install/_index.md` + `install.html` | Thin alpha install page                               |
+| `/404.html`    | `templates/404.html` (Zola convention)       | Custom 404, served by GitHub Pages on unmatched paths |
+| `/sitemap.xml` | Zola built-in                                | Generated automatically                               |
+| `/robots.txt`  | `static/robots.txt`                          | Allow-all                                             |
 
 ### Top bar (shared across routes)
 
@@ -135,7 +135,7 @@ repo-root/
 ### Landing page sections (in order)
 
 1. **Hero** — `h1` (24 px / 600, `text-entry-title`-equivalent) tagline:
-   *"Track upstream updates across your homelab. You decide when to apply them."*
+   _"Track upstream updates across your homelab. You decide when to apply them."_
    Sub-paragraph (1–2 sentences) on what Uptrakit is. Two CTAs: primary "Install"
    linking to `/install/`, secondary "View on GitHub" linking to the repo.
 2. **Alpha banner** — warning callout: APIs may change, no formal security audit, use at
@@ -254,12 +254,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'website/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - ".github/workflows/website.yml"
   pull_request:
     paths:
-      - 'website/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - ".github/workflows/website.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -358,9 +358,9 @@ Documented in `website/README.md`:
    - `AAAA` apex → `2606:50c0:8000::153`, `2606:50c0:8001::153`,
      `2606:50c0:8002::153`, `2606:50c0:8003::153`
    - `CNAME` `www` → `<user>.github.io`
-   (IPs reflect GitHub's published Pages anycast set; verify against
-   `https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site`
-   at deploy time before committing.)
+     (IPs reflect GitHub's published Pages anycast set; verify against
+     `https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site`
+     at deploy time before committing.)
 
 ## Verification
 

@@ -10,10 +10,10 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 
 ## Asset Lifetimes
 
-| Asset | Lifetime | Renewal Window |
-| --- | --- | --- |
-| CA certificate | 5 years | Rotate 6 months before expiry |
-| Server HTTPS cert | 90 days | Renew 30 days before expiry |
+| Asset                  | Lifetime                      | Renewal Window                           |
+| ---------------------- | ----------------------------- | ---------------------------------------- |
+| CA certificate         | 5 years                       | Rotate 6 months before expiry            |
+| Server HTTPS cert      | 90 days                       | Renew 30 days before expiry              |
 | Agent/MQTT client cert | 168 h (default, max 17 520 h) | `min(14 days, lifetime / 5)` — see below |
 
 ## Agent/MQTT Certificate Renewal Window
@@ -30,14 +30,14 @@ renewal_window = min(14 days, cert_lifetime / 5)
 
 Examples:
 
-| Cert lifetime | 1/5 | Ceiling | Effective window |
-| --- | --- | --- | --- |
-| 2 h | < 1 h | 336 h | **< 1 hour (rounds down to 0 — service renews immediately)** |
-| 12 h | 2 h | 336 h | **2 hours** |
-| 168 h (7 days) | 33 h | 336 h | **33 hours** |
-| 720 h (30 days) | 144 h | 336 h | **144 hours** |
-| 1 680 h (70 days) | 336 h | 336 h | **336 hours (14 days)** |
-| 8 760 h (365 days) | 1 752 h | 336 h | **336 hours (14 days)** |
+| Cert lifetime      | 1/5     | Ceiling | Effective window                                             |
+| ------------------ | ------- | ------- | ------------------------------------------------------------ |
+| 2 h                | < 1 h   | 336 h   | **< 1 hour (rounds down to 0 — service renews immediately)** |
+| 12 h               | 2 h     | 336 h   | **2 hours**                                                  |
+| 168 h (7 days)     | 33 h    | 336 h   | **33 hours**                                                 |
+| 720 h (30 days)    | 144 h   | 336 h   | **144 hours**                                                |
+| 1 680 h (70 days)  | 336 h   | 336 h   | **336 hours (14 days)**                                      |
+| 8 760 h (365 days) | 1 752 h | 336 h   | **336 hours (14 days)**                                      |
 
 This formula applies at **two layers**:
 
@@ -134,21 +134,21 @@ See also: [Secure Development](secure-development.md) for the general PKI securi
 When `--pki-addr` is configured, the controller embeds AIA (Authority Information Access) and CDP (CRL Distribution
 Points) extensions in both CA and agent certificates:
 
-| Extension | URL |
-| --- | --- |
-| AIA OCSP | `{pki_addr}/api/v1/pki/ocsp` |
+| Extension      | URL                            |
+| -------------- | ------------------------------ |
+| AIA OCSP       | `{pki_addr}/api/v1/pki/ocsp`   |
 | AIA CA Issuers | `{pki_addr}/api/v1/pki/ca.crt` |
-| CDP CRL | `{pki_addr}/api/v1/pki/ca.crl` |
+| CDP CRL        | `{pki_addr}/api/v1/pki/ca.crl` |
 
 `--pki-addr` accepts both `http://` and `https://` URLs. **`http://` is recommended** because Nginx only supports
 `http://` OCSP responder URLs -- `https://` AIA URLs are silently ignored by Nginx's `ssl_ocsp` directive. When the PKI
 address uses `http://`, the `--pki-http` flag controls how plain HTTP serving is handled:
 
-| `--pki-http` value | Behaviour |
-| --- | --- |
-| `listener` | The controller starts a plain HTTP listener on the port from `--pki-addr`, serving only PKI routes (`/healthz`, `/api/v1/pki/ca.crt`, `/api/v1/pki/ca.crl`, `/api/v1/pki/ocsp`). Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. |
-| `external` | PKI HTTP is handled by an external component (e.g. reverse proxy). Suppresses the warning about `http://` scheme without `--pki-http`. |
-| (not set) | If `--pki-addr` uses `http://`, the controller logs a warning. |
+| `--pki-http` value | Behaviour                                                                                                                                                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listener`         | The controller starts a plain HTTP listener on the port from `--pki-addr`, serving only PKI routes (`/healthz`, `/api/v1/pki/ca.crt`, `/api/v1/pki/ca.crl`, `/api/v1/pki/ocsp`). Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. |
+| `external`         | PKI HTTP is handled by an external component (e.g. reverse proxy). Suppresses the warning about `http://` scheme without `--pki-http`.                                                                                                                                      |
+| (not set)          | If `--pki-addr` uses `http://`, the controller logs a warning.                                                                                                                                                                                                              |
 
 At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `pki_addr`:
 
@@ -200,11 +200,11 @@ that rely on CRL validation should refresh the file every 30–60 minutes.
 
 CRL rebuilds are triggered by three separate mechanisms:
 
-| Trigger | Mechanism |
-| --- | --- |
-| Certificate revoked — same controller | `revocation_notify.notify_one()` fires immediately in `CrlManager::run()`; the CRL is rebuilt and the NATS `RequestCrlRenewal` message is published to notify remote instances |
-| Certificate revoked — remote controllers | `ControllerMessage::RequestCrlRenewal` NATS event received; `event_delivery` calls `revocation_notify.notify_one()` on each receiving controller instance |
-| Periodic refresh | `CrlRenewal` scheduled task (default interval: 14 400 seconds / 4 hours, jitter: 120 seconds) executes `CrlRenewalExecutor`, which calls `SchedulerNotifier::signal_crl_renewal()` — fires `revocation_notify` on the embedded scheduler and publishes NATS for all instances |
+| Trigger                                  | Mechanism                                                                                                                                                                                                                                                                     |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Certificate revoked — same controller    | `revocation_notify.notify_one()` fires immediately in `CrlManager::run()`; the CRL is rebuilt and the NATS `RequestCrlRenewal` message is published to notify remote instances                                                                                                |
+| Certificate revoked — remote controllers | `ControllerMessage::RequestCrlRenewal` NATS event received; `event_delivery` calls `revocation_notify.notify_one()` on each receiving controller instance                                                                                                                     |
+| Periodic refresh                         | `CrlRenewal` scheduled task (default interval: 14 400 seconds / 4 hours, jitter: 120 seconds) executes `CrlRenewalExecutor`, which calls `SchedulerNotifier::signal_crl_renewal()` — fires `revocation_notify` on the embedded scheduler and publishes NATS for all instances |
 
 The default renewal interval (every 4 hours) is configurable via the existing scheduler task management API
 (`PUT /api/v1/scheduler/tasks/{id}`). No separate global setting is needed.
@@ -213,14 +213,14 @@ The default renewal interval (every 4 hours) is configurable via the existing sc
 
 Signed CRLs are persisted in the `crl_cache` table after every rebuild:
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `ca_fingerprint` | `TEXT` (PK) | CA certificate fingerprint |
-| `crl_pem` | `TEXT` | PEM-encoded CRL |
-| `crl_number` | `BIGINT` | Monotonically increasing CRL number |
-| `this_update` | `TIMESTAMPTZ` | CRL issuance time |
-| `next_update` | `TIMESTAMPTZ` | CRL validity expiry (24 h after issuance) |
-| `updated_at` | `TIMESTAMPTZ` | Last row update time |
+| Column           | Type          | Description                               |
+| ---------------- | ------------- | ----------------------------------------- |
+| `ca_fingerprint` | `TEXT` (PK)   | CA certificate fingerprint                |
+| `crl_pem`        | `TEXT`        | PEM-encoded CRL                           |
+| `crl_number`     | `BIGINT`      | Monotonically increasing CRL number       |
+| `this_update`    | `TIMESTAMPTZ` | CRL issuance time                         |
+| `next_update`    | `TIMESTAMPTZ` | CRL validity expiry (24 h after issuance) |
+| `updated_at`     | `TIMESTAMPTZ` | Last row update time                      |
 
 No `tenant_id` column — CRLs are global PKI state (not per-tenant).
 

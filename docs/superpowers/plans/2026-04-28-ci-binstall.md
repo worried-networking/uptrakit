@@ -224,25 +224,25 @@ the actual latest stable if newer.
 Find this block (around line 184):
 
 ```yaml
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+- name: Install cross
+  if: matrix.cross
+  run: cargo install cross --git https://github.com/cross-rs/cross
 ```
 
 Replace with:
 
 ```yaml
-      - name: Cache cross binary
-        if: matrix.cross
-        id: cache-cross
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cross
-          key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
+- name: Cache cross binary
+  if: matrix.cross
+  id: cache-cross
+  uses: actions/cache@v4
+  with:
+    path: ~/.cargo/bin/cross
+    key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
 
-      - name: Install cross
-        if: matrix.cross && steps.cache-cross.outputs.cache-hit != 'true'
-        run: cargo install cross --version 0.2.5 --locked
+- name: Install cross
+  if: matrix.cross && steps.cache-cross.outputs.cache-hit != 'true'
+  run: cargo install cross --version 0.2.5 --locked
 ```
 
 - [x] **Step 3: Commit**
@@ -283,27 +283,27 @@ Locate the `matrix.include` list in the
 `build-artifacts` job (around line 161). Add after the `aarch64-unknown-linux-gnu` entry:
 
 ```yaml
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-            cross: true
+- target: x86_64-unknown-linux-musl
+  runner: ubuntu-latest
+  cross: true
 ```
 
 The full matrix `include` list should now read:
 
 ```yaml
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-            cross: false
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            cross: true
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-            cross: true
-          - target: aarch64-apple-darwin
-            runner: macos-latest
-            cross: false
+include:
+  - target: x86_64-unknown-linux-gnu
+    runner: ubuntu-latest
+    cross: false
+  - target: aarch64-unknown-linux-gnu
+    runner: ubuntu-latest
+    cross: true
+  - target: x86_64-unknown-linux-musl
+    runner: ubuntu-latest
+    cross: true
+  - target: aarch64-apple-darwin
+    runner: macos-latest
+    cross: false
 ```
 
 - [x] **Step 3: Commit**
@@ -343,95 +343,95 @@ binary name and the binstall `bin-dir` set in Task 1).
 In `.github/workflows/release-plz.yml`, find the entire step starting with:
 
 ```yaml
-      # --- upload to respective releases ---
-      - name: Upload release assets
+# --- upload to respective releases ---
+- name: Upload release assets
 ```
 
 Replace that step (through the end of the step's `run:` block) with:
 
 ```yaml
-      # --- package versioned archives, generate checksums, upload ---
-      - name: Package and upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # RELEASES is injected from the job-level env: block (line 176 of the workflow).
-          # Do not remove that job-level declaration — this step inherits it from there.
+# --- package versioned archives, generate checksums, upload ---
+- name: Package and upload release assets
+  env:
+    GH_TOKEN: ${{ github.token }}
+    TARGET: ${{ matrix.target }}
+  run: |
+    set -euo pipefail
+    # RELEASES is injected from the job-level env: block (line 176 of the workflow).
+    # Do not remove that job-level declaration — this step inherits it from there.
 
-          # Args: pkg src arc_prefix inner_name
-          #   pkg        - cargo package name (for RELEASES JSON lookup)
-          #   src        - temp binary file on disk (e.g. uptrakit-agent-x86_64-...)
-          #   arc_prefix - archive name prefix   (e.g. uptrakit-agent)
-          #   inner_name - binary name inside archive (usually = arc_prefix, except cli=uptrakit)
-          package_and_upload() {
-            local pkg="$1" src="$2" arc_prefix="$3" inner_name="$4"
-            local tag version archive tmpdir
+    # Args: pkg src arc_prefix inner_name
+    #   pkg        - cargo package name (for RELEASES JSON lookup)
+    #   src        - temp binary file on disk (e.g. uptrakit-agent-x86_64-...)
+    #   arc_prefix - archive name prefix   (e.g. uptrakit-agent)
+    #   inner_name - binary name inside archive (usually = arc_prefix, except cli=uptrakit)
+    package_and_upload() {
+      local pkg="$1" src="$2" arc_prefix="$3" inner_name="$4"
+      local tag version archive tmpdir
 
-            tag=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
-              '(.[] | select(.package_name==$p) | .tag) // empty')
-            version=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
-              '(.[] | select(.package_name==$p) | .version) // empty')
+      tag=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
+        '(.[] | select(.package_name==$p) | .tag) // empty')
+      version=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
+        '(.[] | select(.package_name==$p) | .version) // empty')
 
-            if [ -z "$tag" ]; then
-              return 0  # package not in this release — silent skip is correct
-            fi
-            if [ ! -f "$src" ]; then
-              echo "ERROR: $pkg released (tag=$tag) but binary $src not found" >&2
-              return 1
-            fi
+      if [ -z "$tag" ]; then
+        return 0  # package not in this release — silent skip is correct
+      fi
+      if [ ! -f "$src" ]; then
+        echo "ERROR: $pkg released (tag=$tag) but binary $src not found" >&2
+        return 1
+      fi
 
-            archive="${arc_prefix}-${version}-${TARGET}.tar.gz"
-            tmpdir=$(mktemp -d)
-            cp "$src" "${tmpdir}/${inner_name}"
-            tar czf "$archive" -C "$tmpdir" "$inner_name"
-            rm -rf "$tmpdir"
+      archive="${arc_prefix}-${version}-${TARGET}.tar.gz"
+      tmpdir=$(mktemp -d)
+      cp "$src" "${tmpdir}/${inner_name}"
+      tar czf "$archive" -C "$tmpdir" "$inner_name"
+      rm -rf "$tmpdir"
 
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$archive" > "${archive}.sha256"
-            else
-              shasum -a 256 "$archive" > "${archive}.sha256"
-            fi
+      if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$archive" > "${archive}.sha256"
+      else
+        shasum -a 256 "$archive" > "${archive}.sha256"
+      fi
 
-            gh release upload "$tag" "$archive" "${archive}.sha256"
-          }
+      gh release upload "$tag" "$archive" "${archive}.sha256"
+    }
 
-          package_and_upload "uptrakit-controller" \
-            "uptrakit-controller-${TARGET}" \
-            "uptrakit-controller" \
-            "uptrakit-controller"
+    package_and_upload "uptrakit-controller" \
+      "uptrakit-controller-${TARGET}" \
+      "uptrakit-controller" \
+      "uptrakit-controller"
 
-          package_and_upload "uptrakit-controller-standalone" \
-            "uptrakit-controller-standalone-${TARGET}" \
-            "uptrakit-controller-standalone" \
-            "uptrakit-controller-standalone"
+    package_and_upload "uptrakit-controller-standalone" \
+      "uptrakit-controller-standalone-${TARGET}" \
+      "uptrakit-controller-standalone" \
+      "uptrakit-controller-standalone"
 
-          package_and_upload "uptrakit-agent" \
-            "uptrakit-agent-${TARGET}" \
-            "uptrakit-agent" \
-            "uptrakit-agent"
+    package_and_upload "uptrakit-agent" \
+      "uptrakit-agent-${TARGET}" \
+      "uptrakit-agent" \
+      "uptrakit-agent"
 
-          package_and_upload "uptrakit-agent-ssh" \
-            "uptrakit-agent-ssh-${TARGET}" \
-            "uptrakit-agent-ssh" \
-            "uptrakit-agent-ssh"
+    package_and_upload "uptrakit-agent-ssh" \
+      "uptrakit-agent-ssh-${TARGET}" \
+      "uptrakit-agent-ssh" \
+      "uptrakit-agent-ssh"
 
-          package_and_upload "uptrakit-mqtt" \
-            "uptrakit-mqtt-${TARGET}" \
-            "uptrakit-mqtt" \
-            "uptrakit-mqtt"
+    package_and_upload "uptrakit-mqtt" \
+      "uptrakit-mqtt-${TARGET}" \
+      "uptrakit-mqtt" \
+      "uptrakit-mqtt"
 
-          package_and_upload "uptrakit-scheduler" \
-            "uptrakit-scheduler-${TARGET}" \
-            "uptrakit-scheduler" \
-            "uptrakit-scheduler"
+    package_and_upload "uptrakit-scheduler" \
+      "uptrakit-scheduler-${TARGET}" \
+      "uptrakit-scheduler" \
+      "uptrakit-scheduler"
 
-          # cli: package name is uptrakit-cli but binary inside archive is "uptrakit"
-          package_and_upload "uptrakit-cli" \
-            "uptrakit-cli-${TARGET}" \
-            "uptrakit-cli" \
-            "uptrakit"
+    # cli: package name is uptrakit-cli but binary inside archive is "uptrakit"
+    package_and_upload "uptrakit-cli" \
+      "uptrakit-cli-${TARGET}" \
+      "uptrakit-cli" \
+      "uptrakit"
 ```
 
 - [x] **Step 2: Update the "Attest build provenance" glob**
@@ -439,19 +439,19 @@ Replace that step (through the end of the step's `run:` block) with:
 Find:
 
 ```yaml
-      - name: Attest build provenance
-        uses: actions/attest@v4
-        with:
-          subject-path: "uptrakit-*-${{ matrix.target }}"
+- name: Attest build provenance
+  uses: actions/attest@v4
+  with:
+    subject-path: "uptrakit-*-${{ matrix.target }}"
 ```
 
 Replace with:
 
 ```yaml
-      - name: Attest build provenance
-        uses: actions/attest@v4
-        with:
-          subject-path: "uptrakit-*-${{ matrix.target }}.tar.gz"
+- name: Attest build provenance
+  uses: actions/attest@v4
+  with:
+    subject-path: "uptrakit-*-${{ matrix.target }}.tar.gz"
 ```
 
 The glob now matches the versioned archives (e.g.
@@ -481,15 +481,15 @@ The doc is stale in several ways. Make these changes:
    (`uptrakit-controller-swagger` — no such artifact; the actual second artifact is
    `uptrakit-controller-standalone`). Replace with:
 
-   | Artifact name | Package | Features |
-   | --- | --- | --- |
-   | `uptrakit-controller` | uptrakit-controller | embedded-frontend,db-sqlite,oidc,zeroconf,notifications-all (no embedded services) |
+   | Artifact name                    | Package                        | Features                                                                                                                       |
+   | -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+   | `uptrakit-controller`            | uptrakit-controller            | embedded-frontend,db-sqlite,oidc,zeroconf,notifications-all (no embedded services)                                             |
    | `uptrakit-controller-standalone` | uptrakit-controller-standalone | embedded-frontend,db-sqlite,oidc,zeroconf,notifications-all,embedded-scheduler,embedded-mqtt,embedded-agent,embedded-ssh-agent |
-   | `uptrakit-agent` | uptrakit-agent | (default) |
-   | `uptrakit-agent-ssh` | uptrakit-agent-ssh | (default) |
-   | `uptrakit-mqtt` | uptrakit-mqtt | (default) |
-   | `uptrakit-scheduler` | uptrakit-scheduler | db-all,oidc (no-default-features) |
-   | `uptrakit-cli` | uptrakit-cli | (default) |
+   | `uptrakit-agent`                 | uptrakit-agent                 | (default)                                                                                                                      |
+   | `uptrakit-agent-ssh`             | uptrakit-agent-ssh             | (default)                                                                                                                      |
+   | `uptrakit-mqtt`                  | uptrakit-mqtt                  | (default)                                                                                                                      |
+   | `uptrakit-scheduler`             | uptrakit-scheduler             | db-all,oidc (no-default-features)                                                                                              |
+   | `uptrakit-cli`                   | uptrakit-cli                   | (default)                                                                                                                      |
 
 4. Update the asset naming line:
 
@@ -499,12 +499,12 @@ The doc is stale in several ways. Make these changes:
 
 5. Update the target table to add the musl row:
 
-   | Target | Runner | Method |
-   | --- | --- | --- |
-   | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | native |
+   | Target                      | Runner          | Method  |
+   | --------------------------- | --------------- | ------- |
+   | `x86_64-unknown-linux-gnu`  | `ubuntu-latest` | native  |
    | `x86_64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
    | `aarch64-unknown-linux-gnu` | `ubuntu-latest` | `cross` |
-   | `aarch64-apple-darwin` | `macos-latest` | native |
+   | `aarch64-apple-darwin`      | `macos-latest`  | native  |
 
 6. Update the ARM64 section heading to cover both cross-compiled targets:
 
@@ -525,12 +525,12 @@ The doc is stale in several ways. Make these changes:
    do not exist (`.github/release-please-config.json`, `.github/.release-please-manifest.json`,
    `.github/workflows/release-please.yml`). Replace with:
 
-   | File | Purpose |
-   | --- | --- |
-   | `release-plz.toml` | release-plz package configuration (bump rules, changelog) |
-   | `.github/workflows/release-plz.yml` | Release workflow (version bump + artifact builds) |
-   | `.github/workflows/docker.yml` | Docker image builds (triggered by `v*` tags) |
-   | `Cross.toml` | Cross-compilation settings for cross-compiled Linux targets |
+   | File                                | Purpose                                                     |
+   | ----------------------------------- | ----------------------------------------------------------- |
+   | `release-plz.toml`                  | release-plz package configuration (bump rules, changelog)   |
+   | `.github/workflows/release-plz.yml` | Release workflow (version bump + artifact builds)           |
+   | `.github/workflows/docker.yml`      | Docker image builds (triggered by `v*` tags)                |
+   | `Cross.toml`                        | Cross-compilation settings for cross-compiled Linux targets |
 
    Note: `release-plz.toml` is at the workspace root (not under `.github/`).
 

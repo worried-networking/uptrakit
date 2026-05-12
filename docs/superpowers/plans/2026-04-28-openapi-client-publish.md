@@ -34,11 +34,11 @@ involved — this is a deliberate hand-authored client.
 
 Current workspace path deps to eliminate:
 
-| Dep | How used | Resolution |
-| --- | --- | --- |
-| `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs`; `wire_safe_enum!` in `permissions.rs` | Inline both macros in `src/macros.rs` |
-| `uptrakit-shared-types` | Many types re-exported from web-api-types lib.rs; `DeviceAuthStatus` in lib.rs | Included in the web-api-types copy (web-api-types re-exports them; after codegen they resolve via `crate::generated::shared_types::`) |
-| `uptrakit-web-api-types` | `pub use uptrakit_web_api_types as types` in lib.rs; all 38 endpoint modules | Copy source snapshot into `src/generated/types/` via xtask |
+| Dep                      | How used                                                                       | Resolution                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs`; `wire_safe_enum!` in `permissions.rs` | Inline both macros in `src/macros.rs`                                                                                                 |
+| `uptrakit-shared-types`  | Many types re-exported from web-api-types lib.rs; `DeviceAuthStatus` in lib.rs | Included in the web-api-types copy (web-api-types re-exports them; after codegen they resolve via `crate::generated::shared_types::`) |
+| `uptrakit-web-api-types` | `pub use uptrakit_web_api_types as types` in lib.rs; all 38 endpoint modules   | Copy source snapshot into `src/generated/types/` via xtask                                                                            |
 
 `uptrakit-web-api-types` itself has 3 internal deps: `uptrakit-wire`, `uptrakit-shared-types`,
 `uptrakit-shared-macros`. The xtask copies all four into `src/generated/` with syn path rewrites.
@@ -166,12 +166,12 @@ git commit -m "feat(openapi-client): inline impl_report_conversion! and wire_saf
 **Background:** `sync-openapi-client` copies four internal crate source trees into
 `openapi-client/src/generated/` with path rewrites:
 
-| Source | Destination | Path rewrites |
-| --- | --- | --- |
-| `crates/shared/surfaces/src/` | `generated/surfaces/` | `crate::` → `crate::generated::surfaces::` |
-| `crates/shared/wire/src/` | `generated/wire/` | `crate::` → `crate::generated::wire::` (first); `uptrakit_surfaces::` → `crate::generated::surfaces::`; `uptrakit_shared_types::` → `crate::generated::shared_types::` |
-| `crates/shared/types/src/` | `generated/shared_types/` | `crate::` → `crate::generated::shared_types::` |
-| `crates/shared/web-api-types/src/` | `generated/types/` | `crate::` → `crate::generated::types::` (first); `uptrakit_wire::` → `crate::generated::wire::`; `uptrakit_shared_types::` → `crate::generated::shared_types::`; `uptrakit_surfaces::` → `crate::generated::surfaces::` |
+| Source                             | Destination               | Path rewrites                                                                                                                                                                                                           |
+| ---------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/surfaces/src/`      | `generated/surfaces/`     | `crate::` → `crate::generated::surfaces::`                                                                                                                                                                              |
+| `crates/shared/wire/src/`          | `generated/wire/`         | `crate::` → `crate::generated::wire::` (first); `uptrakit_surfaces::` → `crate::generated::surfaces::`; `uptrakit_shared_types::` → `crate::generated::shared_types::`                                                  |
+| `crates/shared/types/src/`         | `generated/shared_types/` | `crate::` → `crate::generated::shared_types::`                                                                                                                                                                          |
+| `crates/shared/web-api-types/src/` | `generated/types/`        | `crate::` → `crate::generated::types::` (first); `uptrakit_wire::` → `crate::generated::wire::`; `uptrakit_shared_types::` → `crate::generated::shared_types::`; `uptrakit_surfaces::` → `crate::generated::surfaces::` |
 
 After syn rewriting, two string-literal fixes are applied (serde `default` attribute paths
 cannot be fixed by syn):

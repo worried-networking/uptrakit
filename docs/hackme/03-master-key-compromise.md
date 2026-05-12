@@ -1,11 +1,11 @@
 # ATK-03: Master Key Compromise
 
-| Field | Value |
-| --- | --- |
-| Severity | Critical |
-| Attack surface | Cryptography (AES-256-GCM master key) |
-| Prerequisites | Access to the `--master-key-file`, or controller process memory |
-| STRIDE | Information Disclosure |
+| Field          | Value                                                           |
+| -------------- | --------------------------------------------------------------- |
+| Severity       | Critical                                                        |
+| Attack surface | Cryptography (AES-256-GCM master key)                           |
+| Prerequisites  | Access to the `--master-key-file`, or controller process memory |
+| STRIDE         | Information Disclosure                                          |
 
 ## Attack description
 
@@ -24,15 +24,15 @@
 
 Compromise of the master key exposes every encrypted credential in the system:
 
-| Table | Column | Exposed secret |
-| --- | --- | --- |
-| `ca_certificates` | `key_pem` | CA private key (can forge agent/MQTT certificates) |
-| `oidc_providers` | `client_secret` | OIDC client secrets (can impersonate the app to IdPs) |
-| `mqtt_clients` | `password` | MQTT broker passwords |
-| `mqtt_clients` | `ca_cert` | Custom MQTT CA certificates |
-| `pending_oidc_flows` | `pkce_verifier` | In-flight OIDC PKCE verifiers |
-| `notification_channels` | `config` | Webhook secrets, Telegram bot tokens, HMAC keys |
-| `global_settings` | `auth.jwt_signing_key` | JWT signing key (can forge arbitrary JWT tokens) |
+| Table                   | Column                 | Exposed secret                                        |
+| ----------------------- | ---------------------- | ----------------------------------------------------- |
+| `ca_certificates`       | `key_pem`              | CA private key (can forge agent/MQTT certificates)    |
+| `oidc_providers`        | `client_secret`        | OIDC client secrets (can impersonate the app to IdPs) |
+| `mqtt_clients`          | `password`             | MQTT broker passwords                                 |
+| `mqtt_clients`          | `ca_cert`              | Custom MQTT CA certificates                           |
+| `pending_oidc_flows`    | `pkce_verifier`        | In-flight OIDC PKCE verifiers                         |
+| `notification_channels` | `config`               | Webhook secrets, Telegram bot tokens, HMAC keys       |
+| `global_settings`       | `auth.jwt_signing_key` | JWT signing key (can forge arbitrary JWT tokens)      |
 
 With the CA private key, the attacker can:
 
@@ -64,21 +64,21 @@ With the JWT signing key, the attacker can:
   tampering. An attacker cannot modify encrypted values without the key.
 - **Per-value random nonces.** Each encryption uses a fresh 12-byte random nonce,
   preventing ciphertext comparison attacks.
-- **`ENC:v3:` context-bound envelope encryption.** *(Implemented)* All encrypted
+- **`ENC:v3:` context-bound envelope encryption.** _(Implemented)_ All encrypted
   database columns and settings use `ENC:v3:` format with envelope encryption
   (DEK wraps data) and per-field AAD strings. A ciphertext produced for one column
   cannot be used as a valid ciphertext for another, even if an attacker obtains the
   master key and attempts to relocate ciphertexts.
-- **Env-var delivery removed.** *(Implemented)* The legacy `UPTRAKIT_MASTER_KEY`
+- **Env-var delivery removed.** _(Implemented)_ The legacy `UPTRAKIT_MASTER_KEY`
   environment variable is no longer accepted. The master key must be supplied via
   `--master-key-file <path>`, eliminating exposure through `/proc/pid/environ`,
   container manifests, and orchestration tooling.
-- **Intermediate hex string zeroization.** *(Implemented)* The
+- **Intermediate hex string zeroization.** _(Implemented)_ The
   `read_master_key_hex()` helper returns `Zeroizing<String>` so that the raw hex
   representation of the master key is scrubbed from heap memory on drop. This closes
   a gap where the hex string could survive on the heap after an error path between
   reading the key and wrapping it in `SecretString`.
-- **Broad trusted-proxy CIDR warning.** *(Implemented)* On startup, if any
+- **Broad trusted-proxy CIDR warning.** _(Implemented)_ On startup, if any
   `--trusted-proxy` CIDR has an overly broad prefix length (IPv4 /8 or less, IPv6
   /32 or less, or /0 for either family), a `WARN`-level log message is emitted.
   Overly broad CIDRs undermine IP-based rate limiting and audit logging by trusting

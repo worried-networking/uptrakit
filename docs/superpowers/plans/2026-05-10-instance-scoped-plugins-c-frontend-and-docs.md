@@ -133,12 +133,24 @@ export async function listInstancePlugins(): Promise<InstancePluginSummary[]> {
   return apiGet<InstancePluginSummary[]>("/api/v1/instance-plugins");
 }
 
-export async function setInstancePluginEnabled(pluginType: string, enabled: boolean): Promise<InstancePluginSummary> {
-  return apiPut<InstancePluginSummary>(`/api/v1/instance-plugins/${encodeURIComponent(pluginType)}/enabled`, { enabled });
+export async function setInstancePluginEnabled(
+  pluginType: string,
+  enabled: boolean,
+): Promise<InstancePluginSummary> {
+  return apiPut<InstancePluginSummary>(
+    `/api/v1/instance-plugins/${encodeURIComponent(pluginType)}/enabled`,
+    { enabled },
+  );
 }
 
-export async function upsertInstancePluginConfig(pluginType: string, config: Record<string, unknown>): Promise<InstancePluginSummary> {
-  return apiPut<InstancePluginSummary>(`/api/v1/instance-plugins/${encodeURIComponent(pluginType)}/config`, { config });
+export async function upsertInstancePluginConfig(
+  pluginType: string,
+  config: Record<string, unknown>,
+): Promise<InstancePluginSummary> {
+  return apiPut<InstancePluginSummary>(
+    `/api/v1/instance-plugins/${encodeURIComponent(pluginType)}/config`,
+    { config },
+  );
 }
 ```
 
@@ -173,14 +185,20 @@ Snapshot rules (frontend AGENTS): reuse existing components; Svelte 5 runes; no 
 - [ ] **Step 1: Add imports at the top of the `<script>` block**
 
 ```ts
-import { listInstancePlugins, setInstancePluginEnabled, upsertInstancePluginConfig } from "$lib/api";
+import {
+  listInstancePlugins,
+  setInstancePluginEnabled,
+  upsertInstancePluginConfig,
+} from "$lib/api";
 import type { InstancePluginSummary } from "$lib/types";
 ```
 
 - [ ] **Step 2: Add reactive state next to existing state declarations**
 
 ```ts
-const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+const canManageGlobalSettings = $derived(
+  getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false,
+);
 
 let instancePlugins: InstancePluginSummary[] = $state([]);
 let instancePluginsLoading: boolean = $state(true);
@@ -214,7 +232,8 @@ async function loadInstancePlugins() {
   try {
     instancePlugins = await listInstancePlugins();
   } catch (e) {
-    instancePluginsError = e instanceof Error ? e.message : "Failed to load instance plugins";
+    instancePluginsError =
+      e instanceof Error ? e.message : "Failed to load instance plugins";
     showError(instancePluginsError);
   } finally {
     instancePluginsLoading = false;
@@ -227,14 +246,21 @@ async function loadInstancePlugins() {
 ```ts
 async function executeInstancePluginToggle() {
   if (!instancePluginToggleConfirm) return;
-  const { plugin_type, display_name, next_enabled } = instancePluginToggleConfirm;
+  const { plugin_type, display_name, next_enabled } =
+    instancePluginToggleConfirm;
   instancePluginToggleConfirm = null;
   try {
     const updated = await setInstancePluginEnabled(plugin_type, next_enabled);
-    instancePlugins = instancePlugins.map((p) => (p.plugin_type === plugin_type ? updated : p));
-    showSuccess(`${display_name} ${next_enabled ? "enabled" : "disabled"}. Restart the controller to apply.`);
+    instancePlugins = instancePlugins.map((p) =>
+      p.plugin_type === plugin_type ? updated : p,
+    );
+    showSuccess(
+      `${display_name} ${next_enabled ? "enabled" : "disabled"}. Restart the controller to apply.`,
+    );
   } catch (e) {
-    showError(e instanceof Error ? e.message : "Failed to toggle instance plugin");
+    showError(
+      e instanceof Error ? e.message : "Failed to toggle instance plugin",
+    );
   }
 }
 ```
@@ -246,7 +272,10 @@ function openEditInstancePluginConfig(pluginType: string) {
   editingInstancePluginType = pluginType;
   const summary = instancePlugins.find((p) => p.plugin_type === pluginType);
   if (!summary) return;
-  instancePluginFormValues = flattenConfig(summary.current_config, summary.instance_config_form_fields);
+  instancePluginFormValues = flattenConfig(
+    summary.current_config,
+    summary.instance_config_form_fields,
+  );
   instancePluginFieldErrors = {};
   showInstancePluginConfigModal = true;
 }
@@ -259,19 +288,31 @@ function closeInstancePluginConfigModal() {
 
 async function saveInstancePluginConfig() {
   if (!editingInstancePluginType) return;
-  const summary = instancePlugins.find((p) => p.plugin_type === editingInstancePluginType);
+  const summary = instancePlugins.find(
+    (p) => p.plugin_type === editingInstancePluginType,
+  );
   if (!summary) return;
   const fields = summary.instance_config_form_fields;
-  instancePluginFieldErrors = requiredFieldErrors(fields, instancePluginFormValues);
+  instancePluginFieldErrors = requiredFieldErrors(
+    fields,
+    instancePluginFormValues,
+  );
   if (Object.keys(instancePluginFieldErrors).length > 0) return;
   const config = unflattenConfig(instancePluginFormValues, fields);
   try {
-    const updated = await upsertInstancePluginConfig(editingInstancePluginType, config);
-    instancePlugins = instancePlugins.map((p) => (p.plugin_type === editingInstancePluginType ? updated : p));
+    const updated = await upsertInstancePluginConfig(
+      editingInstancePluginType,
+      config,
+    );
+    instancePlugins = instancePlugins.map((p) =>
+      p.plugin_type === editingInstancePluginType ? updated : p,
+    );
     showSuccess("Instance plugin configuration saved.");
     closeInstancePluginConfigModal();
   } catch (e) {
-    showError(e instanceof Error ? e.message : "Failed to save instance plugin config");
+    showError(
+      e instanceof Error ? e.message : "Failed to save instance plugin config",
+    );
   }
 }
 ```
@@ -765,17 +806,23 @@ Add or replace the relevant prose to convey:
 
 ```html
 <p>
-  <strong>Disabled by default.</strong> Dashboard Icons is now an instance-scoped enhancement: it must be enabled by an instance owner from
-  <em>Settings → Plugin Configs → Instance Plugins</em>. After enabling, the controller must be restarted for the change to take effect; the Settings
-  UI shows a <em>Pending restart</em> badge until then.
+  <strong>Disabled by default.</strong> Dashboard Icons is now an
+  instance-scoped enhancement: it must be enabled by an instance owner from
+  <em>Settings → Plugin Configs → Instance Plugins</em>. After enabling, the
+  controller must be restarted for the change to take effect; the Settings UI
+  shows a <em>Pending restart</em> badge until then.
 </p>
 <p>
-  <strong>Tenant-side opt-out is preserved.</strong> Once an instance owner enables Dashboard Icons, individual tenants can still disable enrichment
-  for their own software items via <em>Settings → Plugin Configs → Type Defaults</em>.
+  <strong>Tenant-side opt-out is preserved.</strong> Once an instance owner
+  enables Dashboard Icons, individual tenants can still disable enrichment for
+  their own software items via
+  <em>Settings → Plugin Configs → Type Defaults</em>.
 </p>
 <p>
-  <strong>Existing icons remain.</strong> If your installation previously used Dashboard Icons, software items already enriched with icons of the form
-  <code>https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/...</code> will retain those URLs after the conversion. Disabling the plugin stops new
+  <strong>Existing icons remain.</strong> If your installation previously used
+  Dashboard Icons, software items already enriched with icons of the form
+  <code>https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/...</code> will
+  retain those URLs after the conversion. Disabling the plugin stops new
   enrichments but does not retroactively wipe historical ones.
 </p>
 ```

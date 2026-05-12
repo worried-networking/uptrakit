@@ -1,11 +1,11 @@
 # ATK-05: MQTT Broker Compromise
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | MQTT integration |
-| Prerequisites | Control of the MQTT broker or ability to publish to broker topics |
-| STRIDE | Tampering, Denial of Service |
+| Field          | Value                                                             |
+| -------------- | ----------------------------------------------------------------- |
+| Severity       | High                                                              |
+| Attack surface | MQTT integration                                                  |
+| Prerequisites  | Control of the MQTT broker or ability to publish to broker topics |
+| STRIDE         | Tampering, Denial of Service                                      |
 
 ## Attack description
 

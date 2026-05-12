@@ -1,11 +1,11 @@
 # ATK-07: SSRF via Plugin Configuration
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Plugin system (API base URLs) |
-| Prerequisites | Authenticated user with `manage_software` permission |
-| STRIDE | Information Disclosure |
+| Field          | Value                                                |
+| -------------- | ---------------------------------------------------- |
+| Severity       | Medium                                               |
+| Attack surface | Plugin system (API base URLs)                        |
+| Prerequisites  | Authenticated user with `manage_software` permission |
+| STRIDE         | Information Disclosure                               |
 
 ## Attack description
 

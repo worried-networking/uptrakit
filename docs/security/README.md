@@ -10,20 +10,20 @@ This folder contains security architecture, cryptography, PKI, authentication, s
 
 ## Contents
 
-| Document | Description |
-| --- | --- |
-| [Security Architecture](security-architecture.md) | Threat model and defense-in-depth principles. |
-| [Cryptography](cryptography.md) | Cryptographic primitives, key handling, and protocol-level crypto details. |
-| [PKI and Certificates](pki-certificates.md) | Managed CA lifecycle, certificate issuance, renewal, OCSP, and CRL behavior. |
-| [Auth and Authorization](auth-and-authorization.md) | Authentication flows, role/permission model, and auth middleware behavior. |
-| [Secrets and Encryption](secrets-and-encryption.md) | Encryption-at-rest, master key handling, and secret redaction conventions. |
-| [TOFU and TLS](tofu-tls.md) | TOFU behavior and TLS trust bootstrap considerations. |
-| [Filesystem and Dependency Security](filesystem-dependency-security.md) | Filesystem permissions, hardening defaults, and dependency safeguards. |
-| [Secure Development](secure-development.md) | Secure coding expectations for contributors. |
-| [Reverse Proxy Security](reverse-proxy-security.md) | Reverse proxy trust model, header validation, revocation strategy, and per-proxy guide links. |
-| [SSH Agent Secrets](ssh-agent-secrets.md) | SSH credential encryption, master key management, bootstrap security, and TOFU vs pinned fingerprints. |
-| [Sudoers Management](sudoers-management.md) | Per-command sudoers generation, sudo policy, detecting/persisting sudo state, and operator guidance. |
-| [Notification Subsystem Security](notifications-security.md) | Secret storage, webhook HMAC signing, Telegram callback verification, action tokens, and tenant isolation. |
+| Document                                                                | Description                                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| [Security Architecture](security-architecture.md)                       | Threat model and defense-in-depth principles.                                                              |
+| [Cryptography](cryptography.md)                                         | Cryptographic primitives, key handling, and protocol-level crypto details.                                 |
+| [PKI and Certificates](pki-certificates.md)                             | Managed CA lifecycle, certificate issuance, renewal, OCSP, and CRL behavior.                               |
+| [Auth and Authorization](auth-and-authorization.md)                     | Authentication flows, role/permission model, and auth middleware behavior.                                 |
+| [Secrets and Encryption](secrets-and-encryption.md)                     | Encryption-at-rest, master key handling, and secret redaction conventions.                                 |
+| [TOFU and TLS](tofu-tls.md)                                             | TOFU behavior and TLS trust bootstrap considerations.                                                      |
+| [Filesystem and Dependency Security](filesystem-dependency-security.md) | Filesystem permissions, hardening defaults, and dependency safeguards.                                     |
+| [Secure Development](secure-development.md)                             | Secure coding expectations for contributors.                                                               |
+| [Reverse Proxy Security](reverse-proxy-security.md)                     | Reverse proxy trust model, header validation, revocation strategy, and per-proxy guide links.              |
+| [SSH Agent Secrets](ssh-agent-secrets.md)                               | SSH credential encryption, master key management, bootstrap security, and TOFU vs pinned fingerprints.     |
+| [Sudoers Management](sudoers-management.md)                             | Per-command sudoers generation, sudo policy, detecting/persisting sudo state, and operator guidance.       |
+| [Notification Subsystem Security](notifications-security.md)            | Secret storage, webhook HMAC signing, Telegram callback verification, action tokens, and tenant isolation. |
 
 ## Related Documentation
 

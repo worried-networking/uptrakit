@@ -14,9 +14,9 @@
 
 ## File Map
 
-| File | Change |
-| ---- | ------ |
-| `frontend/src/routes/software/+page.svelte` | All structural changes (grid, pill, star, skeleton) |
+| File                                                           | Change                                              |
+| -------------------------------------------------------------- | --------------------------------------------------- |
+| `frontend/src/routes/software/+page.svelte`                    | All structural changes (grid, pill, star, skeleton) |
 | `frontend/src/routes/software/software-trigger-status.test.ts` | Update assertions that match the old summary string |
 
 ---
@@ -36,9 +36,13 @@ In `software-trigger-status.test.ts`, find these lines:
 
 ```ts
 // line 211:
-await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
+await waitFor(() =>
+  expect(screen.getByText("4 hosts · 2 updates")).toBeInTheDocument(),
+);
 // line 255:
-expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toHaveAttribute('aria-expanded', 'true');
+expect(
+  screen.getByRole("button", { name: "Collapse Demo App" }),
+).toHaveAttribute("aria-expanded", "true");
 ```
 
 Line 211 expects the old combined summary string — it will fail after the pill splits the text. Line 255 asserts on the collapse button by aria-label, which is preserved in the new pill; it stays correct.
@@ -49,10 +53,14 @@ Open `frontend/src/routes/software/software-trigger-status.test.ts`. Replace lin
 
 ```ts
 // OLD
-await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
+await waitFor(() =>
+  expect(screen.getByText("4 hosts · 2 updates")).toBeInTheDocument(),
+);
 // NEW — wait until the trailing update label appears; this resolves only after detail loads
 // because softwareUpdateLabel returns '· loading updates' until itemDetailsById has data.
-await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
+await waitFor(() =>
+  expect(screen.getByText("· 2 updates")).toBeInTheDocument(),
+);
 ```
 
 The trailing span text starts as `· loading updates` (when `updateableHostCount` returns `null`)
@@ -73,12 +81,12 @@ Open `frontend/src/routes/software/+page.svelte`. After the `softwareSummary` fu
 
 ```ts
 function softwareUpdateLabel(item: SoftwareItemResponse): string {
-    const updateCount = updateableHostCount(item);
-    return updateCount === null
-        ? 'loading updates'
-        : updateCount === 0
-            ? 'up to date'
-            : `${updateCount} update${updateCount === 1 ? '' : 's'}`;
+  const updateCount = updateableHostCount(item);
+  return updateCount === null
+    ? "loading updates"
+    : updateCount === 0
+      ? "up to date"
+      : `${updateCount} update${updateCount === 1 ? "" : "s"}`;
 }
 ```
 
@@ -276,15 +284,15 @@ Delete the `softwareSummary` function from the script section (it is no longer c
 
 ```ts
 function softwareSummary(item: SoftwareItemResponse): string {
-    const hostLabel = `${item.host_count} host${item.host_count === 1 ? '' : 's'}`;
-    const updateCount = updateableHostCount(item);
-    const updateLabel =
-        updateCount === null
-            ? 'loading updates'
-            : updateCount === 0
-                ? 'up to date'
-                : `${updateCount} update${updateCount === 1 ? '' : 's'}`;
-    return `${hostLabel} · ${updateLabel}`;
+  const hostLabel = `${item.host_count} host${item.host_count === 1 ? "" : "s"}`;
+  const updateCount = updateableHostCount(item);
+  const updateLabel =
+    updateCount === null
+      ? "loading updates"
+      : updateCount === 0
+        ? "up to date"
+        : `${updateCount} update${updateCount === 1 ? "" : "s"}`;
+  return `${hostLabel} · ${updateLabel}`;
 }
 ```
 

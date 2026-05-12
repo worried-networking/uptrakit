@@ -43,12 +43,12 @@ This is the default and is sufficient for single-controller deployments.
 
 ## NATS subject scheme
 
-| Routing | Subject |
-| --- | --- |
-| Broadcast (no filter) | `uptrakit.events.broadcast` |
-| Service-targeted | `uptrakit.events.service.<uuid>` |
-| Capability-targeted | `uptrakit.events.capability.<cap>` |
-| Controller events | `uptrakit.events.controller` |
+| Routing               | Subject                            |
+| --------------------- | ---------------------------------- |
+| Broadcast (no filter) | `uptrakit.events.broadcast`        |
+| Service-targeted      | `uptrakit.events.service.<uuid>`   |
+| Capability-targeted   | `uptrakit.events.capability.<cap>` |
+| Controller events     | `uptrakit.events.controller`       |
 
 ## JetStream configuration
 
@@ -70,7 +70,7 @@ Messages are serialized as JSON `NatsEventEnvelope`:
   "source_controller_id": "01234567-89ab-cdef-0123-456789abcdef",
   "target_service_id": null,
   "target_capability": "update_tracking",
-  "message": { "type": "software_states", "..." : "..." },
+  "message": { "type": "software_states", "...": "..." },
   "created_at": "2026-02-27T12:00:00Z"
 }
 ```
@@ -89,12 +89,12 @@ See [NATS Integration](nats-integration.md) for development details and
 
 ## Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/nats/src/` | `uptrakit-nats` — shared envelope, subjects, connection, publish |
-| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — local delivery + optional NATS publish |
-| `crates/ui/web-api/src/nats_transport.rs` | `NatsTransport` — NATS connect, publish, and consumer loop |
-| `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic (used by NATS consumer) |
-| `crates/core/controller/src/cli.rs` | `--nats-url` CLI argument |
-| `crates/core/controller/src/main.rs` | NATS transport wiring and consumer spawn |
-| `crates/core/scheduler/src/nats_notifier.rs` | `NatsSchedulerNotifier` — external scheduler NATS publisher |
+| File                                            | Purpose                                                          |
+| ----------------------------------------------- | ---------------------------------------------------------------- |
+| `crates/shared/nats/src/`                       | `uptrakit-nats` — shared envelope, subjects, connection, publish |
+| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — local delivery + optional NATS publish   |
+| `crates/ui/web-api/src/nats_transport.rs`       | `NatsTransport` — NATS connect, publish, and consumer loop       |
+| `crates/ui/web-api/src/event_delivery.rs`       | Shared delivery routing logic (used by NATS consumer)            |
+| `crates/core/controller/src/cli.rs`             | `--nats-url` CLI argument                                        |
+| `crates/core/controller/src/main.rs`            | NATS transport wiring and consumer spawn                         |
+| `crates/core/scheduler/src/nats_notifier.rs`    | `NatsSchedulerNotifier` — external scheduler NATS publisher      |

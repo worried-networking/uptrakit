@@ -10,16 +10,16 @@ This folder contains end-user deployment documentation for running Uptrakit behi
 
 ## Contents
 
-| Document | Description |
-| --- | --- |
-| [Reverse Proxy Deployment](reverse-proxy.md) | Reverse proxy deployment patterns, trusted proxy settings, and forwarding requirements. |
-| [Nginx](nginx.md) | Nginx reverse proxy configuration (L4 passthrough and L7 termination). |
-| [Nginx Proxy Manager](nginx-proxy-manager.md) | Nginx Proxy Manager GUI configuration and certificate trust. |
-| [Traefik](traefik.md) | Traefik reverse proxy configuration and header forwarding. |
-| [Caddy](caddy.md) | Caddy reverse proxy configuration and PEM header handling. |
-| [Envoy](envoy.md) | Envoy reverse proxy configuration and XFCC header handling. |
-| [HAProxy](haproxy.md) | HAProxy reverse proxy configuration and CRL refresh strategy. |
-| [Docker](docker.md) | Docker Compose deployment with auto-enrollment and profiles. |
+| Document                                      | Description                                                                             |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [Reverse Proxy Deployment](reverse-proxy.md)  | Reverse proxy deployment patterns, trusted proxy settings, and forwarding requirements. |
+| [Nginx](nginx.md)                             | Nginx reverse proxy configuration (L4 passthrough and L7 termination).                  |
+| [Nginx Proxy Manager](nginx-proxy-manager.md) | Nginx Proxy Manager GUI configuration and certificate trust.                            |
+| [Traefik](traefik.md)                         | Traefik reverse proxy configuration and header forwarding.                              |
+| [Caddy](caddy.md)                             | Caddy reverse proxy configuration and PEM header handling.                              |
+| [Envoy](envoy.md)                             | Envoy reverse proxy configuration and XFCC header handling.                             |
+| [HAProxy](haproxy.md)                         | HAProxy reverse proxy configuration and CRL refresh strategy.                           |
+| [Docker](docker.md)                           | Docker Compose deployment with auto-enrollment and profiles.                            |
 
 ## Single-binary Deployment
 

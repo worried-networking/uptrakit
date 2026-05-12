@@ -120,13 +120,13 @@ out. This eliminates any possibility of accidental mDNS-based discovery.
 
 ## Summary
 
-| Scenario | mDNS | TOFU | Attack surface |
-| --- | :---: | :---: | --- |
-| `--url` + `--ca-cert` | No | No | None (fully pinned) |
-| `--url` + `--tofu-fingerprint` | No | Pinned | First connection only; fingerprint verified |
-| `--url` (no cert, no fingerprint) | No | Yes | First connection; user must verify CA manually |
-| No `--url` (mDNS discovery) | Yes | Pinned | First connection; fingerprint from mDNS TXT record |
-| No `--url` + `--tofu-fingerprint` | Yes | Pinned | First connection; user-provided fingerprint overrides mDNS |
+| Scenario                          | mDNS |  TOFU  | Attack surface                                             |
+| --------------------------------- | :--: | :----: | ---------------------------------------------------------- |
+| `--url` + `--ca-cert`             |  No  |   No   | None (fully pinned)                                        |
+| `--url` + `--tofu-fingerprint`    |  No  | Pinned | First connection only; fingerprint verified                |
+| `--url` (no cert, no fingerprint) |  No  |  Yes   | First connection; user must verify CA manually             |
+| No `--url` (mDNS discovery)       | Yes  | Pinned | First connection; fingerprint from mDNS TXT record         |
+| No `--url` + `--tofu-fingerprint` | Yes  | Pinned | First connection; user-provided fingerprint overrides mDNS |
 
 Zero-configuration discovery is designed for trusted LAN environments (home lab, private infrastructure) where
 the convenience of automatic discovery outweighs the risk of mDNS spoofing. For untrusted networks, WAN

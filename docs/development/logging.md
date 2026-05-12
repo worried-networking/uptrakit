@@ -27,24 +27,24 @@ The canonical implementation lives in `crates/shared/tracing-init/src/lib.rs`
 daemons. The controller, CLI, and integration-tests depend on `uptrakit-tracing-init` directly
 to avoid pulling in the full service SDK.
 
-| Context | Call |
-| --- | --- |
-| Service daemons | `uptrakit_service_sdk::TracingBuilder::new().verbosity(…).init()` |
-| Controller | `uptrakit_tracing_init::TracingBuilder::new().verbosity(…).init()` |
-| CLI | `uptrakit_tracing_init::init_cli_tracing(cli.verbose)` |
-| Tests | `uptrakit_tracing_init::init_test_tracing()` (feature `test-support`) |
+| Context         | Call                                                                  |
+| --------------- | --------------------------------------------------------------------- |
+| Service daemons | `uptrakit_service_sdk::TracingBuilder::new().verbosity(…).init()`     |
+| Controller      | `uptrakit_tracing_init::TracingBuilder::new().verbosity(…).init()`    |
+| CLI             | `uptrakit_tracing_init::init_cli_tracing(cli.verbose)`                |
+| Tests           | `uptrakit_tracing_init::init_test_tracing()` (feature `test-support`) |
 
 Do not add per-binary `init_tracing()` helpers or call `tracing_subscriber` directly in binaries.
 
 ## Log Level Guidelines
 
-| Level | Usage | Example events |
-| --- | --- | --- |
-| `error` | Unrecoverable failures that terminate an operation or require operator attention. Always capture the error value as `error = %e`. | TLS setup failure, DEK unwrap failure, database connection lost |
-| `warn` | Unexpected conditions that are handled but may indicate misconfiguration or degraded operation. | TOFU without a pinned fingerprint, rate limits encountered, update frozen |
-| `info` | High-level lifecycle events: service started, enrollment completed, connection established, CA fetched, update completed. One or a few lines per major operation. | `"enrollment approved"`, `"WebSocket connected"`, `"update completed"` |
-| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging. | Detected version, sending message, executing plugin, spawning command |
-| `trace` | Highly verbose, per-message or per-item events. Never enable in production unless targeting a specific subsystem. | Individual output lines from commands, WebSocket frames, token cache hits |
+| Level   | Usage                                                                                                                                                             | Example events                                                            |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `error` | Unrecoverable failures that terminate an operation or require operator attention. Always capture the error value as `error = %e`.                                 | TLS setup failure, DEK unwrap failure, database connection lost           |
+| `warn`  | Unexpected conditions that are handled but may indicate misconfiguration or degraded operation.                                                                   | TOFU without a pinned fingerprint, rate limits encountered, update frozen |
+| `info`  | High-level lifecycle events: service started, enrollment completed, connection established, CA fetched, update completed. One or a few lines per major operation. | `"enrollment approved"`, `"WebSocket connected"`, `"update completed"`    |
+| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging.                                                                  | Detected version, sending message, executing plugin, spawning command     |
+| `trace` | Highly verbose, per-message or per-item events. Never enable in production unless targeting a specific subsystem.                                                 | Individual output lines from commands, WebSocket frames, token cache hits |
 
 ### Rules
 
@@ -101,39 +101,39 @@ All binaries accept a `-v` / `--verbose` flag that can be repeated. Each additio
 The baseline level is `info` for all uptrakit crates; third-party dependencies like
 `tokio`, `h2`, `rustls`, and `reqwest` are silent unless `RUST_LOG` enables them explicitly.
 
-| Flags | Directives | Effect |
-| --- | --- | --- |
-| (none) | `uptrakit=info` | All uptrakit crates at info |
-| `-v` | `uptrakit=debug` | All uptrakit crates at debug |
-| `-vv` | `uptrakit=trace` | All uptrakit crates at trace |
-| `-vvv`+ | Same as `-vv`; a warning is printed | |
+| Flags   | Directives                          | Effect                       |
+| ------- | ----------------------------------- | ---------------------------- |
+| (none)  | `uptrakit=info`                     | All uptrakit crates at info  |
+| `-v`    | `uptrakit=debug`                    | All uptrakit crates at debug |
+| `-vv`   | `uptrakit=trace`                    | All uptrakit crates at trace |
+| `-vvv`+ | Same as `-vv`; a warning is printed |                              |
 
 ### Controller (`uptrakit-controller`)
 
 The controller uses a finer-grained scheme at lower verbosity levels to reduce noise from
 web-API request logs at the default level.
 
-| Flags | Directives | Effect |
-| --- | --- | --- |
-| (none) | `uptrakit_controller=info,uptrakit_web_api=info` | Controller and API at info |
-| `-v` | `uptrakit_controller=debug,uptrakit_web_api=debug` | Controller and API at debug |
-| `-vv` | `uptrakit=debug` | All uptrakit crates at debug |
-| `-vvv` | `uptrakit=trace` | All uptrakit crates at trace |
-| `-vvvv`+ | Same as `-vvv`; a warning is printed | |
+| Flags    | Directives                                         | Effect                       |
+| -------- | -------------------------------------------------- | ---------------------------- |
+| (none)   | `uptrakit_controller=info,uptrakit_web_api=info`   | Controller and API at info   |
+| `-v`     | `uptrakit_controller=debug,uptrakit_web_api=debug` | Controller and API at debug  |
+| `-vv`    | `uptrakit=debug`                                   | All uptrakit crates at debug |
+| `-vvv`   | `uptrakit=trace`                                   | All uptrakit crates at trace |
+| `-vvvv`+ | Same as `-vvv`; a warning is printed               |                              |
 
 ### CLI (`uptrakit`)
 
 The CLI produces no log output by default (tracing is not initialised at all). When `-v` is given, output goes to
 **stderr** so that command output on stdout is not contaminated.
 
-| Flags | Directive | Effect |
-| --- | --- | --- |
-| (none) | *(no subscriber)* | No log output |
-| `-v` | `uptrakit_cli=warn` | CLI crate warnings only |
-| `-vv` | `uptrakit_cli=debug` | CLI crate at debug |
-| `-vvv` | `uptrakit=debug` | All uptrakit crates at debug |
-| `-vvvv` | `uptrakit=trace` | All uptrakit crates at trace |
-| `-vvvvv`+ | Same as `-vvvv`; a warning is printed | |
+| Flags     | Directive                             | Effect                       |
+| --------- | ------------------------------------- | ---------------------------- |
+| (none)    | _(no subscriber)_                     | No log output                |
+| `-v`      | `uptrakit_cli=warn`                   | CLI crate warnings only      |
+| `-vv`     | `uptrakit_cli=debug`                  | CLI crate at debug           |
+| `-vvv`    | `uptrakit=debug`                      | All uptrakit crates at debug |
+| `-vvvv`   | `uptrakit=trace`                      | All uptrakit crates at trace |
+| `-vvvvv`+ | Same as `-vvvv`; a warning is printed |                              |
 
 ### Excessive-verbosity warning
 
@@ -153,7 +153,7 @@ appended after. Because `EnvFilter` resolves same-target conflicts in favour of 
 `RUST_LOG` always wins.
 
 > **Precedence reversal (post-migration):** Before the `TracingBuilder` migration, programmatic
-> directives were added *after* `RUST_LOG`, meaning `-v` flags could silently override `RUST_LOG`
+> directives were added _after_ `RUST_LOG`, meaning `-v` flags could silently override `RUST_LOG`
 > settings for the same target. The new behaviour (RUST_LOG wins) is more predictable and matches
 > operator expectations.
 

@@ -1,11 +1,11 @@
 # ATK-15: Certificate Revocation Bypass
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | PKI / TLS (CRL and OCSP) |
-| Prerequisites | Stolen agent certificate and network access to the controller |
-| STRIDE | Denial of Service |
+| Field          | Value                                                         |
+| -------------- | ------------------------------------------------------------- |
+| Severity       | Medium                                                        |
+| Attack surface | PKI / TLS (CRL and OCSP)                                      |
+| Prerequisites  | Stolen agent certificate and network access to the controller |
+| STRIDE         | Denial of Service                                             |
 
 ## Attack description
 

@@ -440,6 +440,7 @@ Replace all uses of `policy.update_cores` / `policy.update_memory_mb` with the n
 
    `i32::MAX` (~2B cores) and `i64::MAX` will never be reached by any real Proxmox host; the
    Proxmox API will reject the call first. The guard prevents arithmetic overflow only.
+
 5. The `ScalingRecord` struct (in `policy_store.rs`) gains a `scaling_mode_used: ScalingMode` field.
    On persist, write `scaling_mode_used.as_str()` to the DB column.
 

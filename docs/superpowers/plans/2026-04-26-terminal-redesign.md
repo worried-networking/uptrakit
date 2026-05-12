@@ -55,64 +55,89 @@ and `emptyState` into the shared shell.
 Add tests that lock the approved contract into place before changing the component:
 
 ```ts
-it('renders a single critical banner without using Callout markup', async () => {
-	render(TerminalOutput as never, {
-		open: true,
-		title: 'Demo App on host-one',
-		statusLabel: 'Queued',
-		statusTone: 'warning',
-		metadata: 'host-one · started just now · 0m',
-		criticalBanner: {
-			tone: 'warning',
-			label: 'Output truncated',
-			message: 'Only the first 50 MB is stored.'
-		},
-		onclose: vi.fn()
-	} as never);
+it("renders a single critical banner without using Callout markup", async () => {
+  render(
+    TerminalOutput as never,
+    {
+      open: true,
+      title: "Demo App on host-one",
+      statusLabel: "Queued",
+      statusTone: "warning",
+      metadata: "host-one · started just now · 0m",
+      criticalBanner: {
+        tone: "warning",
+        label: "Output truncated",
+        message: "Only the first 50 MB is stored.",
+      },
+      onclose: vi.fn(),
+    } as never,
+  );
 
-	expect(screen.getByText('Output truncated')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-critical-banner"]')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+  expect(screen.getByText("Output truncated")).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-critical-banner"]'),
+  ).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]'),
+  ).not.toBeInTheDocument();
 });
 
-it('keeps details collapsed until explicitly opened', async () => {
-	render(TerminalOutput as never, {
-		open: true,
-		title: 'Demo App on host-one',
-		statusLabel: 'Completed',
-		statusTone: 'success',
-		metadata: 'host-one · started just now · 0m',
-		details: [
-			{ id: 'actor', label: 'Actor', value: 'user (actor-1)' },
-			{ id: 'recovery', label: 'Recovery hint', value: 'Retry after fixing permissions.' }
-		],
-		onclose: vi.fn()
-	} as never);
+it("keeps details collapsed until explicitly opened", async () => {
+  render(
+    TerminalOutput as never,
+    {
+      open: true,
+      title: "Demo App on host-one",
+      statusLabel: "Completed",
+      statusTone: "success",
+      metadata: "host-one · started just now · 0m",
+      details: [
+        { id: "actor", label: "Actor", value: "user (actor-1)" },
+        {
+          id: "recovery",
+          label: "Recovery hint",
+          value: "Retry after fixing permissions.",
+        },
+      ],
+      onclose: vi.fn(),
+    } as never,
+  );
 
-	expect(screen.queryByText('user (actor-1)')).not.toBeInTheDocument();
-	await fireEvent.click(screen.getByRole('button', { name: /details/i }));
-	expect(screen.getByText('user (actor-1)')).toBeInTheDocument();
-	expect(screen.getByText('Retry after fixing permissions.')).toBeInTheDocument();
+  expect(screen.queryByText("user (actor-1)")).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("button", { name: /details/i }));
+  expect(screen.getByText("user (actor-1)")).toBeInTheDocument();
+  expect(
+    screen.getByText("Retry after fixing permissions."),
+  ).toBeInTheDocument();
 });
 
-it('renders an empty state without mounting xterm when there is no live session and no output', async () => {
-	render(TerminalOutput as never, {
-		open: true,
-		title: 'Demo App on host-one',
-		statusLabel: 'Queued',
-		statusTone: 'warning',
-		metadata: 'host-one · started just now · 0m',
-		showTerminal: false,
-		emptyState: {
-			label: 'Queued',
-			message: 'Waiting for another update on this host to finish.'
-		},
-		onclose: vi.fn()
-	} as never);
+it("renders an empty state without mounting xterm when there is no live session and no output", async () => {
+  render(
+    TerminalOutput as never,
+    {
+      open: true,
+      title: "Demo App on host-one",
+      statusLabel: "Queued",
+      statusTone: "warning",
+      metadata: "host-one · started just now · 0m",
+      showTerminal: false,
+      emptyState: {
+        label: "Queued",
+        message: "Waiting for another update on this host to finish.",
+      },
+      onclose: vi.fn(),
+    } as never,
+  );
 
-	expect(screen.getByText('Waiting for another update on this host to finish.')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-empty-state"]')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-output"]')).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Waiting for another update on this host to finish."),
+  ).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-empty-state"]'),
+  ).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-output"]'),
+  ).not.toBeInTheDocument();
 });
 ```
 
@@ -277,50 +302,76 @@ git commit -m "feat(frontend): redesign shared terminal shell"
 Replace callout-oriented assertions with the new shell behavior:
 
 ```ts
-it('shows truncation as the single critical banner and keeps actor/details collapsed by default', async () => {
-	render(HistoryPage);
-	await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+it("shows truncation as the single critical banner and keeps actor/details collapsed by default", async () => {
+  render(HistoryPage);
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-	const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-	await fireEvent.click(nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement);
+  const nginxEntry = screen.getByText("nginx on prod-01").closest("article")!;
+  await fireEvent.click(
+    nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement,
+  );
 
-	expect(await screen.findByText('Output truncated')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-critical-banner"]')).toBeInTheDocument();
-	expect(screen.queryByText('user (actor-1)')).not.toBeInTheDocument();
-	expect(screen.getByRole('button', { name: /details/i })).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+  expect(await screen.findByText("Output truncated")).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-critical-banner"]'),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("user (actor-1)")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /details/i })).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]'),
+  ).not.toBeInTheDocument();
 });
 
-it('keeps waiting-state output lightweight without mounting terminal output', async () => {
-	render(HistoryPage);
-	await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+it("keeps waiting-state output lightweight without mounting terminal output", async () => {
+  render(HistoryPage);
+  await waitFor(() =>
+    expect(screen.getByText("Update History")).toBeInTheDocument(),
+  );
 
-	const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-	await fireEvent.click(nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement);
+  const nginxEntry = screen.getByText("nginx on prod-01").closest("article")!;
+  await fireEvent.click(
+    nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement,
+  );
 
-	expect(await screen.findByText(/waiting for another update/i)).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-empty-state"]')).toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-output"]')).not.toBeInTheDocument();
+  expect(
+    await screen.findByText(/waiting for another update/i),
+  ).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-empty-state"]'),
+  ).toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-output"]'),
+  ).not.toBeInTheDocument();
 });
 
-it('reveals recovery and protection details only after opening Details', async () => {
-	vi.mocked(api.listUpdateHistory).mockResolvedValue(
-		makeHistoryPage([
-			makeHistoryEntry({
-				pre_update_protection_summary: 'Pre-update checks blocked this run.',
-				recovery_hint: 'Resolve the reported issue, then retry the update.'
-			})
-		])
-	);
+it("reveals recovery and protection details only after opening Details", async () => {
+  vi.mocked(api.listUpdateHistory).mockResolvedValue(
+    makeHistoryPage([
+      makeHistoryEntry({
+        pre_update_protection_summary: "Pre-update checks blocked this run.",
+        recovery_hint: "Resolve the reported issue, then retry the update.",
+      }),
+    ]),
+  );
 
-	render(HistoryPage);
-	await waitFor(() => expect(screen.getByText('Demo App on Host One')).toBeInTheDocument());
-	await fireEvent.click(screen.getByRole('button', { name: /view logs/i }));
+  render(HistoryPage);
+  await waitFor(() =>
+    expect(screen.getByText("Demo App on Host One")).toBeInTheDocument(),
+  );
+  await fireEvent.click(screen.getByRole("button", { name: /view logs/i }));
 
-	expect(screen.queryByText('Pre-update checks blocked this run.')).not.toBeInTheDocument();
-	await fireEvent.click(screen.getByRole('button', { name: /details/i }));
-	expect(screen.getByText('Pre-update checks blocked this run.')).toBeInTheDocument();
-	expect(screen.getByText('Resolve the reported issue, then retry the update.')).toBeInTheDocument();
+  expect(
+    screen.queryByText("Pre-update checks blocked this run."),
+  ).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("button", { name: /details/i }));
+  expect(
+    screen.getByText("Pre-update checks blocked this run."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Resolve the reported issue, then retry the update."),
+  ).toBeInTheDocument();
 });
 ```
 
@@ -342,50 +393,67 @@ Replace `terminalCalloutsFor()` with explicit helpers that match the shared comp
 
 ```ts
 function terminalCriticalBannerFor(item: UpdateHistoryResponse) {
-	if (!item.output_truncated) return undefined;
-	return {
-		tone: 'warning' as const,
-		label: 'Output truncated',
-		message: 'This update produced more than 50 MB of output. Only the first 50 MB is stored.'
-	};
+  if (!item.output_truncated) return undefined;
+  return {
+    tone: "warning" as const,
+    label: "Output truncated",
+    message:
+      "This update produced more than 50 MB of output. Only the first 50 MB is stored.",
+  };
 }
 
 function terminalInlineBadgesFor(item: UpdateHistoryResponse) {
-	const badges: Array<{ id: string; tone: 'warning' | 'info'; label: string }> = [];
-	if (activeStreamId === item.id && item.interactive) {
-		badges.push({
-			id: 'interactive',
-			tone: stdinAttention ? 'warning' : 'info',
-			label: stdinAttention ? 'Interactive terminal' : 'Interactive terminal'
-		});
-	}
-	return badges;
+  const badges: Array<{ id: string; tone: "warning" | "info"; label: string }> =
+    [];
+  if (activeStreamId === item.id && item.interactive) {
+    badges.push({
+      id: "interactive",
+      tone: stdinAttention ? "warning" : "info",
+      label: stdinAttention ? "Interactive terminal" : "Interactive terminal",
+    });
+  }
+  return badges;
 }
 
 function terminalDetailsFor(item: UpdateHistoryResponse) {
-	return [
-		item.actor_type ? { id: 'actor', label: 'Actor', value: `${item.actor_type} (${item.actor_id})` } : null,
-		item.pre_update_protection_summary
-			? { id: 'pre-update', label: 'Protection summary', value: item.pre_update_protection_summary }
-			: null,
-		item.recovery_hint ? { id: 'recovery', label: 'Recovery hint', value: item.recovery_hint } : null
-	].filter((detail): detail is { id: string; label: string; value: string } => detail !== null);
+  return [
+    item.actor_type
+      ? {
+          id: "actor",
+          label: "Actor",
+          value: `${item.actor_type} (${item.actor_id})`,
+        }
+      : null,
+    item.pre_update_protection_summary
+      ? {
+          id: "pre-update",
+          label: "Protection summary",
+          value: item.pre_update_protection_summary,
+        }
+      : null,
+    item.recovery_hint
+      ? { id: "recovery", label: "Recovery hint", value: item.recovery_hint }
+      : null,
+  ].filter(
+    (detail): detail is { id: string; label: string; value: string } =>
+      detail !== null,
+  );
 }
 
 function terminalEmptyStateFor(item: UpdateHistoryResponse) {
-	if (isWaitingStatus(item.status)) {
-		return {
-			label: item.status === 'queued' ? 'Queued' : 'Pending',
-			message:
-				item.status === 'queued'
-					? 'Waiting for another update on this host to finish.'
-					: 'Waiting for the agent to start the update.'
-		};
-	}
-	if (!isLiveStatus(item.status) && !(item.output ?? '').trim()) {
-		return { label: 'No output', message: 'No output recorded.' };
-	}
-	return undefined;
+  if (isWaitingStatus(item.status)) {
+    return {
+      label: item.status === "queued" ? "Queued" : "Pending",
+      message:
+        item.status === "queued"
+          ? "Waiting for another update on this host to finish."
+          : "Waiting for the agent to start the update.",
+    };
+  }
+  if (!isLiveStatus(item.status) && !(item.output ?? "").trim()) {
+    return { label: "No output", message: "No output recorded." };
+  }
+  return undefined;
 }
 ```
 
@@ -444,24 +512,38 @@ git commit -m "feat(frontend): map history terminals to shared shell contract"
 Add a test that locks the software detail page into the new terminal contract instead of the route-local `Input Required` warning treatment:
 
 ```ts
-it('uses shared inline badges instead of warning status overrides for the live terminal', async () => {
-	const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
-	vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
-	vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-		update_history_id: 'uh-live',
-		status: 'pending'
-	});
+it("uses shared inline badges instead of warning status overrides for the live terminal", async () => {
+  const host = makeHost({
+    id: "row-1",
+    hostId: "host-1",
+    hostname: "host-one",
+  });
+  vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+  vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+    update_history_id: "uh-live",
+    status: "pending",
+  });
 
-	render(SoftwareDetailPage);
-	await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
-	await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
-	await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+  render(SoftwareDetailPage);
+  await waitFor(() =>
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Demo App" }),
+    ).toBeInTheDocument(),
+  );
+  await fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  await fireEvent.click(screen.getByRole("button", { name: "Trigger Update" }));
 
-	const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
-	expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
-	expect(document.querySelector('[data-ui="terminal-inline-badges"]')).toBeInTheDocument();
-	expect(screen.queryByText('Input Required')).not.toBeInTheDocument();
-	expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+  const shell = await screen.findByRole("dialog", {
+    name: "Demo App on host-one",
+  });
+  expect(shell).toHaveAttribute("data-ui", "terminal-shell");
+  expect(
+    document.querySelector('[data-ui="terminal-inline-badges"]'),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Input Required")).not.toBeInTheDocument();
+  expect(
+    document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]'),
+  ).not.toBeInTheDocument();
 });
 ```
 
@@ -483,14 +565,14 @@ Keep the live modal’s connection status in the existing status badge and move 
 
 ```ts
 function liveInlineBadges() {
-	if (!liveModal) return [];
-	return [
-		{
-			id: 'interactive',
-			tone: liveStdinAttention ? 'warning' : 'info',
-			label: 'Interactive terminal'
-		}
-	];
+  if (!liveModal) return [];
+  return [
+    {
+      id: "interactive",
+      tone: liveStdinAttention ? "warning" : "info",
+      label: "Interactive terminal",
+    },
+  ];
 }
 ```
 

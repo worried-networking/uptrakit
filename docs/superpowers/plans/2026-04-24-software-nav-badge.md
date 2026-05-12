@@ -16,12 +16,12 @@ and renders a `StatusBadge tone="info"` in all four nav templates. Mobile primar
 
 ## File map
 
-| Action | Path | Responsibility |
-| --- | --- | --- |
-| Create | `frontend/src/lib/stores/software-updates.svelte.ts` | Module-level `$state` count, idempotent fetch, public getter |
-| Create | `frontend/src/lib/stores/software-updates.test.ts` | Unit tests for store behaviour |
-| Modify | `frontend/src/routes/+layout.svelte` | Import store + StatusBadge, extend type, add effect + formatBadge, inject badge into navItems, render badge in all 4 templates |
-| Modify | `frontend/src/routes/layout-button-migration.test.ts` | Add badge rendering tests |
+| Action | Path                                                  | Responsibility                                                                                                                 |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Create | `frontend/src/lib/stores/software-updates.svelte.ts`  | Module-level `$state` count, idempotent fetch, public getter                                                                   |
+| Create | `frontend/src/lib/stores/software-updates.test.ts`    | Unit tests for store behaviour                                                                                                 |
+| Modify | `frontend/src/routes/+layout.svelte`                  | Import store + StatusBadge, extend type, add effect + formatBadge, inject badge into navItems, render badge in all 4 templates |
+| Modify | `frontend/src/routes/layout-button-migration.test.ts` | Add badge rendering tests                                                                                                      |
 
 ---
 
@@ -35,58 +35,69 @@ and renders a `StatusBadge tone="info"` in all four nav templates. Mobile primar
 
 ```typescript
 // frontend/src/lib/stores/software-updates.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PaginatedResponse, SoftwareItemResponse } from '$lib/types';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { PaginatedResponse, SoftwareItemResponse } from "$lib/types";
 
 function makeResponse(total: number): PaginatedResponse<SoftwareItemResponse> {
-	return { items: [], total, page: 1, per_page: 1, total_pages: total };
+  return { items: [], total, page: 1, per_page: 1, total_pages: total };
 }
 
-describe('software-updates store', () => {
-	beforeEach(() => {
-		vi.resetModules();
-	});
+describe("software-updates store", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
 
-	it('getUpdatableSoftwareCount is null before any fetch', async () => {
-		vi.doMock('$lib/api', () => ({ getSoftwareItems: vi.fn() }));
-		const { getUpdatableSoftwareCount } = await import('$lib/stores/software-updates.svelte');
-		expect(getUpdatableSoftwareCount()).toBeNull();
-	});
+  it("getUpdatableSoftwareCount is null before any fetch", async () => {
+    vi.doMock("$lib/api", () => ({ getSoftwareItems: vi.fn() }));
+    const { getUpdatableSoftwareCount } =
+      await import("$lib/stores/software-updates.svelte");
+    expect(getUpdatableSoftwareCount()).toBeNull();
+  });
 
-	it('fetchUpdatableSoftwareCount sets count from response total', async () => {
-		const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(42));
-		vi.doMock('$lib/api', () => ({ getSoftwareItems }));
-		const { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } =
-			await import('$lib/stores/software-updates.svelte');
-		await fetchUpdatableSoftwareCount();
-		expect(getUpdatableSoftwareCount()).toBe(42);
-	});
+  it("fetchUpdatableSoftwareCount sets count from response total", async () => {
+    const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(42));
+    vi.doMock("$lib/api", () => ({ getSoftwareItems }));
+    const { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } =
+      await import("$lib/stores/software-updates.svelte");
+    await fetchUpdatableSoftwareCount();
+    expect(getUpdatableSoftwareCount()).toBe(42);
+  });
 
-	it('fetchUpdatableSoftwareCount calls getSoftwareItems with correct args', async () => {
-		const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(3));
-		vi.doMock('$lib/api', () => ({ getSoftwareItems }));
-		const { fetchUpdatableSoftwareCount } = await import('$lib/stores/software-updates.svelte');
-		await fetchUpdatableSoftwareCount();
-		expect(getSoftwareItems).toHaveBeenCalledWith(undefined, 1, undefined, undefined, true);
-	});
+  it("fetchUpdatableSoftwareCount calls getSoftwareItems with correct args", async () => {
+    const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(3));
+    vi.doMock("$lib/api", () => ({ getSoftwareItems }));
+    const { fetchUpdatableSoftwareCount } =
+      await import("$lib/stores/software-updates.svelte");
+    await fetchUpdatableSoftwareCount();
+    expect(getSoftwareItems).toHaveBeenCalledWith(
+      undefined,
+      1,
+      undefined,
+      undefined,
+      true,
+    );
+  });
 
-	it('fetchUpdatableSoftwareCount is idempotent — second call skips network', async () => {
-		const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(5));
-		vi.doMock('$lib/api', () => ({ getSoftwareItems }));
-		const { fetchUpdatableSoftwareCount } = await import('$lib/stores/software-updates.svelte');
-		await fetchUpdatableSoftwareCount();
-		await fetchUpdatableSoftwareCount();
-		expect(getSoftwareItems).toHaveBeenCalledTimes(1);
-	});
+  it("fetchUpdatableSoftwareCount is idempotent — second call skips network", async () => {
+    const getSoftwareItems = vi.fn().mockResolvedValue(makeResponse(5));
+    vi.doMock("$lib/api", () => ({ getSoftwareItems }));
+    const { fetchUpdatableSoftwareCount } =
+      await import("$lib/stores/software-updates.svelte");
+    await fetchUpdatableSoftwareCount();
+    await fetchUpdatableSoftwareCount();
+    expect(getSoftwareItems).toHaveBeenCalledTimes(1);
+  });
 
-	it('fetchUpdatableSoftwareCount silently swallows errors, count stays null', async () => {
-		const getSoftwareItems = vi.fn().mockRejectedValue(new Error('network error'));
-		vi.doMock('$lib/api', () => ({ getSoftwareItems }));
-		const { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } =
-			await import('$lib/stores/software-updates.svelte');
-		await expect(fetchUpdatableSoftwareCount()).resolves.toBeUndefined();
-		expect(getUpdatableSoftwareCount()).toBeNull();
-	});
+  it("fetchUpdatableSoftwareCount silently swallows errors, count stays null", async () => {
+    const getSoftwareItems = vi
+      .fn()
+      .mockRejectedValue(new Error("network error"));
+    vi.doMock("$lib/api", () => ({ getSoftwareItems }));
+    const { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } =
+      await import("$lib/stores/software-updates.svelte");
+    await expect(fetchUpdatableSoftwareCount()).resolves.toBeUndefined();
+    expect(getUpdatableSoftwareCount()).toBeNull();
+  });
 });
 ```
 
@@ -111,13 +122,13 @@ Expected: all tests fail with `Cannot find module '$lib/stores/software-updates.
 ```typescript
 // frontend/src/lib/stores/software-updates.svelte.ts
 
-import { getSoftwareItems } from '$lib/api';
+import { getSoftwareItems } from "$lib/api";
 
 let count: number | null = $state(null);
 
 /** Reactive getter — null before first successful fetch. */
 export function getUpdatableSoftwareCount(): number | null {
-	return count;
+  return count;
 }
 
 /**
@@ -127,13 +138,19 @@ export function getUpdatableSoftwareCount(): number | null {
  * request. Silently swallows errors — the badge is non-critical.
  */
 export async function fetchUpdatableSoftwareCount(): Promise<void> {
-	if (count !== null) return;
-	try {
-		const res = await getSoftwareItems(undefined, 1, undefined, undefined, true);
-		count = res.total;
-	} catch {
-		// Non-critical — badge stays hidden on error.
-	}
+  if (count !== null) return;
+  try {
+    const res = await getSoftwareItems(
+      undefined,
+      1,
+      undefined,
+      undefined,
+      true,
+    );
+    count = res.total;
+  } catch {
+    // Non-critical — badge stays hidden on error.
+  }
 }
 ```
 
@@ -168,97 +185,97 @@ Open `frontend/src/routes/layout-button-migration.test.ts`.
 After the existing `vi.mock('$lib/stores/network.svelte', ...)` block (around line 65), add:
 
 ```typescript
-vi.mock('$lib/stores/software-updates.svelte', () => ({
-	getUpdatableSoftwareCount: vi.fn(() => null),
-	fetchUpdatableSoftwareCount: vi.fn(async () => {})
+vi.mock("$lib/stores/software-updates.svelte", () => ({
+  getUpdatableSoftwareCount: vi.fn(() => null),
+  fetchUpdatableSoftwareCount: vi.fn(async () => {}),
 }));
 ```
 
 The existing imports in `layout-button-migration.test.ts` (lines 1-3) are:
 
 ```typescript
-import { createRawSnippet } from 'svelte';
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { createRawSnippet } from "svelte";
+import { render, screen } from "@testing-library/svelte";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 ```
 
 Replace those three import lines with:
 
 ```typescript
-import { createRawSnippet } from 'svelte';
-import { cleanup, render, screen } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRawSnippet } from "svelte";
+import { cleanup, render, screen } from "@testing-library/svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 ```
 
 After the import block at the top of the file, add:
 
 ```typescript
-import * as softwareUpdates from '$lib/stores/software-updates.svelte';
+import * as softwareUpdates from "$lib/stores/software-updates.svelte";
 ```
 
 At the end of the file (before the closing `});` of the outermost `describe`), add:
 
 ```typescript
-describe('software nav badge', () => {
-	afterEach(() => {
-		cleanup();
-	});
+describe("software nav badge", () => {
+  afterEach(() => {
+    cleanup();
+  });
 
-	// Desktop sidebar and tablet sidebar/overflow nav items carry data-ui="app-shell-nav-item".
-	// Mobile primary nav uses data-ui="app-shell-mobile-nav-item" and only renders
-	// when viewportWidth < 640 — not the default in jsdom (starts at 1024), so mobile
-	// primary badge rendering is verified by code inspection, not these tests.
+  // Desktop sidebar and tablet sidebar/overflow nav items carry data-ui="app-shell-nav-item".
+  // Mobile primary nav uses data-ui="app-shell-mobile-nav-item" and only renders
+  // when viewportWidth < 640 — not the default in jsdom (starts at 1024), so mobile
+  // primary badge rendering is verified by code inspection, not these tests.
 
-	it('shows info StatusBadge with count when updates available', () => {
-		vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(5);
-		render(Layout, {
-			children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
-		});
-		const softwareLink = document.querySelector(
-			'[data-ui="app-shell-nav-item"][href="/software"]'
-		);
-		expect(softwareLink).not.toBeNull();
-		const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
-		expect(badge).not.toBeNull();
-		expect(badge?.getAttribute('data-tone')).toBe('info');
-		expect(badge?.textContent?.trim()).toBe('5');
-	});
+  it("shows info StatusBadge with count when updates available", () => {
+    vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(5);
+    render(Layout, {
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
+    });
+    const softwareLink = document.querySelector(
+      '[data-ui="app-shell-nav-item"][href="/software"]',
+    );
+    expect(softwareLink).not.toBeNull();
+    const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("data-tone")).toBe("info");
+    expect(badge?.textContent?.trim()).toBe("5");
+  });
 
-	it('shows 99+ when count is 100 or more', () => {
-		vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(150);
-		render(Layout, {
-			children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
-		});
-		const softwareLink = document.querySelector(
-			'[data-ui="app-shell-nav-item"][href="/software"]'
-		);
-		const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
-		expect(badge?.textContent?.trim()).toBe('99+');
-	});
+  it("shows 99+ when count is 100 or more", () => {
+    vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(150);
+    render(Layout, {
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
+    });
+    const softwareLink = document.querySelector(
+      '[data-ui="app-shell-nav-item"][href="/software"]',
+    );
+    const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+    expect(badge?.textContent?.trim()).toBe("99+");
+  });
 
-	it('hides badge when count is 0', () => {
-		vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(0);
-		render(Layout, {
-			children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
-		});
-		const softwareLink = document.querySelector(
-			'[data-ui="app-shell-nav-item"][href="/software"]'
-		);
-		const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
-		expect(badge).toBeNull();
-	});
+  it("hides badge when count is 0", () => {
+    vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(0);
+    render(Layout, {
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
+    });
+    const softwareLink = document.querySelector(
+      '[data-ui="app-shell-nav-item"][href="/software"]',
+    );
+    const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+    expect(badge).toBeNull();
+  });
 
-	it('hides badge when count is null', () => {
-		vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(null);
-		render(Layout, {
-			children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
-		});
-		const softwareLink = document.querySelector(
-			'[data-ui="app-shell-nav-item"][href="/software"]'
-		);
-		const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
-		expect(badge).toBeNull();
-	});
+  it("hides badge when count is null", () => {
+    vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(null);
+    render(Layout, {
+      children: createRawSnippet(() => ({ render: () => "<p>content</p>" })),
+    });
+    const softwareLink = document.querySelector(
+      '[data-ui="app-shell-nav-item"][href="/software"]',
+    );
+    const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+    expect(badge).toBeNull();
+  });
 });
 ```
 
@@ -298,9 +315,9 @@ After the last `import` statement in the `<script>` block (around line 28, befor
 
 ```typescript
 import {
-	getUpdatableSoftwareCount,
-	fetchUpdatableSoftwareCount
-} from '$lib/stores/software-updates.svelte';
+  getUpdatableSoftwareCount,
+  fetchUpdatableSoftwareCount,
+} from "$lib/stores/software-updates.svelte";
 ```
 
 ### Step 9 — Extend ShellNavItem and add formatBadge
@@ -311,11 +328,11 @@ Find the `ShellNavItem` type definition (around line 61):
 
 ```typescript
 type ShellNavItem = {
-	href: string;
-	label: string;
-	priority: number;
-	origin: NavItemOrigin;
-	stableId: string;
+  href: string;
+  label: string;
+  priority: number;
+  origin: NavItemOrigin;
+  stableId: string;
 };
 ```
 
@@ -323,17 +340,17 @@ Replace with:
 
 ```typescript
 type ShellNavItem = {
-	href: string;
-	label: string;
-	priority: number;
-	origin: NavItemOrigin;
-	stableId: string;
-	badge?: string;
+  href: string;
+  label: string;
+  priority: number;
+  origin: NavItemOrigin;
+  stableId: string;
+  badge?: string;
 };
 
 function formatBadge(count: number | null): string | undefined {
-	if (count === null || count === 0) return undefined;
-	return count >= 100 ? '99+' : String(count);
+  if (count === null || count === 0) return undefined;
+  return count >= 100 ? "99+" : String(count);
 }
 ```
 
@@ -346,11 +363,11 @@ Find the `$effect` block that loads the surface registry (around line 126):
 ```typescript
 // Load surface registry when authenticated, clear on logout.
 $effect(() => {
-	if (getUser()) {
-		loadSurfaceRegistry();
-	} else {
-		clearSurfaceRegistry();
-	}
+  if (getUser()) {
+    loadSurfaceRegistry();
+  } else {
+    clearSurfaceRegistry();
+  }
 });
 ```
 
@@ -358,9 +375,9 @@ After that block, add:
 
 ```typescript
 $effect(() => {
-	if (getUser()?.permissions.includes(Permission.ViewSoftware)) {
-		void fetchUpdatableSoftwareCount();
-	}
+  if (getUser()?.permissions.includes(Permission.ViewSoftware)) {
+    void fetchUpdatableSoftwareCount();
+  }
 });
 ```
 
@@ -557,20 +574,20 @@ git commit -m "feat(frontend): render updatable-software badge in all nav templa
 
 **Spec coverage:**
 
-| Spec requirement | Task |
-| --- | --- |
-| Store with idempotent fetch | Task 2 |
-| `getUpdatableSoftwareCount()` returns null before fetch | Task 2, verified in Task 1 tests |
-| `null` and `0` → no badge | `formatBadge`, tested in Task 3 |
-| `1–99` → count string | `formatBadge`, tested in Task 3 |
-| `≥100` → "99+" | `formatBadge`, tested in Task 3 |
-| `$effect` on ViewSoftware permission | Step 10 |
-| badge in navItems derived | Step 11 |
-| Desktop sidebar badge (`ml-auto`) | Step 12 |
-| Tablet sidebar badge (`ml-auto`) | Step 13 |
-| Mobile primary badge (no `ml-auto`, `shrink-0`) | Step 14 |
-| Mobile overflow badge (`ml-auto`) | Step 15 |
-| `StatusBadge tone="info"` | Steps 12–15 |
-| SSE wiring deferred | ✅ out of scope, store is ready for it |
+| Spec requirement                                        | Task                                   |
+| ------------------------------------------------------- | -------------------------------------- |
+| Store with idempotent fetch                             | Task 2                                 |
+| `getUpdatableSoftwareCount()` returns null before fetch | Task 2, verified in Task 1 tests       |
+| `null` and `0` → no badge                               | `formatBadge`, tested in Task 3        |
+| `1–99` → count string                                   | `formatBadge`, tested in Task 3        |
+| `≥100` → "99+"                                          | `formatBadge`, tested in Task 3        |
+| `$effect` on ViewSoftware permission                    | Step 10                                |
+| badge in navItems derived                               | Step 11                                |
+| Desktop sidebar badge (`ml-auto`)                       | Step 12                                |
+| Tablet sidebar badge (`ml-auto`)                        | Step 13                                |
+| Mobile primary badge (no `ml-auto`, `shrink-0`)         | Step 14                                |
+| Mobile overflow badge (`ml-auto`)                       | Step 15                                |
+| `StatusBadge tone="info"`                               | Steps 12–15                            |
+| SSE wiring deferred                                     | ✅ out of scope, store is ready for it |
 
 All spec requirements covered. No gaps.

@@ -29,9 +29,9 @@ The Snap plugin manages packages installed via the `snap` command. It:
 
 ## Configuration fields
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `channel` | No | Snap channel to track for this plugin config (e.g. `latest/stable`, `1.0/stable`, `edge`). Defaults to `latest/stable` when not specified. |
+| Field     | Required | Description                                                                                                                                |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `channel` | No       | Snap channel to track for this plugin config (e.g. `latest/stable`, `1.0/stable`, `edge`). Defaults to `latest/stable` when not specified. |
 
 ### Channel format
 
@@ -41,13 +41,13 @@ A Snap channel has the form `<track>/<risk>` or a bare `<risk>`:
   publishers maintain multiple release streams.
 - **Risk**: one of `stable`, `candidate`, `beta`, or `edge`.
 
-| Channel | Meaning |
-| --- | --- |
-| `latest/stable` | Stable releases on the default track (default) |
-| `latest/edge` | Bleeding-edge builds on the default track |
-| `1.0/stable` | Stable releases on the `1.0` track |
-| `stable` | Bare risk — equivalent to `latest/stable` in Snap semantics |
-| `edge` | Bare risk — equivalent to `latest/edge` in Snap semantics |
+| Channel         | Meaning                                                     |
+| --------------- | ----------------------------------------------------------- |
+| `latest/stable` | Stable releases on the default track (default)              |
+| `latest/edge`   | Bleeding-edge builds on the default track                   |
+| `1.0/stable`    | Stable releases on the `1.0` track                          |
+| `stable`        | Bare risk — equivalent to `latest/stable` in Snap semantics |
+| `edge`          | Bare risk — equivalent to `latest/edge` in Snap semantics   |
 
 Channels ending in `/beta` or `/edge` are marked as pre-releases in Uptrakit.
 

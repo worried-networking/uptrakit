@@ -32,7 +32,7 @@ column updates.
   - `frontend/src/routes/hosts/[id]/+page.svelte:564`
   - `frontend/src/routes/hosts/[id]/+page.svelte:649`
   - `frontend/src/routes/hosts/[id]/+page.svelte:693`
-  - `frontend/src/routes/hosts/+page.svelte:445` *(special: also remove `hover:bg-[var(--bg-raised)]`)*
+  - `frontend/src/routes/hosts/+page.svelte:445` _(special: also remove `hover:bg-[var(--bg-raised)]`)_
   - `frontend/src/routes/host-tags/+page.svelte:377`
   - `frontend/src/routes/software/IgnoreRulesTab.svelte:192`
   - `frontend/src/routes/settings/SystemServicesSettings.svelte:356`
@@ -42,7 +42,7 @@ column updates.
   - `frontend/src/routes/settings/OidcProvidersSettings.svelte:230`
   - `frontend/src/routes/settings/EnrollmentTokenSettings.svelte:380`
   - `frontend/src/routes/system-services/+page.svelte:483`
-  - `frontend/src/lib/components/surfaces/SurfaceTable.svelte:235` *(entityLinkRow — sweep only)*
+  - `frontend/src/lib/components/surfaces/SurfaceTable.svelte:235` _(entityLinkRow — sweep only)_
   - `frontend/src/routes/settings/NotificationLogView.svelte:173`
   - `frontend/src/routes/settings/NotificationRulesSettings.svelte:194`
   - `frontend/src/routes/settings/PluginConfigsTab.svelte:809`
@@ -64,41 +64,45 @@ column updates.
 Add to `DataTable.test.ts` (inside `describe('DataTable')`):
 
 ```typescript
-it('tbody carries zebra and hover child-selector classes', () => {
+it("tbody carries zebra and hover child-selector classes", () => {
   const { container } = render(DataTable, {
-    columns: [{ key: 'name', label: 'Name' }],
-    rows: [{ name: 'alpha' }, { name: 'beta' }]
+    columns: [{ key: "name", label: "Name" }],
+    rows: [{ name: "alpha" }, { name: "beta" }],
   });
 
-  const tbody = container.querySelector('tbody');
-  expect(tbody?.className).toContain('[&>tr:nth-child(even)]:bg-[var(--bg-raised)]');
-  expect(tbody?.className).toContain('[&>tr:hover]:bg-[var(--bg-hover)]');
+  const tbody = container.querySelector("tbody");
+  expect(tbody?.className).toContain(
+    "[&>tr:nth-child(even)]:bg-[var(--bg-raised)]",
+  );
+  expect(tbody?.className).toContain("[&>tr:hover]:bg-[var(--bg-hover)]");
 });
 
-it('default auto-rendered tr does not carry even:bg-[var(--bg-raised)]', () => {
+it("default auto-rendered tr does not carry even:bg-[var(--bg-raised)]", () => {
   const { container } = render(DataTable, {
-    columns: [{ key: 'name', label: 'Name' }],
-    rows: [{ name: 'alpha' }, { name: 'beta' }]
+    columns: [{ key: "name", label: "Name" }],
+    rows: [{ name: "alpha" }, { name: "beta" }],
   });
 
-  const trs = container.querySelectorAll('tbody tr');
+  const trs = container.querySelectorAll("tbody tr");
   trs.forEach((tr) => {
-    expect(tr.className).not.toContain('even:bg-[var(--bg-raised)]');
+    expect(tr.className).not.toContain("even:bg-[var(--bg-raised)]");
   });
 });
 
-it('auto-generated mobile cards wrapper carries zebra and hover child-selector classes', () => {
+it("auto-generated mobile cards wrapper carries zebra and hover child-selector classes", () => {
   const { container } = render(DataTable, {
-    columns: [{ key: 'name', label: 'Name', mobileTitle: true }],
-    rows: [{ name: 'alpha' }, { name: 'beta' }],
-    mobileMode: 'cards'
+    columns: [{ key: "name", label: "Name", mobileTitle: true }],
+    rows: [{ name: "alpha" }, { name: "beta" }],
+    mobileMode: "cards",
   });
 
   const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
   // wrapper div is the direct non-role child of the cards container
-  const wrapper = cardsEl?.querySelector(':scope > div:not([role])');
-  expect(wrapper?.className).toContain('[&>div:nth-child(even)]:bg-[var(--bg-raised)]');
-  expect(wrapper?.className).toContain('[&>div:hover]:bg-[var(--bg-hover)]');
+  const wrapper = cardsEl?.querySelector(":scope > div:not([role])");
+  expect(wrapper?.className).toContain(
+    "[&>div:nth-child(even)]:bg-[var(--bg-raised)]",
+  );
+  expect(wrapper?.className).toContain("[&>div:hover]:bg-[var(--bg-hover)]");
 });
 ```
 
@@ -115,13 +119,15 @@ Expected: 3 new tests fail.
 At `DataTable.svelte:122`, change `<tbody>` to:
 
 ```html
-<tbody class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]">
+<tbody
+  class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]"
+></tbody>
 ```
 
 At `DataTable.svelte:127`, remove `even:bg-[var(--bg-raised)]` from the default `<tr>`:
 
 ```html
-<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+<tr class="border-b border-[var(--border-subtle)] last:border-b-0"></tr>
 ```
 
 At `DataTable.svelte:160-212`, replace the entire cards body (the `{#each}` block and its
@@ -444,11 +450,13 @@ Accessibility: each `<label for="...">` must be paired with the matching input. 
 In `audit-logs.test.ts`, add:
 
 ```typescript
-it('renders date filters with simplified From/To labels (no RFC 3339 text)', async () => {
+it("renders date filters with simplified From/To labels (no RFC 3339 text)", async () => {
   render(AuditLogsPage);
-  await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());
-  expect(screen.getByLabelText('From')).toBeInTheDocument();
-  expect(screen.getByLabelText('To')).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText("Audit Logs")).toBeInTheDocument(),
+  );
+  expect(screen.getByLabelText("From")).toBeInTheDocument();
+  expect(screen.getByLabelText("To")).toBeInTheDocument();
   expect(screen.queryByText(/RFC 3339/)).not.toBeInTheDocument();
 });
 ```
@@ -474,8 +482,8 @@ import {
   StatusBadge,
   TableFooterBar,
   TabStrip,
-  type TabStripItem
-} from '$lib/components/ui';
+  type TabStripItem,
+} from "$lib/components/ui";
 ```
 
 Replace lines 228–266 (the filter `<div class="grid ...">` block) with:
@@ -649,31 +657,39 @@ The current actor `<td>` renders `actorLabel(entry)`. Replace with two sub-eleme
 Add to `audit-logs.test.ts` (inside `describe('Audit Logs Page')`):
 
 ```typescript
-it('actor column shows PillBadge for actor_type and enriched display name', async () => {
+it("actor column shows PillBadge for actor_type and enriched display name", async () => {
   vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
 
   render(AuditLogsPage);
-  await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actor' })).toBeInTheDocument());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("columnheader", { name: "Actor" }),
+    ).toBeInTheDocument(),
+  );
 
   // sampleEntry.actor_type = 'user', actor_display = 'Audit Viewer'
-  expect(screen.getByText('user')).toBeInTheDocument();
-  expect(screen.getByText('Audit Viewer')).toBeInTheDocument();
+  expect(screen.getByText("user")).toBeInTheDocument();
+  expect(screen.getByText("Audit Viewer")).toBeInTheDocument();
 });
 
-it('actor column shows only PillBadge when actor_display and actor_id are absent', async () => {
+it("actor column shows only PillBadge when actor_display and actor_id are absent", async () => {
   const systemEntry: AuditLogEntry = {
     ...sampleEntry,
-    id: 'audit-sys',
-    actor_type: 'system',
+    id: "audit-sys",
+    actor_type: "system",
     actor_id: null,
-    actor_display: null
+    actor_display: null,
   };
   vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([systemEntry]));
 
   render(AuditLogsPage);
-  await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actor' })).toBeInTheDocument());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("columnheader", { name: "Actor" }),
+    ).toBeInTheDocument(),
+  );
 
-  expect(screen.getByText('system')).toBeInTheDocument();
+  expect(screen.getByText("system")).toBeInTheDocument();
 });
 ```
 
@@ -699,8 +715,8 @@ import {
   StatusBadge,
   TableFooterBar,
   TabStrip,
-  type TabStripItem
-} from '$lib/components/ui';
+  type TabStripItem,
+} from "$lib/components/ui";
 ```
 
 Replace the actor `<td>` (currently lines 321–323):

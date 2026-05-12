@@ -32,14 +32,14 @@ Extend the Phase 1 marketing site into a documentation hub that:
 
 ### Content scope
 
-| Section | Published | Notes |
-| --- | --- | --- |
-| `docs/end-user/` | Yes | Primary audience: homelab operators |
-| `docs/security/` | Yes | Security posture matters to evaluators |
-| `docs/api/` | No | Too narrow/contributor-facing for Phase 2 |
-| `docs/architecture/` | No | Contributor-facing |
-| `docs/development/` | No | Contributor-facing |
-| `docs/hackme/` | No | Not appropriate for public site |
+| Section              | Published | Notes                                     |
+| -------------------- | --------- | ----------------------------------------- |
+| `docs/end-user/`     | Yes       | Primary audience: homelab operators       |
+| `docs/security/`     | Yes       | Security posture matters to evaluators    |
+| `docs/api/`          | No        | Too narrow/contributor-facing for Phase 2 |
+| `docs/architecture/` | No        | Contributor-facing                        |
+| `docs/development/`  | No        | Contributor-facing                        |
+| `docs/hackme/`       | No        | Not appropriate for public site           |
 
 ### Single-source via symlinks
 
@@ -118,13 +118,13 @@ syntax as part of the front matter authoring pass. GFM alert syntax supports fiv
 
 Standard mappings:
 
-| Old pattern | New syntax |
-| --- | --- |
-| `> **Note:**` / `> **Note**:` | `> [!NOTE]` |
-| `> **Tip:**` / `> **Tip**:` | `> [!TIP]` |
+| Old pattern                             | New syntax       |
+| --------------------------------------- | ---------------- |
+| `> **Note:**` / `> **Note**:`           | `> [!NOTE]`      |
+| `> **Tip:**` / `> **Tip**:`             | `> [!TIP]`       |
 | `> **Important:**` / `> **Important**:` | `> [!IMPORTANT]` |
-| `> **Warning:**` | `> [!WARNING]` |
-| `> **Security note:**` | `> [!CAUTION]` |
+| `> **Warning:**`                        | `> [!WARNING]`   |
+| `> **Security note:**`                  | `> [!CAUTION]`   |
 
 Multi-word or topic-specific labels (e.g. `> **Sudoers note:**`, `> **Output size limit:**`,
 `> **Removing a role:**`, `> **Note for existing hosts:**`, `> **Note on APT batch upgrade:**`)
@@ -135,9 +135,11 @@ Example conversion:
 
 ```markdown
 <!-- before -->
+
 > **Output size limit:** Uptrakit stores up to 50 MB of output per update.
 
 <!-- after -->
+
 > [!NOTE]
 > Output size limit: Uptrakit stores up to 50 MB of output per update.
 ```
@@ -163,7 +165,11 @@ alpha.
 CSS overrides in `site.css` set the `pre` container to match design tokens regardless of theme:
 
 ```css
-pre { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 3px; }
+pre {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
 ```
 
 Upgrade path to dual-theme (if ever needed): switch to `highlight_theme = "css"` +
@@ -240,15 +246,15 @@ github_alerts = true
 
 ### Routes
 
-| Route | Source | Notes |
-| --- | --- | --- |
-| `/docs/` | `content/docs/_index.md` | Hub landing; links to sections |
-| `/docs/end-user/` | `docs/end-user/_index.md` (via symlink) | Section index; alpha banner |
-| `/docs/end-user/deployment/` | `docs/end-user/deployment/_index.md` | Subsection index; alpha banner |
-| `/docs/end-user/plugins/` | `docs/end-user/plugins/_index.md` | Subsection index; alpha banner |
-| `/docs/end-user/<page>/` | `docs/end-user/<page>.md` | Leaf page |
-| `/docs/security/` | `docs/security/_index.md` (via symlink) | Section index; alpha banner |
-| `/docs/security/<page>/` | `docs/security/<page>.md` | Leaf page |
+| Route                        | Source                                  | Notes                          |
+| ---------------------------- | --------------------------------------- | ------------------------------ |
+| `/docs/`                     | `content/docs/_index.md`                | Hub landing; links to sections |
+| `/docs/end-user/`            | `docs/end-user/_index.md` (via symlink) | Section index; alpha banner    |
+| `/docs/end-user/deployment/` | `docs/end-user/deployment/_index.md`    | Subsection index; alpha banner |
+| `/docs/end-user/plugins/`    | `docs/end-user/plugins/_index.md`       | Subsection index; alpha banner |
+| `/docs/end-user/<page>/`     | `docs/end-user/<page>.md`               | Leaf page                      |
+| `/docs/security/`            | `docs/security/_index.md` (via symlink) | Section index; alpha banner    |
+| `/docs/security/<page>/`     | `docs/security/<page>.md`               | Leaf page                      |
 
 ### `docs.html` template
 
@@ -316,18 +322,22 @@ Order left to right: wordmark + favicon | "Docs" | "Install" | GitHub icon | the
 
 **GFM alert styles:**
 
-| CSS class | Background token | Border token |
-| --- | --- | --- |
-| `.markdown-alert-note` | `--color-info-bg` | `--color-info-border` |
-| `.markdown-alert-tip` | `--color-success-bg` | `--color-success-border` |
+| CSS class                   | Background token     | Border token             |
+| --------------------------- | -------------------- | ------------------------ |
+| `.markdown-alert-note`      | `--color-info-bg`    | `--color-info-border`    |
+| `.markdown-alert-tip`       | `--color-success-bg` | `--color-success-border` |
 | `.markdown-alert-important` | `--color-warning-bg` | `--color-warning-border` |
-| `.markdown-alert-warning` | `--color-warning-bg` | `--color-warning-border` |
-| `.markdown-alert-caution` | `--color-danger-bg` | `--color-danger-border` |
+| `.markdown-alert-warning`   | `--color-warning-bg` | `--color-warning-border` |
+| `.markdown-alert-caution`   | `--color-danger-bg`  | `--color-danger-border`  |
 
 **Syntax highlighting:**
 
 ```css
-pre { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 3px; }
+pre {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
 ```
 
 Token colors are `base16-ocean-dark` (Syntect inline). The `pre` override ensures the container
@@ -386,10 +396,10 @@ emitted by `npx pagefind` into `public/pagefind/` and served as static assets.
 
    ```yaml
    paths:
-     - 'website/**'
-     - 'docs/end-user/**'
-     - 'docs/security/**'
-     - '.github/workflows/website.yml'
+     - "website/**"
+     - "docs/end-user/**"
+     - "docs/security/**"
+     - ".github/workflows/website.yml"
    ```
 
    Without this, editing `docs/end-user/deployment/docker.md` would not trigger a site rebuild.

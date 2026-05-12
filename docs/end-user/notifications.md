@@ -17,11 +17,11 @@ trigger messages). A delivery **log** tracks the history of every notification s
 A channel is a delivery endpoint. Each channel has a type and a type-specific configuration.
 Uptrakit currently supports three channel types:
 
-| Type | Description |
-| --- | --- |
-| `webhook` | Sends a JSON POST request to the configured URL. Optionally signs the payload with HMAC-SHA256. |
-| `telegram` | Sends a message to a Telegram chat via the Bot API. Supports inline keyboard buttons for actionable notifications. |
-| `email` | Sends email notifications via SMTP. Global SMTP settings are shared across all email channels; each channel configures only recipient addresses. |
+| Type       | Description                                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `webhook`  | Sends a JSON POST request to the configured URL. Optionally signs the payload with HMAC-SHA256.                                                  |
+| `telegram` | Sends a message to a Telegram chat via the Bot API. Supports inline keyboard buttons for actionable notifications.                               |
+| `email`    | Sends email notifications via SMTP. Global SMTP settings are shared across all email channels; each channel configures only recipient addresses. |
 
 Channels can be enabled or disabled independently. A disabled channel suppresses all deliveries
 without deleting the channel or its rules.
@@ -34,14 +34,14 @@ include **scope filters** to narrow the set of events they match (see [Scoping R
 
 ### Event types
 
-| Event type | Fires when |
-| --- | --- |
-| `update_available` | A new upstream version is detected for a software item. |
-| `update_completed` | An update finishes successfully. |
-| `update_failed` | An update fails. |
-| `new_software_discovered` | Autodiscovery finds a new software package. |
-| `new_service_enrolled` | A new service (agent, MQTT, SSH agent) registers with the controller. |
-| `ca_rotated` | The controller's internal CA is rotated. |
+| Event type                | Fires when                                                            |
+| ------------------------- | --------------------------------------------------------------------- |
+| `update_available`        | A new upstream version is detected for a software item.               |
+| `update_completed`        | An update finishes successfully.                                      |
+| `update_failed`           | An update fails.                                                      |
+| `new_software_discovered` | Autodiscovery finds a new software package.                           |
+| `new_service_enrolled`    | A new service (agent, MQTT, SSH agent) registers with the controller. |
+| `ca_rotated`              | The controller's internal CA is rotated.                              |
 
 ### Actionable notifications
 
@@ -126,11 +126,11 @@ uptrakit notifications channels create --name "My Webhook" --type webhook \
 
 Webhook configuration fields:
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `url` | Yes | The HTTP or HTTPS endpoint to POST notifications to. |
-| `secret` | No | HMAC-SHA256 signing key. When present, every request includes an `X-Uptrakit-Signature` header. |
-| `headers` | No | Object of custom HTTP headers to include with every request (e.g. `{"Authorization":"Bearer ..."}`). |
+| Field     | Required | Description                                                                                          |
+| --------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `url`     | Yes      | The HTTP or HTTPS endpoint to POST notifications to.                                                 |
+| `secret`  | No       | HMAC-SHA256 signing key. When present, every request includes an `X-Uptrakit-Signature` header.      |
+| `headers` | No       | Object of custom HTTP headers to include with every request (e.g. `{"Authorization":"Bearer ..."}`). |
 
 ### Step 2: Create a rule
 
@@ -204,11 +204,11 @@ uptrakit notifications channels create --name "Ops Telegram" --type telegram \
 
 Telegram configuration fields:
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `bot_token` | Yes | The bot token from BotFather. Stored encrypted at rest. |
-| `chat_id` | Yes | The Telegram chat, group, or channel ID to send messages to. |
-| `webhook_secret` | No | Secret token used to verify incoming Telegram callbacks. Must match the `secret_token` parameter passed to `setWebhook`. |
+| Field            | Required | Description                                                                                                              |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `bot_token`      | Yes      | The bot token from BotFather. Stored encrypted at rest.                                                                  |
+| `chat_id`        | Yes      | The Telegram chat, group, or channel ID to send messages to.                                                             |
+| `webhook_secret` | No       | Secret token used to verify incoming Telegram callbacks. Must match the `secret_token` parameter passed to `setWebhook`. |
 
 ### Step 5: Create a rule and test
 
@@ -222,11 +222,11 @@ uptrakit notifications channels test <CHANNEL_ID>
 By default, a rule with no scope filters matches **all events** of its event type across the
 entire tenant. You can narrow the scope using one or more filters when creating or updating a rule.
 
-| Filter | Effect |
-| --- | --- |
-| `--host-id <HOST_ID>` | Only match events for that specific host. |
-| `--software-item-id <ITEM_ID>` | Only match events for that specific software item. |
-| `--plugin-type <TYPE>` | Only match events from that plugin type (e.g. `releases_github`, `package_manager_apt`). |
+| Filter                         | Effect                                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| `--host-id <HOST_ID>`          | Only match events for that specific host.                                                |
+| `--software-item-id <ITEM_ID>` | Only match events for that specific software item.                                       |
+| `--plugin-type <TYPE>`         | Only match events from that plugin type (e.g. `releases_github`, `package_manager_apt`). |
 
 Filters can be combined for narrow targeting. For example, to receive Telegram alerts only when
 updates are available for a specific software item on a specific host:
@@ -317,9 +317,9 @@ uptrakit notifications log -o json | jq '.items[] | select(.status == "failed")'
 
 Notification operations require the following permissions:
 
-| Permission | Grants access to |
-| --- | --- |
-| `view_notifications` | List and view channels, rules, and the delivery log. |
+| Permission             | Grants access to                                     |
+| ---------------------- | ---------------------------------------------------- |
+| `view_notifications`   | List and view channels, rules, and the delivery log. |
 | `manage_notifications` | Create, update, delete, and test channels and rules. |
 
 Users without `view_notifications` cannot see any notification resources. Users with

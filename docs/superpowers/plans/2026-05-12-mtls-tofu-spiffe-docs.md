@@ -48,7 +48,7 @@ having landed.
   - Conflicts: each pin/insecure flag conflicts with `--ca-cert`, `--pki-addr`
 - Modify: `crates/shared/service-sdk/src/tls.rs`
   - Trust composition builder: `build_root_store(controller_ca_pem, opts: TrustOptions) ->
-    Result<RootCertStore, _>`
+Result<RootCertStore, _>`
   - `TrustOptions { trust_public_roots: bool, trust_native_roots: bool }`
   - Load `rustls-native-certs` via `tokio::task::spawn_blocking` at process startup
 - Modify: `crates/shared/service-sdk/src/ca.rs`
@@ -62,7 +62,7 @@ having landed.
   - Fetch and store `trust_domain` from `ServiceSettingsPayload`
 - Modify: `crates/shared/wire/src/payloads.rs`
   - Add `pub trust_domain: String` to `ServiceSettingsPayload` with `#[serde(default,
-    skip_serializing_if = "String::is_empty")]`
+skip_serializing_if = "String::is_empty")]`
   - Add `#[non_exhaustive]` to the struct
 - Modify: `crates/shared/wire/asyncapi.yaml`
   - Add `trust_domain` field to `ServiceSettingsPayload` schema
@@ -1668,7 +1668,7 @@ edits will merge-conflict with Plan 2 and may regress the resolver swap
 to "reconnect always".
 
 - [ ] **Step 5: Update the caller in `cert_handler.rs`** to pass `trust_domain` from
-  `ServiceSettings`
+      `ServiceSettings`
 
 Field: `self.trust_domain: String` on `CertificateRenewalHandler`. Populate from
 `handle_service_settings` (where `ServiceSettingsPayload` is consumed). The
@@ -2293,7 +2293,6 @@ Following the graceful-reload precedent, no compatibility shim is shipped.
 | --------------------------------- | ----------------------------------------------------------- |
 | `--tofu` (alone)                  | `--tofu-insecure` (preferred) or `--tofu-fingerprint=<hex>` |
 | `--tofu --tofu-fingerprint=<hex>` | `--tofu-fingerprint=<hex>`                                  |
-
 ````
 
 - [ ] **Step 2: Lint + commit**
@@ -2302,7 +2301,7 @@ Following the graceful-reload precedent, no compatibility shim is shipped.
 npx markdownlint --config .markdownlint.json docs/security/tofu-tls.md
 git add docs/security/tofu-tls.md
 git commit -m "docs(security): rewrite tofu-tls.md with four modes + trust composition + persistence semantics"
-````
+```
 
 ---
 
@@ -2331,7 +2330,7 @@ DER length encoding correctly across all sizes; the historical hand-rolled
 ```
 
 - [ ] **Step 3: Append a "Service identity (SPIFFE)" subsection** after the Certificate Issuance
-  section
+      section
 
 ```markdown
 ## Service identity (SPIFFE)
@@ -2372,7 +2371,7 @@ and ADR-0012 for the rationale.
 ```
 
 - [ ] **Step 5: Add a "Dynamic Client Verifier" paragraph** in the State Management section near
-  `CaSnapshot Sharing`
+      `CaSnapshot Sharing`
 
 ```markdown
 ### Dynamic Client Verifier
@@ -2461,7 +2460,7 @@ git commit -m "docs(security): document pending-key Zeroize, atomic identity wri
 
 - [ ] **Step 1: `cargo fmt --all -- --check`** — no diff.
 - [ ] **Step 2: `cargo check --workspace --no-default-features --features db-sqlite && cargo check
-  --workspace --all-features`** — PASS both.
+--workspace --all-features`** — PASS both.
 - [ ] **Step 3: Clippy on both feature sets:**
 
   ```sh
@@ -2470,12 +2469,13 @@ git commit -m "docs(security): document pending-key Zeroize, atomic identity wri
   ```
 
   Expected: PASS both.
+
 - [ ] **Step 4: `cargo test --all-features`** — PASS.
 - [ ] **Step 5: `cargo deny check`** — PASS. The new `rustls-native-certs` dep must clear license +
-  advisory checks.
+      advisory checks.
 - [ ] **Step 6: `npx markdownlint --config .markdownlint.json '**/\*.md'`\*\* — PASS.
 - [ ] **Step 7: Reverse-proxy: `cargo test -p uptrakit-controller reverse_proxy -- --ignored`** —
-  PASS.
+      PASS.
 - [ ] **Step 8: System integration:**
 
   ```sh

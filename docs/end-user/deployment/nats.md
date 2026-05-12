@@ -95,12 +95,12 @@ services:
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
-| --- | --- |
-| Controller fails to start with NATS error | NATS server unreachable or JetStream not enabled |
-| Cross-controller messages not delivered | Controllers pointing to different NATS servers |
-| Duplicate message processing | Normal — at-least-once delivery; handlers are idempotent |
-| Messages delayed | NATS consumer pull interval (5s expiry); check NATS server load |
+| Symptom                                   | Likely cause                                                    |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| Controller fails to start with NATS error | NATS server unreachable or JetStream not enabled                |
+| Cross-controller messages not delivered   | Controllers pointing to different NATS servers                  |
+| Duplicate message processing              | Normal — at-least-once delivery; handlers are idempotent        |
+| Messages delayed                          | NATS consumer pull interval (5s expiry); check NATS server load |
 
 ## Related documentation
 

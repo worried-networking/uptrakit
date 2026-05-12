@@ -41,11 +41,11 @@ Controller Process
 
 Each embedded service declares a `CoexistencePolicy`:
 
-| Policy | Behaviour |
-| --- | --- |
+| Policy                         | Behaviour                                                                                                                                                                                          |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `YieldOnSameAppName` (default) | Yield when an external service with the same `service_app_name` connects. Matches by binary identity, not capability set, so shared capabilities like `GracefulShutdown` never cause false yields. |
-| `Custom(f)` | Custom closure — use when additional context (e.g. `machine_id`) is needed beyond `service_app_name`. |
-| `NeverYield` | Never yield — always coexist with external services. |
+| `Custom(f)`                    | Custom closure — use when additional context (e.g. `machine_id`) is needed beyond `service_app_name`.                                                                                              |
+| `NeverYield`                   | Never yield — always coexist with external services.                                                                                                                                               |
 
 The `service_app_name` used for `YieldOnSameAppName` comparisons is read from
 `ServiceConnectionRegistry` when the external service connects. This ensures the value is
@@ -100,10 +100,10 @@ The method:
 
 ## Current Embedded Services
 
-| Service | Feature flag | Coexistence | Notes |
-| --- | --- | --- | --- |
-| Scheduler | `embedded-scheduler` | `YieldOnSameAppName` | Yields when an external `uptrakit-scheduler` connects; internal tasks always run regardless. |
-| Agent | `embedded-agent` | `Custom` | Yields when an external `uptrakit-agent` on the same host (matching `machine_id`) connects. Tenant service, not system. |
+| Service   | Feature flag         | Coexistence          | Notes                                                                                                                                    |
+| --------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Scheduler | `embedded-scheduler` | `YieldOnSameAppName` | Yields when an external `uptrakit-scheduler` connects; internal tasks always run regardless.                                             |
+| Agent     | `embedded-agent`     | `Custom`             | Yields when an external `uptrakit-agent` on the same host (matching `machine_id`) connects. Tenant service, not system.                  |
 | SSH Agent | `embedded-ssh-agent` | `YieldOnSameAppName` | Yields when an external `uptrakit-agent-ssh` connects. Tenant service. Manages remote hosts over SSH from within the controller process. |
 
 ## Embedded Agent
@@ -261,10 +261,10 @@ crates/core/controller/src/ssh_agent/
 
 Both `ServiceResponse` and `SystemServiceResponse` expose the embedded state:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `is_embedded` | `bool` | `true` for controller-embedded services. |
-| `yielded_to` | `Uuid[]?` | External service IDs causing this embedded service to yield. `null` when not yielded or not embedded. Refreshed from `embedded_service_runtime_states` on a 30-second interval. |
+| Field         | Type      | Description                                                                                                                                                                     |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `is_embedded` | `bool`    | `true` for controller-embedded services.                                                                                                                                        |
+| `yielded_to`  | `Uuid[]?` | External service IDs causing this embedded service to yield. `null` when not yielded or not embedded. Refreshed from `embedded_service_runtime_states` on a 30-second interval. |
 
 ### Constraints enforced by the API
 

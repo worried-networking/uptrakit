@@ -22,19 +22,19 @@ through `SurfaceRenderer` → `SurfaceActionBar` → `SurfaceInteractionButton`.
 
 ## File Map
 
-| File | Action | Purpose |
-| --- | --- | --- |
-| `crates/shared/surfaces/src/surface.rs` | Modify | Add `#[non_exhaustive]` to `Capability`+`SurfaceDescriptor`, add `Capability::ContextSelector`, add `SurfaceContextSelectorDescriptor` struct, add `context_selector` field to `SurfaceDescriptor` |
-| `frontend/src/lib/surfaces/contract.ts` | Modify | Add `SurfaceContextSelector` interface, add `'context_selector'` to `SurfaceCapability`, add `context_selector?` to `SurfaceDescriptor` |
-| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.svelte` | Modify | Add `requiredContextParam?: string` prop; disabled `<span>` wrapper guard |
-| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | Modify | New tests for disabled guard |
-| `frontend/src/lib/components/surfaces/SurfaceActionBar.svelte` | Modify | Add `requiredContextParam?: string` and `requiredForInteractionIds?: string[]` props; per-button dispatch |
-| `frontend/src/lib/components/surfaces/SurfaceActionBar.test.ts` | Modify | New test for prop threading through to disabled button |
-| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte` | Modify | Add same two props; forward to `SurfaceActionBar` on `action_bar` branch only |
-| `frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte` | Modify | Context selector state + fetch + `effectiveBaseParams` + `baseParamsFingerprint` fix + prop pass-through |
-| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts` | Modify | New tests: selector render, option fetch, selection updates params |
-| `crates/plugins/infrastructure/proxmox/src/surfaces.rs` | Modify | `handle_list`: optional `plugin_config_id`, updated serialization keys, secondary config-name batch lookup |
-| `crates/plugins/infrastructure/proxmox/src/plugin.rs` | Modify | Replace `proxmox_hosts_selector_boundary_surface()` with `proxmox_hosts_surface()` |
+| File                                                                    | Action | Purpose                                                                                                                                                                                            |
+| ----------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/shared/surfaces/src/surface.rs`                                 | Modify | Add `#[non_exhaustive]` to `Capability`+`SurfaceDescriptor`, add `Capability::ContextSelector`, add `SurfaceContextSelectorDescriptor` struct, add `context_selector` field to `SurfaceDescriptor` |
+| `frontend/src/lib/surfaces/contract.ts`                                 | Modify | Add `SurfaceContextSelector` interface, add `'context_selector'` to `SurfaceCapability`, add `context_selector?` to `SurfaceDescriptor`                                                            |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.svelte`  | Modify | Add `requiredContextParam?: string` prop; disabled `<span>` wrapper guard                                                                                                                          |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | Modify | New tests for disabled guard                                                                                                                                                                       |
+| `frontend/src/lib/components/surfaces/SurfaceActionBar.svelte`          | Modify | Add `requiredContextParam?: string` and `requiredForInteractionIds?: string[]` props; per-button dispatch                                                                                          |
+| `frontend/src/lib/components/surfaces/SurfaceActionBar.test.ts`         | Modify | New test for prop threading through to disabled button                                                                                                                                             |
+| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte`           | Modify | Add same two props; forward to `SurfaceActionBar` on `action_bar` branch only                                                                                                                      |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte`          | Modify | Context selector state + fetch + `effectiveBaseParams` + `baseParamsFingerprint` fix + prop pass-through                                                                                           |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts`         | Modify | New tests: selector render, option fetch, selection updates params                                                                                                                                 |
+| `crates/plugins/infrastructure/proxmox/src/surfaces.rs`                 | Modify | `handle_list`: optional `plugin_config_id`, updated serialization keys, secondary config-name batch lookup                                                                                         |
+| `crates/plugins/infrastructure/proxmox/src/plugin.rs`                   | Modify | Replace `proxmox_hosts_selector_boundary_surface()` with `proxmox_hosts_surface()`                                                                                                                 |
 
 ## Spec alignment notes
 
@@ -256,13 +256,13 @@ In `contract.ts`, add before `SurfaceDescriptor`:
 
 ```typescript
 export interface SurfaceContextSelector {
-    param_key: string;
-    label: string;
-    all_option_label: string;
-    rest_api_path: string;
-    value_field: string;
-    label_field: string;
-    required_for_interactions: string[];
+  param_key: string;
+  label: string;
+  all_option_label: string;
+  rest_api_path: string;
+  value_field: string;
+  label_field: string;
+  required_for_interactions: string[];
 }
 ```
 
@@ -281,9 +281,9 @@ In `contract.ts`, add to `SurfaceDescriptor` after `root_node`:
 
 ```typescript
 export interface SurfaceDescriptor {
-    // ... existing fields ...
-    root_node: SurfaceNode;
-    context_selector?: SurfaceContextSelector;
+  // ... existing fields ...
+  root_node: SurfaceNode;
+  context_selector?: SurfaceContextSelector;
 }
 ```
 
@@ -321,57 +321,57 @@ invisible. Wrap the disabled button in `<span title="...">` instead (the span re
 Add to `SurfaceInteractionButton.test.ts` inside the `describe` block:
 
 ```typescript
-describe('requiredContextParam guard', () => {
-    const interaction: InteractionDescriptor = {
-        interaction_id: 'discover',
-        kind: 'mutation_action',
-        label: 'Discover',
-        transport: { mode: 'controller_local' }
-    };
+describe("requiredContextParam guard", () => {
+  const interaction: InteractionDescriptor = {
+    interaction_id: "discover",
+    kind: "mutation_action",
+    label: "Discover",
+    transport: { mode: "controller_local" },
+  };
 
-    it('renders button disabled with tooltip wrapper when requiredContextParam absent from baseParams', () => {
-        render(SurfaceInteractionButton, {
-            surfaceId: 'proxmox.hosts',
-            interaction,
-            interactions: [interaction],
-            baseParams: {},
-            requiredContextParam: 'plugin_config_id'
-        });
-
-        const button = screen.getByRole('button', { name: 'Discover' });
-        expect(button).toBeDisabled();
-        const wrapper = button.closest('span[title]');
-        expect(wrapper).not.toBeNull();
-        expect(wrapper?.getAttribute('title')).toBe('Select a configuration first');
+  it("renders button disabled with tooltip wrapper when requiredContextParam absent from baseParams", () => {
+    render(SurfaceInteractionButton, {
+      surfaceId: "proxmox.hosts",
+      interaction,
+      interactions: [interaction],
+      baseParams: {},
+      requiredContextParam: "plugin_config_id",
     });
 
-    it('renders button enabled when requiredContextParam present in baseParams', () => {
-        render(SurfaceInteractionButton, {
-            surfaceId: 'proxmox.hosts',
-            interaction,
-            interactions: [interaction],
-            baseParams: { plugin_config_id: '01944c3c-6a3a-7000-8000-000000000001' },
-            requiredContextParam: 'plugin_config_id'
-        });
+    const button = screen.getByRole("button", { name: "Discover" });
+    expect(button).toBeDisabled();
+    const wrapper = button.closest("span[title]");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.getAttribute("title")).toBe("Select a configuration first");
+  });
 
-        const button = screen.getByRole('button', { name: 'Discover' });
-        expect(button).not.toBeDisabled();
-        expect(button.closest('span[title]')).toBeNull();
+  it("renders button enabled when requiredContextParam present in baseParams", () => {
+    render(SurfaceInteractionButton, {
+      surfaceId: "proxmox.hosts",
+      interaction,
+      interactions: [interaction],
+      baseParams: { plugin_config_id: "01944c3c-6a3a-7000-8000-000000000001" },
+      requiredContextParam: "plugin_config_id",
     });
 
-    it('renders button normally when requiredContextParam is undefined', () => {
-        render(SurfaceInteractionButton, {
-            surfaceId: 'proxmox.hosts',
-            interaction,
-            interactions: [interaction],
-            baseParams: {}
-            // requiredContextParam omitted
-        });
+    const button = screen.getByRole("button", { name: "Discover" });
+    expect(button).not.toBeDisabled();
+    expect(button.closest("span[title]")).toBeNull();
+  });
 
-        const button = screen.getByRole('button', { name: 'Discover' });
-        expect(button).not.toBeDisabled();
-        expect(button.closest('span[title]')).toBeNull();
+  it("renders button normally when requiredContextParam is undefined", () => {
+    render(SurfaceInteractionButton, {
+      surfaceId: "proxmox.hosts",
+      interaction,
+      interactions: [interaction],
+      baseParams: {},
+      // requiredContextParam omitted
     });
+
+    const button = screen.getByRole("button", { name: "Discover" });
+    expect(button).not.toBeDisabled();
+    expect(button.closest("span[title]")).toBeNull();
+  });
 });
 ```
 
@@ -485,33 +485,33 @@ git commit -m "feat(surfaces): add requiredContextParam disabled guard to Surfac
 Add to `SurfaceActionBar.test.ts` inside the `describe` block:
 
 ```typescript
-it('passes requiredContextParam to button whose id is in requiredForInteractionIds', async () => {
-    const discoverInteraction: InteractionDescriptor = {
-        interaction_id: 'discover',
-        kind: 'mutation_action',
-        label: 'Discover',
-        transport: { mode: 'controller_local' }
-    };
-    const testInteraction: InteractionDescriptor = {
-        interaction_id: 'test-connection',
-        kind: 'mutation_action',
-        label: 'Test Connection',
-        transport: { mode: 'controller_local' }
-    };
+it("passes requiredContextParam to button whose id is in requiredForInteractionIds", async () => {
+  const discoverInteraction: InteractionDescriptor = {
+    interaction_id: "discover",
+    kind: "mutation_action",
+    label: "Discover",
+    transport: { mode: "controller_local" },
+  };
+  const testInteraction: InteractionDescriptor = {
+    interaction_id: "test-connection",
+    kind: "mutation_action",
+    label: "Test Connection",
+    transport: { mode: "controller_local" },
+  };
 
-    render(SurfaceActionBar, {
-        surfaceId: 'proxmox.hosts',
-        actionIds: ['discover', 'test-connection'],
-        interactions: [discoverInteraction, testInteraction],
-        baseParams: {},                           // no plugin_config_id
-        requiredContextParam: 'plugin_config_id',
-        requiredForInteractionIds: ['discover', 'test-connection']
-    });
+  render(SurfaceActionBar, {
+    surfaceId: "proxmox.hosts",
+    actionIds: ["discover", "test-connection"],
+    interactions: [discoverInteraction, testInteraction],
+    baseParams: {}, // no plugin_config_id
+    requiredContextParam: "plugin_config_id",
+    requiredForInteractionIds: ["discover", "test-connection"],
+  });
 
-    const discoverBtn = screen.getByRole('button', { name: 'Discover' });
-    const testBtn = screen.getByRole('button', { name: 'Test Connection' });
-    expect(discoverBtn).toBeDisabled();
-    expect(testBtn).toBeDisabled();
+  const discoverBtn = screen.getByRole("button", { name: "Discover" });
+  const testBtn = screen.getByRole("button", { name: "Test Connection" });
+  expect(discoverBtn).toBeDisabled();
+  expect(testBtn).toBeDisabled();
 });
 ```
 
@@ -692,128 +692,132 @@ git commit -m "feat(surfaces): forward requiredContextParam props through Surfac
 Add to `SurfaceReadPanel.test.ts`:
 
 ```typescript
-import { waitFor } from '@testing-library/svelte';
+import { waitFor } from "@testing-library/svelte";
 
-describe('context selector', () => {
-    function makeReadWithContextSelector(): SurfaceReadResponse {
-        const base = makeRead();
-        return {
-            ...base,
-            descriptor: {
-                ...base.descriptor,
-                context_selector: {
-                    param_key: 'plugin_config_id',
-                    label: 'Configuration',
-                    all_option_label: 'All Configurations',
-                    rest_api_path: '/api/v1/plugin-configs',
-                    value_field: 'id',
-                    label_field: 'name',
-                    required_for_interactions: []
-                }
-            }
-        };
-    }
+describe("context selector", () => {
+  function makeReadWithContextSelector(): SurfaceReadResponse {
+    const base = makeRead();
+    return {
+      ...base,
+      descriptor: {
+        ...base.descriptor,
+        context_selector: {
+          param_key: "plugin_config_id",
+          label: "Configuration",
+          all_option_label: "All Configurations",
+          rest_api_path: "/api/v1/plugin-configs",
+          value_field: "id",
+          label_field: "name",
+          required_for_interactions: [],
+        },
+      },
+    };
+  }
 
-    beforeEach(() => {
-        vi.stubGlobal('fetch', vi.fn());
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders ProviderSelector when context_selector is present", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { id: "cfg-1", name: "Cluster 1" },
+        { id: "cfg-2", name: "Cluster 2" },
+      ],
+    } as Response);
+
+    render(SurfaceReadPanel, {
+      surface: makeSurface(),
+      read: makeReadWithContextSelector(),
     });
 
-    afterEach(() => {
-        vi.unstubAllGlobals();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Configuration")).toBeInTheDocument();
     });
 
-    it('renders ProviderSelector when context_selector is present', async () => {
-        vi.mocked(fetch).mockResolvedValue({
-            ok: true,
-            json: async () => [
-                { id: 'cfg-1', name: 'Cluster 1' },
-                { id: 'cfg-2', name: 'Cluster 2' }
-            ]
-        } as Response);
+    const select = screen.getByLabelText("Configuration") as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.text);
+    expect(options[0]).toBe("All Configurations");
+    expect(options).toContain("Cluster 1");
+    expect(options).toContain("Cluster 2");
+  });
 
-        render(SurfaceReadPanel, {
-            surface: makeSurface(),
-            read: makeReadWithContextSelector()
-        });
+  it("selecting an option merges param_key into baseParams passed to SurfaceRenderer", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => [{ id: "cfg-1", name: "Cluster 1" }],
+    } as Response);
 
-        await waitFor(() => {
-            expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
-        });
+    // Spy on invokeSurfaceInteraction to capture baseParams used in hydration
+    vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
 
-        const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
-        const options = Array.from(select.options).map((o) => o.text);
-        expect(options[0]).toBe('All Configurations');
-        expect(options).toContain('Cluster 1');
-        expect(options).toContain('Cluster 2');
+    const read = makeReadWithContextSelector();
+    // Add a hydration-triggering data source so effectiveBaseParams flows into requests
+    read.data_sources = [
+      {
+        data_source_id: "ds1",
+        kind: { kind: "provider_query", operation_id: "list" },
+        result_schema: "any",
+        refresh_policy: { type: "manual" },
+      },
+    ];
+    read.interactions = [
+      {
+        interaction_id: "list",
+        kind: "data_load",
+        label: "List",
+        transport: { mode: "controller_local" },
+      },
+    ];
+    read.descriptor.root_node = { kind: "key_value", data_source_id: "ds1" };
+
+    render(SurfaceReadPanel, { surface: makeSurface(), read });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Configuration")).toBeInTheDocument();
     });
 
-    it('selecting an option merges param_key into baseParams passed to SurfaceRenderer', async () => {
-        vi.mocked(fetch).mockResolvedValue({
-            ok: true,
-            json: async () => [{ id: 'cfg-1', name: 'Cluster 1' }]
-        } as Response);
+    const select = screen.getByLabelText("Configuration") as HTMLSelectElement;
+    await fireEvent.change(select, { target: { value: "cfg-1" } });
 
-        // Spy on invokeSurfaceInteraction to capture baseParams used in hydration
-        vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+    await waitFor(() => {
+      const calls = vi.mocked(invokeSurfaceInteraction).mock.calls;
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall[2].params).toMatchObject({ plugin_config_id: "cfg-1" });
+    });
+  });
 
-        const read = makeReadWithContextSelector();
-        // Add a hydration-triggering data source so effectiveBaseParams flows into requests
-        read.data_sources = [{
-            data_source_id: 'ds1',
-            kind: { kind: 'provider_query', operation_id: 'list' },
-            result_schema: 'any',
-            refresh_policy: { type: 'manual' }
-        }];
-        read.interactions = [{
-            interaction_id: 'list',
-            kind: 'data_load',
-            label: 'List',
-            transport: { mode: 'controller_local' }
-        }];
-        read.descriptor.root_node = { kind: 'key_value', data_source_id: 'ds1' };
-
-        render(SurfaceReadPanel, { surface: makeSurface(), read });
-
-        await waitFor(() => {
-            expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
-        });
-
-        const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
-        await fireEvent.change(select, { target: { value: 'cfg-1' } });
-
-        await waitFor(() => {
-            const calls = vi.mocked(invokeSurfaceInteraction).mock.calls;
-            const lastCall = calls[calls.length - 1];
-            expect(lastCall[2].params).toMatchObject({ plugin_config_id: 'cfg-1' });
-        });
+  it("does not render a selector when context_selector is absent", () => {
+    render(SurfaceReadPanel, {
+      surface: makeSurface(),
+      read: makeRead(),
     });
 
-    it('does not render a selector when context_selector is absent', () => {
-        render(SurfaceReadPanel, {
-            surface: makeSurface(),
-            read: makeRead()
-        });
+    expect(screen.queryByLabelText("Configuration")).toBeNull();
+  });
 
-        expect(screen.queryByLabelText('Configuration')).toBeNull();
+  it("falls back to All Configurations on fetch failure", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("network error"));
+
+    render(SurfaceReadPanel, {
+      surface: makeSurface(),
+      read: makeReadWithContextSelector(),
     });
 
-    it('falls back to All Configurations on fetch failure', async () => {
-        vi.mocked(fetch).mockRejectedValue(new Error('network error'));
-
-        render(SurfaceReadPanel, {
-            surface: makeSurface(),
-            read: makeReadWithContextSelector()
-        });
-
-        await waitFor(() => {
-            const select = screen.queryByLabelText('Configuration');
-            if (select) {
-                const options = Array.from((select as HTMLSelectElement).options);
-                expect(options.length).toBe(1);
-                expect(options[0].text).toBe('All Configurations');
-            }
-        });
+    await waitFor(() => {
+      const select = screen.queryByLabelText("Configuration");
+      if (select) {
+        const options = Array.from((select as HTMLSelectElement).options);
+        expect(options.length).toBe(1);
+        expect(options[0].text).toBe("All Configurations");
+      }
     });
+  });
 });
 ```
 

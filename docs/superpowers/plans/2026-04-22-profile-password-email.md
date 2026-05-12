@@ -18,30 +18,30 @@ using `PublicEntryShell`.
 
 ## File Map
 
-| Action | File |
-| --- | --- |
+| Action | File                                                                      |
+| ------ | ------------------------------------------------------------------------- |
 | Create | `crates/shared/db/src/migration/m20260422_000001_email_change_request.rs` |
-| Modify | `crates/shared/db/src/migration/mod.rs` |
-| Create | `crates/shared/db/src/entity/email_change_request.rs` |
-| Modify | `crates/shared/db/src/entity/mod.rs` |
-| Modify | `crates/shared/db/src/entity/prelude.rs` |
-| Modify | `crates/shared/db/src/entity/user.rs` |
-| Create | `crates/shared/web-api-types/src/profile.rs` |
-| Modify | `crates/shared/web-api-types/src/lib.rs` |
-| Modify | `crates/shared/web-api-types/src/auth.rs` (`UserResponse`) |
-| Modify | `crates/ui/web-api-auth/src/auth/token_denylist.rs` |
-| Modify | `crates/ui/web-api-auth/src/auth/session.rs` |
-| Modify | `crates/ui/web-api/src/middleware/require_auth.rs` |
-| Modify | `crates/plugins/notifications/core/src/error.rs` |
-| Modify | `crates/plugins/notifications/email/src/plugin.rs` |
-| Modify | `crates/ui/web-api/src/routes/users.rs` |
-| Modify | `crates/ui/web-api/src/routes/auth.rs` |
-| Modify | `crates/shared/scheduler-engine/src/executors/auth_cleanup.rs` |
-| Modify | `frontend/src/lib/types.ts` |
-| Modify | `frontend/src/lib/auth.svelte.ts` |
-| Modify | `frontend/src/lib/api.ts` |
-| Modify | `frontend/src/routes/profile/+page.svelte` |
-| Create | `frontend/src/routes/auth/email-change/confirm/+page.svelte` |
+| Modify | `crates/shared/db/src/migration/mod.rs`                                   |
+| Create | `crates/shared/db/src/entity/email_change_request.rs`                     |
+| Modify | `crates/shared/db/src/entity/mod.rs`                                      |
+| Modify | `crates/shared/db/src/entity/prelude.rs`                                  |
+| Modify | `crates/shared/db/src/entity/user.rs`                                     |
+| Create | `crates/shared/web-api-types/src/profile.rs`                              |
+| Modify | `crates/shared/web-api-types/src/lib.rs`                                  |
+| Modify | `crates/shared/web-api-types/src/auth.rs` (`UserResponse`)                |
+| Modify | `crates/ui/web-api-auth/src/auth/token_denylist.rs`                       |
+| Modify | `crates/ui/web-api-auth/src/auth/session.rs`                              |
+| Modify | `crates/ui/web-api/src/middleware/require_auth.rs`                        |
+| Modify | `crates/plugins/notifications/core/src/error.rs`                          |
+| Modify | `crates/plugins/notifications/email/src/plugin.rs`                        |
+| Modify | `crates/ui/web-api/src/routes/users.rs`                                   |
+| Modify | `crates/ui/web-api/src/routes/auth.rs`                                    |
+| Modify | `crates/shared/scheduler-engine/src/executors/auth_cleanup.rs`            |
+| Modify | `frontend/src/lib/types.ts`                                               |
+| Modify | `frontend/src/lib/auth.svelte.ts`                                         |
+| Modify | `frontend/src/lib/api.ts`                                                 |
+| Modify | `frontend/src/routes/profile/+page.svelte`                                |
+| Create | `frontend/src/routes/auth/email-change/confirm/+page.svelte`              |
 
 ---
 
@@ -2045,7 +2045,7 @@ Add after the imports at the top of `auth.svelte.ts`:
 /** Decode a JWT payload without verification (client-side only). */
 function parseJwt(token: string): Record<string, unknown> {
   try {
-    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     return JSON.parse(atob(base64)) as Record<string, unknown>;
   } catch {
     return {};
@@ -2057,7 +2057,9 @@ export function getAuthMethod(): string | null {
   const token = getAccessToken();
   if (!token) return null;
   const claims = parseJwt(token);
-  return typeof claims['auth_method'] === 'string' ? claims['auth_method'] : null;
+  return typeof claims["auth_method"] === "string"
+    ? claims["auth_method"]
+    : null;
 }
 ```
 
@@ -2082,36 +2084,47 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
-export function updateProfile(userId: string, data: UpdateProfileRequest): Promise<void> {
+export function updateProfile(
+  userId: string,
+  data: UpdateProfileRequest,
+): Promise<void> {
   return requestVoid(`/users/${encodeURIComponent(userId)}/profile`, {
-    method: 'PUT',
-    body: JSON.stringify(data)
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 
-export function initiateEmailChange(userId: string, data: InitiateEmailChangeRequest): Promise<void> {
+export function initiateEmailChange(
+  userId: string,
+  data: InitiateEmailChangeRequest,
+): Promise<void> {
   return requestVoid(`/users/${encodeURIComponent(userId)}/email`, {
-    method: 'POST',
-    body: JSON.stringify(data)
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 
 export function cancelEmailChange(userId: string): Promise<void> {
   return requestVoid(`/users/${encodeURIComponent(userId)}/email`, {
-    method: 'DELETE'
+    method: "DELETE",
   });
 }
 
-export function changePassword(userId: string, data: ChangePasswordRequest): Promise<void> {
+export function changePassword(
+  userId: string,
+  data: ChangePasswordRequest,
+): Promise<void> {
   return requestVoid(`/users/${encodeURIComponent(userId)}/password`, {
-    method: 'PUT',
-    body: JSON.stringify(data)
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 
-export function confirmEmailChange(token: string): Promise<{ message: string }> {
+export function confirmEmailChange(
+  token: string,
+): Promise<{ message: string }> {
   return request<{ message: string }>(
-    `/auth/email-change/confirm?token=${encodeURIComponent(token)}`
+    `/auth/email-change/confirm?token=${encodeURIComponent(token)}`,
   );
 }
 ```
@@ -2146,9 +2159,18 @@ git commit -m "feat(frontend): add profile types, JWT auth_method helper, and AP
 At the top of `<script lang="ts">`, add imports:
 
 ```typescript
-import { getAuthMethod } from '$lib/auth.svelte';
-import { updateProfile, initiateEmailChange, cancelEmailChange, changePassword } from '$lib/api';
-import type { UpdateProfileRequest, InitiateEmailChangeRequest, ChangePasswordRequest } from '$lib/api';
+import { getAuthMethod } from "$lib/auth.svelte";
+import {
+  updateProfile,
+  initiateEmailChange,
+  cancelEmailChange,
+  changePassword,
+} from "$lib/api";
+import type {
+  UpdateProfileRequest,
+  InitiateEmailChangeRequest,
+  ChangePasswordRequest,
+} from "$lib/api";
 ```
 
 Add state variables for the profile section (`user` is already declared at line 21 of the file — do not redeclare it):
@@ -2157,10 +2179,10 @@ Add state variables for the profile section (`user` is already declared at line 
 const authMethod = $derived(getAuthMethod());
 
 // Profile details form
-let firstName = $state('');
-let lastName = $state('');
+let firstName = $state("");
+let lastName = $state("");
 let profileSaving = $state(false);
-let profileError = $state('');
+let profileError = $state("");
 
 $effect(() => {
   if (user) {
@@ -2172,12 +2194,15 @@ $effect(() => {
 async function handleSaveProfile() {
   if (!user) return;
   profileSaving = true;
-  profileError = '';
+  profileError = "";
   try {
-    await updateProfile(user.id, { first_name: firstName, last_name: lastName });
-    showSuccess('Profile updated');
+    await updateProfile(user.id, {
+      first_name: firstName,
+      last_name: lastName,
+    });
+    showSuccess("Profile updated");
   } catch (e) {
-    profileError = e instanceof Error ? e.message : 'Failed to update profile';
+    profileError = e instanceof Error ? e.message : "Failed to update profile";
   } finally {
     profileSaving = false;
   }
@@ -2240,26 +2265,27 @@ git commit -m "feat(frontend): add Profile Details section to profile page"
 
 ```typescript
 let showChangeEmail = $state(false);
-let newEmail = $state('');
-let emailCurrentPassword = $state('');
+let newEmail = $state("");
+let emailCurrentPassword = $state("");
 let emailChanging = $state(false);
 let emailChangeSuccess = $state(false);
-let emailError = $state('');
+let emailError = $state("");
 
 async function handleInitiateEmailChange() {
   if (!user) return;
   emailChanging = true;
-  emailError = '';
+  emailError = "";
   try {
     await initiateEmailChange(user.id, {
       new_email: newEmail,
       current_password: emailCurrentPassword,
     });
     emailChangeSuccess = true;
-    newEmail = '';
-    emailCurrentPassword = '';
+    newEmail = "";
+    emailCurrentPassword = "";
   } catch (e) {
-    emailError = e instanceof Error ? e.message : 'Failed to initiate email change';
+    emailError =
+      e instanceof Error ? e.message : "Failed to initiate email change";
   } finally {
     emailChanging = false;
   }
@@ -2269,11 +2295,11 @@ async function handleCancelEmailChange() {
   if (!user) return;
   try {
     await cancelEmailChange(user.id);
-    showSuccess('Email change cancelled');
+    showSuccess("Email change cancelled");
     // Refresh user data to update has_pending_email_change
     // (trigger re-fetch of /me or update local state)
   } catch (e) {
-    showError(e instanceof Error ? e.message : 'Failed to cancel email change');
+    showError(e instanceof Error ? e.message : "Failed to cancel email change");
   }
 }
 ```
@@ -2357,34 +2383,35 @@ git commit -m "feat(frontend): add Change Email section to profile page"
 - [ ] **Step 1: Add password change state and handler**
 
 ```typescript
-let currentPassword = $state('');
-let newPassword = $state('');
-let confirmPassword = $state('');
+let currentPassword = $state("");
+let newPassword = $state("");
+let confirmPassword = $state("");
 let passwordSaving = $state(false);
-let confirmPasswordError = $state('');
+let confirmPasswordError = $state("");
 let passwordChangeSuccess = $state(false);
-let passwordError = $state('');
+let passwordError = $state("");
 
 async function handleChangePassword() {
   if (!user) return;
   if (newPassword !== confirmPassword) {
-    confirmPasswordError = 'Passwords do not match';
+    confirmPasswordError = "Passwords do not match";
     return;
   }
-  confirmPasswordError = '';
-  passwordError = '';
+  confirmPasswordError = "";
+  passwordError = "";
   passwordSaving = true;
   try {
     await changePassword(user.id, {
       current_password: currentPassword,
-      new_password: newPassword
+      new_password: newPassword,
     });
     passwordChangeSuccess = true;
-    currentPassword = '';
-    newPassword = '';
-    confirmPassword = '';
+    currentPassword = "";
+    newPassword = "";
+    confirmPassword = "";
   } catch (e) {
-    passwordError = e instanceof Error ? e.message : 'Failed to change password';
+    passwordError =
+      e instanceof Error ? e.message : "Failed to change password";
   } finally {
     passwordSaving = false;
   }
@@ -2594,24 +2621,24 @@ git commit -m "fix: quality gate fixups for profile management"
 
 ## Spec Coverage Check
 
-| Spec requirement | Task |
-| --- | --- |
-| DB table for pending email change | Task 1 |
-| SeaORM entity + user relation | Task 2 |
-| Request/response types + validation | Task 3 |
-| JTI allowlist on denylist (deny_user_except) | Task 4 |
-| `jti` on `AuthenticatedUser` | Task 5 |
-| `delete_user_sessions_except` | Task 6 |
-| `SmtpNotConfigured` error variant | Task 7 |
-| `update_profile` handler | Task 8 |
-| `initiate_email_change` handler + email send | Task 9 |
-| `cancel_email_change` handler | Task 10 |
-| `confirm_email_change` handler | Task 10 |
-| `change_password` handler + session invalidation | Task 11 |
-| `has_pending_email_change` on me endpoint | Task 12 |
-| Expire email_change_requests in scheduler | Task 13 |
-| Frontend User type + JWT auth_method + API helpers | Task 14 |
+| Spec requirement                                                     | Task    |
+| -------------------------------------------------------------------- | ------- |
+| DB table for pending email change                                    | Task 1  |
+| SeaORM entity + user relation                                        | Task 2  |
+| Request/response types + validation                                  | Task 3  |
+| JTI allowlist on denylist (deny_user_except)                         | Task 4  |
+| `jti` on `AuthenticatedUser`                                         | Task 5  |
+| `delete_user_sessions_except`                                        | Task 6  |
+| `SmtpNotConfigured` error variant                                    | Task 7  |
+| `update_profile` handler                                             | Task 8  |
+| `initiate_email_change` handler + email send                         | Task 9  |
+| `cancel_email_change` handler                                        | Task 10 |
+| `confirm_email_change` handler                                       | Task 10 |
+| `change_password` handler + session invalidation                     | Task 11 |
+| `has_pending_email_change` on me endpoint                            | Task 12 |
+| Expire email_change_requests in scheduler                            | Task 13 |
+| Frontend User type + JWT auth_method + API helpers                   | Task 14 |
 | Profile Details section (name, read-only email, Change email button) | Task 15 |
-| Change Email section (pending/no-pending states, success Callout) | Task 16 |
-| Change Password section (3 fields, confirm match, hint) | Task 17 |
-| Confirm email route with PublicEntryShell | Task 18 |
+| Change Email section (pending/no-pending states, success Callout)    | Task 16 |
+| Change Password section (3 fields, confirm match, hint)              | Task 17 |
+| Confirm email route with PublicEntryShell                            | Task 18 |

@@ -44,14 +44,14 @@ width), or because the migration touched non-trivial state (services merge targe
 
 ## Inventory
 
-| # | Site | Blocker today | Migration shape |
-| --- | --- | --- | --- |
-| 1 | `routes/services/+page.svelte:681` (merge target) | Placeholder uses `value={null}` | Drop `null`, default to `''` |
-| 2 | `routes/software/+page.svelte:1059` (plugin filter) | Needs `w-auto` (toolbar context) | `width="auto"` |
-| 3 | `lib/components/AssignToHostModal.svelte:344` (execution_site, table 1: detect_version + fetch_releases) | Conditional `controller` option for `fetch_releases` only | `$derived` options array via shared helper |
-| 4 | `lib/components/EditHostAssignmentModal.svelte:706` (cfg picker) | Uses `<optgroup>` | `SelectGroup` discriminated union |
-| 5 | `lib/components/EditHostAssignmentModal.svelte:1070` (hook cfg) | Uses `<optgroup>` | `SelectGroup` discriminated union |
-| 6 | `lib/components/ui/ProviderSelector.svelte:55` | Per-option `disabled` + dead empty branch | Migrate inner select, drop dead code |
+| #   | Site                                                                                                     | Blocker today                                             | Migration shape                            |
+| --- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------ |
+| 1   | `routes/services/+page.svelte:681` (merge target)                                                        | Placeholder uses `value={null}`                           | Drop `null`, default to `''`               |
+| 2   | `routes/software/+page.svelte:1059` (plugin filter)                                                      | Needs `w-auto` (toolbar context)                          | `width="auto"`                             |
+| 3   | `lib/components/AssignToHostModal.svelte:344` (execution_site, table 1: detect_version + fetch_releases) | Conditional `controller` option for `fetch_releases` only | `$derived` options array via shared helper |
+| 4   | `lib/components/EditHostAssignmentModal.svelte:706` (cfg picker)                                         | Uses `<optgroup>`                                         | `SelectGroup` discriminated union          |
+| 5   | `lib/components/EditHostAssignmentModal.svelte:1070` (hook cfg)                                          | Uses `<optgroup>`                                         | `SelectGroup` discriminated union          |
+| 6   | `lib/components/ui/ProviderSelector.svelte:55`                                                           | Per-option `disabled` + dead empty branch                 | Migrate inner select, drop dead code       |
 
 `SchemaForm.svelte` is already migrated (commit `5964fdca`) but `SchemaForm.test.ts:333`
 still asserts a stale "not migrated — regression guard". Test passes incidentally
@@ -66,33 +66,33 @@ because `Select` renders a native `<select>` internally. Rewrite as a positive
 
 ```ts
 export type SelectOption = {
-    value: string;
-    label: string;
-    disabled?: boolean;
+  value: string;
+  label: string;
+  disabled?: boolean;
 };
 
 export type SelectGroup = {
-    label: string;
-    options: SelectOption[];
+  label: string;
+  options: SelectOption[];
 };
 
 export type SelectItem = SelectOption | SelectGroup;
 
 export type SelectProps = {
-    id: string;
-    value?: string;
-    options: SelectItem[];
-    width?: 'full' | 'auto';        // default 'full'
-    name?: string;
-    placeholder?: string;
-    disabled?: boolean;
-    required?: boolean;
-    error?: string;
-    onchange?: (e: Event) => void;
-    onblur?: (e: FocusEvent) => void;
-    'aria-describedby'?: string;
-    'aria-label'?: string;
-    class?: string;
+  id: string;
+  value?: string;
+  options: SelectItem[];
+  width?: "full" | "auto"; // default 'full'
+  name?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  required?: boolean;
+  error?: string;
+  onchange?: (e: Event) => void;
+  onblur?: (e: FocusEvent) => void;
+  "aria-describedby"?: string;
+  "aria-label"?: string;
+  class?: string;
 };
 ```
 
@@ -118,20 +118,20 @@ Updated destructure (changes from current: add `width`, default `'full'`):
 
 ```ts
 let {
-    id,
-    value = $bindable(),
-    options,
-    width = 'full',
-    name,
-    placeholder,
-    disabled = false,
-    required = false,
-    error,
-    onchange,
-    onblur,
-    'aria-describedby': ariaDescribedby,
-    'aria-label': ariaLabel,
-    class: className = ''
+  id,
+  value = $bindable(),
+  options,
+  width = "full",
+  name,
+  placeholder,
+  disabled = false,
+  required = false,
+  error,
+  onchange,
+  onblur,
+  "aria-describedby": ariaDescribedby,
+  "aria-label": ariaLabel,
+  class: className = "",
 }: SelectProps = $props();
 ```
 
@@ -141,18 +141,20 @@ Keep `BASE` as a plain `const` (no width class). Compose width into `computedCla
 
 ```ts
 const BASE =
-    'h-8 py-0 pl-[10px] pr-10 rounded-card ' +
-    'bg-[var(--bg-surface)] border border-[var(--border-default)] ' +
-    'text-sm text-[var(--text-primary)] ' +
-    'focus-visible:outline-none ' +
-    'focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ' +
-    'disabled:opacity-40 disabled:cursor-not-allowed ' +
-    'aria-[invalid=true]:border-[var(--color-danger-border)] ' +
-    'aria-[invalid=true]:bg-[var(--color-danger-bg)] ' +
-    'transition-[background,border-color] duration-fast';
+  "h-8 py-0 pl-[10px] pr-10 rounded-card " +
+  "bg-[var(--bg-surface)] border border-[var(--border-default)] " +
+  "text-sm text-[var(--text-primary)] " +
+  "focus-visible:outline-none " +
+  "focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] " +
+  "disabled:opacity-40 disabled:cursor-not-allowed " +
+  "aria-[invalid=true]:border-[var(--color-danger-border)] " +
+  "aria-[invalid=true]:bg-[var(--color-danger-bg)] " +
+  "transition-[background,border-color] duration-fast";
 
-const widthClass = $derived(width === 'auto' ? 'w-auto' : 'w-full');
-const computedClass = $derived([BASE, widthClass, className].filter(Boolean).join(' '));
+const widthClass = $derived(width === "auto" ? "w-auto" : "w-full");
+const computedClass = $derived(
+  [BASE, widthClass, className].filter(Boolean).join(" "),
+);
 ```
 
 `BASE` stays static so its declaration position relative to `$props()` does not
@@ -209,7 +211,7 @@ commit.
 **State change.** Drop `null` from `mergeTargetId`:
 
 ```ts
-let mergeTargetId = $state('');
+let mergeTargetId = $state("");
 ```
 
 Update the three reset sites (lines 221, 226, 237) to assign `''` instead of `null`.
@@ -230,15 +232,17 @@ The truthy check at line 690 (`disabled={!mergeTargetId}`) keeps working.
 
 ```ts
 const mergeTargetOptions = $derived(
-    services
-        .filter((s) =>
-            s.status === 'approved'
-            && s.capabilities.includes('software_discovery')
-            && s.id !== mergeSource?.id)
-        .map((t) => ({
-            value: t.id,
-            label: `${t.friendly_name} (${t.hostname})`
-        }))
+  services
+    .filter(
+      (s) =>
+        s.status === "approved" &&
+        s.capabilities.includes("software_discovery") &&
+        s.id !== mergeSource?.id,
+    )
+    .map((t) => ({
+      value: t.id,
+      label: `${t.friendly_name} (${t.hostname})`,
+    })),
 );
 ```
 
@@ -281,13 +285,13 @@ After migration, both tables should consume the same helper to avoid drift.
 
 ```ts
 function executionSiteOptions(role: StandardRoleKey): SelectOption[] {
-    return [
-        { value: 'auto', label: 'Auto' },
-        { value: 'agent', label: 'Agent' },
-        ...(role === 'fetch_releases'
-            ? [{ value: 'controller', label: 'Controller' }]
-            : [])
-    ];
+  return [
+    { value: "auto", label: "Auto" },
+    { value: "agent", label: "Agent" },
+    ...(role === "fetch_releases"
+      ? [{ value: "controller", label: "Controller" }]
+      : []),
+  ];
 }
 ```
 
@@ -330,7 +334,12 @@ re-exports `SelectProps` + `SelectOption`. The barrel must add `SelectGroup` and
 `SelectItem`:
 
 ```ts
-export type { SelectProps, SelectOption, SelectGroup, SelectItem } from './Select.svelte';
+export type {
+  SelectProps,
+  SelectOption,
+  SelectGroup,
+  SelectItem,
+} from "./Select.svelte";
 ```
 
 **Type imports.** `EditHostAssignmentModal.svelte` (and any other file using the
@@ -340,7 +349,7 @@ different `SelectOption` (the SchemaForm field shape) from `$lib/types`.
 Importing both would create a duplicate-identifier collision:
 
 ```ts
-import { Select, type SelectItem } from '$lib/components/forms';
+import { Select, type SelectItem } from "$lib/components/forms";
 // existing line stays untouched:
 //   import { ..., SelectOption, ... } from '$lib/types';
 ```
@@ -356,36 +365,36 @@ has the collision today.
 
 ```ts
 function pluginConfigItems(
-    savedOpts: PluginConfig[],
-    typeOpts: PluginType[]
+  savedOpts: PluginConfig[],
+  typeOpts: PluginType[],
 ): SelectItem[] {
-    // Inline literal — do NOT annotate with `SelectOption`. The `$lib/types`
-    // `SelectOption` already imported in this file has the same shape but is a
-    // different nominal type than the forms barrel's `SelectOption`. Letting
-    // TypeScript infer keeps the placeholder structurally compatible with
-    // both `SelectItem` and `SelectGroup.options[number]`.
-    const placeholder = { value: '', label: '— not configured —' };
-    const inlineOpts = typeOpts.map((pt) => ({
-        value: `type:${pt.plugin_type}`,
-        label: pt.display_name
-    }));
-    if (savedOpts.length === 0) {
-        return [placeholder, ...inlineOpts];
-    }
-    const items: SelectItem[] = [
-        placeholder,
-        {
-            label: 'Saved',
-            options: savedOpts.map((cfg) => ({
-                value: `cfg:${cfg.id}`,
-                label: cfg.name
-            }))
-        }
-    ];
-    if (inlineOpts.length > 0) {
-        items.push({ label: 'Inline', options: inlineOpts });
-    }
-    return items;
+  // Inline literal — do NOT annotate with `SelectOption`. The `$lib/types`
+  // `SelectOption` already imported in this file has the same shape but is a
+  // different nominal type than the forms barrel's `SelectOption`. Letting
+  // TypeScript infer keeps the placeholder structurally compatible with
+  // both `SelectItem` and `SelectGroup.options[number]`.
+  const placeholder = { value: "", label: "— not configured —" };
+  const inlineOpts = typeOpts.map((pt) => ({
+    value: `type:${pt.plugin_type}`,
+    label: pt.display_name,
+  }));
+  if (savedOpts.length === 0) {
+    return [placeholder, ...inlineOpts];
+  }
+  const items: SelectItem[] = [
+    placeholder,
+    {
+      label: "Saved",
+      options: savedOpts.map((cfg) => ({
+        value: `cfg:${cfg.id}`,
+        label: cfg.name,
+      })),
+    },
+  ];
+  if (inlineOpts.length > 0) {
+    items.push({ label: "Inline", options: inlineOpts });
+  }
+  return items;
 }
 ```
 
@@ -510,11 +519,11 @@ Actions:
 
 ```ts
 function handleChange(event: Event): void {
-    const nextId = (event.currentTarget as HTMLSelectElement).value;
-    if (!isControlled) {
-        uncontrolledId = nextId;
-    }
-    onSelect?.(nextId);
+  const nextId = (event.currentTarget as HTMLSelectElement).value;
+  if (!isControlled) {
+    uncontrolledId = nextId;
+  }
+  onSelect?.(nextId);
 }
 ```
 
@@ -575,19 +584,24 @@ regression-guard comment goes with it. `FormField` and `apiGet` imports are alre
 present in the test file — no new imports needed.
 
 ```ts
-it('select field renders Select primitive', async () => {
-    const loadInitialValues = vi.fn().mockResolvedValue({});
-    vi.mocked(apiGet).mockResolvedValue([]);
-    const { container } = render(SchemaForm, {
-        fields: [{
-            key: 'region', label: 'Region', field_type: 'select', required: false,
-            options: [{ value: 'eu', label: 'EU' }]
-        }] satisfies FormField[],
-        loadInitialValues,
-        onsubmit: vi.fn().mockResolvedValue(undefined)
-    });
-    await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
-    expect(container.querySelector('[data-ui="select"]')).toBeInTheDocument();
+it("select field renders Select primitive", async () => {
+  const loadInitialValues = vi.fn().mockResolvedValue({});
+  vi.mocked(apiGet).mockResolvedValue([]);
+  const { container } = render(SchemaForm, {
+    fields: [
+      {
+        key: "region",
+        label: "Region",
+        field_type: "select",
+        required: false,
+        options: [{ value: "eu", label: "EU" }],
+      },
+    ] satisfies FormField[],
+    loadInitialValues,
+    onsubmit: vi.fn().mockResolvedValue(undefined),
+  });
+  await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+  expect(container.querySelector('[data-ui="select"]')).toBeInTheDocument();
 });
 ```
 
@@ -687,14 +701,14 @@ Covers placeholder, two groups, and a disabled option in one view.
 
 ## Risks and Mitigations
 
-| Risk | Likelihood | Mitigation |
-| --- | --- | --- |
-| Existing site test asserts on dropped class string (`w-full`, `select`) | Medium | Hybrid grep audit (Step 1) catalogues these before migration |
-| ProviderSelector caller missed during `id` prop addition (TypeScript catches it) | Low | New required prop; `tsc` errors at compile time |
-| Site #1 reset point for `mergeTargetId` missed (3 sites: 221, 226, 237) | Low | Listed explicitly; grep confirms no other writers |
-| Optgroup rendering looks visually wrong (group label spacing, separators) | Low | Native browser rendering; manual eyeball check on dev server |
-| `width="auto"` interacts badly with FormFieldRow grid in some site | Low | Site #2 is the only `width="auto"` caller; not used inside FormFieldRow |
-| Status-quo bias preserved a behaviour that should be revisited | Mitigated | Contrarian review surfaced ProviderSelector dead branch; bias sweep run on remaining decisions |
+| Risk                                                                             | Likelihood | Mitigation                                                                                     |
+| -------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| Existing site test asserts on dropped class string (`w-full`, `select`)          | Medium     | Hybrid grep audit (Step 1) catalogues these before migration                                   |
+| ProviderSelector caller missed during `id` prop addition (TypeScript catches it) | Low        | New required prop; `tsc` errors at compile time                                                |
+| Site #1 reset point for `mergeTargetId` missed (3 sites: 221, 226, 237)          | Low        | Listed explicitly; grep confirms no other writers                                              |
+| Optgroup rendering looks visually wrong (group label spacing, separators)        | Low        | Native browser rendering; manual eyeball check on dev server                                   |
+| `width="auto"` interacts badly with FormFieldRow grid in some site               | Low        | Site #2 is the only `width="auto"` caller; not used inside FormFieldRow                        |
+| Status-quo bias preserved a behaviour that should be revisited                   | Mitigated  | Contrarian review surfaced ProviderSelector dead branch; bias sweep run on remaining decisions |
 
 ## Out-of-Scope Follow-ups
 

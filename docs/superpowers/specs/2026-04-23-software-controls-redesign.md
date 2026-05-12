@@ -63,7 +63,7 @@ list stay outside the card but remain inside `{#if isItemsTab}`.
   **moves to the new card wrapper div**.
 - The standalone select-all `<div class="flex justify-end">` (lines 938–948).
 - The inner list container's `overflow-hidden rounded-[4px] border border-[var(--border-subtle)]
-  bg-[var(--bg-surface)]` classes — the outer card provides that. Keep `role="list"`,
+bg-[var(--bg-surface)]` classes — the outer card provides that. Keep `role="list"`,
   `aria-label`, and `data-ui="software-group-list"` attributes.
 - The empty state's inner `rounded-[4px] border … bg-[var(--bg-surface)]` — card provides it.
 
@@ -102,11 +102,11 @@ This matches the Hosts DataTable pattern where the select-all `<th>` is always p
 
 The checkbox has three visually distinct states driven by existing derived values:
 
-| State | Condition | `checked` | `indeterminate` | Visual |
-| ----- | --------- | --------- | --------------- | ------ |
-| Nothing selected | `batchSelectedIds.size === 0` | `false` | `false` | empty box |
-| Some selected | `batchSelectedIds.size > 0 && !allBatchPageSelected` | `false` | `true` | dash/minus |
-| All selected | `allBatchPageSelected` | `true` | `false` | filled/checked |
+| State            | Condition                                            | `checked` | `indeterminate` | Visual         |
+| ---------------- | ---------------------------------------------------- | --------- | --------------- | -------------- |
+| Nothing selected | `batchSelectedIds.size === 0`                        | `false`   | `false`         | empty box      |
+| Some selected    | `batchSelectedIds.size > 0 && !allBatchPageSelected` | `false`   | `true`          | dash/minus     |
+| All selected     | `allBatchPageSelected`                               | `true`    | `false`         | filled/checked |
 
 No new logic required — `allBatchPageSelected` (`items.every(i => batchSelectedIds.has(i.id))`)
 and `batchSelectedIds.size` already provide the necessary signals. The `Checkbox` primitive

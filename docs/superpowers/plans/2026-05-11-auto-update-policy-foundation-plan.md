@@ -1623,7 +1623,7 @@ For every error: open the file, replace `ActorType::*.as_str()` with `ActorType:
 Likely sites:
 
 - `crates/ui/mcp/src/tools/update.rs` — already uses `ActorInfo::new(ActorType::ApiToken,
-  ctx.token_id.to_string())` per the earlier grep; verify it passes the typed actor through
+ctx.token_id.to_string())` per the earlier grep; verify it passes the typed actor through
   cleanly.
 
 ### Task 4.5: Verify R4 quality gates and commit

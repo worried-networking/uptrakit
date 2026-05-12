@@ -1,11 +1,11 @@
 # ATK-11: Supply Chain Dependency Attack
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Build / dependencies |
-| Prerequisites | Compromise of a crate on crates.io or a transitive dependency |
-| STRIDE | Tampering |
+| Field          | Value                                                         |
+| -------------- | ------------------------------------------------------------- |
+| Severity       | Medium                                                        |
+| Attack surface | Build / dependencies                                          |
+| Prerequisites  | Compromise of a crate on crates.io or a transitive dependency |
+| STRIDE         | Tampering                                                     |
 
 ## Attack description
 
@@ -18,18 +18,18 @@
 
 High-value targets in the dependency tree:
 
-| Crate | Role | Impact of compromise |
-| --- | --- | --- |
-| `rustls` / `aws-lc-rs` | TLS and cryptography | Key extraction, MITM, broken encryption |
-| `argon2` | Password hashing | Weakened hashing, credential theft |
-| `jsonwebtoken` | JWT signing/verification | Token forgery, auth bypass |
-| `openidconnect` | OIDC protocol | Auth bypass, token manipulation |
-| `reqwest` | HTTP client | Request interception, SSRF |
-| `serde` / `serde_json` | Serialization | Data manipulation, code execution |
-| `rcgen` | Certificate generation | Rogue certificates, PKI compromise |
-| `rumqttc` | MQTT client | Broker credential theft, message manipulation |
-| `sea-orm` | Database ORM | SQL injection, data exfiltration |
-| `mail-send` | SMTP email | Credential theft, email manipulation |
+| Crate                  | Role                     | Impact of compromise                          |
+| ---------------------- | ------------------------ | --------------------------------------------- |
+| `rustls` / `aws-lc-rs` | TLS and cryptography     | Key extraction, MITM, broken encryption       |
+| `argon2`               | Password hashing         | Weakened hashing, credential theft            |
+| `jsonwebtoken`         | JWT signing/verification | Token forgery, auth bypass                    |
+| `openidconnect`        | OIDC protocol            | Auth bypass, token manipulation               |
+| `reqwest`              | HTTP client              | Request interception, SSRF                    |
+| `serde` / `serde_json` | Serialization            | Data manipulation, code execution             |
+| `rcgen`                | Certificate generation   | Rogue certificates, PKI compromise            |
+| `rumqttc`              | MQTT client              | Broker credential theft, message manipulation |
+| `sea-orm`              | Database ORM             | SQL injection, data exfiltration              |
+| `mail-send`            | SMTP email               | Credential theft, email manipulation          |
 
 ## Worst-case impact
 

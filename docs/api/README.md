@@ -4,16 +4,16 @@ This folder documents the controller HTTP API, service/controller wire protocol,
 
 ## Contents
 
-| Document | Description |
-| --- | --- |
-| [Wire Protocol](wire-protocol.md) | WebSocket lifecycle, message types, and AsyncAPI mapping for controller/service communication. |
-| [HTTP Web API](http-web-api.md) | REST endpoints, request/response behavior, rate limits, and multi-tenancy notes. |
-| [Settings Runtime](settings-runtime.md) | Settings storage, reconciliation, snapshots, and runtime reload behavior. |
-| [Auth Flows](auth-flows.md) | Login/device authorization, token lifecycle, and enrollment-related auth flows. |
-| [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions. |
-| [Notifications](notifications.md) | Notification channels, rules, delivery log, and Telegram callback endpoints. |
-| [Batch Actions](batch-actions.md) | Batch/group action endpoints for bulk management operations across all resources. |
-| [Host Tags](host-tags.md) | Host tag CRUD, batch delete, and host tag assignment endpoints. |
+| Document                                          | Description                                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [Wire Protocol](wire-protocol.md)                 | WebSocket lifecycle, message types, and AsyncAPI mapping for controller/service communication. |
+| [HTTP Web API](http-web-api.md)                   | REST endpoints, request/response behavior, rate limits, and multi-tenancy notes.               |
+| [Settings Runtime](settings-runtime.md)           | Settings storage, reconciliation, snapshots, and runtime reload behavior.                      |
+| [Auth Flows](auth-flows.md)                       | Login/device authorization, token lifecycle, and enrollment-related auth flows.                |
+| [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions.          |
+| [Notifications](notifications.md)                 | Notification channels, rules, delivery log, and Telegram callback endpoints.                   |
+| [Batch Actions](batch-actions.md)                 | Batch/group action endpoints for bulk management operations across all resources.              |
+| [Host Tags](host-tags.md)                         | Host tag CRUD, batch delete, and host tag assignment endpoints.                                |
 
 ## Related Documentation
 

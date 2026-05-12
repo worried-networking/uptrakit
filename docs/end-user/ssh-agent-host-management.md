@@ -34,11 +34,11 @@ uptrakit-agent-ssh host add \
 
 Optional flags:
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--port` | 22 | SSH port |
-| `--host-key-fingerprint` | (none) | Expected host key fingerprint (SHA-256) |
-| `--state-dir` | platform default | Override the state directory |
+| Flag                     | Default          | Description                             |
+| ------------------------ | ---------------- | --------------------------------------- |
+| `--port`                 | 22               | SSH port                                |
+| `--host-key-fingerprint` | (none)           | Expected host key fingerprint (SHA-256) |
+| `--state-dir`            | platform default | Override the state directory            |
 
 The private key type (Ed25519, RSA, or ECDSA) is auto-detected from the file content. Use `-` as the file path to read the key from stdin.
 
@@ -77,11 +77,11 @@ When renaming a host (`--name new-name`), the new name must not conflict with an
 
 The `--sudo-policy` flag overrides the stored sudo execution policy for this host:
 
-| Value | Description |
-| --- | --- |
+| Value            | Description                                                             |
+| ---------------- | ----------------------------------------------------------------------- |
 | `auto` (default) | Prepend `sudo` when agent user is not root and `sudo_available` is true |
-| `force-with` | Always prepend `sudo` (unless agent user is root) |
-| `force-without` | Never prepend `sudo` |
+| `force-with`     | Always prepend `sudo` (unless agent user is root)                       |
+| `force-without`  | Never prepend `sudo`                                                    |
 
 Example:
 
@@ -215,11 +215,11 @@ this agent instance.
 
 ## Supported Key Types
 
-| Key Type | PEM Format | Notes |
-| --- | --- | --- |
-| Ed25519 | OpenSSH or PKCS#8 | Preferred for new deployments |
-| RSA | PKCS#1, OpenSSH, or PKCS#8 | Widely supported |
-| ECDSA | SEC1, OpenSSH, or PKCS#8 | Elliptic curve (P-256, P-384) |
+| Key Type | PEM Format                 | Notes                         |
+| -------- | -------------------------- | ----------------------------- |
+| Ed25519  | OpenSSH or PKCS#8          | Preferred for new deployments |
+| RSA      | PKCS#1, OpenSSH, or PKCS#8 | Widely supported              |
+| ECDSA    | SEC1, OpenSSH, or PKCS#8   | Elliptic curve (P-256, P-384) |
 
 The key type is detected automatically from the PEM header and binary content. Unsupported formats are rejected with an error.
 

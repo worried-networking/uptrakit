@@ -910,9 +910,12 @@ onMount(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
 
-  const unsubscribeSurfaces = subscribeToEvent(AdminEventType.SurfacesChanged, () => {
-    void loadSurfaceRegistry();
-  });
+  const unsubscribeSurfaces = subscribeToEvent(
+    AdminEventType.SurfacesChanged,
+    () => {
+      void loadSurfaceRegistry();
+    },
+  );
 
   return () => {
     window.removeEventListener("resize", syncViewport);
@@ -963,7 +966,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // AdminEventType is a TypeScript string enum so values are plain strings at runtime.
 import { AdminEventType } from "$lib/sse";
 
-type OnEventFn = (eventType: AdminEventType, data: Record<string, unknown>) => void;
+type OnEventFn = (
+  eventType: AdminEventType,
+  data: Record<string, unknown>,
+) => void;
 let capturedOnEvent: OnEventFn | undefined;
 const mockLoadSurfaceRegistry = vi.fn().mockResolvedValue(undefined);
 
@@ -1043,7 +1049,10 @@ describe("events.svelte — surfaces_changed handling", () => {
     });
 
     // Simulate what readAdminEventStream does: JSON.parse('{}') → {}
-    capturedOnEvent?.(AdminEventType.SurfacesChanged, JSON.parse("{}") as Record<string, unknown>);
+    capturedOnEvent?.(
+      AdminEventType.SurfacesChanged,
+      JSON.parse("{}") as Record<string, unknown>,
+    );
     await vi.advanceTimersByTimeAsync(200);
 
     expect(received).toBe(true);

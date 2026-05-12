@@ -88,7 +88,9 @@ import { htmlEscape } from "./htmlEscape";
 
 describe("htmlEscape", () => {
   it("escapes script tags", () => {
-    expect(htmlEscape("<script>alert(1)</script>")).toBe("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(htmlEscape("<script>alert(1)</script>")).toBe(
+      "&lt;script&gt;alert(1)&lt;/script&gt;",
+    );
   });
 
   it("escapes ampersands first", () => {
@@ -168,7 +170,9 @@ export interface MetadataDiff {
   client_uri?: { from: string | null; to: string | null };
 }
 
-export async function getConsentDetails(requestId: string): Promise<ConsentDetails> {
+export async function getConsentDetails(
+  requestId: string,
+): Promise<ConsentDetails> {
   return apiFetch(`/oauth/consent/${encodeURIComponent(requestId)}`);
 }
 
@@ -182,7 +186,9 @@ export async function approveConsent(
   });
 }
 
-export async function denyConsent(requestId: string): Promise<{ redirect_to: string }> {
+export async function denyConsent(
+  requestId: string,
+): Promise<{ redirect_to: string }> {
   return apiFetch(`/oauth/consent/${encodeURIComponent(requestId)}/deny`, {
     method: "POST",
   });
@@ -217,7 +223,15 @@ export async function trustOAuthClient(clientId: string): Promise<void> {
 }
 
 export async function manualRegisterClient(
-  body: Omit<OAuthClient, "id" | "created_at" | "last_used_at" | "revoked_at" | "trusted_at" | "created_via"> & {
+  body: Omit<
+    OAuthClient,
+    | "id"
+    | "created_at"
+    | "last_used_at"
+    | "revoked_at"
+    | "trusted_at"
+    | "created_via"
+  > & {
     default_scope: string;
   },
 ): Promise<OAuthClient> {

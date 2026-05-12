@@ -14,13 +14,13 @@
 
 ## File Map
 
-| File | Unmigrated buttons | Import needed |
-| --- | --- | --- |
-| `frontend/src/routes/settings/PluginConfigsTab.svelte` | 17 raw `<button>` elements across 3 modals and 3 table action columns | Add `import Button from '$lib/components/Button.svelte'` |
-| `frontend/src/routes/settings/SchedulerTab.svelte` | 4 raw `<button>` elements: Retry, Edit, Run, Cancel, Save | Add import |
-| `frontend/src/routes/settings/SystemServicesSettings.svelte` | 6 raw `<button>` elements: Load Tokens, Refresh, Create Token launcher, Copy, modal Cancel, modal Create; Revoke | Add import |
-| `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` | 5 raw `<button>` elements; Revoke already migrated | Import already present |
-| `frontend/src/routes/settings/AgentCertificateSettings.svelte` | 1 raw `<button>`; introduce `saving` state | Add import |
+| File                                                           | Unmigrated buttons                                                                                               | Import needed                                            |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `frontend/src/routes/settings/PluginConfigsTab.svelte`         | 17 raw `<button>` elements across 3 modals and 3 table action columns                                            | Add `import Button from '$lib/components/Button.svelte'` |
+| `frontend/src/routes/settings/SchedulerTab.svelte`             | 4 raw `<button>` elements: Retry, Edit, Run, Cancel, Save                                                        | Add import                                               |
+| `frontend/src/routes/settings/SystemServicesSettings.svelte`   | 6 raw `<button>` elements: Load Tokens, Refresh, Create Token launcher, Copy, modal Cancel, modal Create; Revoke | Add import                                               |
+| `frontend/src/routes/settings/EnrollmentTokenSettings.svelte`  | 5 raw `<button>` elements; Revoke already migrated                                                               | Import already present                                   |
+| `frontend/src/routes/settings/AgentCertificateSettings.svelte` | 1 raw `<button>`; introduce `saving` state                                                                       | Add import                                               |
 
 Test files to create:
 
@@ -34,14 +34,14 @@ Test files to create:
 
 ## Variant reference
 
-| Old Skeleton class | Button prop |
-| --- | --- |
-| `preset-filled-primary-500` | `variant="primary"` |
-| `preset-filled-error-500` | `variant="danger"` |
-| `preset-tonal-error` | `variant="danger"` |
-| `preset-filled-error-500` | `variant="danger"` |
+| Old Skeleton class                      | Button prop           |
+| --------------------------------------- | --------------------- |
+| `preset-filled-primary-500`             | `variant="primary"`   |
+| `preset-filled-error-500`               | `variant="danger"`    |
+| `preset-tonal-error`                    | `variant="danger"`    |
+| `preset-filled-error-500`               | `variant="danger"`    |
 | `preset-tonal` / `preset-tonal-surface` | `variant="secondary"` |
-| `btn-sm` size modifier | `size="sm"` |
+| `btn-sm` size modifier                  | `size="sm"`           |
 
 Remove `class="btn ..."` entirely. Keep all other props (`onclick`, `disabled`, `aria-*`). When source had a
 text-swap expression (`{saving ? 'Saving...' : 'Save'}`), remove the swap and pass `loading={saving}` — Button
@@ -61,25 +61,25 @@ moves into `loading={saving}`; keep only the non-saving gate in `disabled`.
 
 Full button inventory (verified with Grep):
 
-| Line (approx) | Label | Old class | Target |
-| --- | --- | --- | --- |
-| 672 | Add Config | `btn preset-filled-primary-500` | `variant="primary"` |
-| 809 | Edit (config row) | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| 812–818 | Discover (config row) | `btn btn-sm preset-tonal` + text-swap `'...' : 'Discover'` | `variant="secondary" size="sm" loading={discoveringId === config.id}`, static text `Discover` |
-| 821–826 | Delete (config row) | `btn btn-sm preset-tonal-error` | `variant="danger" size="sm"` |
-| 885 | Add Plugin Type | `btn preset-filled-primary-500` | `variant="primary"` |
-| 962–965 | Remove (allowlist row) | `btn btn-sm preset-tonal-error` | `variant="danger" size="sm"` |
-| 1067–1068 | Edit (type settings row) | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| 1071–1075 | Reset (type settings row) | `btn btn-sm preset-tonal-error` | `variant="danger" size="sm"` |
-| 1202–1212 | Advanced: Edit as JSON | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| 1234–1248 | Return to form editor | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| 1304 | Cancel (config modal footer) | `btn preset-tonal-surface` | `variant="secondary"` |
-| 1306–1312 | Test (config modal footer) | `btn preset-tonal` + text-swap `'Testing...' : 'Test'` | `variant="secondary" loading={configTesting} disabled={!configForm.plugin_type}`, static text `Test` |
-| 1314–1316 | Create/Update (config modal footer) | `btn preset-filled-primary-500` | `variant="primary"` |
-| 1356 | Cancel (allowlist modal footer) | `btn preset-tonal-surface` | `variant="secondary"` |
-| 1357 | Add (allowlist modal footer) | `btn preset-filled-primary-500` | `variant="primary"` |
-| 1448 | Cancel (type settings modal footer) | `btn preset-tonal-surface` | `variant="secondary"` |
-| 1449 | Save (type settings modal footer) | `btn preset-filled-primary-500` | `variant="primary"` |
+| Line (approx) | Label                               | Old class                                                  | Target                                                                                               |
+| ------------- | ----------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 672           | Add Config                          | `btn preset-filled-primary-500`                            | `variant="primary"`                                                                                  |
+| 809           | Edit (config row)                   | `btn btn-sm preset-tonal`                                  | `variant="secondary" size="sm"`                                                                      |
+| 812–818       | Discover (config row)               | `btn btn-sm preset-tonal` + text-swap `'...' : 'Discover'` | `variant="secondary" size="sm" loading={discoveringId === config.id}`, static text `Discover`        |
+| 821–826       | Delete (config row)                 | `btn btn-sm preset-tonal-error`                            | `variant="danger" size="sm"`                                                                         |
+| 885           | Add Plugin Type                     | `btn preset-filled-primary-500`                            | `variant="primary"`                                                                                  |
+| 962–965       | Remove (allowlist row)              | `btn btn-sm preset-tonal-error`                            | `variant="danger" size="sm"`                                                                         |
+| 1067–1068     | Edit (type settings row)            | `btn btn-sm preset-tonal`                                  | `variant="secondary" size="sm"`                                                                      |
+| 1071–1075     | Reset (type settings row)           | `btn btn-sm preset-tonal-error`                            | `variant="danger" size="sm"`                                                                         |
+| 1202–1212     | Advanced: Edit as JSON              | `btn btn-sm preset-tonal`                                  | `variant="secondary" size="sm"`                                                                      |
+| 1234–1248     | Return to form editor               | `btn btn-sm preset-tonal`                                  | `variant="secondary" size="sm"`                                                                      |
+| 1304          | Cancel (config modal footer)        | `btn preset-tonal-surface`                                 | `variant="secondary"`                                                                                |
+| 1306–1312     | Test (config modal footer)          | `btn preset-tonal` + text-swap `'Testing...' : 'Test'`     | `variant="secondary" loading={configTesting} disabled={!configForm.plugin_type}`, static text `Test` |
+| 1314–1316     | Create/Update (config modal footer) | `btn preset-filled-primary-500`                            | `variant="primary"`                                                                                  |
+| 1356          | Cancel (allowlist modal footer)     | `btn preset-tonal-surface`                                 | `variant="secondary"`                                                                                |
+| 1357          | Add (allowlist modal footer)        | `btn preset-filled-primary-500`                            | `variant="primary"`                                                                                  |
+| 1448          | Cancel (type settings modal footer) | `btn preset-tonal-surface`                                 | `variant="secondary"`                                                                                |
+| 1449          | Save (type settings modal footer)   | `btn preset-filled-primary-500`                            | `variant="primary"`                                                                                  |
 
 No `saving` state introduction needed — no async button in this file lacks a loading path that is currently missed;
 Discover and Test already have their flags.
@@ -89,16 +89,32 @@ Discover and Test already have their flags.
 Create `frontend/src/routes/settings/PluginConfigsTab.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
-  getPluginConfigs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+vi.mock("$lib/api", () => ({
+  getPluginConfigs: vi
+    .fn()
+    .mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      pages: 0,
+    }),
   createPluginConfig: vi.fn(),
   updatePluginConfig: vi.fn(),
   deletePluginConfig: vi.fn(),
   triggerPluginConfigDiscovery: vi.fn(),
-  listDiscoveryAllowlist: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+  listDiscoveryAllowlist: vi
+    .fn()
+    .mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      pages: 0,
+    }),
   addDiscoveryAllowlistEntry: vi.fn(),
   deleteDiscoveryAllowlistEntry: vi.fn(),
   listPluginTypes: vi.fn().mockResolvedValue([]),
@@ -106,52 +122,80 @@ vi.mock('$lib/api', () => ({
   listPluginTypeSettings: vi.fn().mockResolvedValue([]),
   upsertPluginTypeSettings: vi.fn(),
   deletePluginTypeSettings: vi.fn(),
-  testPluginConfig: vi.fn()
+  testPluginConfig: vi.fn(),
 }));
-vi.mock('$lib/auth.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({
   getUser: vi.fn(() => ({
-    id: 'u1',
-    email: 'a@b.com',
-    first_name: 'A',
-    last_name: 'B',
-    permissions: ['manage_plugin_configs', 'trigger_discovery', 'manage_allowlist', 'manage_plugin_type_settings']
-  }))
+    id: "u1",
+    email: "a@b.com",
+    first_name: "A",
+    last_name: "B",
+    permissions: [
+      "manage_plugin_configs",
+      "trigger_discovery",
+      "manage_allowlist",
+      "manage_plugin_type_settings",
+    ],
+  })),
 }));
-vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
-vi.mock('$lib/stores/events.svelte', () => ({ subscribe: vi.fn(() => () => {}), getLastEvent: vi.fn(() => null) }));
+vi.mock("$lib/notifications.svelte", () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+}));
+vi.mock("$lib/stores/events.svelte", () => ({
+  subscribe: vi.fn(() => () => {}),
+  getLastEvent: vi.fn(() => null),
+}));
 
-import { Permission } from '$lib/types';
-import * as auth from '$lib/auth.svelte';
-import PluginConfigsTab from './PluginConfigsTab.svelte';
+import { Permission } from "$lib/types";
+import * as auth from "$lib/auth.svelte";
+import PluginConfigsTab from "./PluginConfigsTab.svelte";
 
-describe('PluginConfigsTab button variants', () => {
-  it('has no raw preset-filled-primary-500 buttons', async () => {
+describe("PluginConfigsTab button variants", () => {
+  it("has no raw preset-filled-primary-500 buttons", async () => {
     vi.mocked(auth.getUser).mockReturnValue({
-      id: 'u1', email: 'a@b.com', first_name: 'A', last_name: 'B',
-      permissions: [Permission.ManagePluginConfigs, Permission.TriggerDiscovery,
-                    Permission.ManageDiscoveryAllowlist, Permission.ManagePluginTypeSettings]
+      id: "u1",
+      email: "a@b.com",
+      first_name: "A",
+      last_name: "B",
+      permissions: [
+        Permission.ManagePluginConfigs,
+        Permission.TriggerDiscovery,
+        Permission.ManageDiscoveryAllowlist,
+        Permission.ManagePluginTypeSettings,
+      ],
     } as ReturnType<typeof auth.getUser>);
     const { container } = render(PluginConfigsTab);
-    await waitFor(() => expect(container.querySelector('button.preset-filled-primary-500')).toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector("button.preset-filled-primary-500"),
+      ).toBeNull(),
+    );
   });
 
-  it('has no raw preset-tonal-error buttons', async () => {
+  it("has no raw preset-tonal-error buttons", async () => {
     const { container } = render(PluginConfigsTab);
-    await waitFor(() => expect(container.querySelector('button.preset-tonal-error')).toBeNull());
+    await waitFor(() =>
+      expect(container.querySelector("button.preset-tonal-error")).toBeNull(),
+    );
   });
 
-  it('has no raw preset-tonal-surface buttons', async () => {
+  it("has no raw preset-tonal-surface buttons", async () => {
     const { container } = render(PluginConfigsTab);
-    await waitFor(() => expect(container.querySelector('button.preset-tonal-surface')).toBeNull());
+    await waitFor(() =>
+      expect(container.querySelector("button.preset-tonal-surface")).toBeNull(),
+    );
   });
 
-  it('Add Config button has primary gradient class', async () => {
+  it("Add Config button has primary gradient class", async () => {
     const { container } = render(PluginConfigsTab);
     await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent?.trim() === 'Add Config'
+      const btn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "Add Config",
       );
-      expect(btn?.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+      expect(btn?.className).toContain(
+        "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+      );
     });
   });
 });
@@ -515,13 +559,13 @@ git commit -m "feat(ui): migrate PluginConfigsTab to Button primitive (#3d step 
 
 Full button inventory (verified from source):
 
-| Line (approx) | Label | Old class | Target |
-| --- | --- | --- | --- |
-| 102 | Retry | `btn preset-filled-primary-500 mt-2` | `variant="primary"` — keep `mt-2` via `class="mt-2"` on Button |
-| 147 | Edit (row) | `btn btn-sm preset-tonal` | `variant="secondary" size="sm"` |
-| 148–154 | Run (row) | `btn btn-sm preset-tonal` + text-swap `'...' : 'Run'` | `variant="ghost" size="sm" loading={triggeringId === task.id} disabled={task.is_running}`, static text `Run` |
-| 184 | Cancel (modal) | `btn preset-tonal-surface` | `variant="secondary"` |
-| 185–187 | Save (modal) | `btn preset-filled-primary-500` + text-swap `'Saving...' : 'Save'` | `variant="primary" loading={saving}`, static text `Save` |
+| Line (approx) | Label          | Old class                                                          | Target                                                                                                       |
+| ------------- | -------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 102           | Retry          | `btn preset-filled-primary-500 mt-2`                               | `variant="primary"` — keep `mt-2` via `class="mt-2"` on Button                                               |
+| 147           | Edit (row)     | `btn btn-sm preset-tonal`                                          | `variant="secondary" size="sm"`                                                                              |
+| 148–154       | Run (row)      | `btn btn-sm preset-tonal` + text-swap `'...' : 'Run'`              | `variant="ghost" size="sm" loading={triggeringId === task.id} disabled={task.is_running}`, static text `Run` |
+| 184           | Cancel (modal) | `btn preset-tonal-surface`                                         | `variant="secondary"`                                                                                        |
+| 185–187       | Save (modal)   | `btn preset-filled-primary-500` + text-swap `'Saving...' : 'Save'` | `variant="primary" loading={saving}`, static text `Save`                                                     |
 
 `saving` and `triggeringId` state variables already exist in the script block. No new state needed.
 
@@ -532,101 +576,125 @@ The Retry button currently has `mt-2` in its class. Button accepts a `class` pro
 Create `frontend/src/routes/settings/SchedulerTab.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
+vi.mock("$lib/api", () => ({
   listSchedulerTasks: vi.fn().mockResolvedValue([
     {
-      id: 'task-1',
-      name: 'Test Task',
-      cron_expression: '0 * * * *',
+      id: "task-1",
+      name: "Test Task",
+      cron_expression: "0 * * * *",
       is_enabled: true,
       is_running: false,
       last_run_at: null,
       next_run_at: null,
       interval_seconds: 3600,
-      jitter_seconds: 0
-    }
+      jitter_seconds: 0,
+    },
   ]),
   updateSchedulerTask: vi.fn(),
-  triggerSchedulerTask: vi.fn()
+  triggerSchedulerTask: vi.fn(),
 }));
-vi.mock('$lib/auth.svelte', () => ({
+vi.mock("$lib/auth.svelte", () => ({
   getUser: vi.fn(() => ({
-    id: 'u1', email: 'a@b.com', first_name: 'A', last_name: 'B',
-    permissions: ['manage_scheduler']
-  }))
+    id: "u1",
+    email: "a@b.com",
+    first_name: "A",
+    last_name: "B",
+    permissions: ["manage_scheduler"],
+  })),
 }));
-vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
+vi.mock("$lib/notifications.svelte", () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+}));
 
-import * as api from '$lib/api';
-import { Permission } from '$lib/types';
-import * as auth from '$lib/auth.svelte';
-import SchedulerTab from './SchedulerTab.svelte';
+import * as api from "$lib/api";
+import { Permission } from "$lib/types";
+import * as auth from "$lib/auth.svelte";
+import SchedulerTab from "./SchedulerTab.svelte";
 
 afterEach(() => vi.clearAllMocks());
 
 function makeUser() {
   return {
-    id: 'u1', email: 'a@b.com', first_name: 'A', last_name: 'B',
-    permissions: [Permission.ManageScheduler]
+    id: "u1",
+    email: "a@b.com",
+    first_name: "A",
+    last_name: "B",
+    permissions: [Permission.ManageScheduler],
   } as ReturnType<typeof auth.getUser>;
 }
 
-describe('SchedulerTab button variants', () => {
-  it('has no raw preset-filled-primary-500 buttons', async () => {
+describe("SchedulerTab button variants", () => {
+  it("has no raw preset-filled-primary-500 buttons", async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
     const { container } = render(SchedulerTab);
-    await waitFor(() => screen.getByText('Test Task'));
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    await waitFor(() => screen.getByText("Test Task"));
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('has no raw preset-tonal-surface buttons', async () => {
+  it("has no raw preset-tonal-surface buttons", async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
     const { container } = render(SchedulerTab);
-    await waitFor(() => screen.getByText('Test Task'));
-    expect(container.querySelector('button.preset-tonal-surface')).toBeNull();
+    await waitFor(() => screen.getByText("Test Task"));
+    expect(container.querySelector("button.preset-tonal-surface")).toBeNull();
   });
 
-  it('Run button has ghost (bg-transparent) class', async () => {
+  it("Run button has ghost (bg-transparent) class", async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
     render(SchedulerTab);
-    await waitFor(() => screen.getByText('Test Task'));
-    const runBtn = screen.getByRole('button', { name: 'Run' });
-    expect(runBtn.className).toContain('bg-transparent');
+    await waitFor(() => screen.getByText("Test Task"));
+    const runBtn = screen.getByRole("button", { name: "Run" });
+    expect(runBtn.className).toContain("bg-transparent");
   });
 
-  it('Save button carries aria-busy=true while saving', async () => {
+  it("Save button carries aria-busy=true while saving", async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
     let resolve!: (v: unknown) => void;
     vi.mocked(api.updateSchedulerTask).mockReturnValue(
-      new Promise((r) => { resolve = r; })
+      new Promise((r) => {
+        resolve = r;
+      }),
     );
     render(SchedulerTab);
-    await waitFor(() => screen.getByText('Test Task'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const saveBtn = await screen.findByRole('button', { name: 'Save' });
+    await waitFor(() => screen.getByText("Test Task"));
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const saveBtn = await screen.findByRole("button", { name: "Save" });
     await fireEvent.click(saveBtn);
-    await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
-    resolve({ id: 'task-1', name: 'Test Task', cron_expression: '0 * * * *', is_enabled: true,
-               is_running: false, last_run_at: null, next_run_at: null, interval_seconds: 3600, jitter_seconds: 0 });
-    await waitFor(() => expect(saveBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(saveBtn).toHaveAttribute("aria-busy", "true"));
+    resolve({
+      id: "task-1",
+      name: "Test Task",
+      cron_expression: "0 * * * *",
+      is_enabled: true,
+      is_running: false,
+      last_run_at: null,
+      next_run_at: null,
+      interval_seconds: 3600,
+      jitter_seconds: 0,
+    });
+    await waitFor(() => expect(saveBtn).not.toHaveAttribute("aria-busy"));
   });
 
   it('Save button text is static "Save" during loading — no text swap', async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
     let resolve!: (v: unknown) => void;
     vi.mocked(api.updateSchedulerTask).mockReturnValue(
-      new Promise((r) => { resolve = r; })
+      new Promise((r) => {
+        resolve = r;
+      }),
     );
     render(SchedulerTab);
-    await waitFor(() => screen.getByText('Test Task'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const saveBtn = await screen.findByRole('button', { name: 'Save' });
+    await waitFor(() => screen.getByText("Test Task"));
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const saveBtn = await screen.findByRole("button", { name: "Save" });
     await fireEvent.click(saveBtn);
-    await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
-    expect(saveBtn).toHaveTextContent('Save');
+    await waitFor(() => expect(saveBtn).toHaveAttribute("aria-busy", "true"));
+    expect(saveBtn).toHaveTextContent("Save");
     resolve({});
   });
 });
@@ -779,15 +847,15 @@ git commit -m "feat(ui): migrate SchedulerTab to Button primitive (#3d step 2)"
 
 Full button inventory (verified from source):
 
-| Line (approx) | Label | Old class | Target |
-| --- | --- | --- | --- |
-| 184–186 | Load Tokens | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={loading}`, static text `Load Tokens` |
-| 188–190 | Refresh | `btn preset-tonal` | `variant="secondary" loading={loading}` |
-| 192–199 | Create Token (launcher) | `btn preset-filled-primary-500` | `variant="primary"` |
-| 213–215 | Copy | `btn btn-sm preset-tonal flex-shrink-0` | `variant="ghost" size="sm" class="flex-shrink-0"` |
-| 270–278 | Cancel (modal) | `btn preset-tonal` | `variant="secondary"` |
-| 279–281 | Create (modal footer) | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={creating}`, static text `Create` |
-| 370–372 | Revoke | `btn btn-sm preset-filled-error-500` | `variant="danger" size="sm"` |
+| Line (approx) | Label                   | Old class                                   | Target                                                           |
+| ------------- | ----------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| 184–186       | Load Tokens             | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={loading}`, static text `Load Tokens` |
+| 188–190       | Refresh                 | `btn preset-tonal`                          | `variant="secondary" loading={loading}`                          |
+| 192–199       | Create Token (launcher) | `btn preset-filled-primary-500`             | `variant="primary"`                                              |
+| 213–215       | Copy                    | `btn btn-sm preset-tonal flex-shrink-0`     | `variant="ghost" size="sm" class="flex-shrink-0"`                |
+| 270–278       | Cancel (modal)          | `btn preset-tonal`                          | `variant="secondary"`                                            |
+| 279–281       | Create (modal footer)   | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={creating}`, static text `Create`     |
+| 370–372       | Revoke                  | `btn btn-sm preset-filled-error-500`        | `variant="danger" size="sm"`                                     |
 
 Note: `SystemServicesSettings.svelte` does NOT currently have `import Button`. Add it.
 
@@ -801,56 +869,78 @@ on Load Tokens; for Refresh there is no text-swap so just `loading={loading}` ad
 Create `frontend/src/routes/settings/SystemServicesSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
-  listSystemEnrollmentTokens: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+vi.mock("$lib/api", () => ({
+  listSystemEnrollmentTokens: vi
+    .fn()
+    .mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      pages: 0,
+    }),
   createSystemEnrollmentToken: vi.fn(),
-  revokeSystemEnrollmentToken: vi.fn()
+  revokeSystemEnrollmentToken: vi.fn(),
 }));
 
-import * as api from '$lib/api';
-import SystemServicesSettings from './SystemServicesSettings.svelte';
+import * as api from "$lib/api";
+import SystemServicesSettings from "./SystemServicesSettings.svelte";
 
 const props = { onSuccess: vi.fn(), onError: vi.fn() };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('SystemServicesSettings button variants', () => {
-  it('has no raw preset-filled-primary-500 buttons', () => {
+describe("SystemServicesSettings button variants", () => {
+  it("has no raw preset-filled-primary-500 buttons", () => {
     const { container } = render(SystemServicesSettings, props);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('has no raw preset-filled-error-500 buttons', () => {
+  it("has no raw preset-filled-error-500 buttons", () => {
     const { container } = render(SystemServicesSettings, props);
-    expect(container.querySelector('button.preset-filled-error-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-error-500"),
+    ).toBeNull();
   });
 
-  it('has no raw preset-tonal buttons', () => {
+  it("has no raw preset-tonal buttons", () => {
     const { container } = render(SystemServicesSettings, props);
-    expect(container.querySelector('button.preset-tonal')).toBeNull();
+    expect(container.querySelector("button.preset-tonal")).toBeNull();
   });
 
-  it('modal Create button carries aria-busy=true while creating', async () => {
+  it("modal Create button carries aria-busy=true while creating", async () => {
     let resolve!: (v: unknown) => void;
     vi.mocked(api.createSystemEnrollmentToken).mockReturnValue(
-      new Promise((r) => { resolve = r; })
+      new Promise((r) => {
+        resolve = r;
+      }),
     );
     render(SystemServicesSettings, props);
     // Open modal
-    const createLauncher = screen.getByRole('button', { name: 'Create Token' });
+    const createLauncher = screen.getByRole("button", { name: "Create Token" });
     await fireEvent.click(createLauncher);
     // Fill name
     const nameInput = await screen.findByLabelText(/Name/i);
-    await fireEvent.input(nameInput, { target: { value: 'My Token' } });
-    const createBtn = screen.getByRole('button', { name: 'Create' });
+    await fireEvent.input(nameInput, { target: { value: "My Token" } });
+    const createBtn = screen.getByRole("button", { name: "Create" });
     await fireEvent.click(createBtn);
-    await waitFor(() => expect(createBtn).toHaveAttribute('aria-busy', 'true'));
-    resolve({ token: 'tok_abc', id: 't1', name: 'My Token', created_at: new Date().toISOString(),
-               revoked_at: null, expires_at: null, max_uses: null, use_count: 0 });
-    await waitFor(() => expect(createBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(createBtn).toHaveAttribute("aria-busy", "true"));
+    resolve({
+      token: "tok_abc",
+      id: "t1",
+      name: "My Token",
+      created_at: new Date().toISOString(),
+      revoked_at: null,
+      expires_at: null,
+      max_uses: null,
+      use_count: 0,
+    });
+    await waitFor(() => expect(createBtn).not.toHaveAttribute("aria-busy"));
   });
 });
 ```
@@ -1064,69 +1154,88 @@ git commit -m "feat(ui): migrate SystemServicesSettings to Button primitive (#3d
 
 Remaining unmigrated buttons (verified from source):
 
-| Line (approx) | Label | Old class | Target |
-| --- | --- | --- | --- |
-| 201–203 | Load Tokens | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={loading} disabled={loading}`, static text `Load Tokens` |
-| 205–207 | Refresh | `btn preset-tonal` | `variant="secondary" loading={loading} disabled={loading}` |
-| 209–215 | Create Token (launcher) | `btn preset-filled-primary-500` | `variant="primary"` |
-| 231–233 | Copy | `btn btn-sm preset-tonal flex-shrink-0` | `variant="ghost" size="sm" class="flex-shrink-0"` |
-| 302–309 | Cancel (modal) | `btn preset-tonal` | `variant="secondary"` |
-| 311–313 | Create (modal footer) | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={creating}`, static text `Create` |
+| Line (approx) | Label                   | Old class                                   | Target                                                                              |
+| ------------- | ----------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 201–203       | Load Tokens             | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={loading} disabled={loading}`, static text `Load Tokens` |
+| 205–207       | Refresh                 | `btn preset-tonal`                          | `variant="secondary" loading={loading} disabled={loading}`                          |
+| 209–215       | Create Token (launcher) | `btn preset-filled-primary-500`             | `variant="primary"`                                                                 |
+| 231–233       | Copy                    | `btn btn-sm preset-tonal flex-shrink-0`     | `variant="ghost" size="sm" class="flex-shrink-0"`                                   |
+| 302–309       | Cancel (modal)          | `btn preset-tonal`                          | `variant="secondary"`                                                               |
+| 311–313       | Create (modal footer)   | `btn preset-filled-primary-500` + text-swap | `variant="primary" loading={creating}`, static text `Create`                        |
 
 - [ ] **Step 4.1: Write failing test**
 
 Create `frontend/src/routes/settings/EnrollmentTokenSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({
-  listEnrollmentTokens: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+vi.mock("$lib/api", () => ({
+  listEnrollmentTokens: vi
+    .fn()
+    .mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      pages: 0,
+    }),
   createEnrollmentToken: vi.fn(),
-  revokeEnrollmentToken: vi.fn()
+  revokeEnrollmentToken: vi.fn(),
 }));
 
-import * as api from '$lib/api';
-import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
+import * as api from "$lib/api";
+import EnrollmentTokenSettings from "./EnrollmentTokenSettings.svelte";
 
 const props = {
   summary: { total: 0, active: 0, revoked: 0, expired: 0 },
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('EnrollmentTokenSettings button variants', () => {
-  it('has no raw preset-filled-primary-500 buttons', () => {
+describe("EnrollmentTokenSettings button variants", () => {
+  it("has no raw preset-filled-primary-500 buttons", () => {
     const { container } = render(EnrollmentTokenSettings, props);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('has no raw preset-tonal buttons (unqualified)', () => {
+  it("has no raw preset-tonal buttons (unqualified)", () => {
     const { container } = render(EnrollmentTokenSettings, props);
-    expect(container.querySelector('button.preset-tonal')).toBeNull();
+    expect(container.querySelector("button.preset-tonal")).toBeNull();
   });
 
-  it('modal Create button carries aria-busy=true while creating', async () => {
+  it("modal Create button carries aria-busy=true while creating", async () => {
     let resolve!: (v: unknown) => void;
     vi.mocked(api.createEnrollmentToken).mockReturnValue(
-      new Promise((r) => { resolve = r; })
+      new Promise((r) => {
+        resolve = r;
+      }),
     );
     render(EnrollmentTokenSettings, props);
-    const createLauncher = screen.getByRole('button', { name: 'Create Token' });
+    const createLauncher = screen.getByRole("button", { name: "Create Token" });
     await fireEvent.click(createLauncher);
     const nameInput = await screen.findByLabelText(/Name/i);
-    await fireEvent.input(nameInput, { target: { value: 'My Token' } });
-    const createBtn = screen.getByRole('button', { name: 'Create' });
+    await fireEvent.input(nameInput, { target: { value: "My Token" } });
+    const createBtn = screen.getByRole("button", { name: "Create" });
     await fireEvent.click(createBtn);
-    await waitFor(() => expect(createBtn).toHaveAttribute('aria-busy', 'true'));
-    resolve({ token: 'tok_xyz', id: 't1', name: 'My Token', created_at: new Date().toISOString(),
-               revoked_at: null, expires_at: null, max_uses: null, use_count: 0 });
-    await waitFor(() => expect(createBtn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(createBtn).toHaveAttribute("aria-busy", "true"));
+    resolve({
+      token: "tok_xyz",
+      id: "t1",
+      name: "My Token",
+      created_at: new Date().toISOString(),
+      revoked_at: null,
+      expires_at: null,
+      max_uses: null,
+      use_count: 0,
+    });
+    await waitFor(() => expect(createBtn).not.toHaveAttribute("aria-busy"));
   });
-
 });
 ```
 
@@ -1322,64 +1431,72 @@ wrap the async body in try/finally, then migrate the button.
 Create `frontend/src/routes/settings/AgentCertificateSettings.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 
-vi.mock('$lib/api', () => ({ updateAgentCertificateSettings: vi.fn() }));
+vi.mock("$lib/api", () => ({ updateAgentCertificateSettings: vi.fn() }));
 
-import * as api from '$lib/api';
-import type { AgentCertificateSettings } from '$lib/types';
-import AgentCertificateSettingsComponent from './AgentCertificateSettings.svelte';
+import * as api from "$lib/api";
+import type { AgentCertificateSettings } from "$lib/types";
+import AgentCertificateSettingsComponent from "./AgentCertificateSettings.svelte";
 
 const mockSettings: AgentCertificateSettings = {
   lifetime_days: 7,
   renewal_window_hours_override: null,
-  effective_renewal_window_hours: 24
+  effective_renewal_window_hours: 24,
 };
 
 const props = {
   settings: mockSettings,
   onSuccess: vi.fn(),
-  onError: vi.fn()
+  onError: vi.fn(),
 };
 
 afterEach(() => vi.clearAllMocks());
 
-describe('AgentCertificateSettings Save button', () => {
-  it('Save button has no raw preset-filled-primary-500 class', () => {
+describe("AgentCertificateSettings Save button", () => {
+  it("Save button has no raw preset-filled-primary-500 class", () => {
     const { container } = render(AgentCertificateSettingsComponent, props);
-    expect(container.querySelector('button.preset-filled-primary-500')).toBeNull();
+    expect(
+      container.querySelector("button.preset-filled-primary-500"),
+    ).toBeNull();
   });
 
-  it('Save button has primary gradient class', () => {
+  it("Save button has primary gradient class", () => {
     render(AgentCertificateSettingsComponent, props);
-    const btn = screen.getByRole('button', { name: 'Save' });
-    expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+    const btn = screen.getByRole("button", { name: "Save" });
+    expect(btn.className).toContain(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    );
   });
 
-  it('Save button carries aria-busy=true while saving', async () => {
+  it("Save button carries aria-busy=true while saving", async () => {
     let resolve!: (v: AgentCertificateSettings) => void;
     vi.mocked(api.updateAgentCertificateSettings).mockReturnValue(
-      new Promise<AgentCertificateSettings>((r) => { resolve = r; })
+      new Promise<AgentCertificateSettings>((r) => {
+        resolve = r;
+      }),
     );
     render(AgentCertificateSettingsComponent, props);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
     resolve(mockSettings);
-    await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy"));
   });
 
   it('Save button text is static "Save" during loading — no text swap', async () => {
     let resolve!: (v: AgentCertificateSettings) => void;
     vi.mocked(api.updateAgentCertificateSettings).mockReturnValue(
-      new Promise<AgentCertificateSettings>((r) => { resolve = r; })
+      new Promise<AgentCertificateSettings>((r) => {
+        resolve = r;
+      }),
     );
     render(AgentCertificateSettingsComponent, props);
-    const btn = screen.getByRole('button', { name: 'Save' });
+    const btn = screen.getByRole("button", { name: "Save" });
     await fireEvent.click(btn);
-    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-    expect(btn).toHaveTextContent('Save');
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    expect(btn).toHaveTextContent("Save");
     resolve(mockSettings);
   });
 });
@@ -1647,45 +1764,45 @@ If no changes needed, skip this commit.
 
 ## Self-Review Checklist
 
-| Spec requirement | Task / Step |
-| --- | --- |
-| PluginConfigsTab: Add Config → primary | Task 1, Step 1.4 |
-| PluginConfigsTab: Edit (config row) → secondary sm | Task 1, Step 1.5 |
-| PluginConfigsTab: Discover → secondary sm + loading | Task 1, Step 1.5 |
-| PluginConfigsTab: Delete → danger sm | Task 1, Step 1.5 |
-| PluginConfigsTab: Add Plugin Type → primary | Task 1, Step 1.6 |
-| PluginConfigsTab: Remove (allowlist row) → danger sm | Task 1, Step 1.7 |
-| PluginConfigsTab: Edit (type settings row) → secondary sm | Task 1, Step 1.8 |
-| PluginConfigsTab: Reset (type settings row) → danger sm | Task 1, Step 1.8 |
-| PluginConfigsTab: Advanced: Edit as JSON → secondary sm | Task 1, Step 1.9 |
-| PluginConfigsTab: Return to form editor → secondary sm | Task 1, Step 1.9 |
-| PluginConfigsTab: Config modal Cancel → secondary | Task 1, Step 1.10 |
-| PluginConfigsTab: Config modal Test → secondary + loading | Task 1, Step 1.10 |
-| PluginConfigsTab: Config modal Create/Update → primary | Task 1, Step 1.10 |
-| PluginConfigsTab: Allowlist modal Cancel → secondary | Task 1, Step 1.11 |
-| PluginConfigsTab: Allowlist modal Add → primary | Task 1, Step 1.11 |
-| PluginConfigsTab: Type settings modal Cancel → secondary | Task 1, Step 1.12 |
-| PluginConfigsTab: Type settings modal Save → primary | Task 1, Step 1.12 |
-| SchedulerTab: Retry → primary | Task 2, Step 2.4 |
-| SchedulerTab: Edit (row) → secondary sm | Task 2, Step 2.5 |
-| SchedulerTab: Run (row) → ghost sm + loading | Task 2, Step 2.6 |
-| SchedulerTab: Cancel (modal) → secondary | Task 2, Step 2.7 |
-| SchedulerTab: Save (modal) → primary + loading + no text-swap | Task 2, Step 2.8 |
-| SystemServicesSettings: Load Tokens → primary + loading | Task 3, Step 3.4 |
-| SystemServicesSettings: Refresh → secondary + loading | Task 3, Step 3.5 |
-| SystemServicesSettings: Create Token launcher → primary | Task 3, Step 3.6 |
-| SystemServicesSettings: Copy → ghost sm | Task 3, Step 3.7 |
-| SystemServicesSettings: Modal Cancel → secondary | Task 3, Step 3.8 |
-| SystemServicesSettings: Modal Create → primary + loading + no text-swap | Task 3, Step 3.9 |
-| SystemServicesSettings: Revoke → danger sm | Task 3, Step 3.10 |
-| EnrollmentTokenSettings: Load Tokens → primary + loading | Task 4, Step 4.3 |
-| EnrollmentTokenSettings: Refresh → secondary + loading | Task 4, Step 4.4 |
-| EnrollmentTokenSettings: Create Token launcher → primary | Task 4, Step 4.5 |
-| EnrollmentTokenSettings: Copy → ghost sm | Task 4, Step 4.6 |
-| EnrollmentTokenSettings: Modal Cancel → secondary | Task 4, Step 4.7 |
-| EnrollmentTokenSettings: Modal Create → primary + loading (no extra disabled gate) | Task 4, Step 4.8 |
-| AgentCertificateSettings: introduce saving state | Task 5, Step 5.3 |
-| AgentCertificateSettings: Save → primary + loading + no text-swap | Task 5, Step 5.4 |
-| `<input>`, `<select>`, `<textarea>`, toggles — OUT OF SCOPE | Not touched |
-| Scheduler enable/disable toggle — OUT OF SCOPE | Not touched |
-| Full frontend gate | Task 7 |
+| Spec requirement                                                                   | Task / Step       |
+| ---------------------------------------------------------------------------------- | ----------------- |
+| PluginConfigsTab: Add Config → primary                                             | Task 1, Step 1.4  |
+| PluginConfigsTab: Edit (config row) → secondary sm                                 | Task 1, Step 1.5  |
+| PluginConfigsTab: Discover → secondary sm + loading                                | Task 1, Step 1.5  |
+| PluginConfigsTab: Delete → danger sm                                               | Task 1, Step 1.5  |
+| PluginConfigsTab: Add Plugin Type → primary                                        | Task 1, Step 1.6  |
+| PluginConfigsTab: Remove (allowlist row) → danger sm                               | Task 1, Step 1.7  |
+| PluginConfigsTab: Edit (type settings row) → secondary sm                          | Task 1, Step 1.8  |
+| PluginConfigsTab: Reset (type settings row) → danger sm                            | Task 1, Step 1.8  |
+| PluginConfigsTab: Advanced: Edit as JSON → secondary sm                            | Task 1, Step 1.9  |
+| PluginConfigsTab: Return to form editor → secondary sm                             | Task 1, Step 1.9  |
+| PluginConfigsTab: Config modal Cancel → secondary                                  | Task 1, Step 1.10 |
+| PluginConfigsTab: Config modal Test → secondary + loading                          | Task 1, Step 1.10 |
+| PluginConfigsTab: Config modal Create/Update → primary                             | Task 1, Step 1.10 |
+| PluginConfigsTab: Allowlist modal Cancel → secondary                               | Task 1, Step 1.11 |
+| PluginConfigsTab: Allowlist modal Add → primary                                    | Task 1, Step 1.11 |
+| PluginConfigsTab: Type settings modal Cancel → secondary                           | Task 1, Step 1.12 |
+| PluginConfigsTab: Type settings modal Save → primary                               | Task 1, Step 1.12 |
+| SchedulerTab: Retry → primary                                                      | Task 2, Step 2.4  |
+| SchedulerTab: Edit (row) → secondary sm                                            | Task 2, Step 2.5  |
+| SchedulerTab: Run (row) → ghost sm + loading                                       | Task 2, Step 2.6  |
+| SchedulerTab: Cancel (modal) → secondary                                           | Task 2, Step 2.7  |
+| SchedulerTab: Save (modal) → primary + loading + no text-swap                      | Task 2, Step 2.8  |
+| SystemServicesSettings: Load Tokens → primary + loading                            | Task 3, Step 3.4  |
+| SystemServicesSettings: Refresh → secondary + loading                              | Task 3, Step 3.5  |
+| SystemServicesSettings: Create Token launcher → primary                            | Task 3, Step 3.6  |
+| SystemServicesSettings: Copy → ghost sm                                            | Task 3, Step 3.7  |
+| SystemServicesSettings: Modal Cancel → secondary                                   | Task 3, Step 3.8  |
+| SystemServicesSettings: Modal Create → primary + loading + no text-swap            | Task 3, Step 3.9  |
+| SystemServicesSettings: Revoke → danger sm                                         | Task 3, Step 3.10 |
+| EnrollmentTokenSettings: Load Tokens → primary + loading                           | Task 4, Step 4.3  |
+| EnrollmentTokenSettings: Refresh → secondary + loading                             | Task 4, Step 4.4  |
+| EnrollmentTokenSettings: Create Token launcher → primary                           | Task 4, Step 4.5  |
+| EnrollmentTokenSettings: Copy → ghost sm                                           | Task 4, Step 4.6  |
+| EnrollmentTokenSettings: Modal Cancel → secondary                                  | Task 4, Step 4.7  |
+| EnrollmentTokenSettings: Modal Create → primary + loading (no extra disabled gate) | Task 4, Step 4.8  |
+| AgentCertificateSettings: introduce saving state                                   | Task 5, Step 5.3  |
+| AgentCertificateSettings: Save → primary + loading + no text-swap                  | Task 5, Step 5.4  |
+| `<input>`, `<select>`, `<textarea>`, toggles — OUT OF SCOPE                        | Not touched       |
+| Scheduler enable/disable toggle — OUT OF SCOPE                                     | Not touched       |
+| Full frontend gate                                                                 | Task 7            |

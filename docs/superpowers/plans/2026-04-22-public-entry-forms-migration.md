@@ -30,15 +30,15 @@ if not, this plan blocks until that lands.
 Each `<input class={PUBLIC_ENTRY_INPUT_CLASS} ...>` migrates to `<Input>` with the following prop
 mapping:
 
-| Raw attribute | Input prop |
-| --- | --- |
-| `id="..."` | `id="..."` |
-| `type="..."` | `type="..."` |
-| `bind:value={x}` | `bind:value={x}` |
-| `autocomplete="..."` | `autocomplete="..."` |
+| Raw attribute                             | Input prop                                |
+| ----------------------------------------- | ----------------------------------------- |
+| `id="..."`                                | `id="..."`                                |
+| `type="..."`                              | `type="..."`                              |
+| `bind:value={x}`                          | `bind:value={x}`                          |
+| `autocomplete="..."`                      | `autocomplete="..."`                      |
 | `aria-invalid={err ? 'true' : undefined}` | dropped — Input derives from `error` prop |
-| `oninput={fn}` | `oninput={fn}` |
-| `placeholder="..."` | `placeholder="..."` |
+| `oninput={fn}`                            | `oninput={fn}`                            |
+| `placeholder="..."`                       | `placeholder="..."`                       |
 
 The `error` prop is passed to both `FormFieldRow` (for error-copy rendering) and `<Input>` (for
 `aria-invalid` + error-bg styling). `aria-invalid` bindings at call sites are dropped — `<Input>` sets
@@ -156,8 +156,8 @@ Read the file before editing to confirm exact input markup and surrounding conte
 In the `<script lang="ts">` block, add:
 
 ```ts
-import Input from '$lib/components/Input.svelte';
-import Link from '$lib/components/Link.svelte';
+import Input from "$lib/components/Input.svelte";
+import Link from "$lib/components/Link.svelte";
 ```
 
 Remove `PUBLIC_ENTRY_INPUT_CLASS` and `PUBLIC_ENTRY_LINK_CLASS` from the `PublicEntryShell`
@@ -166,7 +166,9 @@ destructured import. Keep `PUBLIC_ENTRY_FORM_CLASS`.
 After the trim the import line reads:
 
 ```ts
-import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+import PublicEntryShell, {
+  PUBLIC_ENTRY_FORM_CLASS,
+} from "$lib/components/ui/PublicEntryShell.svelte";
 ```
 
 - [ ] **Step 2: Migrate site 1 — registration-token input**
@@ -337,8 +339,8 @@ Read the file before editing to confirm exact markup.
 In the `<script lang="ts">` block, add:
 
 ```ts
-import Input from '$lib/components/Input.svelte';
-import Checkbox from '$lib/components/Checkbox.svelte';
+import Input from "$lib/components/Input.svelte";
+import Checkbox from "$lib/components/Checkbox.svelte";
 ```
 
 Remove `PUBLIC_ENTRY_INPUT_CLASS` and `PUBLIC_ENTRY_CHECKBOX_CLASS` from the `PublicEntryShell`
@@ -348,7 +350,9 @@ file — do not list it as a drop target.
 After the trim the import line reads:
 
 ```ts
-import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+import PublicEntryShell, {
+  PUBLIC_ENTRY_FORM_CLASS,
+} from "$lib/components/ui/PublicEntryShell.svelte";
 ```
 
 - [ ] **Step 2: Migrate site 1 — register-email input**
@@ -583,7 +587,7 @@ both be removed.
 Line 28 currently reads:
 
 ```ts
-import { PUBLIC_ENTRY_INPUT_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+import { PUBLIC_ENTRY_INPUT_CLASS } from "$lib/components/ui/PublicEntryShell.svelte";
 ```
 
 Delete this import line. The constant no longer exists in `PublicEntryShell.svelte` after Task 1.
@@ -593,7 +597,9 @@ Delete this import line. The constant no longer exists in `PublicEntryShell.svel
 Line 77 currently reads:
 
 ```ts
-expect(screen.getByLabelText('Email').className).toContain(PUBLIC_ENTRY_INPUT_CLASS);
+expect(screen.getByLabelText("Email").className).toContain(
+  PUBLIC_ENTRY_INPUT_CLASS,
+);
 ```
 
 Delete this line. After migration the Email input renders through `<Input>` with its own `BASE` class,
@@ -606,15 +612,15 @@ After the inline-error assertions in the existing login test, add assertions for
 `login-email` and `login-password` inputs:
 
 ```ts
-const emailInput = screen.getByLabelText('Email');
-expect(emailInput.getAttribute('id')).toBe('login-email');
-expect(emailInput.getAttribute('type')).toBe('email');
-expect(emailInput.getAttribute('autocomplete')).toBe('email');
+const emailInput = screen.getByLabelText("Email");
+expect(emailInput.getAttribute("id")).toBe("login-email");
+expect(emailInput.getAttribute("type")).toBe("email");
+expect(emailInput.getAttribute("autocomplete")).toBe("email");
 
-const passwordInput = screen.getByLabelText('Password');
-expect(passwordInput.getAttribute('id')).toBe('login-password');
-expect(passwordInput.getAttribute('type')).toBe('password');
-expect(passwordInput.getAttribute('autocomplete')).toBe('current-password');
+const passwordInput = screen.getByLabelText("Password");
+expect(passwordInput.getAttribute("id")).toBe("login-password");
+expect(passwordInput.getAttribute("type")).toBe("password");
+expect(passwordInput.getAttribute("autocomplete")).toBe("current-password");
 ```
 
 - [ ] **Step 4: Add `aria-describedby` wiring test for Input error state**
@@ -624,23 +630,30 @@ After an error is set on an Input and FormFieldRow renders the error copy, the `
 This verifies the `FormFieldRow` ↔ `Input` wiring from spec Q4.
 
 ```ts
-it('login-email Input aria-describedby points to FormFieldRow error copy id after error set', async () => {
+it("login-email Input aria-describedby points to FormFieldRow error copy id after error set", async () => {
   render(LoginPage);
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument(),
   );
 
   // Trigger a login attempt that sets loginFieldErrors.email
-  await fireEvent.input(screen.getByLabelText('Email'), { target: { value: 'bad' } });
-  await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'pw' } });
-  await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+  await fireEvent.input(screen.getByLabelText("Email"), {
+    target: { value: "bad" },
+  });
+  await fireEvent.input(screen.getByLabelText("Password"), {
+    target: { value: "pw" },
+  });
+  await fireEvent.click(screen.getByRole("button", { name: /log in/i }));
 
   await waitFor(() =>
-    expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText("Email")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    ),
   );
 
-  const emailInput = screen.getByLabelText('Email');
-  const describedById = emailInput.getAttribute('aria-describedby');
+  const emailInput = screen.getByLabelText("Email");
+  const describedById = emailInput.getAttribute("aria-describedby");
   expect(describedById).toBeTruthy();
   const errorNode = document.getElementById(describedById!);
   expect(errorNode).not.toBeNull();
@@ -655,40 +668,42 @@ gets populated — mirror the existing mock pattern in the test file.
 - [ ] **Step 5: Add test for conditionally-rendered registration-token input**
 
 ```ts
-it('registration-token Input renders type=text and autocomplete=off under registrationTokenRequired', async () => {
+it("registration-token Input renders type=text and autocomplete=off under registrationTokenRequired", async () => {
   page.url = new URL(
-    'http://localhost/login#registration_token_required=true&registration_code=RC123'
+    "http://localhost/login#registration_token_required=true&registration_code=RC123",
   ) as typeof page.url;
 
   render(LoginPage);
 
   await waitFor(() =>
-    expect(screen.getByLabelText('Registration token')).toBeInTheDocument()
+    expect(screen.getByLabelText("Registration token")).toBeInTheDocument(),
   );
 
-  const tokenInput = screen.getByLabelText('Registration token');
-  expect(tokenInput.getAttribute('id')).toBe('registration-token');
-  expect(tokenInput.getAttribute('type')).toBe('text');
-  expect(tokenInput.getAttribute('autocomplete')).toBe('off');
+  const tokenInput = screen.getByLabelText("Registration token");
+  expect(tokenInput.getAttribute("id")).toBe("registration-token");
+  expect(tokenInput.getAttribute("type")).toBe("text");
+  expect(tokenInput.getAttribute("autocomplete")).toBe("off");
 });
 ```
 
 - [ ] **Step 6: Add test for conditionally-rendered link-password input**
 
 ```ts
-it('link-password Input renders type=password and autocomplete=current-password under linkRequired', async () => {
+it("link-password Input renders type=password and autocomplete=current-password under linkRequired", async () => {
   page.url = new URL(
-    'http://localhost/login?link_required=true&email=user@example.com'
+    "http://localhost/login?link_required=true&email=user@example.com",
   ) as typeof page.url;
 
   render(LoginPage);
 
-  await waitFor(() => expect(screen.getByLabelText('Password')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByLabelText("Password")).toBeInTheDocument(),
+  );
 
-  const linkPwInput = screen.getByLabelText('Password');
-  expect(linkPwInput.getAttribute('id')).toBe('link-password');
-  expect(linkPwInput.getAttribute('type')).toBe('password');
-  expect(linkPwInput.getAttribute('autocomplete')).toBe('current-password');
+  const linkPwInput = screen.getByLabelText("Password");
+  expect(linkPwInput.getAttribute("id")).toBe("link-password");
+  expect(linkPwInput.getAttribute("type")).toBe("password");
+  expect(linkPwInput.getAttribute("autocomplete")).toBe("current-password");
 });
 ```
 
@@ -698,47 +713,50 @@ Add this to `frontend/src/routes/public-entry.test.ts`, importing `Checkbox` at 
 file alongside existing imports:
 
 ```ts
-import Checkbox from '$lib/components/Checkbox.svelte';
+import Checkbox from "$lib/components/Checkbox.svelte";
 ```
 
 Then add the test:
 
 ```ts
-it('Checkbox renders opacity-40 class when disabled=true', () => {
-  const { container } = render(Checkbox, { id: 'test-cb', disabled: true });
-  const checkbox = container.querySelector('#test-cb') as HTMLInputElement;
+it("Checkbox renders opacity-40 class when disabled=true", () => {
+  const { container } = render(Checkbox, { id: "test-cb", disabled: true });
+  const checkbox = container.querySelector("#test-cb") as HTMLInputElement;
   expect(checkbox).not.toBeNull();
-  const wrapper = checkbox.closest('[class*="opacity"]') ?? checkbox.parentElement;
-  expect(wrapper?.className ?? checkbox.className).toContain('opacity-40');
+  const wrapper =
+    checkbox.closest('[class*="opacity"]') ?? checkbox.parentElement;
+  expect(wrapper?.className ?? checkbox.className).toContain("opacity-40");
 });
 ```
 
 - [ ] **Step 8: Add Checkbox primitive contract test**
 
 ```ts
-it('show-token Checkbox renders with id=show-token, toggles field, and fires onchange exactly once per click', async () => {
-  page.url = new URL('http://localhost/register') as typeof page.url;
+it("show-token Checkbox renders with id=show-token, toggles field, and fires onchange exactly once per click", async () => {
+  page.url = new URL("http://localhost/register") as typeof page.url;
 
   render(RegisterPage);
 
-  const checkbox = document.querySelector('#show-token') as HTMLInputElement;
+  const checkbox = document.querySelector("#show-token") as HTMLInputElement;
   expect(checkbox).not.toBeNull();
-  expect(checkbox.getAttribute('type')).toBe('checkbox');
+  expect(checkbox.getAttribute("type")).toBe("checkbox");
   expect(checkbox.checked).toBe(false);
 
   const handler = vi.fn();
-  checkbox.addEventListener('change', handler);
+  checkbox.addEventListener("change", handler);
 
   await fireEvent.click(checkbox);
 
   expect(handler).toHaveBeenCalledTimes(1);
   expect(checkbox.checked).toBe(true);
-  await waitFor(() => expect(screen.getByLabelText('Invite token')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByLabelText("Invite token")).toBeInTheDocument(),
+  );
 
   await fireEvent.click(checkbox);
   expect(handler).toHaveBeenCalledTimes(2);
   await waitFor(() =>
-    expect(screen.queryByLabelText('Invite token')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Invite token")).not.toBeInTheDocument(),
   );
 });
 ```
@@ -746,41 +764,49 @@ it('show-token Checkbox renders with id=show-token, toggles field, and fires onc
 - [ ] **Step 9: Add Link primitive contract test for the login footer link**
 
 ```ts
-it('login footer Register link renders as <Link> with href=/register', async () => {
+it("login footer Register link renders as <Link> with href=/register", async () => {
   render(LoginPage);
 
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument(),
   );
 
-  const registerLink = screen.getByRole('link', { name: 'Register' });
-  expect(registerLink).toHaveAttribute('href', '/register');
-  expect(registerLink.className).toContain('font-medium');
-  expect(registerLink.className).toContain('underline');
+  const registerLink = screen.getByRole("link", { name: "Register" });
+  expect(registerLink).toHaveAttribute("href", "/register");
+  expect(registerLink.className).toContain("font-medium");
+  expect(registerLink.className).toContain("underline");
 });
 ```
 
 - [ ] **Step 10: Add regression guard — deleted class literal strings not in DOM**
 
 ```ts
-it('regression: deleted PUBLIC_ENTRY_INPUT/CHECKBOX/LINK_CLASS literal strings absent from DOM', async () => {
+it("regression: deleted PUBLIC_ENTRY_INPUT/CHECKBOX/LINK_CLASS literal strings absent from DOM", async () => {
   render(LoginPage);
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument(),
   );
   // Input class fragment
-  expect(document.body.innerHTML).not.toContain('rounded-lg border border-[var(--border-default)]');
+  expect(document.body.innerHTML).not.toContain(
+    "rounded-lg border border-[var(--border-default)]",
+  );
   // Link class fragment
-  expect(document.body.innerHTML).not.toContain('hover:text-[var(--accent-bright)] focus-visible:outline-none');
+  expect(document.body.innerHTML).not.toContain(
+    "hover:text-[var(--accent-bright)] focus-visible:outline-none",
+  );
 
   // Checkbox class fragment — needs register page
   cleanup();
-  page.url = new URL('http://localhost/register') as typeof page.url;
+  page.url = new URL("http://localhost/register") as typeof page.url;
   render(RegisterPage);
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Register' })).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Register" }),
+    ).toBeInTheDocument(),
   );
-  expect(document.body.innerHTML).not.toContain('checkbox h-4 w-4 rounded border-[var(--border-default)]');
+  expect(document.body.innerHTML).not.toContain(
+    "checkbox h-4 w-4 rounded border-[var(--border-default)]",
+  );
 });
 ```
 
@@ -842,24 +868,27 @@ After re-baseline, add a Playwright assertion block (or a separate test `it` blo
 text pair in both themes. Use the `getComputedStyle` approach:
 
 ```ts
-test('Input error state meets WCAG AA contrast in light theme', async ({ page }) => {
-  await page.goto('/login');
+test("Input error state meets WCAG AA contrast in light theme", async ({
+  page,
+}) => {
+  await page.goto("/login");
   // Force a field error (e.g., submit with empty fields)
-  await page.getByRole('button', { name: /log in/i }).click();
+  await page.getByRole("button", { name: /log in/i }).click();
   // Get the error-state input background and the text color
-  const errorInput = page.locator('#login-email');
-  const bg = await errorInput.evaluate((el) =>
-    getComputedStyle(el).backgroundColor
+  const errorInput = page.locator("#login-email");
+  const bg = await errorInput.evaluate(
+    (el) => getComputedStyle(el).backgroundColor,
   );
-  const color = await errorInput.evaluate((el) =>
-    getComputedStyle(el).color
-  );
+  const color = await errorInput.evaluate((el) => getComputedStyle(el).color);
   // Parse rgb(r, g, b) strings to relative luminance and assert contrast >= 4.5
   function relativeLuminance(rgb: string): number {
-    const [r, g, b] = rgb.match(/\d+/g)!.map(Number).map((c) => {
-      const s = c / 255;
-      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-    });
+    const [r, g, b] = rgb
+      .match(/\d+/g)!
+      .map(Number)
+      .map((c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
   function contrastRatio(l1: number, l2: number): number {
@@ -870,18 +899,25 @@ test('Input error state meets WCAG AA contrast in light theme', async ({ page })
   expect(ratio).toBeGreaterThanOrEqual(4.5);
 });
 
-test('Input error state meets WCAG AA contrast in dark theme', async ({ page }) => {
-  await page.goto('/login');
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await page.getByRole('button', { name: /log in/i }).click();
-  const errorInput = page.locator('#login-email');
-  const bg = await errorInput.evaluate((el) => getComputedStyle(el).backgroundColor);
+test("Input error state meets WCAG AA contrast in dark theme", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("button", { name: /log in/i }).click();
+  const errorInput = page.locator("#login-email");
+  const bg = await errorInput.evaluate(
+    (el) => getComputedStyle(el).backgroundColor,
+  );
   const color = await errorInput.evaluate((el) => getComputedStyle(el).color);
   function relativeLuminance(rgb: string): number {
-    const [r, g, b] = rgb.match(/\d+/g)!.map(Number).map((c) => {
-      const s = c / 255;
-      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-    });
+    const [r, g, b] = rgb
+      .match(/\d+/g)!
+      .map(Number)
+      .map((c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
   function contrastRatio(l1: number, l2: number): number {
@@ -941,10 +977,10 @@ Expected: 0 failures. All non-public-entry snapshot suites unaffected.
 
 ## Commit summary
 
-| # | Commit | Files |
-| --- | --- | --- |
-| 1 | Delete 3 utility-class exports | `PublicEntryShell.svelte` |
-| 2 | Migrate 4 inputs + 1 footer link | `login/+page.svelte` |
-| 3 | Migrate 5 inputs + 1 checkbox | `register/+page.svelte` |
-| 4 | Update unit tests | `public-entry.test.ts` |
-| 5 | Re-baseline e2e snapshots | `public-entry.spec.ts-snapshots/` |
+| #   | Commit                           | Files                             |
+| --- | -------------------------------- | --------------------------------- |
+| 1   | Delete 3 utility-class exports   | `PublicEntryShell.svelte`         |
+| 2   | Migrate 4 inputs + 1 footer link | `login/+page.svelte`              |
+| 3   | Migrate 5 inputs + 1 checkbox    | `register/+page.svelte`           |
+| 4   | Update unit tests                | `public-entry.test.ts`            |
+| 5   | Re-baseline e2e snapshots        | `public-entry.spec.ts-snapshots/` |

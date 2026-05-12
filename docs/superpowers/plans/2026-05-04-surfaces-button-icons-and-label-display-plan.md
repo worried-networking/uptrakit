@@ -1198,7 +1198,9 @@ describe("resolveIcon", () => {
     const result = resolveIcon("Trash2");
     expect(result.ok).toBe(false);
     expect(result.component).toBe(Box);
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[surfaces] Unknown icon name: "Trash2"');
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[surfaces] Unknown icon name: "Trash2"',
+    );
   });
 
   it("returns the Box fallback without logging when the name is null", () => {
@@ -1819,7 +1821,9 @@ it("keeps the context-gated outer span and disables the inner button", () => {
     requiredContextParam: "config_id",
   });
 
-  const gateSpan = container.querySelector('span[title="Select a configuration first"]');
+  const gateSpan = container.querySelector(
+    'span[title="Select a configuration first"]',
+  );
   expect(gateSpan).not.toBeNull();
   const button = container.querySelector("button");
   expect(button?.disabled).toBe(true);
@@ -2146,7 +2150,9 @@ it('passes labelDisplay="auto" to children when interaction has icon', () => {
   });
 
   // labelDisplay='auto' renders the label inside .button-label-auto.
-  expect(container.querySelector(".button-label-auto")?.textContent).toBe("Sync");
+  expect(container.querySelector(".button-label-auto")?.textContent).toBe(
+    "Sync",
+  );
 });
 
 it('passes labelDisplay="always" to children when interaction has no icon', () => {
@@ -2256,7 +2262,9 @@ it("row-action wrapper uses flex-nowrap and @container/buttons (entity-link path
     },
   });
 
-  const wrappers = container.querySelectorAll("td .flex.flex-nowrap.\\@container\\/buttons");
+  const wrappers = container.querySelectorAll(
+    "td .flex.flex-nowrap.\\@container\\/buttons",
+  );
   expect(wrappers.length).toBeGreaterThan(0);
   expect(container.querySelector(".sr-only")?.textContent).toBe("Remove");
 });
@@ -2276,7 +2284,9 @@ it("row-action wrapper uses flex-nowrap and @container/buttons (rowActions snipp
     },
   });
 
-  const wrapper = container.querySelector(".flex.flex-nowrap.\\@container\\/buttons");
+  const wrapper = container.querySelector(
+    ".flex.flex-nowrap.\\@container\\/buttons",
+  );
   expect(wrapper).not.toBeNull();
   expect(container.querySelector(".sr-only")?.textContent).toBe("Remove");
 });

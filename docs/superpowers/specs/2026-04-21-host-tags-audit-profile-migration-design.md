@@ -126,7 +126,7 @@ The row-level Edit and Delete actions themselves are `<ContextMenuItem label="â€
     `<Button variant="primary" loading={creating} disabled={!newTokenName.trim()} onclick={handleCreate}>Create</Button>`.
     Note: the Create submit in the New API Token modal is already migrated as of Wave 3; skip it. The `Button` import at
     line 10 already exists. Cancel (line 208) is the only remaining create-state site. The `{creating ? 'Creating...' :
-    'Create'}` text-swap is already removed; the `disabled={submitting || !newTokenName.trim()}` collapse is already
+'Create'}` text-swap is already removed; the `disabled={submitting || !newTokenName.trim()}` collapse is already
     applied. Created state footer:
     `<Button variant="secondary" onclick={() => copyToken(createdToken!)}>Copy</Button>` +
     `<Button variant="primary" onclick={closeCreateModal}>Done</Button>`. Copy is a side-effect action (writes to

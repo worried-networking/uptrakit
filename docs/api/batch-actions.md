@@ -9,7 +9,10 @@ containing an `action` string and an `ids` UUID array. Responses use partial-suc
 ```json
 {
   "action": "approve",
-  "ids": ["550e8400-e29b-41d4-a716-446655440000", "6ba7b810-9dad-11d1-80b4-00c04fd430c8"]
+  "ids": [
+    "550e8400-e29b-41d4-a716-446655440000",
+    "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  ]
 }
 ```
 
@@ -29,26 +32,27 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 
 ```json
 {
-  "succeeded": [
-    { "id": "550e8400-e29b-41d4-a716-446655440000" }
-  ],
+  "succeeded": [{ "id": "550e8400-e29b-41d4-a716-446655440000" }],
   "failed": [
-    { "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "error": "service is not in Pending state" }
+    {
+      "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "error": "service is not in Pending state"
+    }
   ]
 }
 ```
 
 ## Endpoints
 
-| Endpoint | Actions | Permission |
-| --- | --- | --- |
-| `POST /api/v1/services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveServices`, `CanRejectServices`, `CanRemoveServices`) |
-| `POST /api/v1/system-services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveSystemServices`, `CanRejectSystemServices`, `CanRemoveSystemServices`) |
-| `POST /api/v1/software-items/batch` | `approve`, `delete` | `CanDeleteSoftware` |
-| `POST /api/v1/hosts/batch` | `deactivate` | `CanDeactivateHosts` |
-| `POST /api/v1/autodiscovery/ignores/batch` | `delete` | `CanManageIgnores` |
-| `POST /api/v1/plugin-configs/batch` | `delete` | `CanManageCommands` |
-| `POST /api/v1/host-tags/batch` | `delete` | `CanUpdateHosts` |
+| Endpoint                                   | Actions                           | Permission                                                                                    |
+| ------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `POST /api/v1/services/batch`              | `approve`, `reject`, `deactivate` | Per-action (`CanApproveServices`, `CanRejectServices`, `CanRemoveServices`)                   |
+| `POST /api/v1/system-services/batch`       | `approve`, `reject`, `deactivate` | Per-action (`CanApproveSystemServices`, `CanRejectSystemServices`, `CanRemoveSystemServices`) |
+| `POST /api/v1/software-items/batch`        | `approve`, `delete`               | `CanDeleteSoftware`                                                                           |
+| `POST /api/v1/hosts/batch`                 | `deactivate`                      | `CanDeactivateHosts`                                                                          |
+| `POST /api/v1/autodiscovery/ignores/batch` | `delete`                          | `CanManageIgnores`                                                                            |
+| `POST /api/v1/plugin-configs/batch`        | `delete`                          | `CanManageCommands`                                                                           |
+| `POST /api/v1/host-tags/batch`             | `delete`                          | `CanUpdateHosts`                                                                              |
 
 All endpoints require a valid Bearer token. Permission extractors are declared on each route
 handler and reflected in the OpenAPI spec via `x-required-permission`.
@@ -95,11 +99,11 @@ transactional patterns and trigger the same WebSocket and admin event broadcasts
 
 ## Error Scenarios
 
-| Status | Condition |
-| --- | --- |
-| `400 Bad Request` | Empty `action`, empty `ids`, more than 100 IDs, or unknown action string. |
-| `401 Unauthorized` | Missing or invalid Bearer token. |
-| `403 Forbidden` | Token lacks the required permission for the endpoint. |
+| Status                     | Condition                                                                                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `400 Bad Request`          | Empty `action`, empty `ids`, more than 100 IDs, or unknown action string.                                                                                                                                                      |
+| `401 Unauthorized`         | Missing or invalid Bearer token.                                                                                                                                                                                               |
+| `403 Forbidden`            | Token lacks the required permission for the endpoint.                                                                                                                                                                          |
 | `200 OK` (partial success) | Request is valid but some items could not be processed. Items may fail because they are not found, are in the wrong state for the requested action, or violate a constraint. Each failure includes a per-item `error` message. |
 
 ## Shared Surface Batch Actions
@@ -120,10 +124,10 @@ The frontend provides a multi-select UI for batch actions on all supported list 
 
 ### Shared components
 
-| Component | Purpose |
-| --- | --- |
-| `BatchActionBar.svelte` | Fixed-position toolbar at the viewport bottom. Shows selected count, action buttons (styled per `destructive` flag), and a deselect-all button. |
-| `BatchResultDialog.svelte` | Modal that displays partial-success results with per-item error messages. Only shown when failures occur; pure success uses a toast instead. |
+| Component                  | Purpose                                                                                                                                         |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BatchActionBar.svelte`    | Fixed-position toolbar at the viewport bottom. Shows selected count, action buttons (styled per `destructive` flag), and a deselect-all button. |
+| `BatchResultDialog.svelte` | Modal that displays partial-success results with per-item error messages. Only shown when failures occur; pure success uses a toast instead.    |
 
 ### Page integration pattern
 
@@ -145,19 +149,19 @@ action is invoked with an `ids` array in the params.
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/web-api-types/src/batch_actions.rs` | `BatchActionRequest`, `BatchActionResponse`, and validation |
-| `crates/ui/web-api/src/routes/services.rs` | `batch_services` handler |
-| `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
-| `crates/ui/web-api/src/routes/software_items/mod.rs` | `batch_software_items` handler |
-| `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
-| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
-| `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
-| `crates/ui/web-api/src/routes/host_tags.rs` | `batch_host_tags` handler |
+| File                                                         | Purpose                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `crates/shared/web-api-types/src/batch_actions.rs`           | `BatchActionRequest`, `BatchActionResponse`, and validation   |
+| `crates/ui/web-api/src/routes/services.rs`                   | `batch_services` handler                                      |
+| `crates/ui/web-api/src/routes/system_services.rs`            | `batch_system_services` handler                               |
+| `crates/ui/web-api/src/routes/software_items/mod.rs`         | `batch_software_items` handler                                |
+| `crates/ui/web-api/src/routes/hosts.rs`                      | `batch_hosts` handler                                         |
+| `crates/ui/web-api/src/routes/autodiscovery.rs`              | `batch_autodiscovery_ignores` handler                         |
+| `crates/ui/web-api/src/routes/plugin_configs.rs`             | `batch_plugin_configs` handler                                |
+| `crates/ui/web-api/src/routes/host_tags.rs`                  | `batch_host_tags` handler                                     |
 | `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy compatibility schema carrying the `batch_action` field |
-| `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
-| `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
-| `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar |
-| `frontend/src/lib/components/BatchResultDialog.svelte` | Shared partial-success results dialog |
-| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Shared surface table with batch support |
+| `frontend/src/lib/types.ts`                                  | `BatchActionRequest`, `BatchActionResponse` TypeScript types  |
+| `frontend/src/lib/api.ts`                                    | `batchServices`, `batchHosts`, etc. API client functions      |
+| `frontend/src/lib/components/BatchActionBar.svelte`          | Shared batch action toolbar                                   |
+| `frontend/src/lib/components/BatchResultDialog.svelte`       | Shared partial-success results dialog                         |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte`   | Shared surface table with batch support                       |

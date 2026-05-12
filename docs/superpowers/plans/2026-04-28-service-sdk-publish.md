@@ -24,16 +24,16 @@ xtask crate with a `sync-sdk` command that generates `src/generated/` from `uptr
 `uptrakit-service-sdk` lives at `crates/shared/service-sdk/`. It currently has these workspace path
 deps that prevent crates.io publication:
 
-| Dep | How used | Resolution |
-| --- | --- | --- |
-| `uptrakit-backoff` | `pub use uptrakit_backoff::Backoff` in `lib.rs` | Inline `Backoff` struct in `src/backoff.rs` |
-| `uptrakit-build-info` | `BuildInfo::current()` + `.render_human()` in `main_helper.rs` | Inline minimal `BuildInfo` in `src/build_info.rs` |
-| `uptrakit-directories` | `AppDirs`, `create_secure_dir`, `write_secure_file_str`, `DirectoryError`, `Result` | Copy `src/dirs.rs` from the source crate |
-| `uptrakit-tracing-init` | `pub use uptrakit_tracing_init::*` in `src/tracing_init.rs` | Copy full source into `src/tracing_init.rs` |
-| `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs` and `shared_types.rs` | Inline macro in private `src/macros.rs` |
-| `uptrakit-crypto` | `sealed_box_decrypt_base64` in `src/sensitive_params.rs` | Gate behind `sensitive-params` feature |
-| `uptrakit-wire` | Wire types throughout, `ServiceTransport`, `ServiceMessage`, etc. | Generate into `src/generated/wire/` via xtask |
-| `uptrakit-shared-types` | `hex::encode` (3 call sites in `ca.rs`), `SecretString` (1 use in `identity.rs`); also referenced throughout wire source (payloads, pagination, etc.) | Included in codegen: copy source into `src/generated/shared_types/`; add `hex` dep directly for `ca.rs` |
+| Dep                      | How used                                                                                                                                              | Resolution                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `uptrakit-backoff`       | `pub use uptrakit_backoff::Backoff` in `lib.rs`                                                                                                       | Inline `Backoff` struct in `src/backoff.rs`                                                             |
+| `uptrakit-build-info`    | `BuildInfo::current()` + `.render_human()` in `main_helper.rs`                                                                                        | Inline minimal `BuildInfo` in `src/build_info.rs`                                                       |
+| `uptrakit-directories`   | `AppDirs`, `create_secure_dir`, `write_secure_file_str`, `DirectoryError`, `Result`                                                                   | Copy `src/dirs.rs` from the source crate                                                                |
+| `uptrakit-tracing-init`  | `pub use uptrakit_tracing_init::*` in `src/tracing_init.rs`                                                                                           | Copy full source into `src/tracing_init.rs`                                                             |
+| `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs` and `shared_types.rs`                                                                                         | Inline macro in private `src/macros.rs`                                                                 |
+| `uptrakit-crypto`        | `sealed_box_decrypt_base64` in `src/sensitive_params.rs`                                                                                              | Gate behind `sensitive-params` feature                                                                  |
+| `uptrakit-wire`          | Wire types throughout, `ServiceTransport`, `ServiceMessage`, etc.                                                                                     | Generate into `src/generated/wire/` via xtask                                                           |
+| `uptrakit-shared-types`  | `hex::encode` (3 call sites in `ca.rs`), `SecretString` (1 use in `identity.rs`); also referenced throughout wire source (payloads, pagination, etc.) | Included in codegen: copy source into `src/generated/shared_types/`; add `hex` dep directly for `ca.rs` |
 
 `uptrakit-wire` depends on `uptrakit-surfaces` and `uptrakit-shared-types`. All three have
 zero workspace path deps themselves (only third-party crates: `serde`, `uuid`, `time`, etc.).

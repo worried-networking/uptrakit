@@ -24,13 +24,13 @@ Hard rules:
 
 ## Slot Registry
 
-| Slot ID | Host container | Visual rule |
-| --- | --- | --- |
-| `surface.page` | Top-level nav page | Same shell and nav treatment as built-in top-level pages |
-| `settings.tabs` | Settings tab strip | Same `TabStrip` and body container as built-in settings tabs |
-| `settings.below.global` | Global settings body | Same inline card stack as built-in global settings content |
-| `software.tabs` | Software tab strip | Same `TabStrip` and body container as built-in software tabs |
-| `host_detail.tabs` | Host detail body | Same inline card stack as built-in host detail content |
+| Slot ID                           | Host container                  | Visual rule                                                          |
+| --------------------------------- | ------------------------------- | -------------------------------------------------------------------- |
+| `surface.page`                    | Top-level nav page              | Same shell and nav treatment as built-in top-level pages             |
+| `settings.tabs`                   | Settings tab strip              | Same `TabStrip` and body container as built-in settings tabs         |
+| `settings.below.global`           | Global settings body            | Same inline card stack as built-in global settings content           |
+| `software.tabs`                   | Software tab strip              | Same `TabStrip` and body container as built-in software tabs         |
+| `host_detail.tabs`                | Host detail body                | Same inline card stack as built-in host detail content               |
 | `software_item.host_context_menu` | Software-item host context menu | Same launcher-row shell and standard modal shell as built-in actions |
 
 ![Sidebar navigation showing built-in and surface.page entries at equal visual weight](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
@@ -67,19 +67,19 @@ Targeted-provider rules:
 Surface-rendered content uses the same shared primitive set as built-in UI. No surface-only visual
 widgets are allowed.
 
-| Surface Primitive | Design treatment |
-| --- | --- |
-| `Section` | Vertical stack with `16px` gap |
-| `TextBlock` | Standard body copy at `text-sm text-[var(--text-primary)]` |
-| `KeyValue` | Same label/value rhythm as settings and detail views |
-| `Table` | Canonical `DataTable` treatment |
-| `Form` | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms |
-| `ActionBar` | Right-aligned action row with `flex gap-2 justify-end` |
-| `Tabs` | Canonical `TabStrip` |
-| `Callout` | Semantic info/warning/danger via shared `Callout` component |
-| `EmptyState` | Canonical `EmptyState` component |
-| `ModalTrigger` | Standard `ModalShell` |
-| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`) |
+| Surface Primitive | Design treatment                                                             |
+| ----------------- | ---------------------------------------------------------------------------- |
+| `Section`         | Vertical stack with `16px` gap                                               |
+| `TextBlock`       | Standard body copy at `text-sm text-[var(--text-primary)]`                   |
+| `KeyValue`        | Same label/value rhythm as settings and detail views                         |
+| `Table`           | Canonical `DataTable` treatment                                              |
+| `Form`            | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms |
+| `ActionBar`       | Right-aligned action row with `flex gap-2 justify-end`                       |
+| `Tabs`            | Canonical `TabStrip`                                                         |
+| `Callout`         | Semantic info/warning/danger via shared `Callout` component                  |
+| `EmptyState`      | Canonical `EmptyState` component                                             |
+| `ModalTrigger`    | Standard `ModalShell`                                                        |
+| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`)         |
 
 ---
 
@@ -97,13 +97,13 @@ render their own equivalent selector.
 ```typescript
 // frontend/src/lib/surfaces/contract.ts
 export interface SurfaceContextSelector {
-  param_key: string;           // key injected into baseParams when a value is selected
-  label: string;               // ProviderSelector dropdown label
-  all_option_label: string;    // label for the "no filter / all" option (empty-string value)
-  rest_api_path: string;       // GET endpoint; response must be an array or { items: [...] }
-  value_field: string;         // field on each item used as the option value
-  label_field: string;         // field on each item used as the option display label
-  required_for_interactions: string[];  // interaction IDs that are disabled until a non-empty value is selected
+  param_key: string; // key injected into baseParams when a value is selected
+  label: string; // ProviderSelector dropdown label
+  all_option_label: string; // label for the "no filter / all" option (empty-string value)
+  rest_api_path: string; // GET endpoint; response must be an array or { items: [...] }
+  value_field: string; // field on each item used as the option value
+  label_field: string; // field on each item used as the option display label
+  required_for_interactions: string[]; // interaction IDs that are disabled until a non-empty value is selected
 }
 ```
 
@@ -136,7 +136,7 @@ When a context selector is present and `selectedContextValue` is non-empty, `Sur
 const effectiveBaseParams = $derived(
   contextSelector && selectedContextValue
     ? { ...baseParams, [contextSelector.param_key]: selectedContextValue }
-    : { ...baseParams }
+    : { ...baseParams },
 );
 ```
 
@@ -147,10 +147,10 @@ includes `base_params`. No manual reload is required.
 
 `SurfaceReadPanel` derives two props from the context selector and passes them down to `SurfaceRenderer`:
 
-| Prop | Source | Purpose |
-| --- | --- | --- |
-| `requiredContextParam` | `contextSelector.param_key` | The key that must be non-empty for gated interactions |
-| `requiredForInteractionIds` | `contextSelector.required_for_interactions` | Which interaction IDs are gated |
+| Prop                        | Source                                      | Purpose                                               |
+| --------------------------- | ------------------------------------------- | ----------------------------------------------------- |
+| `requiredContextParam`      | `contextSelector.param_key`                 | The key that must be non-empty for gated interactions |
+| `requiredForInteractionIds` | `contextSelector.required_for_interactions` | Which interaction IDs are gated                       |
 
 `SurfaceRenderer` accepts both props and forwards them to `SurfaceActionBar` when rendering an `action_bar`
 node. `SurfaceActionBar` forwards `requiredContextParam` selectively — only to buttons whose
@@ -203,14 +203,14 @@ Rules for this pattern:
 
 **Status:** `Implemented`
 
-| State ID | Rendering rule |
-| --- | --- |
-| `loading` | Loading text or spinner where shape is not known; no skeleton component exists |
-| `permission_denied` | `EmptyState` or `Callout` explanation (no actionable controls) |
-| `no_compatible_provider` | Shared `EmptyState` body — never a toast |
-| `contract_mismatch` | `Callout` with `warning` tone |
-| `hydration_action_failure` | Inline `Callout` with `danger` tone; keep layout intact |
-| `no_surface_content` | Structural slots stay structural; non-structural slots omit themselves |
+| State ID                   | Rendering rule                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `loading`                  | Loading text or spinner where shape is not known; no skeleton component exists |
+| `permission_denied`        | `EmptyState` or `Callout` explanation (no actionable controls)                 |
+| `no_compatible_provider`   | Shared `EmptyState` body — never a toast                                       |
+| `contract_mismatch`        | `Callout` with `warning` tone                                                  |
+| `hydration_action_failure` | Inline `Callout` with `danger` tone; keep layout intact                        |
+| `no_surface_content`       | Structural slots stay structural; non-structural slots omit themselves         |
 
 ---
 
@@ -253,12 +253,12 @@ The following pairs and matrices are mandatory for CI to pass:
 
 Required slot-state fixtures:
 
-| Slot | Required states |
-| --- | --- |
-| `surface.page` | `loaded`, `permission_denied`, targeted `no_compatible_provider`, `contract_mismatch`, `hydration_action_failure` |
-| `settings.tabs`, `software.tabs` | `loaded`, `permission_denied`, targeted `no_compatible_provider`, `contract_mismatch`, `no_surface_content` |
+| Slot                                        | Required states                                                                                                            |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `surface.page`                              | `loaded`, `permission_denied`, targeted `no_compatible_provider`, `contract_mismatch`, `hydration_action_failure`          |
+| `settings.tabs`, `software.tabs`            | `loaded`, `permission_denied`, targeted `no_compatible_provider`, `contract_mismatch`, `no_surface_content`                |
 | `settings.below.global`, `host_detail.tabs` | `loaded`, `permission_denied`, targeted `no_compatible_provider`, `contract_mismatch`, `hydration_action_failure`, omitted |
-| `software_item.host_context_menu` | launcher row, opened modal, fallback, omitted |
+| `software_item.host_context_menu`           | launcher row, opened modal, fallback, omitted                                                                              |
 
 ---
 
@@ -334,14 +334,14 @@ Governance file: `frontend/tests/e2e/ui-parity-waivers.json`
 
 Every waiver entry must include:
 
-| Field | Description |
-| --- | --- |
-| `scope` | Affected pair or slot identifier |
-| `owner` | Responsible team or engineer |
-| `expiry_date` | ISO date after which the waiver is invalid |
-| `capture_region` | CSS selector or `data-parity-region` value |
-| `justification` | Short explanation of the known difference |
-| `review_ref` | GitHub PR number in `PR-NNNN` format, e.g. `PR-1234` |
+| Field            | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `scope`          | Affected pair or slot identifier                     |
+| `owner`          | Responsible team or engineer                         |
+| `expiry_date`    | ISO date after which the waiver is invalid           |
+| `capture_region` | CSS selector or `data-parity-region` value           |
+| `justification`  | Short explanation of the known difference            |
+| `review_ref`     | GitHub PR number in `PR-NNNN` format, e.g. `PR-1234` |
 
 Example:
 

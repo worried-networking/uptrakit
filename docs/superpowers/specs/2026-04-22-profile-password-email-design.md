@@ -47,14 +47,14 @@ No combined OIDC + password auth is planned. The two paths are mutually exclusiv
 
 Migration: `m20260422_000001_email_change_request`
 
-| Column       | Type              | Notes                                              |
-|--------------|-------------------|----------------------------------------------------|
-| `id`         | `Uuid`            | Primary key                                        |
-| `user_id`    | `Uuid`            | FK → `user.id` CASCADE DELETE; UNIQUE              |
-| `new_email`  | `EncryptedString` | Encrypted at rest via `uptrakit_crypto`            |
-| `token_hash` | `String`          | Output of `hash_token()` — raw token never stored  |
-| `expires_at` | `OffsetDateTime`  | 24 h from creation                                 |
-| `created_at` | `OffsetDateTime`  |                                                    |
+| Column       | Type              | Notes                                             |
+| ------------ | ----------------- | ------------------------------------------------- |
+| `id`         | `Uuid`            | Primary key                                       |
+| `user_id`    | `Uuid`            | FK → `user.id` CASCADE DELETE; UNIQUE             |
+| `new_email`  | `EncryptedString` | Encrypted at rest via `uptrakit_crypto`           |
+| `token_hash` | `String`          | Output of `hash_token()` — raw token never stored |
+| `expires_at` | `OffsetDateTime`  | 24 h from creation                                |
+| `created_at` | `OffsetDateTime`  |                                                   |
 
 `tenant_id` is intentionally omitted: the `user` entity itself has no `tenant_id` — users are
 global identities, and role-to-tenant scoping lives in `user_role`. The FK through `user_id`
@@ -421,7 +421,7 @@ save error: `<Callout tone="danger" message={apiError} />` above the save button
 `<SectionCard title="Change email">` with two mutually exclusive states driven by
 `has_pending_email_change` from `/me`:
 
-*No pending change state:*
+_No pending change state:_
 
 Form fields:
 
@@ -435,7 +435,7 @@ Submit: `<Button variant="primary" onclick={submitEmailChange} loading={submitti
 On success: replace the form with `<Callout tone="success" message="Check your inbox at {newEmail} to confirm." />`.
 On API error: `<Callout tone="danger" message={apiError} />` above the submit button.
 
-*Pending change state:*
+_Pending change state:_
 
 `<Callout tone="info" message="Confirmation email sent. Waiting for confirmation." />`
 
@@ -477,20 +477,20 @@ States:
 
 ## Error handling
 
-| Scenario | Response |
-| --- | --- |
-| `new_email` already registered | 409 Conflict |
-| `current_password` incorrect | 401 `"Invalid credentials"` |
-| OIDC user → email endpoint | 403 (before body read) |
-| OIDC user → password endpoint | 403 (before body read) |
-| Confirmation token not found | 404 |
-| Confirmation token expired | 410 Gone; row deleted |
-| `new_email` taken on confirm (race) | 409; row deleted; user must restart |
-| SMTP not configured | 503 `"Email delivery not configured"` |
-| SMTP delivery failure | 503 `"Email delivery failed"` |
-| Non-owner, no `ManageUsers`, profile PUT | 403 |
-| `DELETE` with no pending change | 204 (idempotent) |
-| User deactivated mid-flow | 401 on next auth middleware check |
+| Scenario                                 | Response                              |
+| ---------------------------------------- | ------------------------------------- |
+| `new_email` already registered           | 409 Conflict                          |
+| `current_password` incorrect             | 401 `"Invalid credentials"`           |
+| OIDC user → email endpoint               | 403 (before body read)                |
+| OIDC user → password endpoint            | 403 (before body read)                |
+| Confirmation token not found             | 404                                   |
+| Confirmation token expired               | 410 Gone; row deleted                 |
+| `new_email` taken on confirm (race)      | 409; row deleted; user must restart   |
+| SMTP not configured                      | 503 `"Email delivery not configured"` |
+| SMTP delivery failure                    | 503 `"Email delivery failed"`         |
+| Non-owner, no `ManageUsers`, profile PUT | 403                                   |
+| `DELETE` with no pending change          | 204 (idempotent)                      |
+| User deactivated mid-flow                | 401 on next auth middleware check     |
 
 ## Testing
 

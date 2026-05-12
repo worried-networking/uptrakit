@@ -46,11 +46,11 @@ any system that does not use Pacman.
 
 ### `discovery_filter` field
 
-| Value | Description |
-| --- | --- |
-| *(omitted — default `{}`)* | All installed packages (`pacman -Q`). Plugin config is auto-created on first discovery. |
-| `"all"` | All installed packages (`pacman -Q`) — explicit; uses pre-existing plugin config. |
-| `"explicit"` | Only explicitly installed packages (`pacman -Qe`). |
+| Value                      | Description                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| _(omitted — default `{}`)_ | All installed packages (`pacman -Q`). Plugin config is auto-created on first discovery. |
+| `"all"`                    | All installed packages (`pacman -Q`) — explicit; uses pre-existing plugin config.       |
+| `"explicit"`               | Only explicitly installed packages (`pacman -Qe`).                                      |
 
 **Default config** — no `discovery_filter` key, serialises as `{}`:
 

@@ -462,202 +462,331 @@ Each file gets a test extension task.
 - [ ] Add test suite for Button variants (after existing tests):
 
 ```typescript
-describe('Button Migrations', () => {
-	it('Create Tag header action renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Create Tag' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Create Tag' });
-		expect(btn).toHaveClass('inline-flex'); // Button base class
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-	});
+describe("Button Migrations", () => {
+  it('Create Tag header action renders variant="primary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Create Tag" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Create Tag" });
+    expect(btn).toHaveClass("inline-flex"); // Button base class
+    expect(btn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+  });
 
-	it('Row ellipsis trigger renders variant="ghost" size="sm" with EllipsisIcon and sr-only children', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
-		);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Actions for prod' });
-		expect(btn).toHaveClass('h-[19px]'); // size="sm"
-		expect(btn).toHaveClass('bg-transparent'); // ghost variant
-		const srOnly = btn.querySelector('span.sr-only');
-		expect(srOnly?.textContent).toBe('Actions for prod');
-		expect(btn.querySelector('svg')).toBeInTheDocument(); // EllipsisIcon rendered
-	});
+  it('Row ellipsis trigger renders variant="ghost" size="sm" with EllipsisIcon and sr-only children', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockResolvedValue(
+      makePage([
+        {
+          id: "tag-1",
+          name: "prod",
+          color: "#FF0000",
+          description: "",
+          created_at: "2026-04-19T00:00:00Z",
+          host_count: 5,
+        },
+      ]),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for prod" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Actions for prod" });
+    expect(btn).toHaveClass("h-[19px]"); // size="sm"
+    expect(btn).toHaveClass("bg-transparent"); // ghost variant
+    const srOnly = btn.querySelector("span.sr-only");
+    expect(srOnly?.textContent).toBe("Actions for prod");
+    expect(btn.querySelector("svg")).toBeInTheDocument(); // EllipsisIcon rendered
+  });
 
-	it('Row ellipsis trigger preserves stopPropagation and e.currentTarget for menu positioning', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([{ id: 'tag-1', name: 'test', color: '#00FF00', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 2 }])
-		);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for test' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Actions for test' });
-		const mockStopPropagation = vi.fn();
-		const event = new MouseEvent('click', { bubbles: true });
-		Object.defineProperty(event, 'stopPropagation', { value: mockStopPropagation });
-		Object.defineProperty(event, 'currentTarget', { value: btn });
-		btn.dispatchEvent(event);
-		expect(mockStopPropagation).toHaveBeenCalled();
-	});
+  it("Row ellipsis trigger preserves stopPropagation and e.currentTarget for menu positioning", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockResolvedValue(
+      makePage([
+        {
+          id: "tag-1",
+          name: "test",
+          color: "#00FF00",
+          description: "",
+          created_at: "2026-04-19T00:00:00Z",
+          host_count: 2,
+        },
+      ]),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for test" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Actions for test" });
+    const mockStopPropagation = vi.fn();
+    const event = new MouseEvent("click", { bubbles: true });
+    Object.defineProperty(event, "stopPropagation", {
+      value: mockStopPropagation,
+    });
+    Object.defineProperty(event, "currentTarget", { value: btn });
+    btn.dispatchEvent(event);
+    expect(mockStopPropagation).toHaveBeenCalled();
+  });
 
-	it('Error Retry button renders variant="primary" with async loading state', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Network error'));
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Retry' });
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(btn).not.toHaveAttribute('aria-busy', 'true'); // Not loading initially
-		expect(btn).not.toHaveAttribute('disabled');
+  it('Error Retry button renders variant="primary" with async loading state', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Retry" });
+    expect(btn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+    expect(btn).not.toHaveAttribute("aria-busy", "true"); // Not loading initially
+    expect(btn).not.toHaveAttribute("disabled");
 
-		// Simulate click and loading
-		vi.mocked(api.getHostTags).mockResolvedValueOnce(makePage([]));
-		const clickPromise = btn.click();
-		await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-		await clickPromise;
-		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
-	});
+    // Simulate click and loading
+    vi.mocked(api.getHostTags).mockResolvedValueOnce(makePage([]));
+    const clickPromise = btn.click();
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    await clickPromise;
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy", "true"));
+  });
 
-	it('Error Retry button clears loading state after rejection', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Load failed'));
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Retry' });
+  it("Error Retry button clears loading state after rejection", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error("Load failed"));
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Retry" });
 
-		// Mock rejection on retry click
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Retry failed'));
-		try {
-			btn.click();
-		} catch {
-			// Expected
-		}
-		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
-	});
+    // Mock rejection on retry click
+    vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error("Retry failed"));
+    try {
+      btn.click();
+    } catch {
+      // Expected
+    }
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy", "true"));
+  });
 
-	it('Create modal Auto toggle renders variant="secondary" size="sm"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		render(HostTagsPage);
-		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByText('Create Tag')).toBeInTheDocument());
-		const autoBtn = screen.getByRole('button', { name: 'Auto' });
-		expect(autoBtn).toHaveClass('h-[19px]'); // size="sm"
-		expect(autoBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('Create modal Auto toggle renders variant="secondary" size="sm"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    render(HostTagsPage);
+    const createBtn = screen.getByRole("button", { name: "Create Tag" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByText("Create Tag")).toBeInTheDocument(),
+    );
+    const autoBtn = screen.getByRole("button", { name: "Auto" });
+    expect(autoBtn).toHaveClass("h-[19px]"); // size="sm"
+    expect(autoBtn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('Create modal footer Cancel renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		render(HostTagsPage);
-		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByText('Create Tag')).toBeInTheDocument());
-		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-		expect(cancelBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('Create modal footer Cancel renders variant="secondary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    render(HostTagsPage);
+    const createBtn = screen.getByRole("button", { name: "Create Tag" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByText("Create Tag")).toBeInTheDocument(),
+    );
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(cancelBtn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('Create modal footer Create submit renders variant="primary" with loading={submitting}', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		render(HostTagsPage);
-		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByText('Create Tag')).toBeInTheDocument());
-		const submitBtn = screen.getByRole('button', { name: 'Create' });
-		expect(submitBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(submitBtn).toHaveAttribute('disabled'); // Disabled when name empty
-		const nameInput = screen.getByPlaceholderText('e.g. production');
-		await userEvent.type(nameInput, 'new-tag');
-		expect(submitBtn).not.toHaveAttribute('disabled'); // Enabled when name present
-	});
+  it('Create modal footer Create submit renders variant="primary" with loading={submitting}', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    render(HostTagsPage);
+    const createBtn = screen.getByRole("button", { name: "Create Tag" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByText("Create Tag")).toBeInTheDocument(),
+    );
+    const submitBtn = screen.getByRole("button", { name: "Create" });
+    expect(submitBtn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+    expect(submitBtn).toHaveAttribute("disabled"); // Disabled when name empty
+    const nameInput = screen.getByPlaceholderText("e.g. production");
+    await userEvent.type(nameInput, "new-tag");
+    expect(submitBtn).not.toHaveAttribute("disabled"); // Enabled when name present
+  });
 
-	it('Create modal footer Create children stay static "Create" across submit window', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.createHostTag).mockImplementation(
-			() => new Promise((resolve) => setTimeout(() => resolve({ id: 'tag-1', name: 'new', color: '', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 0 }), 100))
-		);
-		render(HostTagsPage);
-		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByText('Create Tag')).toBeInTheDocument());
-		const nameInput = screen.getByPlaceholderText('e.g. production');
-		await userEvent.type(nameInput, 'new-tag');
-		const submitBtn = screen.getByRole('button', { name: 'Create' });
-		await userEvent.click(submitBtn);
-		// Children should remain "Create", not "Creating..."
-		expect(submitBtn.textContent).toContain('Create');
-		expect(submitBtn.textContent).not.toContain('Creating');
-	});
+  it('Create modal footer Create children stay static "Create" across submit window', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.createHostTag).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                id: "tag-1",
+                name: "new",
+                color: "",
+                description: "",
+                created_at: "2026-04-19T00:00:00Z",
+                host_count: 0,
+              }),
+            100,
+          ),
+        ),
+    );
+    render(HostTagsPage);
+    const createBtn = screen.getByRole("button", { name: "Create Tag" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByText("Create Tag")).toBeInTheDocument(),
+    );
+    const nameInput = screen.getByPlaceholderText("e.g. production");
+    await userEvent.type(nameInput, "new-tag");
+    const submitBtn = screen.getByRole("button", { name: "Create" });
+    await userEvent.click(submitBtn);
+    // Children should remain "Create", not "Creating..."
+    expect(submitBtn.textContent).toContain("Create");
+    expect(submitBtn.textContent).not.toContain("Creating");
+  });
 
-	it('Edit modal footer Save renders variant="primary" with loading={submitting} and disabled={!editTag?.name.trim()}', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: 'desc', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
-		);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
-		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for prod' });
-		await userEvent.click(ellipsisBtn);
-		await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument());
-		const editItem = screen.getByRole('menuitem', { name: 'Edit' });
-		await userEvent.click(editItem);
-		await waitFor(() => expect(screen.getByDisplayValue('prod')).toBeInTheDocument());
-		const saveBtn = screen.getByRole('button', { name: 'Save' });
-		expect(saveBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		// Clear name field
-		const nameInput = screen.getByDisplayValue('prod') as HTMLInputElement;
-		nameInput.value = '';
-		nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-		await waitFor(() => expect(saveBtn).toHaveAttribute('disabled'));
-		// Restore name
-		nameInput.value = 'updated';
-		nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-		await waitFor(() => expect(saveBtn).not.toHaveAttribute('disabled'));
-	});
+  it('Edit modal footer Save renders variant="primary" with loading={submitting} and disabled={!editTag?.name.trim()}', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockResolvedValue(
+      makePage([
+        {
+          id: "tag-1",
+          name: "prod",
+          color: "#FF0000",
+          description: "desc",
+          created_at: "2026-04-19T00:00:00Z",
+          host_count: 5,
+        },
+      ]),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for prod" }),
+      ).toBeInTheDocument(),
+    );
+    const ellipsisBtn = screen.getByRole("button", {
+      name: "Actions for prod",
+    });
+    await userEvent.click(ellipsisBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("menuitem", { name: "Edit" }),
+      ).toBeInTheDocument(),
+    );
+    const editItem = screen.getByRole("menuitem", { name: "Edit" });
+    await userEvent.click(editItem);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("prod")).toBeInTheDocument(),
+    );
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    expect(saveBtn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+    // Clear name field
+    const nameInput = screen.getByDisplayValue("prod") as HTMLInputElement;
+    nameInput.value = "";
+    nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => expect(saveBtn).toHaveAttribute("disabled"));
+    // Restore name
+    nameInput.value = "updated";
+    nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => expect(saveBtn).not.toHaveAttribute("disabled"));
+  });
 
-	it('Edit modal footer Cancel renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([{ id: 'tag-1', name: 'test', color: '#00FF00', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 2 }])
-		);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for test' })).toBeInTheDocument());
-		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for test' });
-		await userEvent.click(ellipsisBtn);
-		await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument());
-		const editItem = screen.getByRole('menuitem', { name: 'Edit' });
-		await userEvent.click(editItem);
-		await waitFor(() => expect(screen.getByDisplayValue('test')).toBeInTheDocument());
-		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-		expect(cancelBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('Edit modal footer Cancel renders variant="secondary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockResolvedValue(
+      makePage([
+        {
+          id: "tag-1",
+          name: "test",
+          color: "#00FF00",
+          description: "",
+          created_at: "2026-04-19T00:00:00Z",
+          host_count: 2,
+        },
+      ]),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for test" }),
+      ).toBeInTheDocument(),
+    );
+    const ellipsisBtn = screen.getByRole("button", {
+      name: "Actions for test",
+    });
+    await userEvent.click(ellipsisBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("menuitem", { name: "Edit" }),
+      ).toBeInTheDocument(),
+    );
+    const editItem = screen.getByRole("menuitem", { name: "Edit" });
+    await userEvent.click(editItem);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("test")).toBeInTheDocument(),
+    );
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(cancelBtn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('Out-of-scope regression: Edit/Delete ContextMenuItems remain unchanged and are not wrapped in Button', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
-		);
-		render(HostTagsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
-		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for prod' });
-		await userEvent.click(ellipsisBtn);
-		await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument());
-		const editItem = screen.getByRole('menuitem', { name: 'Edit' });
-		expect(editItem).toBeInTheDocument();
-		expect(editItem.tagName).toBe('LI'); // ContextMenuItem remains unchanged
-		const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
-		expect(deleteItem).toBeInTheDocument();
-		expect(deleteItem.tagName).toBe('LI'); // ContextMenuItem remains unchanged
-	});
+  it("Out-of-scope regression: Edit/Delete ContextMenuItems remain unchanged and are not wrapped in Button", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.getHostTags).mockResolvedValue(
+      makePage([
+        {
+          id: "tag-1",
+          name: "prod",
+          color: "#FF0000",
+          description: "",
+          created_at: "2026-04-19T00:00:00Z",
+          host_count: 5,
+        },
+      ]),
+    );
+    render(HostTagsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Actions for prod" }),
+      ).toBeInTheDocument(),
+    );
+    const ellipsisBtn = screen.getByRole("button", {
+      name: "Actions for prod",
+    });
+    await userEvent.click(ellipsisBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("menuitem", { name: "Edit" }),
+      ).toBeInTheDocument(),
+    );
+    const editItem = screen.getByRole("menuitem", { name: "Edit" });
+    expect(editItem).toBeInTheDocument();
+    expect(editItem.tagName).toBe("LI"); // ContextMenuItem remains unchanged
+    const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+    expect(deleteItem).toBeInTheDocument();
+    expect(deleteItem.tagName).toBe("LI"); // ContextMenuItem remains unchanged
+  });
 });
 ```
 
 - [ ] Import userEvent at top of test file if not already present:
 
   ```typescript
-  import userEvent from '@testing-library/user-event';
+  import userEvent from "@testing-library/user-event";
   ```
 
 **Commit:** `test(frontend): extend host-tags tests for Button migration (sub-spec #3j)`
@@ -676,110 +805,146 @@ describe('Button Migrations', () => {
 - [ ] Add test suite for Button variants (after existing tests):
 
 ```typescript
-describe('Button Migrations', () => {
-	it('Apply Filters button renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Apply Filters' });
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-	});
+describe("Button Migrations", () => {
+  it('Apply Filters button renders variant="primary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Apply Filters" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Apply Filters" });
+    expect(btn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+  });
 
-	it('Clear Filters button renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Clear Filters' });
-		expect(btn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('Clear Filters button renders variant="secondary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Clear Filters" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Clear Filters" });
+    expect(btn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('Apply Filters click triggers load(1) and updates DataTable loading prop', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument());
-		const applyBtn = screen.getByRole('button', { name: 'Apply Filters' });
-		const actionInput = screen.getByPlaceholderText('e.g. login');
-		await userEvent.type(actionInput, 'create');
-		await userEvent.click(applyBtn);
-		await waitFor(() => expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
-			expect.objectContaining({ page: 1, action_type: 'create' })
-		));
-	});
+  it("Apply Filters click triggers load(1) and updates DataTable loading prop", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Apply Filters" }),
+      ).toBeInTheDocument(),
+    );
+    const applyBtn = screen.getByRole("button", { name: "Apply Filters" });
+    const actionInput = screen.getByPlaceholderText("e.g. login");
+    await userEvent.type(actionInput, "create");
+    await userEvent.click(applyBtn);
+    await waitFor(() =>
+      expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, action_type: "create" }),
+      ),
+    );
+  });
 
-	it('Clear Filters click resets filter state and triggers load(1)', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument());
-		const actionInput = screen.getByPlaceholderText('e.g. login');
-		await userEvent.type(actionInput, 'delete');
-		const clearBtn = screen.getByRole('button', { name: 'Clear Filters' });
-		await userEvent.click(clearBtn);
-		await waitFor(() => {
-			expect((actionInput as HTMLInputElement).value).toBe('');
-			expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
-				expect.objectContaining({ page: 1, action_type: undefined })
-			);
-		});
-	});
+  it("Clear Filters click resets filter state and triggers load(1)", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Clear Filters" }),
+      ).toBeInTheDocument(),
+    );
+    const actionInput = screen.getByPlaceholderText("e.g. login");
+    await userEvent.type(actionInput, "delete");
+    const clearBtn = screen.getByRole("button", { name: "Clear Filters" });
+    await userEvent.click(clearBtn);
+    await waitFor(() => {
+      expect((actionInput as HTMLInputElement).value).toBe("");
+      expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, action_type: undefined }),
+      );
+    });
+  });
 
-	it('Error Retry button renders variant="primary" with async loading state', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Network error'));
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Retry' });
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(btn).not.toHaveAttribute('aria-busy', 'true'); // Not loading initially
-		expect(btn).not.toHaveAttribute('disabled');
+  it('Error Retry button renders variant="primary" with async loading state', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    vi.mocked(api.listAuditLogs).mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Retry" });
+    expect(btn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+    expect(btn).not.toHaveAttribute("aria-busy", "true"); // Not loading initially
+    expect(btn).not.toHaveAttribute("disabled");
 
-		// Simulate click and loading
-		vi.mocked(api.listAuditLogs).mockResolvedValueOnce(makePage([sampleEntry]));
-		const clickPromise = btn.click();
-		await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-		await clickPromise;
-		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
-	});
+    // Simulate click and loading
+    vi.mocked(api.listAuditLogs).mockResolvedValueOnce(makePage([sampleEntry]));
+    const clickPromise = btn.click();
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    await clickPromise;
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy", "true"));
+  });
 
-	it('Error Retry button clears loading state after rejection', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
-		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Load failed'));
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Retry' });
+  it("Error Retry button clears loading state after rejection", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+    vi.mocked(api.listAuditLogs).mockRejectedValueOnce(
+      new Error("Load failed"),
+    );
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Retry" });
 
-		// Mock rejection on retry click
-		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Retry failed'));
-		try {
-			btn.click();
-		} catch {
-			// Expected
-		}
-		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
-	});
+    // Mock rejection on retry click
+    vi.mocked(api.listAuditLogs).mockRejectedValueOnce(
+      new Error("Retry failed"),
+    );
+    try {
+      btn.click();
+    } catch {
+      // Expected
+    }
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-busy", "true"));
+  });
 
-	it('Out-of-scope regression: TabStrip scope toggle remains unchanged', async () => {
-		vi.mocked(auth.getUser).mockReturnValue({
-			...auditViewer,
-			permissions: [Permission.ViewAuditLogs, Permission.ViewSystemAuditLogs]
-		});
-		render(AuditLogsPage);
-		await waitFor(() => expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument());
-		const tablist = screen.getByRole('tablist', { name: 'Audit log scope' });
-		expect(tablist).toBeInTheDocument();
-		const tenantTab = screen.getByRole('tab', { name: 'Tenant Logs' });
-		const systemTab = screen.getByRole('tab', { name: 'System Logs' });
-		expect(tenantTab).toBeInTheDocument();
-		expect(systemTab).toBeInTheDocument();
-	});
+  it("Out-of-scope regression: TabStrip scope toggle remains unchanged", async () => {
+    vi.mocked(auth.getUser).mockReturnValue({
+      ...auditViewer,
+      permissions: [Permission.ViewAuditLogs, Permission.ViewSystemAuditLogs],
+    });
+    render(AuditLogsPage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tablist", { name: "Audit log scope" }),
+      ).toBeInTheDocument(),
+    );
+    const tablist = screen.getByRole("tablist", { name: "Audit log scope" });
+    expect(tablist).toBeInTheDocument();
+    const tenantTab = screen.getByRole("tab", { name: "Tenant Logs" });
+    const systemTab = screen.getByRole("tab", { name: "System Logs" });
+    expect(tenantTab).toBeInTheDocument();
+    expect(systemTab).toBeInTheDocument();
+  });
 });
 ```
 
 - [ ] Import userEvent at top of test file if not already present:
 
   ```typescript
-  import userEvent from '@testing-library/user-event';
+  import userEvent from "@testing-library/user-event";
   ```
 
 **Commit:** `test(frontend): extend audit-logs tests for Button migration (sub-spec #3j)`
@@ -798,146 +963,207 @@ describe('Button Migrations', () => {
 - [ ] Add test suite for Button variants (after existing tests):
 
 ```typescript
-describe('Button Migrations', () => {
-	it('New Token launcher renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		render(ProfilePage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'New Token' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'New Token' });
-		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-	});
+describe("Button Migrations", () => {
+  it('New Token launcher renders variant="primary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    render(ProfilePage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "New Token" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "New Token" });
+    expect(btn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+  });
 
-	it('Row Revoke button renders variant="danger" size="sm"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		const token: ApiTokenResponse = {
-			id: 'token-1',
-			name: 'CI Pipeline',
-			created_at: '2026-04-19T00:00:00Z',
-			revoked_at: null
-		};
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
-		render(ProfilePage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
-		const btn = screen.getByRole('button', { name: 'Revoke' });
-		expect(btn).toHaveClass('h-[19px]'); // size="sm"
-		expect(btn).toHaveClass('bg-[var(--color-error-bg)]'); // danger variant
-	});
+  it('Row Revoke button renders variant="danger" size="sm"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    const token: ApiTokenResponse = {
+      id: "token-1",
+      name: "CI Pipeline",
+      created_at: "2026-04-19T00:00:00Z",
+      revoked_at: null,
+    };
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
+    render(ProfilePage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Revoke" }),
+      ).toBeInTheDocument(),
+    );
+    const btn = screen.getByRole("button", { name: "Revoke" });
+    expect(btn).toHaveClass("h-[19px]"); // size="sm"
+    expect(btn).toHaveClass("bg-[var(--color-error-bg)]"); // danger variant
+  });
 
-	it('New API Token modal Create state Cancel button renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
-		await userEvent.click(newTokenBtn);
-		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
-		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-		expect(cancelBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('New API Token modal Create state Cancel button renders variant="secondary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    render(ProfilePage);
+    const newTokenBtn = screen.getByRole("button", { name: "New Token" });
+    await userEvent.click(newTokenBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("e.g. CI Pipeline"),
+      ).toBeInTheDocument(),
+    );
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(cancelBtn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('New API Token modal Create state Create button already migrated (Wave 3)', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
-		await userEvent.click(newTokenBtn);
-		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
-		const createBtn = screen.getByRole('button', { name: 'Create' });
-		expect(createBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(createBtn).toBeDisabled(); // Disabled when name empty
-		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
-		await userEvent.type(nameInput, 'new-token');
-		await waitFor(() => expect(createBtn).not.toHaveAttribute('disabled'));
-		// Verify no aria-busy when not loading (Button removes attr when loading=false)
-		expect(createBtn).not.toHaveAttribute('aria-busy');
-		// Verify static children "Create" (no text-swap)
-		expect(createBtn.textContent).toContain('Create');
-	});
+  it("New API Token modal Create state Create button already migrated (Wave 3)", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    render(ProfilePage);
+    const newTokenBtn = screen.getByRole("button", { name: "New Token" });
+    await userEvent.click(newTokenBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("e.g. CI Pipeline"),
+      ).toBeInTheDocument(),
+    );
+    const createBtn = screen.getByRole("button", { name: "Create" });
+    expect(createBtn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+    expect(createBtn).toBeDisabled(); // Disabled when name empty
+    const nameInput = screen.getByPlaceholderText("e.g. CI Pipeline");
+    await userEvent.type(nameInput, "new-token");
+    await waitFor(() => expect(createBtn).not.toHaveAttribute("disabled"));
+    // Verify no aria-busy when not loading (Button removes attr when loading=false)
+    expect(createBtn).not.toHaveAttribute("aria-busy");
+    // Verify static children "Create" (no text-swap)
+    expect(createBtn.textContent).toContain("Create");
+  });
 
-	it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
-		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
-		await userEvent.click(newTokenBtn);
-		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
-		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
-		await userEvent.type(nameInput, 'test-token');
-		const createBtn = screen.getByRole('button', { name: 'Create' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument());
-		const copyBtn = screen.getByRole('button', { name: 'Copy' });
-		expect(copyBtn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
-	});
+  it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    vi.mocked(api.createApiToken).mockResolvedValue({
+      id: "token-1",
+      token: "secret-token-123",
+    });
+    render(ProfilePage);
+    const newTokenBtn = screen.getByRole("button", { name: "New Token" });
+    await userEvent.click(newTokenBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("e.g. CI Pipeline"),
+      ).toBeInTheDocument(),
+    );
+    const nameInput = screen.getByPlaceholderText("e.g. CI Pipeline");
+    await userEvent.type(nameInput, "test-token");
+    const createBtn = screen.getByRole("button", { name: "Create" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument(),
+    );
+    const copyBtn = screen.getByRole("button", { name: "Copy" });
+    expect(copyBtn).toHaveClass("bg-[var(--bg-raised)]"); // secondary variant
+  });
 
-	it('New API Token modal Created state Done button renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
-		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
-		await userEvent.click(newTokenBtn);
-		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
-		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
-		await userEvent.type(nameInput, 'test-token');
-		const createBtn = screen.getByRole('button', { name: 'Create' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument());
-		const doneBtn = screen.getByRole('button', { name: 'Done' });
-		expect(doneBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-	});
+  it('New API Token modal Created state Done button renders variant="primary"', async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    vi.mocked(api.createApiToken).mockResolvedValue({
+      id: "token-1",
+      token: "secret-token-123",
+    });
+    render(ProfilePage);
+    const newTokenBtn = screen.getByRole("button", { name: "New Token" });
+    await userEvent.click(newTokenBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("e.g. CI Pipeline"),
+      ).toBeInTheDocument(),
+    );
+    const nameInput = screen.getByPlaceholderText("e.g. CI Pipeline");
+    await userEvent.type(nameInput, "test-token");
+    const createBtn = screen.getByRole("button", { name: "Create" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument(),
+    );
+    const doneBtn = screen.getByRole("button", { name: "Done" });
+    expect(doneBtn).toHaveClass(
+      "bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]",
+    ); // primary variant
+  });
 
-	it('New API Token modal Copy button invokes clipboard.writeText and surfaces success toast', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
-		const clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText');
-		render(ProfilePage);
-		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
-		await userEvent.click(newTokenBtn);
-		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
-		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
-		await userEvent.type(nameInput, 'test-token');
-		const createBtn = screen.getByRole('button', { name: 'Create' });
-		await userEvent.click(createBtn);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument());
-		const copyBtn = screen.getByRole('button', { name: 'Copy' });
-		await userEvent.click(copyBtn);
-		await waitFor(() => expect(clipboardSpy).toHaveBeenCalledWith('secret-token-123'));
-		clipboardSpy.mockRestore();
-	});
+  it("New API Token modal Copy button invokes clipboard.writeText and surfaces success toast", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+    vi.mocked(api.createApiToken).mockResolvedValue({
+      id: "token-1",
+      token: "secret-token-123",
+    });
+    const clipboardSpy = vi.spyOn(navigator.clipboard, "writeText");
+    render(ProfilePage);
+    const newTokenBtn = screen.getByRole("button", { name: "New Token" });
+    await userEvent.click(newTokenBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("e.g. CI Pipeline"),
+      ).toBeInTheDocument(),
+    );
+    const nameInput = screen.getByPlaceholderText("e.g. CI Pipeline");
+    await userEvent.type(nameInput, "test-token");
+    const createBtn = screen.getByRole("button", { name: "Create" });
+    await userEvent.click(createBtn);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument(),
+    );
+    const copyBtn = screen.getByRole("button", { name: "Copy" });
+    await userEvent.click(copyBtn);
+    await waitFor(() =>
+      expect(clipboardSpy).toHaveBeenCalledWith("secret-token-123"),
+    );
+    clipboardSpy.mockRestore();
+  });
 
-	it('Out-of-scope regression: ConfirmDialog Revoke confirmation is not wrapped in Button', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(user);
-		const token: ApiTokenResponse = {
-			id: 'token-1',
-			name: 'Test Token',
-			created_at: '2026-04-19T00:00:00Z',
-			revoked_at: null
-		};
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
-		render(ProfilePage);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
-		const revokeBtn = screen.getByRole('button', { name: 'Revoke' });
-		await userEvent.click(revokeBtn);
-		await waitFor(() => expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument());
-		// ConfirmDialog is rendered but its confirm button is owned by #3k
-		// We only assert that the launcher (Revoke) opened the dialog
-		expect(screen.getByRole('heading', { name: 'Revoke API Token' })).toBeInTheDocument();
-	});
+  it("Out-of-scope regression: ConfirmDialog Revoke confirmation is not wrapped in Button", async () => {
+    vi.mocked(auth.getUser).mockReturnValue(user);
+    const token: ApiTokenResponse = {
+      id: "token-1",
+      name: "Test Token",
+      created_at: "2026-04-19T00:00:00Z",
+      revoked_at: null,
+    };
+    vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
+    render(ProfilePage);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Revoke" }),
+      ).toBeInTheDocument(),
+    );
+    const revokeBtn = screen.getByRole("button", { name: "Revoke" });
+    await userEvent.click(revokeBtn);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Revoke API Token" }),
+      ).toBeInTheDocument(),
+    );
+    // ConfirmDialog is rendered but its confirm button is owned by #3k
+    // We only assert that the launcher (Revoke) opened the dialog
+    expect(
+      screen.getByRole("heading", { name: "Revoke API Token" }),
+    ).toBeInTheDocument();
+  });
 });
 ```
 
 - [ ] Add missing imports at top of test file (if not already present):
 
   ```typescript
-  import userEvent from '@testing-library/user-event';
-  import type { ApiTokenResponse } from '$lib/types';
+  import userEvent from "@testing-library/user-event";
+  import type { ApiTokenResponse } from "$lib/types";
   ```
 
 - [ ] Verify `user` mock exists in test file — `profile.test.ts` already defines
-  `const user = { ... }` at line 23. Use it directly; do NOT redeclare.
+      `const user = { ... }` at line 23. Use it directly; do NOT redeclare.
 
 **Commit:** `test(frontend): extend profile tests for Button migration (sub-spec #3j)`
 
@@ -1038,6 +1264,7 @@ describe('Button Migrations', () => {
 
   ```markdown
   ## Summary
+
   Migrate three admin routes (host-tags, audit-logs, profile) to Button primitive with icon-only ellipsis triggers, async retry loading state, and modal footer patterns.
 
   - Host-Tags: Create Tag launcher, row ellipsis trigger, Create/Edit modal footers, Auto/Pick color toggles, error Retry
@@ -1047,6 +1274,7 @@ describe('Button Migrations', () => {
   All migrations use canonical Button variants: primary, ghost, danger, secondary.
 
   ## Test Plan
+
   - Unit tests extended for all Button variants, loading states, aria attributes
   - e2e snapshots re-baselined in dark + light themes
   - Full frontend gate passes (lint, format, type check, unit tests, build)

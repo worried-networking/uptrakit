@@ -204,96 +204,139 @@ This task gets a build passing with a bare-bones page so subsequent visual work 
 ```html
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{{ config.title }}{% endblock %}</title>
-  <meta name="description" content="{% block description %}{{ config.description }}{% endblock %}">
-  <link rel="icon" type="image/svg+xml" href="{{ get_url(path='favicon.svg') }}">
-  <link rel="stylesheet" href="{{ get_url(path='css/site.css') }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}{{ config.title }}{% endblock %}</title>
+    <meta
+      name="description"
+      content="{% block description %}{{ config.description }}{% endblock %}"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="{{ get_url(path='favicon.svg') }}"
+    />
+    <link rel="stylesheet" href="{{ get_url(path='css/site.css') }}" />
 
-  <!-- Open Graph (og:image deferred to phase 2 per spec) -->
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="{% block og_title %}{{ config.title }}{% endblock %}">
-  <meta property="og:description" content="{% block og_description %}{{ config.description }}{% endblock %}">
-  <meta property="og:url" content="{% block og_url %}{{ config.base_url }}{% endblock %}">
+    <!-- Open Graph (og:image deferred to phase 2 per spec) -->
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="{% block og_title %}{{ config.title }}{% endblock %}"
+    />
+    <meta
+      property="og:description"
+      content="{% block og_description %}{{ config.description }}{% endblock %}"
+    />
+    <meta
+      property="og:url"
+      content="{% block og_url %}{{ config.base_url }}{% endblock %}"
+    />
 
-  <!-- Theme bootstrap: set data-theme before first paint to avoid flash. -->
-  <script>
-    (function () {
-      try {
-        var stored = localStorage.getItem('uptrakit-theme');
-        if (stored === 'dark' || stored === 'light') {
-          document.documentElement.setAttribute('data-theme', stored);
-          return;
+    <!-- Theme bootstrap: set data-theme before first paint to avoid flash. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("uptrakit-theme");
+          if (stored === "dark" || stored === "light") {
+            document.documentElement.setAttribute("data-theme", stored);
+            return;
+          }
+          var prefers =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches;
+          document.documentElement.setAttribute(
+            "data-theme",
+            prefers ? "light" : "dark",
+          );
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
         }
-        var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-        document.documentElement.setAttribute('data-theme', prefers ? 'light' : 'dark');
-      } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
-    })();
-  </script>
-</head>
-<body>
-  <header class="topbar">
-    <a class="topbar__brand" href="{{ get_url(path='/') }}">
-      <img class="topbar__logo" src="{{ get_url(path='favicon.svg') }}" alt="" width="24" height="24">
-      <span class="topbar__wordmark">uptrakit</span>
-    </a>
-    <nav class="topbar__nav">
-      <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
-      <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
-        <span aria-hidden="true">◐</span>
-      </button>
-    </nav>
-  </header>
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="topbar__brand" href="{{ get_url(path='/') }}">
+        <img
+          class="topbar__logo"
+          src="{{ get_url(path='favicon.svg') }}"
+          alt=""
+          width="24"
+          height="24"
+        />
+        <span class="topbar__wordmark">uptrakit</span>
+      </a>
+      <nav class="topbar__nav">
+        <a
+          class="topbar__link"
+          href="{{ config.extra.github_repo_url }}"
+          rel="noopener"
+          target="_blank"
+          >GitHub</a
+        >
+        <button
+          class="topbar__theme-toggle"
+          type="button"
+          aria-label="Toggle theme"
+          data-theme-toggle
+        >
+          <span aria-hidden="true">◐</span>
+        </button>
+      </nav>
+    </header>
 
-  <main class="content">
-    {% block content %}{% endblock %}
-  </main>
+    <main class="content">{% block content %}{% endblock %}</main>
 
-  <footer class="footer">
-    {%- set sha_full = get_env(name="GITHUB_SHA", default="") -%}
-    {%- set sha = sha_full | truncate(length=7, end="") -%}
-    <p>
-      © {{ now() | date(format="%Y") }} Uptrakit contributors —
-      Dual-licensed
-      <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-MIT">MIT</a>
-      /
-      <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-APACHE">Apache-2.0</a>
-      —
-      <a href="{{ config.extra.github_repo_url }}">Source</a>
-      {%- if sha %}
-      —
-      <a href="{{ config.extra.github_repo_url }}/commit/{{ sha_full }}"><code>{{ sha }}</code></a>
-      {%- endif %}
-    </p>
-  </footer>
+    <footer class="footer">
+      {%- set sha_full = get_env(name="GITHUB_SHA", default="") -%} {%- set sha
+      = sha_full | truncate(length=7, end="") -%}
+      <p>
+        © {{ now() | date(format="%Y") }} Uptrakit contributors — Dual-licensed
+        <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-MIT"
+          >MIT</a
+        >
+        /
+        <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-APACHE"
+          >Apache-2.0</a
+        >
+        —
+        <a href="{{ config.extra.github_repo_url }}">Source</a>
+        {%- if sha %} —
+        <a href="{{ config.extra.github_repo_url }}/commit/{{ sha_full }}"
+          ><code>{{ sha }}</code></a
+        >
+        {%- endif %}
+      </p>
+    </footer>
 
-  <script>
-    (function () {
-      var btn = document.querySelector('[data-theme-toggle]');
-      if (!btn) return;
-      btn.addEventListener('click', function () {
-        var current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-        var next = current === 'light' ? 'dark' : 'light';
-        document.documentElement.setAttribute('data-theme', next);
-        try { localStorage.setItem('uptrakit-theme', next); } catch (e) {}
-      });
-    })();
-  </script>
-</body>
+    <script>
+      (function () {
+        var btn = document.querySelector("[data-theme-toggle]");
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          var current =
+            document.documentElement.getAttribute("data-theme") === "light"
+              ? "light"
+              : "dark";
+          var next = current === "light" ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem("uptrakit-theme", next);
+          } catch (e) {}
+        });
+      })();
+    </script>
+  </body>
 </html>
 ```
 
 - [ ] **Step 2: Create `website/templates/landing.html`**
 
 ```html
-{% extends "base.html" %}
-
-{% block content %}
-  <p>Phase-1 placeholder. Task 7 fills this in.</p>
+{% extends "base.html" %} {% block content %}
+<p>Phase-1 placeholder. Task 7 fills this in.</p>
 {% endblock %}
 ```
 
@@ -368,16 +411,16 @@ This is one large file written end-to-end so its parts cohere. Read it as one un
   --accent-dark: #0891b2;
   --accent-deep: #0e7490;
   --color-success: #4ade80;
-  --color-success-bg: rgba(74, 222, 128, 0.10);
+  --color-success-bg: rgba(74, 222, 128, 0.1);
   --color-success-border: rgba(74, 222, 128, 0.25);
   --color-warning: #fbbf24;
   --color-warning-bg: rgba(251, 191, 36, 0.12);
-  --color-warning-border: rgba(251, 191, 36, 0.30);
+  --color-warning-border: rgba(251, 191, 36, 0.3);
   --color-danger: #fdba74;
   --color-danger-bg: rgba(234, 88, 12, 0.15);
   --color-danger-border: rgba(234, 88, 12, 0.35);
   --color-info: #67e8f9;
-  --color-info-bg: rgba(6, 182, 212, 0.10);
+  --color-info-bg: rgba(6, 182, 212, 0.1);
   --color-info-border: rgba(6, 182, 212, 0.22);
 }
 
@@ -399,13 +442,13 @@ This is one large file written end-to-end so its parts cohere. Read it as one un
   --accent-deep: #1e40af;
   --color-success: #16a34a;
   --color-success-bg: rgba(22, 163, 74, 0.08);
-  --color-success-border: rgba(22, 163, 74, 0.30);
+  --color-success-border: rgba(22, 163, 74, 0.3);
   --color-warning: #d97706;
   --color-warning-bg: rgba(217, 119, 6, 0.08);
   --color-warning-border: rgba(217, 119, 6, 0.28);
   --color-danger: #dc2626;
   --color-danger-bg: rgba(220, 38, 38, 0.07);
-  --color-danger-border: rgba(220, 38, 38, 0.30);
+  --color-danger-border: rgba(220, 38, 38, 0.3);
   --color-info: #0891b2;
   --color-info-bg: rgba(8, 145, 178, 0.08);
   --color-info-border: rgba(8, 145, 178, 0.22);
@@ -420,7 +463,8 @@ This is one large file written end-to-end so its parts cohere. Read it as one un
 }
 
 html {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
   font-size: 14px;
   line-height: 1.55;
   color: var(--text-primary);
@@ -449,7 +493,10 @@ a {
   color: var(--accent-bright);
   text-decoration: none;
   border-bottom: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
 }
 
 a:hover {
@@ -463,7 +510,7 @@ a:focus-visible {
 }
 
 code {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   font-size: 0.92em;
   background: var(--bg-raised);
   padding: 1px 6px;
@@ -471,7 +518,7 @@ code {
 }
 
 pre {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: 3px;
@@ -489,7 +536,9 @@ pre code {
 
 /* ---------- Typography ---------- */
 
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   margin: 0 0 12px;
   color: var(--text-primary);
 }
@@ -530,7 +579,8 @@ p strong {
   margin: 0 0 8px;
 }
 
-ul, ol {
+ul,
+ol {
   margin: 0 0 14px;
   padding-left: 22px;
   color: var(--text-secondary);
@@ -578,7 +628,7 @@ hr {
 }
 
 .topbar__wordmark {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -611,7 +661,10 @@ hr {
   border-radius: 3px;
   padding: 4px 10px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
 }
 
 .topbar__theme-toggle:hover {
@@ -655,12 +708,18 @@ hr {
   gap: 14px;
 }
 
-.grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 
 @media (max-width: 640px) {
   .grid--2,
-  .grid--4 { grid-template-columns: 1fr; }
+  .grid--4 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .card {
@@ -722,7 +781,10 @@ hr {
   border-radius: 3px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
   border-bottom: 1px solid transparent;
 }
 
@@ -810,7 +872,9 @@ hr {
 }
 
 @media (max-width: 640px) {
-  .willwont { grid-template-columns: 1fr; }
+  .willwont {
+    grid-template-columns: 1fr;
+  }
 }
 
 .willwont__col {
@@ -826,8 +890,12 @@ hr {
   text-transform: uppercase;
 }
 
-.willwont__col--will h3 { color: var(--color-success); }
-.willwont__col--wont h3 { color: var(--color-danger); }
+.willwont__col--will h3 {
+  color: var(--color-success);
+}
+.willwont__col--wont h3 {
+  color: var(--color-danger);
+}
 
 .willwont__col ul {
   margin: 0;
@@ -841,7 +909,7 @@ hr {
   border: 1px solid var(--border-default);
   border-radius: 3px;
   padding: 16px 18px;
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -865,7 +933,7 @@ hr {
   border-radius: 2px;
   background: var(--bg-raised);
   border: 1px solid var(--border-default);
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Roboto Mono", monospace;
   font-size: 12px;
   font-weight: 700;
   color: var(--accent-bright);
@@ -932,10 +1000,10 @@ A small macro keeps callout markup consistent across pages.
 
 ```html
 {% macro callout(kind, title, body) %}
-  <aside class="callout callout--{{ kind }}" role="note">
-    {% if title %}<span class="callout__title">{{ title }}</span>{% endif %}
-    <div>{{ body | safe }}</div>
-  </aside>
+<aside class="callout callout--{{ kind }}" role="note">
+  {% if title %}<span class="callout__title">{{ title }}</span>{% endif %}
+  <div>{{ body | safe }}</div>
+</aside>
 {% endmacro callout %}
 ```
 
@@ -971,53 +1039,75 @@ The landing page is mostly static markup, so the template carries the structure 
 - [ ] **Step 1: Replace `website/templates/landing.html` with the full landing page**
 
 ```html
-{% extends "base.html" %}
-{% import "macros/ui.html" as ui %}
-
-{% block title %}Uptrakit — track upstream updates across your homelab{% endblock %}
-{% block description %}Self-hosted update tracking toolkit for Linux homelabs and small fleets. Tracks installed software versions, checks upstream releases, and runs manual updates only.{% endblock %}
-{% block og_title %}Uptrakit — track upstream updates across your homelab{% endblock %}
-{% block og_description %}Self-hosted update tracker for homelabs. Manual updates only — you decide when.{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% import "macros/ui.html" as ui %} {% block title
+%}Uptrakit — track upstream updates across your homelab{% endblock %} {% block
+description %}Self-hosted update tracking toolkit for Linux homelabs and small
+fleets. Tracks installed software versions, checks upstream releases, and runs
+manual updates only.{% endblock %} {% block og_title %}Uptrakit — track upstream
+updates across your homelab{% endblock %} {% block og_description %}Self-hosted
+update tracker for homelabs. Manual updates only — you decide when.{% endblock
+%} {% block content %}
 
 <section class="hero">
-  <h1 class="hero__title">Track upstream updates across your homelab. You decide when to apply them.</h1>
+  <h1 class="hero__title">
+    Track upstream updates across your homelab. You decide when to apply them.
+  </h1>
   <p class="hero__sub">
-    Uptrakit is a self-hosted update tracking toolkit for Linux homelabs and small fleets.
-    It checks upstream sources on a schedule, surfaces what's new, and runs only the
-    updates you confirm.
+    Uptrakit is a self-hosted update tracking toolkit for Linux homelabs and
+    small fleets. It checks upstream sources on a schedule, surfaces what's new,
+    and runs only the updates you confirm.
   </p>
   <div class="hero__ctas">
-    <a class="btn btn--primary" href="{{ get_url(path='install/') }}">Install</a>
-    <a class="btn btn--secondary" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">View on GitHub</a>
+    <a class="btn btn--primary" href="{{ get_url(path='install/') }}"
+      >Install</a
+    >
+    <a
+      class="btn btn--secondary"
+      href="{{ config.extra.github_repo_url }}"
+      rel="noopener"
+      target="_blank"
+      >View on GitHub</a
+    >
   </div>
 </section>
 
-{{ ui::callout(
-  kind="warning",
-  title="Alpha",
-  body="<p>APIs may change. No formal third-party security audit yet. Use at your own risk.</p>"
-) }}
+{{ ui::callout( kind="warning", title="Alpha", body="
+<p>
+  APIs may change. No formal third-party security audit yet. Use at your own
+  risk.
+</p>
+" ) }}
 
 <section class="section">
   <h2 class="section__heading">What it does</h2>
   <div class="grid grid--4">
     <article class="card">
       <h3 class="card__title">Track versions</h3>
-      <p class="card__body">Records the installed version of every tracked item across multiple hosts.</p>
+      <p class="card__body">
+        Records the installed version of every tracked item across multiple
+        hosts.
+      </p>
     </article>
     <article class="card">
       <h3 class="card__title">Plugin upstream checks</h3>
-      <p class="card__body">Pluggable sources — GitHub Releases, Proxmox VE Helper-Scripts, package managers.</p>
+      <p class="card__body">
+        Pluggable sources — GitHub Releases, Proxmox VE Helper-Scripts, package
+        managers.
+      </p>
     </article>
     <article class="card">
       <h3 class="card__title">Manual updates only</h3>
-      <p class="card__body">Every update action requires explicit user confirmation. No silent automatic upgrades.</p>
+      <p class="card__body">
+        Every update action requires explicit user confirmation. No silent
+        automatic upgrades.
+      </p>
     </article>
     <article class="card">
       <h3 class="card__title">Home Assistant ready</h3>
-      <p class="card__body">Each tracked item appears as an <code>update</code> entity via MQTT auto-discovery.</p>
+      <p class="card__body">
+        Each tracked item appears as an <code>update</code> entity via MQTT
+        auto-discovery.
+      </p>
     </article>
   </div>
 </section>
@@ -1050,7 +1140,12 @@ The landing page is mostly static markup, so the template carries the structure 
   <h2 class="section__heading">Security stance</h2>
   <ul>
     <li>Agents run unprivileged (e.g. <code>uptrakit</code>)</li>
-    <li>Privileged operations are constrained via a sudo allowlist (<code>NOPASSWD</code> for specific commands only)</li>
+    <li>
+      Privileged operations are constrained via a sudo allowlist (<code
+        >NOPASSWD</code
+      >
+      for specific commands only)
+    </li>
     <li>Agents accept no inbound connections</li>
     <li>All update actions require explicit user confirmation</li>
     <li>Dual-licensed under MIT and Apache-2.0</li>
@@ -1081,9 +1176,14 @@ The landing page is mostly static markup, so the template carries the structure 
 <section class="section">
   <h2 class="section__heading">Get involved</h2>
   <p>
-    Issues, ideas, and pull requests are welcome.
-    See <a href="{{ config.extra.github_repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
-    for project conventions, and <a href="{{ config.extra.github_repo_url }}/blob/main/SECURITY.md">SECURITY.md</a>
+    Issues, ideas, and pull requests are welcome. See
+    <a href="{{ config.extra.github_repo_url }}/blob/main/CONTRIBUTING.md"
+      >CONTRIBUTING.md</a
+    >
+    for project conventions, and
+    <a href="{{ config.extra.github_repo_url }}/blob/main/SECURITY.md"
+      >SECURITY.md</a
+    >
     for the disclosure policy.
   </p>
 </section>
@@ -1168,29 +1268,30 @@ docker compose up -d
 - [ ] **Step 2: Create `website/templates/install.html`**
 
 ```html
-{% extends "base.html" %}
-{% import "macros/ui.html" as ui %}
-
-{% block title %}Install Uptrakit (alpha){% endblock %}
-{% block description %}Local evaluation install for Uptrakit using Docker Compose. Production deploys live in the canonical deployment guide.{% endblock %}
-{% block og_title %}Install Uptrakit (alpha){% endblock %}
-{% block og_description %}Local evaluation install for Uptrakit using Docker Compose.{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% import "macros/ui.html" as ui %} {% block title
+%}Install Uptrakit (alpha){% endblock %} {% block description %}Local evaluation
+install for Uptrakit using Docker Compose. Production deploys live in the
+canonical deployment guide.{% endblock %} {% block og_title %}Install Uptrakit
+(alpha){% endblock %} {% block og_description %}Local evaluation install for
+Uptrakit using Docker Compose.{% endblock %} {% block content %}
 
 <p class="eyebrow">Alpha install</p>
 <h1>Try Uptrakit locally</h1>
 
 <p>
-  This is a local evaluation flow. It starts the controller with the embedded scheduler
-  and SQLite — no MQTT, no external scheduler, no agents. Production deploys need a
-  reverse proxy, agent enrollment, and (depending on profile) MQTT or PostgreSQL.
+  This is a local evaluation flow. It starts the controller with the embedded
+  scheduler and SQLite — no MQTT, no external scheduler, no agents. Production
+  deploys need a reverse proxy, agent enrollment, and (depending on profile)
+  MQTT or PostgreSQL.
 </p>
 
 <h2>Prerequisites</h2>
 <ul>
   <li>Docker Engine 24+ with Compose V2</li>
-  <li><code>openssl</code> available on <code>$PATH</code> (or any other source of 64 hex characters)</li>
+  <li>
+    <code>openssl</code> available on <code>$PATH</code> (or any other source of
+    64 hex characters)
+  </li>
 </ul>
 
 <h2>Quickstart</h2>
@@ -1199,7 +1300,7 @@ docker compose up -d
   <span class="install-step__num">1</span>
   <div class="install-step__body">
     <p>Clone the repository:</p>
-<pre><code>git clone https://github.com/worried-networking/uptrakit.git
+    <pre><code>git clone https://github.com/worried-networking/uptrakit.git
 cd uptrakit</code></pre>
   </div>
 </div>
@@ -1208,7 +1309,7 @@ cd uptrakit</code></pre>
   <span class="install-step__num">2</span>
   <div class="install-step__body">
     <p>Create the environment file and a master encryption key:</p>
-<pre><code>cp .env.example .env
+    <pre><code>cp .env.example .env
 echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" &gt;&gt; .env</code></pre>
   </div>
 </div>
@@ -1216,23 +1317,35 @@ echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" &gt;&gt; .env</code></pre>
 <div class="install-step">
   <span class="install-step__num">3</span>
   <div class="install-step__body">
-    <p>Start the controller (default profile — controller + SQLite + embedded scheduler):</p>
-<pre><code>docker compose up -d</code></pre>
-    <p>The controller is reachable at <code>https://localhost:8443</code>. Expect a self-signed certificate warning on first load.</p>
+    <p>
+      Start the controller (default profile — controller + SQLite + embedded
+      scheduler):
+    </p>
+    <pre><code>docker compose up -d</code></pre>
+    <p>
+      The controller is reachable at <code>https://localhost:8443</code>. Expect
+      a self-signed certificate warning on first load.
+    </p>
     <p>The first-run registration token is printed to the controller logs:</p>
-<pre><code>docker compose logs controller | grep "registration token"</code></pre>
+    <pre><code>docker compose logs controller | grep "registration token"</code></pre>
   </div>
 </div>
 
-{{ ui::callout(
-  kind="warning",
-  title="Production deploys need more",
-  body="<p>This snippet runs the controller alone. Production setups need a reverse proxy in front of the controller, an enrollment flow for agents, and depending on profile (mqtt, scheduler, postgres, full) one or more support services. The canonical deployment guide is in the repo.</p>"
-) }}
+{{ ui::callout( kind="warning", title="Production deploys need more", body="
+<p>
+  This snippet runs the controller alone. Production setups need a reverse proxy
+  in front of the controller, an enrollment flow for agents, and depending on
+  profile (mqtt, scheduler, postgres, full) one or more support services. The
+  canonical deployment guide is in the repo.
+</p>
+" ) }}
 
 <p>
   Full reference:
-  <a href="{{ config.extra.github_repo_url }}/blob/main/docs/end-user/deployment/docker.md">docs/end-user/deployment/docker.md</a>
+  <a
+    href="{{ config.extra.github_repo_url }}/blob/main/docs/end-user/deployment/docker.md"
+    >docs/end-user/deployment/docker.md</a
+  >
   on GitHub.
 </p>
 
@@ -1299,19 +1412,16 @@ what GitHub Pages serves for unmatched paths.
 - [ ] **Step 1: Create `website/templates/404.html`**
 
 ```html
-{% extends "base.html" %}
-
-{% block title %}Not found — Uptrakit{% endblock %}
-
-{% block content %}
-  <section class="hero">
-    <p class="eyebrow">404</p>
-    <h1 class="hero__title">Page not found</h1>
-    <p class="hero__sub">The page you asked for does not exist (or has moved).</p>
-    <div class="hero__ctas">
-      <a class="btn btn--primary" href="{{ get_url(path='/') }}">Back to home</a>
-    </div>
-  </section>
+{% extends "base.html" %} {% block title %}Not found — Uptrakit{% endblock %} {%
+block content %}
+<section class="hero">
+  <p class="eyebrow">404</p>
+  <h1 class="hero__title">Page not found</h1>
+  <p class="hero__sub">The page you asked for does not exist (or has moved).</p>
+  <div class="hero__ctas">
+    <a class="btn btn--primary" href="{{ get_url(path='/') }}">Back to home</a>
+  </div>
+</section>
 {% endblock %}
 ```
 
@@ -1362,12 +1472,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'website/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - ".github/workflows/website.yml"
   pull_request:
     paths:
-      - 'website/**'
-      - '.github/workflows/website.yml'
+      - "website/**"
+      - ".github/workflows/website.yml"
   workflow_dispatch:
 
 permissions:
@@ -1541,13 +1651,13 @@ Dependabot bumps `taiki-e/install-action` itself but does not parse the
 
 ## What lives here
 
-| Path | Purpose |
-| --- | --- |
-| `config.toml` | Zola configuration |
-| `content/` | Page content + per-page front-matter |
-| `templates/` | Tera templates |
-| `templates/macros/ui.html` | Shared callout macro |
-| `static/` | Files copied verbatim into the build (CNAME, favicon, robots.txt, css/) |
+| Path                       | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `config.toml`              | Zola configuration                                                      |
+| `content/`                 | Page content + per-page front-matter                                    |
+| `templates/`               | Tera templates                                                          |
+| `templates/macros/ui.html` | Shared callout macro                                                    |
+| `static/`                  | Files copied verbatim into the build (CNAME, favicon, robots.txt, css/) |
 
 For phase-2 plans (docs hub at `/docs/`), see follow-up specs in
 `docs/superpowers/specs/`.

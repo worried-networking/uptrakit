@@ -1,11 +1,11 @@
 # ATK-19: RCE on Controller via API or Network Input
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | Controller / HTTP API |
-| Prerequisites | Authenticated API access, or network access to the controller |
-| STRIDE | Elevation of Privilege |
+| Field          | Value                                                         |
+| -------------- | ------------------------------------------------------------- |
+| Severity       | High                                                          |
+| Attack surface | Controller / HTTP API                                         |
+| Prerequisites  | Authenticated API access, or network access to the controller |
+| STRIDE         | Elevation of Privilege                                        |
 
 ## Attack description
 

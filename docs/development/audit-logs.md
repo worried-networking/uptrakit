@@ -41,14 +41,14 @@ Notes:
 
 ## Core crates
 
-| Path | Purpose |
-| --- | --- |
-| `crates/shared/audit-log/` | `AuditActionType`, `AuditEntry`, `AuditOutcome`, `AuditEmitter`, `RuntimeAuditEmitter`, dispatcher, backends |
-| `crates/shared/db/src/entity/audit_log.rs` | Tenant-scoped semantic rows |
-| `crates/shared/db/src/entity/system_audit_log.rs` | System-scoped semantic rows |
-| `crates/ui/web-api/src/routes/*` | HTTP mutation producers |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Service-forwarded audit event ingestion + scope validation |
-| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup + runtime audit emission |
+| Path                                                                | Purpose                                                                                                      |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `crates/shared/audit-log/`                                          | `AuditActionType`, `AuditEntry`, `AuditOutcome`, `AuditEmitter`, `RuntimeAuditEmitter`, dispatcher, backends |
+| `crates/shared/db/src/entity/audit_log.rs`                          | Tenant-scoped semantic rows                                                                                  |
+| `crates/shared/db/src/entity/system_audit_log.rs`                   | System-scoped semantic rows                                                                                  |
+| `crates/ui/web-api/src/routes/*`                                    | HTTP mutation producers                                                                                      |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`            | Service-forwarded audit event ingestion + scope validation                                                   |
+| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup + runtime audit emission                                                                   |
 
 ## Persistence model
 

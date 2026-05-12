@@ -78,13 +78,13 @@ is rejected with a 409 Conflict response.
 
 ## Edge Cases
 
-| Scenario | Behavior |
-| --- | --- |
-| Update finishes while typing | Terminal goes read-only; WebSocket receives `completed` |
-| Agent disconnects mid-session | Controller broadcasts an error; frontend shows disconnect |
-| Admin disconnects mid-update | Update continues running; stdin channel closes (process sees EOF) |
-| PTY allocation fails | Falls back to non-interactive mode with a warning |
-| Agent lacks `InteractiveUpdates` | Controller returns HTTP 409 |
+| Scenario                         | Behavior                                                          |
+| -------------------------------- | ----------------------------------------------------------------- |
+| Update finishes while typing     | Terminal goes read-only; WebSocket receives `completed`           |
+| Agent disconnects mid-session    | Controller broadcasts an error; frontend shows disconnect         |
+| Admin disconnects mid-update     | Update continues running; stdin channel closes (process sees EOF) |
+| PTY allocation fails             | Falls back to non-interactive mode with a warning                 |
+| Agent lacks `InteractiveUpdates` | Controller returns HTTP 409                                       |
 
 ## Batch Updates
 

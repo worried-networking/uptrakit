@@ -18,29 +18,29 @@ has full control. Subsequent users receive only the **viewer** role by default.
 
 ## Built-in roles
 
-| Role | Purpose | Key permissions |
-| --- | --- | --- |
-| **viewer** | Read-only access | View services, software, hosts, settings |
-| **operator** | Day-to-day operations | Approve/reject services, trigger checks and updates |
-| **service_manager** | Full service lifecycle | Approve, reject, remove, update services |
-| **software_manager** | Software management | Create, edit, delete software; trigger checks/updates; manage scheduler and ignore rules |
-| **host_manager** | Host management | Update host properties/tags, deactivate hosts |
-| **settings_manager** | Tenant administration | Auth settings, enrollment tokens, certificates, notifications, audit logs, user management |
-| **command_manager** | Command configuration | Modify command-bearing plugin config fields (equivalent to root access on managed hosts) |
-| **system_administrator** | Infrastructure management | Global settings, system services, system audit logs |
+| Role                     | Purpose                   | Key permissions                                                                            |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------ |
+| **viewer**               | Read-only access          | View services, software, hosts, settings                                                   |
+| **operator**             | Day-to-day operations     | Approve/reject services, trigger checks and updates                                        |
+| **service_manager**      | Full service lifecycle    | Approve, reject, remove, update services                                                   |
+| **software_manager**     | Software management       | Create, edit, delete software; trigger checks/updates; manage scheduler and ignore rules   |
+| **host_manager**         | Host management           | Update host properties/tags, deactivate hosts                                              |
+| **settings_manager**     | Tenant administration     | Auth settings, enrollment tokens, certificates, notifications, audit logs, user management |
+| **command_manager**      | Command configuration     | Modify command-bearing plugin config fields (equivalent to root access on managed hosts)   |
+| **system_administrator** | Infrastructure management | Global settings, system services, system audit logs                                        |
 
 ## Access presets
 
 Presets assign a predefined set of roles in a single operation. They are useful for quickly
 setting up user access levels without manually selecting individual roles.
 
-| Preset | Roles | Typical use case |
-| --- | --- | --- |
-| **read_only** | viewer | Stakeholders, dashboard viewers |
-| **operator** | viewer, operator | On-call staff |
-| **manager** | viewer, service_manager, software_manager, host_manager | Team leads |
-| **administrator** | viewer, service_manager, software_manager, host_manager, settings_manager, command_manager | Tenant administrators |
-| **owner** | All 8 roles | System owners |
+| Preset            | Roles                                                                                      | Typical use case                |
+| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
+| **read_only**     | viewer                                                                                     | Stakeholders, dashboard viewers |
+| **operator**      | viewer, operator                                                                           | On-call staff                   |
+| **manager**       | viewer, service_manager, software_manager, host_manager                                    | Team leads                      |
+| **administrator** | viewer, service_manager, software_manager, host_manager, settings_manager, command_manager | Tenant administrators           |
+| **owner**         | All 8 roles                                                                                | System owners                   |
 
 ## Managing users
 

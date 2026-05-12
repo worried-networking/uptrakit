@@ -87,8 +87,12 @@ const requiredTokens = [
 describe("adapter manifest", () => {
   it("covers all required semantic tokens in dark and light themes", () => {
     for (const token of requiredTokens) {
-      expect(manifest).toContainEqual(expect.objectContaining({ token, theme: "dark" }));
-      expect(manifest).toContainEqual(expect.objectContaining({ token, theme: "light" }));
+      expect(manifest).toContainEqual(
+        expect.objectContaining({ token, theme: "dark" }),
+      );
+      expect(manifest).toContainEqual(
+        expect.objectContaining({ token, theme: "light" }),
+      );
     }
   });
 });
@@ -206,8 +210,14 @@ render(TabStrip, {
   activeId: "general",
 });
 
-expect(screen.getByRole("tab", { name: "General" })).toHaveAttribute("data-state", "active");
-expect(screen.getByRole("tab", { name: "Plugin Configs" })).toHaveAttribute("data-state", "inactive");
+expect(screen.getByRole("tab", { name: "General" })).toHaveAttribute(
+  "data-state",
+  "active",
+);
+expect(screen.getByRole("tab", { name: "Plugin Configs" })).toHaveAttribute(
+  "data-state",
+  "inactive",
+);
 ```
 
 Run:
@@ -416,7 +426,13 @@ Include helpers shaped like:
 
 ```ts
 export function buildParitySurfaceTab(id: string, label: string) {
-  return { surface_id: id, label, priority: 100, slot: "settings.tabs", targeting: "universal" };
+  return {
+    surface_id: id,
+    label,
+    priority: 100,
+    slot: "settings.tabs",
+    targeting: "universal",
+  };
 }
 ```
 

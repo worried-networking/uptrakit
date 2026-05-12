@@ -18,20 +18,20 @@ confirmVariant severity mapping. No new primitives created.
 
 ## File map
 
-| File | Change type | Summary |
-| --- | --- | --- |
-| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.svelte` | Modify | Replace raw `<button>` with `<Button>` primitive; drop `presetClass`/`buttonClass`; add `confirmVariant` to `<ConfirmDialog>` |
-| `frontend/src/lib/components/surfaces/SurfaceWorkflow.svelte` | Modify | Replace 7 raw `<button>` sites; delete `presetClass`/`buttonClass`; introduce `confirmVariantForSeverity`; add `confirmVariant` to `<ConfirmDialog>` |
-| `frontend/src/lib/components/surfaces/SurfaceForm.svelte` | Modify | Replace one raw `<button>` (fallback branch) with `<Button>`; drop text-swap |
-| `frontend/src/lib/components/surfaces/SchemaForm.svelte` | Modify | Replace raw `<button>` submit; replace `<input type="checkbox">` with `<Checkbox>`; replace raw `<textarea>` with `<Textarea>`; replace raw `<input>` with `<Input>`; drop bespoke `aria-invalid` |
-| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte` | Modify | Replace one `<button class="btn preset-tonal-surface">` with `<Button variant="secondary">` |
-| `frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte` | Modify | Replace both custom-outline retry `<button>` sites with `<Button variant="danger" size="sm">` |
-| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | Modify | Add variant/loading/aria-busy/size/confirmVariant assertions |
-| `frontend/src/lib/components/surfaces/SurfaceWorkflow.test.ts` | Modify | Add trigger variant, Cancel/Back secondary, four primary step buttons, confirmVariant assertions |
-| `frontend/src/lib/components/surfaces/SurfaceForm.test.ts` | Modify | Add Button variant + loading wiring assertion |
-| `frontend/src/lib/components/surfaces/SchemaForm.test.ts` | Modify | Add field-type dispatch matrix, error-prop wiring, unknown-type warn, submit primitive assertions |
-| `frontend/src/lib/components/surfaces/SurfaceRenderer.test.ts` | Modify | Add modal-trigger `variant="secondary"` + `data-ui` assertion |
-| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts` | Modify | Add retry button `variant="danger" size="sm"` assertions |
+| File                                                                    | Change type | Summary                                                                                                                                                                                           |
+| ----------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.svelte`  | Modify      | Replace raw `<button>` with `<Button>` primitive; drop `presetClass`/`buttonClass`; add `confirmVariant` to `<ConfirmDialog>`                                                                     |
+| `frontend/src/lib/components/surfaces/SurfaceWorkflow.svelte`           | Modify      | Replace 7 raw `<button>` sites; delete `presetClass`/`buttonClass`; introduce `confirmVariantForSeverity`; add `confirmVariant` to `<ConfirmDialog>`                                              |
+| `frontend/src/lib/components/surfaces/SurfaceForm.svelte`               | Modify      | Replace one raw `<button>` (fallback branch) with `<Button>`; drop text-swap                                                                                                                      |
+| `frontend/src/lib/components/surfaces/SchemaForm.svelte`                | Modify      | Replace raw `<button>` submit; replace `<input type="checkbox">` with `<Checkbox>`; replace raw `<textarea>` with `<Textarea>`; replace raw `<input>` with `<Input>`; drop bespoke `aria-invalid` |
+| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte`           | Modify      | Replace one `<button class="btn preset-tonal-surface">` with `<Button variant="secondary">`                                                                                                       |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte`          | Modify      | Replace both custom-outline retry `<button>` sites with `<Button variant="danger" size="sm">`                                                                                                     |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | Modify      | Add variant/loading/aria-busy/size/confirmVariant assertions                                                                                                                                      |
+| `frontend/src/lib/components/surfaces/SurfaceWorkflow.test.ts`          | Modify      | Add trigger variant, Cancel/Back secondary, four primary step buttons, confirmVariant assertions                                                                                                  |
+| `frontend/src/lib/components/surfaces/SurfaceForm.test.ts`              | Modify      | Add Button variant + loading wiring assertion                                                                                                                                                     |
+| `frontend/src/lib/components/surfaces/SchemaForm.test.ts`               | Modify      | Add field-type dispatch matrix, error-prop wiring, unknown-type warn, submit primitive assertions                                                                                                 |
+| `frontend/src/lib/components/surfaces/SurfaceRenderer.test.ts`          | Modify      | Add modal-trigger `variant="secondary"` + `data-ui` assertion                                                                                                                                     |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts`         | Modify      | Add retry button `variant="danger" size="sm"` assertions                                                                                                                                          |
 
 ---
 
@@ -62,107 +62,109 @@ After migration:
 Add to `SurfaceInteractionButton.test.ts` inside the existing `describe` block:
 
 ```typescript
-it('renders a primary Button for non-danger interactions', () => {
+it("renders a primary Button for non-danger interactions", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'do-thing',
-    kind: 'mutation_action',
-    label: 'Do Thing',
-    transport: { mode: 'controller_local' }
+    interaction_id: "do-thing",
+    kind: "mutation_action",
+    label: "Do Thing",
+    transport: { mode: "controller_local" },
   };
 
   render(SurfaceInteractionButton, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const btn = screen.getByRole('button', { name: 'Do Thing' });
+  const btn = screen.getByRole("button", { name: "Do Thing" });
   // Button primitive applies h-[23px] for size=md
-  expect(btn.className).toContain('h-[23px]');
+  expect(btn.className).toContain("h-[23px]");
   // No loading spinner initially
-  expect(btn).not.toHaveAttribute('aria-busy');
+  expect(btn).not.toHaveAttribute("aria-busy");
 });
 
-it('renders a danger Button when severity is danger', () => {
+it("renders a danger Button when severity is danger", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'delete-thing',
-    kind: 'mutation_action',
-    label: 'Delete Thing',
-    transport: { mode: 'controller_local' },
+    interaction_id: "delete-thing",
+    kind: "mutation_action",
+    label: "Delete Thing",
+    transport: { mode: "controller_local" },
     confirmation: {
-      title: 'Confirm',
-      message: 'Are you sure?',
-      severity: 'danger'
-    }
+      title: "Confirm",
+      message: "Are you sure?",
+      severity: "danger",
+    },
   };
 
   render(SurfaceInteractionButton, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const btn = screen.getByRole('button', { name: 'Delete Thing' });
+  const btn = screen.getByRole("button", { name: "Delete Thing" });
   // Button primitive's danger variant contains error-bg token
-  expect(btn.className).toContain('color-error');
+  expect(btn.className).toContain("color-error");
 });
 
-it('sets aria-busy and preserves label text during loading', async () => {
+it("sets aria-busy and preserves label text during loading", async () => {
   vi.mocked(invokeSurfaceInteraction).mockImplementation(
-    () => new Promise(() => {}) // never resolves — keeps loading=true
+    () => new Promise(() => {}), // never resolves — keeps loading=true
   );
   const interaction: InteractionDescriptor = {
-    interaction_id: 'slow-thing',
-    kind: 'mutation_action',
-    label: 'Slow Thing',
-    transport: { mode: 'controller_local' }
+    interaction_id: "slow-thing",
+    kind: "mutation_action",
+    label: "Slow Thing",
+    transport: { mode: "controller_local" },
   };
 
   render(SurfaceInteractionButton, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const btn = screen.getByRole('button', { name: 'Slow Thing' });
+  const btn = screen.getByRole("button", { name: "Slow Thing" });
   await fireEvent.click(btn);
 
   await waitFor(() => {
-    expect(btn).toHaveAttribute('aria-busy', 'true');
+    expect(btn).toHaveAttribute("aria-busy", "true");
   });
   // Children text is preserved during load — NOT replaced with 'Processing...'
-  expect(btn.textContent).not.toContain('Processing');
-  expect(screen.getByText('Slow Thing')).toBeInTheDocument();
+  expect(btn.textContent).not.toContain("Processing");
+  expect(screen.getByText("Slow Thing")).toBeInTheDocument();
 });
 
-it('renders size=sm Button with h-[19px]', () => {
+it("renders size=sm Button with h-[19px]", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'sm-thing',
-    kind: 'mutation_action',
-    label: 'Sm Thing',
-    transport: { mode: 'controller_local' }
+    interaction_id: "sm-thing",
+    kind: "mutation_action",
+    label: "Sm Thing",
+    transport: { mode: "controller_local" },
   };
 
   render(SurfaceInteractionButton, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     interaction,
-    size: 'sm'
+    size: "sm",
   });
 
-  expect(screen.getByRole('button', { name: 'Sm Thing' }).className).toContain('h-[19px]');
+  expect(screen.getByRole("button", { name: "Sm Thing" }).className).toContain(
+    "h-[19px]",
+  );
 });
 
-it('no raw preset-filled-* or preset-tonal-* classes on any button', () => {
+it("no raw preset-filled-* or preset-tonal-* classes on any button", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'any-thing',
-    kind: 'mutation_action',
-    label: 'Any Thing',
-    transport: { mode: 'controller_local' }
+    interaction_id: "any-thing",
+    kind: "mutation_action",
+    label: "Any Thing",
+    transport: { mode: "controller_local" },
   };
 
   const { container } = render(SurfaceInteractionButton, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const buttons = container.querySelectorAll('button');
+  const buttons = container.querySelectorAll("button");
   buttons.forEach((b) => {
     expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
   });
@@ -312,233 +314,250 @@ After migration:
 Add to `SurfaceWorkflow.test.ts` inside the existing `describe` block:
 
 ```typescript
-it('renders workflow trigger with primary variant for non-danger severity', () => {
+it("renders workflow trigger with primary variant for non-danger severity", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'bootstrap',
-    kind: 'workflow',
-    label: 'Bootstrap Host',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "bootstrap",
+    kind: "workflow",
+    label: "Bootstrap Host",
+    transport: { mode: "provider_proxied" },
     workflow_steps: [
       {
-        step_id: 'execute',
-        label: 'Execute',
-        input_schema: 'object',
-        result_schema: 'any',
-        form_ui: { fields: [] }
-      }
-    ]
+        step_id: "execute",
+        label: "Execute",
+        input_schema: "object",
+        result_schema: "any",
+        form_ui: { fields: [] },
+      },
+    ],
   };
 
   render(SurfaceWorkflow, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const btn = screen.getByRole('button', { name: 'Bootstrap Host' });
+  const btn = screen.getByRole("button", { name: "Bootstrap Host" });
   // primary variant has accent gradient
-  expect(btn.className).toContain('h-[23px]');
+  expect(btn.className).toContain("h-[23px]");
   expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
 });
 
-it('renders workflow trigger with danger variant when severity is danger', () => {
+it("renders workflow trigger with danger variant when severity is danger", () => {
   const interaction: InteractionDescriptor = {
-    interaction_id: 'delete-workflow',
-    kind: 'workflow',
-    label: 'Delete Workflow',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "delete-workflow",
+    kind: "workflow",
+    label: "Delete Workflow",
+    transport: { mode: "provider_proxied" },
     confirmation: {
-      title: 'Confirm',
-      message: 'Are you sure?',
-      severity: 'danger'
+      title: "Confirm",
+      message: "Are you sure?",
+      severity: "danger",
     },
     workflow_steps: [
       {
-        step_id: 'execute',
-        label: 'Execute',
-        input_schema: 'object',
-        result_schema: 'any',
-        form_ui: { fields: [] }
-      }
-    ]
+        step_id: "execute",
+        label: "Execute",
+        input_schema: "object",
+        result_schema: "any",
+        form_ui: { fields: [] },
+      },
+    ],
   };
 
   render(SurfaceWorkflow, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     interaction,
-    interactions: [interaction]
+    interactions: [interaction],
   });
 
-  const btn = screen.getByRole('button', { name: 'Delete Workflow' });
-  expect(btn.className).toContain('color-error');
+  const btn = screen.getByRole("button", { name: "Delete Workflow" });
+  expect(btn.className).toContain("color-error");
 });
 
-it('renders Cancel and Back as secondary variant buttons (not ghost)', async () => {
+it("renders Cancel and Back as secondary variant buttons (not ghost)", async () => {
   vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
   const interaction: InteractionDescriptor = {
-    interaction_id: 'multi-step',
-    kind: 'workflow',
-    label: 'Multi Step',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "multi-step",
+    kind: "workflow",
+    label: "Multi Step",
+    transport: { mode: "provider_proxied" },
     workflow_steps: [
       {
-        step_id: 'step1',
-        label: 'Step 1',
-        input_schema: 'object',
-        result_schema: 'any',
-        submit_interaction_id: 'step1-submit',
-        form_ui: { fields: [{ key: 'val', label: 'Val', field_type: 'text', required: false }] }
+        step_id: "step1",
+        label: "Step 1",
+        input_schema: "object",
+        result_schema: "any",
+        submit_interaction_id: "step1-submit",
+        form_ui: {
+          fields: [
+            { key: "val", label: "Val", field_type: "text", required: false },
+          ],
+        },
       },
       {
-        step_id: 'step2',
-        label: 'Step 2',
-        input_schema: 'object',
-        result_schema: 'any',
-        form_ui: { fields: [] }
-      }
-    ]
+        step_id: "step2",
+        label: "Step 2",
+        input_schema: "object",
+        result_schema: "any",
+        form_ui: { fields: [] },
+      },
+    ],
   };
   const interactions: InteractionDescriptor[] = [
     interaction,
     {
-      interaction_id: 'step1-submit',
-      kind: 'mutation_action',
-      label: 'Step1',
-      transport: { mode: 'provider_proxied' }
-    }
+      interaction_id: "step1-submit",
+      kind: "mutation_action",
+      label: "Step1",
+      transport: { mode: "provider_proxied" },
+    },
   ];
 
   render(SurfaceWorkflow, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     interaction,
-    interactions
+    interactions,
   });
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Multi Step' }));
-  await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  await fireEvent.click(screen.getByRole("button", { name: "Multi Step" }));
+  await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
   await waitFor(() => {
     // Back button is now visible on step 2
-    const backBtn = screen.getByRole('button', { name: 'Back' });
+    const backBtn = screen.getByRole("button", { name: "Back" });
     // secondary variant uses bg-raised token
-    expect(backBtn.className).toContain('bg-[var(--bg-raised)]');
+    expect(backBtn.className).toContain("bg-[var(--bg-raised)]");
     expect(backBtn.className).not.toMatch(/preset-tonal/);
   });
 
-  const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
-  expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+  const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+  expect(cancelBtn.className).toContain("bg-[var(--bg-raised)]");
   expect(cancelBtn.className).not.toMatch(/preset-tonal/);
 });
 
-it('renders four primary step buttons with correct children text', async () => {
+it("renders four primary step buttons with correct children text", async () => {
   vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
   // Single-step workflow with form fields — renders Run/Continue form-submit path
   const interaction: InteractionDescriptor = {
-    interaction_id: 'single',
-    kind: 'workflow',
-    label: 'Single Step',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "single",
+    kind: "workflow",
+    label: "Single Step",
+    transport: { mode: "provider_proxied" },
     workflow_steps: [
       {
-        step_id: 'only',
-        label: 'Only',
-        input_schema: 'object',
-        result_schema: 'any',
-        submit_interaction_id: 'only-submit',
-        form_ui: { fields: [{ key: 'v', label: 'V', field_type: 'text', required: false }] }
-      }
-    ]
+        step_id: "only",
+        label: "Only",
+        input_schema: "object",
+        result_schema: "any",
+        submit_interaction_id: "only-submit",
+        form_ui: {
+          fields: [
+            { key: "v", label: "V", field_type: "text", required: false },
+          ],
+        },
+      },
+    ],
   };
   const interactions: InteractionDescriptor[] = [
     interaction,
     {
-      interaction_id: 'only-submit',
-      kind: 'mutation_action',
-      label: 'Only Submit',
-      transport: { mode: 'provider_proxied' }
-    }
+      interaction_id: "only-submit",
+      kind: "mutation_action",
+      label: "Only Submit",
+      transport: { mode: "provider_proxied" },
+    },
   ];
 
   render(SurfaceWorkflow, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     interaction,
-    interactions
+    interactions,
   });
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Single Step' }));
+  await fireEvent.click(screen.getByRole("button", { name: "Single Step" }));
 
   // isLastStep=true so form-submit branch should read 'Run'
-  const runBtn = screen.getByRole('button', { name: 'Run' });
-  expect(runBtn.className).toContain('h-[23px]');
+  const runBtn = screen.getByRole("button", { name: "Run" });
+  expect(runBtn.className).toContain("h-[23px]");
   expect(runBtn.className).not.toMatch(/preset-filled/);
 });
 
-it('trigger loading state sets aria-busy and preserves label (no text-swap)', async () => {
-  vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+it("trigger loading state sets aria-busy and preserves label (no text-swap)", async () => {
+  vi.mocked(invokeSurfaceInteraction).mockImplementation(
+    () => new Promise(() => {}),
+  );
   const interaction: InteractionDescriptor = {
-    interaction_id: 'long-workflow',
-    kind: 'workflow',
-    label: 'Long Workflow',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "long-workflow",
+    kind: "workflow",
+    label: "Long Workflow",
+    transport: { mode: "provider_proxied" },
     workflow_steps: [
       {
-        step_id: 'step',
-        label: 'Step',
-        input_schema: 'object',
-        result_schema: 'any',
-        submit_interaction_id: 'step-submit',
-        form_ui: { fields: [] }
-      }
-    ]
+        step_id: "step",
+        label: "Step",
+        input_schema: "object",
+        result_schema: "any",
+        submit_interaction_id: "step-submit",
+        form_ui: { fields: [] },
+      },
+    ],
   };
   const interactions: InteractionDescriptor[] = [
     interaction,
     {
-      interaction_id: 'step-submit',
-      kind: 'mutation_action',
-      label: 'Step Submit',
-      transport: { mode: 'provider_proxied' }
-    }
+      interaction_id: "step-submit",
+      kind: "mutation_action",
+      label: "Step Submit",
+      transport: { mode: "provider_proxied" },
+    },
   ];
 
-  render(SurfaceWorkflow, { surfaceId: 'test.surface', interaction, interactions });
+  render(SurfaceWorkflow, {
+    surfaceId: "test.surface",
+    interaction,
+    interactions,
+  });
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Long Workflow' }));
-  const runBtn = screen.getByRole('button', { name: 'Run' });
+  await fireEvent.click(screen.getByRole("button", { name: "Long Workflow" }));
+  const runBtn = screen.getByRole("button", { name: "Run" });
   await fireEvent.click(runBtn);
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Run' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
   });
-  expect(screen.getByText('Run')).toBeInTheDocument();
-  expect(screen.queryByText('Processing...')).not.toBeInTheDocument();
+  expect(screen.getByText("Run")).toBeInTheDocument();
+  expect(screen.queryByText("Processing...")).not.toBeInTheDocument();
 });
 
-it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
+it("no raw preset-filled-* or preset-tonal-* classes on any button in modal", async () => {
   vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
   const interaction: InteractionDescriptor = {
-    interaction_id: 'bootstrap',
-    kind: 'workflow',
-    label: 'Bootstrap Host',
-    transport: { mode: 'provider_proxied' },
+    interaction_id: "bootstrap",
+    kind: "workflow",
+    label: "Bootstrap Host",
+    transport: { mode: "provider_proxied" },
     workflow_steps: [
       {
-        step_id: 'execute',
-        label: 'Execute',
-        input_schema: 'object',
-        result_schema: 'any',
-        form_ui: { fields: [] }
-      }
-    ]
+        step_id: "execute",
+        label: "Execute",
+        input_schema: "object",
+        result_schema: "any",
+        form_ui: { fields: [] },
+      },
+    ],
   };
 
   const { container } = render(SurfaceWorkflow, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+  await fireEvent.click(screen.getByRole("button", { name: "Bootstrap Host" }));
 
-  container.querySelectorAll('button').forEach((b) => {
+  container.querySelectorAll("button").forEach((b) => {
     expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
   });
 });
@@ -812,51 +831,56 @@ keeps no `confirmVariant` — it inherits the `'danger'` default from #3k.
 Add to `SurfaceForm.test.ts` inside the existing `describe` block:
 
 ```typescript
-it('fallback submit renders Button primitive with primary variant and loading wired', async () => {
+it("fallback submit renders Button primitive with primary variant and loading wired", async () => {
   // Interaction with NO form_ui fields — triggers the raw-payload fallback branch
   const interaction: InteractionDescriptor = {
-    interaction_id: 'raw-submit',
-    kind: 'form_submit',
-    label: 'Raw Submit',
-    transport: { mode: 'controller_local' },
-    form_ui: { fields: [] }
+    interaction_id: "raw-submit",
+    kind: "form_submit",
+    label: "Raw Submit",
+    transport: { mode: "controller_local" },
+    form_ui: { fields: [] },
   };
 
   render(SurfaceForm, {
-    surfaceId: 'test.surface',
-    interaction
+    surfaceId: "test.surface",
+    interaction,
   });
 
-  const btn = screen.getByRole('button', { name: 'Submit' });
+  const btn = screen.getByRole("button", { name: "Submit" });
   // Button primitive h-[23px] for size=md
-  expect(btn.className).toContain('h-[23px]');
+  expect(btn.className).toContain("h-[23px]");
   expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
 });
 
-it('fallback submit preserves effectiveSubmitLabel during loading (no text-swap)', async () => {
-  vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+it("fallback submit preserves effectiveSubmitLabel during loading (no text-swap)", async () => {
+  vi.mocked(invokeSurfaceInteraction).mockImplementation(
+    () => new Promise(() => {}),
+  );
   const interaction: InteractionDescriptor = {
-    interaction_id: 'raw-submit',
-    kind: 'form_submit',
-    label: 'Raw Submit',
-    transport: { mode: 'controller_local' },
-    form_ui: { fields: [] }
+    interaction_id: "raw-submit",
+    kind: "form_submit",
+    label: "Raw Submit",
+    transport: { mode: "controller_local" },
+    form_ui: { fields: [] },
   };
 
   render(SurfaceForm, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     interaction,
-    submitLabel: 'Deploy'
+    submitLabel: "Deploy",
   });
 
-  const form = screen.getByRole('button', { name: 'Deploy' }).closest('form')!;
+  const form = screen.getByRole("button", { name: "Deploy" }).closest("form")!;
   await fireEvent.submit(form);
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Deploy' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole("button", { name: "Deploy" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
   });
-  expect(screen.queryByText('Submitting...')).not.toBeInTheDocument();
-  expect(screen.getByText('Deploy')).toBeInTheDocument();
+  expect(screen.queryByText("Submitting...")).not.toBeInTheDocument();
+  expect(screen.getByText("Deploy")).toBeInTheDocument();
 });
 ```
 
@@ -951,185 +975,240 @@ and a raw `<button>` submit with a three-branch text-swap. The migration:
 Add to `SchemaForm.test.ts` inside the existing `describe` block:
 
 ```typescript
-it('renders text field as Input primitive (no raw input[type=text])', async () => {
+it("renders text field as Input primitive (no raw input[type=text])", async () => {
   render(SchemaForm, {
-    fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      { key: "name", label: "Name", field_type: "text", required: false },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const input = screen.getByRole('textbox', { name: /Name/i });
+  const input = screen.getByRole("textbox", { name: /Name/i });
   // Button primitive uses h-8; Input primitive uses w-full rounded-[3px]
-  expect(input.className).toContain('rounded-[3px]');
+  expect(input.className).toContain("rounded-[3px]");
   // No raw Skeleton CSS class
-  expect(input.className).not.toContain('input');
+  expect(input.className).not.toContain("input");
 });
 
-it('renders password field as Input type=password', () => {
+it("renders password field as Input type=password", () => {
   render(SchemaForm, {
-    fields: [{ key: 'pwd', label: 'Password', field_type: 'password', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      {
+        key: "pwd",
+        label: "Password",
+        field_type: "password",
+        required: false,
+      },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const input = document.querySelector('input[type=password]') as HTMLInputElement;
+  const input = document.querySelector(
+    "input[type=password]",
+  ) as HTMLInputElement;
   expect(input).not.toBeNull();
-  expect(input.className).toContain('rounded-[3px]');
+  expect(input.className).toContain("rounded-[3px]");
 });
 
-it('renders number field as Input type=number', () => {
+it("renders number field as Input type=number", () => {
   render(SchemaForm, {
-    fields: [{ key: 'port', label: 'Port', field_type: 'number', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      { key: "port", label: "Port", field_type: "number", required: false },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const input = screen.getByRole('spinbutton', { name: /Port/i });
-  expect(input.className).toContain('rounded-[3px]');
+  const input = screen.getByRole("spinbutton", { name: /Port/i });
+  expect(input.className).toContain("rounded-[3px]");
 });
 
-it('renders textarea field as Textarea primitive with rows=3', () => {
+it("renders textarea field as Textarea primitive with rows=3", () => {
   render(SchemaForm, {
-    fields: [{ key: 'notes', label: 'Notes', field_type: 'textarea', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      { key: "notes", label: "Notes", field_type: "textarea", required: false },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const ta = screen.getByRole('textbox', { name: /Notes/i }) as HTMLTextAreaElement;
-  expect(ta.tagName).toBe('TEXTAREA');
+  const ta = screen.getByRole("textbox", {
+    name: /Notes/i,
+  }) as HTMLTextAreaElement;
+  expect(ta.tagName).toBe("TEXTAREA");
   expect(ta.rows).toBe(3);
   // Textarea primitive uses rounded-[3px]
-  expect(ta.className).toContain('rounded-[3px]');
+  expect(ta.className).toContain("rounded-[3px]");
   // No raw Skeleton CSS class
-  expect(ta.className).not.toContain('textarea');
+  expect(ta.className).not.toContain("textarea");
 });
 
-it('renders ssh_private_key field as mono Textarea with rows=8', () => {
+it("renders ssh_private_key field as mono Textarea with rows=8", () => {
   render(SchemaForm, {
-    fields: [{ key: 'key', label: 'SSH Key', field_type: 'ssh_private_key', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      {
+        key: "key",
+        label: "SSH Key",
+        field_type: "ssh_private_key",
+        required: false,
+      },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const ta = screen.getByRole('textbox', { name: /SSH Key/i }) as HTMLTextAreaElement;
-  expect(ta.tagName).toBe('TEXTAREA');
+  const ta = screen.getByRole("textbox", {
+    name: /SSH Key/i,
+  }) as HTMLTextAreaElement;
+  expect(ta.tagName).toBe("TEXTAREA");
   expect(ta.rows).toBe(8);
   // mono variant applies font-mono
-  expect(ta.className).toContain('font-mono');
+  expect(ta.className).toContain("font-mono");
 });
 
-it('renders toggle field as Checkbox primitive inside FormFieldRow', () => {
+it("renders toggle field as Checkbox primitive inside FormFieldRow", () => {
   render(SchemaForm, {
-    fields: [{ key: 'enabled', label: 'Enabled', field_type: 'toggle', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      {
+        key: "enabled",
+        label: "Enabled",
+        field_type: "toggle",
+        required: false,
+      },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const cb = screen.getByRole('checkbox', { name: /Enabled/i }) as HTMLInputElement;
+  const cb = screen.getByRole("checkbox", {
+    name: /Enabled/i,
+  }) as HTMLInputElement;
   // Checkbox primitive uses accent- and rounded-[2px]
-  expect(cb.className).toContain('rounded-[2px]');
-  expect(cb.className).not.toContain('checkbox');
+  expect(cb.className).toContain("rounded-[2px]");
+  expect(cb.className).not.toContain("checkbox");
 });
 
-it('renders hidden field as raw input[type=hidden] (not a primitive)', () => {
+it("renders hidden field as raw input[type=hidden] (not a primitive)", () => {
   render(SchemaForm, {
-    fields: [{ key: 'id', label: 'ID', field_type: 'hidden', required: false }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      { key: "id", label: "ID", field_type: "hidden", required: false },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const hidden = document.querySelector('input[type=hidden]') as HTMLInputElement;
+  const hidden = document.querySelector(
+    "input[type=hidden]",
+  ) as HTMLInputElement;
   expect(hidden).not.toBeNull();
-  expect(hidden.name).toBe('id');
+  expect(hidden.name).toBe("id");
 });
 
-it('renders select field as raw <select> (unchanged — not migrated to primitive)', () => {
+it("renders select field as raw <select> (unchanged — not migrated to primitive)", () => {
   render(SchemaForm, {
-    fields: [{
-      key: 'env',
-      label: 'Environment',
-      field_type: 'select',
-      required: false,
-      options: [{ value: 'prod', label: 'Production' }]
-    }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      {
+        key: "env",
+        label: "Environment",
+        field_type: "select",
+        required: false,
+        options: [{ value: "prod", label: "Production" }],
+      },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
   // select field uses a raw <select> element — regression guard (not migrated to primitive)
-  const sel = document.querySelector('select#env') as HTMLSelectElement;
+  const sel = document.querySelector("select#env") as HTMLSelectElement;
   expect(sel).not.toBeNull();
-  expect(sel.className).toContain('select');
+  expect(sel.className).toContain("select");
 });
 
-it('renders multi_select field as CheckboxList (unchanged — not migrated to primitive)', () => {
+it("renders multi_select field as CheckboxList (unchanged — not migrated to primitive)", () => {
   render(SchemaForm, {
-    fields: [{
-      key: 'tags',
-      label: 'Tags',
-      field_type: 'multi_select',
-      required: false,
-      options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]
-    }] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    fields: [
+      {
+        key: "tags",
+        label: "Tags",
+        field_type: "multi_select",
+        required: false,
+        options: [
+          { value: "a", label: "A" },
+          { value: "b", label: "B" },
+        ],
+      },
+    ] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
   // multi_select uses CheckboxList — regression guard; verifies the branch was not
   // accidentally replaced by a primitive. These tests pass both before and after
   // migration (the branch is intentionally untouched).
-  const checkboxes = document.querySelectorAll('input[type=checkbox]');
+  const checkboxes = document.querySelectorAll("input[type=checkbox]");
   expect(checkboxes.length).toBeGreaterThanOrEqual(2);
 });
 
-it('falls back to Input type=text for unknown field_type and warns once', () => {
-  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+it("falls back to Input type=text for unknown field_type and warns once", () => {
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   render(SchemaForm, {
     fields: [
-      { key: 'x', label: 'X', field_type: 'unexpected_custom' as unknown as FormField['field_type'], required: false }
+      {
+        key: "x",
+        label: "X",
+        field_type: "unexpected_custom" as unknown as FormField["field_type"],
+        required: false,
+      },
     ] satisfies FormField[],
-    onsubmit: vi.fn().mockResolvedValue(undefined)
+    onsubmit: vi.fn().mockResolvedValue(undefined),
   });
 
-  const input = screen.getByRole('textbox', { name: /X/i });
-  expect(input.className).toContain('rounded-[3px]');
+  const input = screen.getByRole("textbox", { name: /X/i });
+  expect(input.className).toContain("rounded-[3px]");
   expect(warnSpy).toHaveBeenCalledTimes(1);
-  expect(warnSpy.mock.calls[0][0]).toContain('unexpected_custom');
+  expect(warnSpy.mock.calls[0][0]).toContain("unexpected_custom");
 
   warnSpy.mockRestore();
 });
 
-it('passes error to Input primitive and does not use aria-invalid directly', async () => {
+it("passes error to Input primitive and does not use aria-invalid directly", async () => {
   const onsubmit = vi.fn().mockResolvedValue(undefined);
   render(SchemaForm, {
-    fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }] satisfies FormField[],
-    onsubmit
+    fields: [
+      { key: "name", label: "Name", field_type: "text", required: true },
+    ] satisfies FormField[],
+    onsubmit,
   });
 
-  const btn = screen.getByRole('button', { name: 'Submit' });
-  await fireEvent.submit(btn.closest('form')!);
+  const btn = screen.getByRole("button", { name: "Submit" });
+  await fireEvent.submit(btn.closest("form")!);
 
   // Error message comes from Input primitive's error-row render
-  const errorMsg = screen.getByText('Name is required.');
+  const errorMsg = screen.getByText("Name is required.");
   expect(errorMsg).toBeInTheDocument();
 
-  const input = screen.getByRole('textbox', { name: /Name/i });
+  const input = screen.getByRole("textbox", { name: /Name/i });
   // The primitive sets aria-invalid; we do NOT assert absence — just that the error message exists
-  expect(input).toHaveAttribute('aria-invalid', 'true');
+  expect(input).toHaveAttribute("aria-invalid", "true");
 });
 
-it('submit renders Button primitive with loading={loading || preLoading} and no text-swap', async () => {
+it("submit renders Button primitive with loading={loading || preLoading} and no text-swap", async () => {
   const onsubmit = vi.fn().mockImplementation(() => new Promise(() => {}));
   render(SchemaForm, {
-    fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }] satisfies FormField[],
+    fields: [
+      { key: "name", label: "Name", field_type: "text", required: false },
+    ] satisfies FormField[],
     onsubmit,
-    submitLabel: 'Save Config'
+    submitLabel: "Save Config",
   });
 
-  const btn = screen.getByRole('button', { name: 'Save Config' });
-  expect(btn.className).toContain('h-[23px]');
+  const btn = screen.getByRole("button", { name: "Save Config" });
+  expect(btn.className).toContain("h-[23px]");
   expect(btn.className).not.toMatch(/preset-filled/);
 
-  await fireEvent.submit(btn.closest('form')!);
+  await fireEvent.submit(btn.closest("form")!);
 
   await waitFor(() => {
-    expect(btn).toHaveAttribute('aria-busy', 'true');
+    expect(btn).toHaveAttribute("aria-busy", "true");
   });
-  expect(screen.queryByText('Processing...')).not.toBeInTheDocument();
-  expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
-  expect(screen.getByText('Save Config')).toBeInTheDocument();
+  expect(screen.queryByText("Processing...")).not.toBeInTheDocument();
+  expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+  expect(screen.getByText("Save Config")).toBeInTheDocument();
 });
 ```
 
@@ -1396,16 +1475,30 @@ Replace the catch-all block with:
 And add this helper function in the `<script>` section (after the `warnedFieldTypes` set):
 
 ```typescript
-function warnUnknownFieldType(fieldType: string): 'text' | 'password' | 'number' {
-  if (fieldType === 'password') return 'password';
-  if (fieldType === 'number') return 'number';
-  if (!['text', 'select', 'multi_select', 'toggle', 'hidden', 'textarea', 'ssh_private_key'].includes(fieldType)) {
+function warnUnknownFieldType(
+  fieldType: string,
+): "text" | "password" | "number" {
+  if (fieldType === "password") return "password";
+  if (fieldType === "number") return "number";
+  if (
+    ![
+      "text",
+      "select",
+      "multi_select",
+      "toggle",
+      "hidden",
+      "textarea",
+      "ssh_private_key",
+    ].includes(fieldType)
+  ) {
     if (!warnedFieldTypes.has(fieldType)) {
       warnedFieldTypes.add(fieldType);
-      console.warn(`[SchemaForm] Unknown field_type "${fieldType}" — rendering as text input`);
+      console.warn(
+        `[SchemaForm] Unknown field_type "${fieldType}" — rendering as text input`,
+      );
     }
   }
-  return 'text';
+  return "text";
 }
 ```
 
@@ -1483,36 +1576,38 @@ git commit -m "feat(frontend): migrate SchemaForm field dispatch + submit to pri
 Add to `SurfaceRenderer.test.ts` inside the existing `describe` block:
 
 ```typescript
-it('modal-trigger renders Button with secondary variant and data-ui preserved', async () => {
+it("modal-trigger renders Button with secondary variant and data-ui preserved", async () => {
   const node: SurfaceNode = {
-    kind: 'modal_trigger',
-    interaction_id: 'open-modal',
-    modal_nodes: []
+    kind: "modal_trigger",
+    interaction_id: "open-modal",
+    modal_nodes: [],
   };
 
   const interactions: InteractionDescriptor[] = [
     {
-      interaction_id: 'open-modal',
-      kind: 'mutation_action',
-      label: 'Open Modal',
-      transport: { mode: 'controller_local' }
-    }
+      interaction_id: "open-modal",
+      kind: "mutation_action",
+      label: "Open Modal",
+      transport: { mode: "controller_local" },
+    },
   ];
 
   const { container } = render(SurfaceRenderer, {
-    surfaceId: 'test.surface',
+    surfaceId: "test.surface",
     node,
     interactions,
     dataSources: [],
-    dataBySource: {}
+    dataBySource: {},
   });
 
-  const btn = screen.getByRole('button', { name: 'Open Modal' });
-  expect(btn).toHaveAttribute('data-ui', 'modal-trigger');
+  const btn = screen.getByRole("button", { name: "Open Modal" });
+  expect(btn).toHaveAttribute("data-ui", "modal-trigger");
   // secondary variant uses bg-raised token
-  expect(btn.className).toContain('bg-[var(--bg-raised)]');
+  expect(btn.className).toContain("bg-[var(--bg-raised)]");
   expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
-  expect(container.querySelectorAll('button[class*="preset-"]')).toHaveLength(0);
+  expect(container.querySelectorAll('button[class*="preset-"]')).toHaveLength(
+    0,
+  );
 });
 ```
 
@@ -1606,115 +1701,115 @@ pass after migration. New assertions verify the `danger` variant class.
 Add to `SurfaceReadPanel.test.ts` inside the existing `describe` block (after line 635):
 
 ```typescript
-it('retry button in targeted branch renders Button variant=danger size=sm', async () => {
+it("retry button in targeted branch renders Button variant=danger size=sm", async () => {
   // Mock a provider so the targeted branch renders past the "No provider connected" gate.
   vi.mocked(getSurfaceProviders).mockReturnValue([
     {
-      provider_id: 'provider-1',
-      display_label: 'Provider 1',
-      availability: 'available',
+      provider_id: "provider-1",
+      display_label: "Provider 1",
+      availability: "available",
       service_id: undefined,
-      encryption_metadata: undefined
-    }
+      encryption_metadata: undefined,
+    },
   ]);
-  vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('fail'));
+  vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error("fail"));
 
   const read: SurfaceReadResponse = {
     descriptor: {
-      surface_id: 'surface.one',
-      label: 'Targeted',
+      surface_id: "surface.one",
+      label: "Targeted",
       priority: 100,
-      slot: 'host_detail.tabs',
-      scope: 'tenant',
-      targeting: 'targeted',
-      provider_kind: 'plugin',
+      slot: "host_detail.tabs",
+      scope: "tenant",
+      targeting: "targeted",
+      provider_kind: "plugin",
       required_capabilities: [],
       root_node: {
-        kind: 'key_value',
-        data_source_id: 'data.remote'
-      }
+        kind: "key_value",
+        data_source_id: "data.remote",
+      },
     },
     interactions: [
       {
-        interaction_id: 'get-info',
-        kind: 'data_load',
-        label: 'Get Info',
-        transport: { mode: 'controller_local' }
-      }
+        interaction_id: "get-info",
+        kind: "data_load",
+        label: "Get Info",
+        transport: { mode: "controller_local" },
+      },
     ],
     data_sources: [
       {
-        data_source_id: 'data.remote',
-        kind: { kind: 'provider_query', operation_id: 'get-info' },
-        result_schema: 'object',
-        refresh_policy: { type: 'manual' }
-      }
-    ]
+        data_source_id: "data.remote",
+        kind: { kind: "provider_query", operation_id: "get-info" },
+        result_schema: "object",
+        refresh_policy: { type: "manual" },
+      },
+    ],
   };
 
   render(SurfaceReadPanel, {
     surface: makeSurface(),
     read,
-    baseParams: { host_id: 'host-001' },
-    reloadToken: 0
+    baseParams: { host_id: "host-001" },
+    reloadToken: 0,
   });
 
-  const btn = await screen.findByRole('button', { name: 'Try again' });
+  const btn = await screen.findByRole("button", { name: "Try again" });
   // Button primitive's danger variant uses color-error tokens
-  expect(btn.className).toContain('color-error');
+  expect(btn.className).toContain("color-error");
   // size=sm → h-[19px]
-  expect(btn.className).toContain('h-[19px]');
+  expect(btn.className).toContain("h-[19px]");
   // No bespoke inline class
-  expect(btn.className).not.toContain('border-[var(--color-error-border)]');
+  expect(btn.className).not.toContain("border-[var(--color-error-border)]");
 });
 
-it('retry button in universal branch renders Button variant=danger size=sm', async () => {
-  vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('fail'));
+it("retry button in universal branch renders Button variant=danger size=sm", async () => {
+  vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error("fail"));
 
   const read: SurfaceReadResponse = {
     descriptor: {
-      surface_id: 'surface.one',
-      label: 'Universal',
+      surface_id: "surface.one",
+      label: "Universal",
       priority: 100,
-      slot: 'host_detail.tabs',
-      scope: 'tenant',
-      targeting: 'universal',
-      provider_kind: 'plugin',
+      slot: "host_detail.tabs",
+      scope: "tenant",
+      targeting: "universal",
+      provider_kind: "plugin",
       required_capabilities: [],
       root_node: {
-        kind: 'key_value',
-        data_source_id: 'data.remote'
-      }
+        kind: "key_value",
+        data_source_id: "data.remote",
+      },
     },
     interactions: [
       {
-        interaction_id: 'get-info',
-        kind: 'data_load',
-        label: 'Get Info',
-        transport: { mode: 'controller_local' }
-      }
+        interaction_id: "get-info",
+        kind: "data_load",
+        label: "Get Info",
+        transport: { mode: "controller_local" },
+      },
     ],
     data_sources: [
       {
-        data_source_id: 'data.remote',
-        kind: { kind: 'provider_query', operation_id: 'get-info' },
-        result_schema: 'object',
-        refresh_policy: { type: 'manual' }
-      }
-    ]
+        data_source_id: "data.remote",
+        kind: { kind: "provider_query", operation_id: "get-info" },
+        result_schema: "object",
+        refresh_policy: { type: "manual" },
+      },
+    ],
   };
 
   render(SurfaceReadPanel, {
     surface: makeSurface(),
     read,
     baseParams: {},
-    reloadToken: 0
+    reloadToken: 0,
   });
 
-  const btn = await screen.findByRole('button', { name: 'Try again' });
-  expect(btn.className).toContain('color-error');
-  expect(btn.className).toContain('h-[19px]');
-  expect(btn.className).not.toContain('border-[var(--color-error-border)]');
+  const btn = await screen.findByRole("button", { name: "Try again" });
+  expect(btn.className).toContain("color-error");
+  expect(btn.className).toContain("h-[19px]");
+  expect(btn.className).not.toContain("border-[var(--color-error-border)]");
 });
 ```
 
@@ -1845,11 +1940,11 @@ npx playwright test tests/e2e/surface-preview.spec.ts --update-snapshots
 If `surface-preview.spec.ts` does not exist, create a minimal spec:
 
 ```typescript
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test('surface-preview visual baseline', async ({ page }) => {
-  await page.goto('/dev/surface-preview');
-  await expect(page).toHaveScreenshot('surface-preview.png');
+test("surface-preview visual baseline", async ({ page }) => {
+  await page.goto("/dev/surface-preview");
+  await expect(page).toHaveScreenshot("surface-preview.png");
 });
 ```
 
@@ -1889,7 +1984,7 @@ grep -n 'preset-filled\|preset-tonal' \
 
 Expected: no output (zero matches). If any matches appear, migrate them using the same pattern as Task 1 before continuing.
 
-- [ ] **Step 2: Grep migrated files for any remaining raw preset-* button classes**
+- [ ] **Step 2: Grep migrated files for any remaining raw preset-\* button classes**
 
 ```bash
 cd /Users/andreyyantsen/Development/uptrakit/frontend

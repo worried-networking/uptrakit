@@ -2774,33 +2774,33 @@ git commit -m "feat(dispatch): wire resource scaling hook into all update finali
 
 **Spec coverage check:**
 
-| Spec requirement | Task |
-| --- | --- |
-| Migration A: add `update_cores`/`update_memory_mb` to both policy tables | Task 1 |
-| Migration B: create `proxmox_resource_scaling_records` | Task 2 |
-| Entity files for new table | Task 2 |
-| `ProtectionPolicy` / `ProxmoxProtectionPolicyRecord` field extension | Task 3 |
-| `PveQemuConfig` resource + hotplug fields + `supports_live_resource_scaling` | Task 4 |
-| `PveLxcConfig` resource fields | Task 4 |
-| `set_qemu_config_resources` / `set_lxc_config_resources` | Task 5 |
-| `UpdateHookController` + contexts | Task 6 |
-| `ControllerUpdateHook` trait | Task 6 |
-| `ControllerUpdateHookOps` + `PluginOps` | Task 7 |
-| `CreateControllerUpdateHookFn` + `RoleCreators` field | Task 8 |
-| `declare_plugin!` optional param | Task 8 |
-| `PluginCatalog` wiring | Task 9 |
-| `upsert_scaling_record` / `load_scaling_record` | Task 10 |
-| Pre-update hook: mapping load, policy load, hotplug check, scaling, crash-safe record | Task 11 |
-| Post-update hook: restore, restore-failure notification | Task 12 |
-| `declare_plugin!` invocation for Proxmox | Task 13 |
-| `reset_tenant_data` extension | Task 13 |
-| `QueryUpdateHookController` + dispatch fns | Task 14 |
-| `finalize_post_update_best_effort` + `with_recovery_timeout` | Task 15 |
-| Pre-update hook call sites in `updates.rs` | Task 15 |
-| Orchestrator + `update_batches/dispatch.rs` + `update_batches/mod.rs` call sites | Task 16 |
-| Crash-recovery finalization path | Task 16 |
-| Post-update order: hook before protection finalization | Tasks 15–16 |
-| Pre-update order: protection before hook | Tasks 15–16 |
+| Spec requirement                                                                      | Task        |
+| ------------------------------------------------------------------------------------- | ----------- |
+| Migration A: add `update_cores`/`update_memory_mb` to both policy tables              | Task 1      |
+| Migration B: create `proxmox_resource_scaling_records`                                | Task 2      |
+| Entity files for new table                                                            | Task 2      |
+| `ProtectionPolicy` / `ProxmoxProtectionPolicyRecord` field extension                  | Task 3      |
+| `PveQemuConfig` resource + hotplug fields + `supports_live_resource_scaling`          | Task 4      |
+| `PveLxcConfig` resource fields                                                        | Task 4      |
+| `set_qemu_config_resources` / `set_lxc_config_resources`                              | Task 5      |
+| `UpdateHookController` + contexts                                                     | Task 6      |
+| `ControllerUpdateHook` trait                                                          | Task 6      |
+| `ControllerUpdateHookOps` + `PluginOps`                                               | Task 7      |
+| `CreateControllerUpdateHookFn` + `RoleCreators` field                                 | Task 8      |
+| `declare_plugin!` optional param                                                      | Task 8      |
+| `PluginCatalog` wiring                                                                | Task 9      |
+| `upsert_scaling_record` / `load_scaling_record`                                       | Task 10     |
+| Pre-update hook: mapping load, policy load, hotplug check, scaling, crash-safe record | Task 11     |
+| Post-update hook: restore, restore-failure notification                               | Task 12     |
+| `declare_plugin!` invocation for Proxmox                                              | Task 13     |
+| `reset_tenant_data` extension                                                         | Task 13     |
+| `QueryUpdateHookController` + dispatch fns                                            | Task 14     |
+| `finalize_post_update_best_effort` + `with_recovery_timeout`                          | Task 15     |
+| Pre-update hook call sites in `updates.rs`                                            | Task 15     |
+| Orchestrator + `update_batches/dispatch.rs` + `update_batches/mod.rs` call sites      | Task 16     |
+| Crash-recovery finalization path                                                      | Task 16     |
+| Post-update order: hook before protection finalization                                | Tasks 15–16 |
+| Pre-update order: protection before hook                                              | Tasks 15–16 |
 
 **Placeholder scan:** None found.
 

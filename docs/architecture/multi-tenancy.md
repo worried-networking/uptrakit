@@ -8,31 +8,31 @@ multi-tenant mode is planned for a future release.
 The `tenants` table stores tenant records. A seeded **default tenant** (with `is_default = true`) is created by the
 initial migration. All data in single-tenant mode is associated with this default tenant.
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | `Uuid::now_v7()` |
-| `name` | String | Human-readable name |
-| `slug` | String (unique) | URL-safe identifier |
-| `is_default` | Bool | Exactly one row has `true` |
-| `created_at` | Timestamp | |
-| `updated_at` | Timestamp | |
-| `deactivated_at` | Timestamp? | Soft-delete |
+| Column           | Type            | Notes                      |
+| ---------------- | --------------- | -------------------------- |
+| `id`             | UUID PK         | `Uuid::now_v7()`           |
+| `name`           | String          | Human-readable name        |
+| `slug`           | String (unique) | URL-safe identifier        |
+| `is_default`     | Bool            | Exactly one row has `true` |
+| `created_at`     | Timestamp       |                            |
+| `updated_at`     | Timestamp       |                            |
+| `deactivated_at` | Timestamp?      | Soft-delete                |
 
 ## Tenant-scoped tables
 
 The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenants(id)` ON DELETE RESTRICT:
 
-| Table | Unique constraint change |
-| --- | --- |
-| `services` | — (index on `tenant_id`) |
-| `hosts` | `machine_id` unique → `(tenant_id, machine_id)` |
-| `plugin_configs` | — (index on `tenant_id`) |
-| `software_items` | `(plugin_config_id, package_identifier)` → `(tenant_id, plugin_config_id, package_identifier)` |
-| `oidc_providers` | `slug` unique → `(tenant_id, slug)` |
-| `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
-| `settings` | PK `(key)` → `(tenant_id, key)` |
-| `mqtt_clients` | Non-unique index on `tenant_id` (multiple clients per tenant, limit controlled by `MqttMaxClientsPerTenant` global setting) |
-| `settings_version` | PK `tenant_id` (one row per tenant, version counters for cross-instance cache invalidation) |
+| Table              | Unique constraint change                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `services`         | — (index on `tenant_id`)                                                                                                    |
+| `hosts`            | `machine_id` unique → `(tenant_id, machine_id)`                                                                             |
+| `plugin_configs`   | — (index on `tenant_id`)                                                                                                    |
+| `software_items`   | `(plugin_config_id, package_identifier)` → `(tenant_id, plugin_config_id, package_identifier)`                              |
+| `oidc_providers`   | `slug` unique → `(tenant_id, slug)`                                                                                         |
+| `user_roles`       | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)`                                                                   |
+| `settings`         | PK `(key)` → `(tenant_id, key)`                                                                                             |
+| `mqtt_clients`     | Non-unique index on `tenant_id` (multiple clients per tenant, limit controlled by `MqttMaxClientsPerTenant` global setting) |
+| `settings_version` | PK `tenant_id` (one row per tenant, version counters for cross-instance cache invalidation)                                 |
 
 ## Tables NOT changed (remain global)
 
