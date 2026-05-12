@@ -32,13 +32,13 @@ already configured the right role assignments.
 Every software item host assignment has up to five **plugin roles**. Each role can use a
 different plugin:
 
-| Role | What it does |
-| --- | --- |
-| `detect_version` | Runs on the agent to detect the currently installed version. |
-| `fetch_releases` | Fetches the latest available version from an upstream source. |
-| `execute_update` | Runs the actual update command on the agent. |
-| `pre_update_hook` | Runs before the update (e.g. stop a service). |
-| `post_update_hook` | Runs after the update (e.g. restart a service). |
+| Role               | What it does                                                  |
+| ------------------ | ------------------------------------------------------------- |
+| `detect_version`   | Runs on the agent to detect the currently installed version.  |
+| `fetch_releases`   | Fetches the latest available version from an upstream source. |
+| `execute_update`   | Runs the actual update command on the agent.                  |
+| `pre_update_hook`  | Runs before the update (e.g. stop a service).                 |
+| `post_update_hook` | Runs after the update (e.g. restart a service).               |
 
 The three core roles are optional individually, but at least `detect_version` should be
 configured to give Uptrakit something to report. Omitting `fetch_releases` means Uptrakit
@@ -59,11 +59,11 @@ configuration fields.
 Use this pattern when the software publishes versioned binaries as GitHub release assets and
 exposes a `--version`-style command.
 
-| Role | Plugin type | What it does |
-| --- | --- | --- |
-| `detect_version` | `generic_shell` | Runs a shell command on the agent to read the installed version. |
-| `fetch_releases` | `releases_github` | Fetches release tags from the GitHub API (controller-side). |
-| `execute_update` | `releases_github` | Downloads a release asset to the agent and installs it. |
+| Role             | Plugin type       | What it does                                                     |
+| ---------------- | ----------------- | ---------------------------------------------------------------- |
+| `detect_version` | `generic_shell`   | Runs a shell command on the agent to read the installed version. |
+| `fetch_releases` | `releases_github` | Fetches release tags from the GitHub API (controller-side).      |
+| `execute_update` | `releases_github` | Downloads a release asset to the agent and installs it.          |
 
 #### Example: Pocket ID
 
@@ -95,13 +95,13 @@ Plugin configs needed:
 
 Role assignments on the host (`auth.uk-home.yantsen.su`):
 
-| Role | Plugin config | Package identifier | Config override |
-| --- | --- | --- | --- |
-| `detect_version` | `Pocket ID (shell)` | `pocket-id` | _(none)_ |
-| `fetch_releases` | `GitHub Releases` | `pocket-id/pocket-id` | `{"tag_strip_prefix": "v"}` |
-| `execute_update` | `GitHub Releases` | `pocket-id/pocket-id` | `{"asset_patterns": ["pocket-id-linux-amd64"], "install_path": "/opt/pocket-id/pocket-id", "make_executable": true}` |
-| `pre_update_hook` | `Systemd Hook` | — | `{"service_name": "pocketid"}` |
-| `post_update_hook` | `Systemd Hook` | — | `{"service_name": "pocketid"}` |
+| Role               | Plugin config       | Package identifier    | Config override                                                                                                      |
+| ------------------ | ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `detect_version`   | `Pocket ID (shell)` | `pocket-id`           | _(none)_                                                                                                             |
+| `fetch_releases`   | `GitHub Releases`   | `pocket-id/pocket-id` | `{"tag_strip_prefix": "v"}`                                                                                          |
+| `execute_update`   | `GitHub Releases`   | `pocket-id/pocket-id` | `{"asset_patterns": ["pocket-id-linux-amd64"], "install_path": "/opt/pocket-id/pocket-id", "make_executable": true}` |
+| `pre_update_hook`  | `Systemd Hook`      | —                     | `{"service_name": "pocketid"}`                                                                                       |
+| `post_update_hook` | `Systemd Hook`      | —                     | `{"service_name": "pocketid"}`                                                                                       |
 
 The `execute_update` config override specifies:
 
@@ -130,11 +130,11 @@ on another).
 Use this pattern when the software has no GitHub releases page (or you prefer not to use the
 GitHub API) and you can write a shell command to perform the update.
 
-| Role | Plugin type | What it does |
-| --- | --- | --- |
-| `detect_version` | `generic_shell` | Reads the installed version via a shell command. |
+| Role             | Plugin type     | What it does                                                         |
+| ---------------- | --------------- | -------------------------------------------------------------------- |
+| `detect_version` | `generic_shell` | Reads the installed version via a shell command.                     |
 | `fetch_releases` | `generic_shell` | _(not supported — leave unconfigured or use another release plugin)_ |
-| `execute_update` | `generic_shell` | Runs a custom shell command to perform the update. |
+| `execute_update` | `generic_shell` | Runs a custom shell command to perform the update.                   |
 
 A single `generic_shell` plugin config can cover both `detect_version` and `execute_update`
 if you set both `version_command` and `update_command`:
@@ -160,11 +160,11 @@ Use this pattern when you want Uptrakit to show the installed version for a piec
 but updates are handled entirely outside Uptrakit (e.g. a manually compiled binary or a
 proprietary tool).
 
-| Role | Plugin type | What it does |
-| --- | --- | --- |
-| `detect_version` | `generic_shell` | Reads the installed version. |
+| Role             | Plugin type                    | What it does                                                              |
+| ---------------- | ------------------------------ | ------------------------------------------------------------------------- |
+| `detect_version` | `generic_shell`                | Reads the installed version.                                              |
 | `fetch_releases` | `releases_github` (or similar) | Fetches upstream releases so you can see when a new version is available. |
-| `execute_update` | _(unconfigured)_ | Uptrakit shows an update is available but cannot install it. |
+| `execute_update` | _(unconfigured)_               | Uptrakit shows an update is available but cannot install it.              |
 
 Leave `execute_update` unconfigured. Uptrakit will detect version drift and display it in the
 UI, but the **Update** button will be absent for that host assignment.

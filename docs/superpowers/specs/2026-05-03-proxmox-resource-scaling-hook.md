@@ -68,10 +68,10 @@ Migration name: `"m20260503_000001_proxmox_resource_scaling_policy"`.
 Add two nullable integer columns to both `proxmox_protection_defaults` and
 `proxmox_protection_item_overrides`:
 
-| Column | Type | Constraint |
-| --- | --- | --- |
-| `update_cores` | `INT` | `NULL` |
-| `update_memory_mb` | `INT` | `NULL` |
+| Column             | Type  | Constraint |
+| ------------------ | ----- | ---------- |
+| `update_cores`     | `INT` | `NULL`     |
+| `update_memory_mb` | `INT` | `NULL`     |
 
 `NULL` means no scaling configured. Both columns are `NULL` on all existing rows after
 the migration (no backfill needed).
@@ -82,24 +82,24 @@ Migration name: `"m20260503_000002_proxmox_resource_scaling_record"`.
 
 Create table `proxmox_resource_scaling_records`:
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `update_history_id` | `UUID` | Primary key |
-| `tenant_id` | `UUID` | Not null |
-| `host_id` | `UUID` | Not null |
-| `software_item_id` | `UUID` | Not null |
-| `plugin_config_id` | `UUID` | Not null |
-| `mapping_id` | `UUID` | Not null |
-| `vm_type` | `VARCHAR(16)` | Not null — `"qemu"` or `"lxc"` (from `mapping.proxmox_type`) |
-| `original_cores` | `INT` | Not null — value read from Proxmox before scaling |
-| `original_memory_mb` | `BIGINT` | Not null — use BIGINT to match `u64` Proxmox API type |
-| `scaled_cores` | `INT` | Not null — target value applied by pre-update hook |
-| `scaled_memory_mb` | `BIGINT` | Not null |
-| `scale_status` | `VARCHAR(32)` | Not null — `scaling` / `scaled` / `skipped` / `failed` |
-| `restore_status` | `VARCHAR(32)` | Not null — `pending` / `restored` / `restore_failed` / `skipped` (used when `scale_status = "failed"`) |
-| `error_message` | `TEXT` | Nullable |
-| `created_at` | `TIMESTAMP` | Not null (use `.timestamp()` in SeaORM migration, matching all other Proxmox tables) |
-| `updated_at` | `TIMESTAMP` | Not null |
+| Column               | Type          | Notes                                                                                                  |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `update_history_id`  | `UUID`        | Primary key                                                                                            |
+| `tenant_id`          | `UUID`        | Not null                                                                                               |
+| `host_id`            | `UUID`        | Not null                                                                                               |
+| `software_item_id`   | `UUID`        | Not null                                                                                               |
+| `plugin_config_id`   | `UUID`        | Not null                                                                                               |
+| `mapping_id`         | `UUID`        | Not null                                                                                               |
+| `vm_type`            | `VARCHAR(16)` | Not null — `"qemu"` or `"lxc"` (from `mapping.proxmox_type`)                                           |
+| `original_cores`     | `INT`         | Not null — value read from Proxmox before scaling                                                      |
+| `original_memory_mb` | `BIGINT`      | Not null — use BIGINT to match `u64` Proxmox API type                                                  |
+| `scaled_cores`       | `INT`         | Not null — target value applied by pre-update hook                                                     |
+| `scaled_memory_mb`   | `BIGINT`      | Not null                                                                                               |
+| `scale_status`       | `VARCHAR(32)` | Not null — `scaling` / `scaled` / `skipped` / `failed`                                                 |
+| `restore_status`     | `VARCHAR(32)` | Not null — `pending` / `restored` / `restore_failed` / `skipped` (used when `scale_status = "failed"`) |
+| `error_message`      | `TEXT`        | Nullable                                                                                               |
+| `created_at`         | `TIMESTAMP`   | Not null (use `.timestamp()` in SeaORM migration, matching all other Proxmox tables)                   |
+| `updated_at`         | `TIMESTAMP`   | Not null                                                                                               |
 
 No FK to `update_history` — that table lives in `shared-db`; cross-crate FK constraints
 are not used elsewhere in this plugin (matching the `proxmox_protection_audit` precedent).
@@ -464,7 +464,7 @@ let store = DbProxmoxProtectionStore { db: ctx.controller.tenant_db().db() };
      Check `config.supports_live_resource_scaling()`. If `false` →
      `tracing::warn!("QEMU VM {vmid} on {node} does not support hotplug — skipping resource scaling")` → return early.
    - LXC (`mapping.proxmox_type == "lxc"`): `client.get_lxc_config(node, vmid).await` (no hotplug check).
-   On API error → `tracing::warn!(...)`, return early.
+     On API error → `tracing::warn!(...)`, return early.
 6. Extract `original_cores` and `original_memory_mb` from the config response.
    If either is absent (Proxmox did not return the field) → `tracing::warn!(...)`, return early.
    **Type notes:**
@@ -702,7 +702,7 @@ are also restored:
 - `controller-runtime/src/lib.rs` — the crash-recovery finalization path that runs when
   a Controller restarts and discovers in-flight updates. This is the path that closes
   the crash-safety loop: without it, `scale_status = "scaling"` / `restore_status =
-  "pending"` records written before a crash will never be acted on.
+"pending"` records written before a crash will never be acted on.
 
 The implementation of Wave 5 must audit all call sites of `finalize_post_update` (or
 equivalent) in the codebase and confirm each one also calls `finalize_post_update_hook`.
@@ -725,21 +725,21 @@ caller can log the failure at the update-id level, then swallows it.
 
 ## Full Acceptance Criteria
 
-| Check | Expected |
-| --- | --- |
-| `proxmox_protection_defaults` schema | `update_cores`, `update_memory_mb` columns present, nullable |
-| `proxmox_protection_item_overrides` schema | same |
-| `proxmox_resource_scaling_records` table | all columns present |
-| `ControllerUpdateHook` trait | in `roles.rs`, no plugin-named types |
-| `UpdateHookController` trait | in `roles.rs`, only `tenant_db()` |
-| `ControllerUpdateHookOps` | in `plugin_ops.rs`, default `None` impl |
-| `declare_plugin!` all existing plugin crates | compile with new `controller_update_hook: None` default |
-| Pre-update order | protection before hook |
-| Post-update order | hook before protection finalization |
-| Scale-up failure | Update proceeds; record written with `scale_status = "failed"`; `restore_status = "skipped"` |
-| Restore failure | `restore_status = "restore_failed"`; notification attempted; `PostUpdateOutcome` unchanged |
-| QEMU hotplug absent | scaling skipped; no scaling record written |
-| LXC | no hotplug check; scaling attempted |
-| `cargo check --all-features` | clean |
-| `cargo clippy --all-targets --all-features` | clean |
-| `cargo test --all-features` | passes |
+| Check                                        | Expected                                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `proxmox_protection_defaults` schema         | `update_cores`, `update_memory_mb` columns present, nullable                                 |
+| `proxmox_protection_item_overrides` schema   | same                                                                                         |
+| `proxmox_resource_scaling_records` table     | all columns present                                                                          |
+| `ControllerUpdateHook` trait                 | in `roles.rs`, no plugin-named types                                                         |
+| `UpdateHookController` trait                 | in `roles.rs`, only `tenant_db()`                                                            |
+| `ControllerUpdateHookOps`                    | in `plugin_ops.rs`, default `None` impl                                                      |
+| `declare_plugin!` all existing plugin crates | compile with new `controller_update_hook: None` default                                      |
+| Pre-update order                             | protection before hook                                                                       |
+| Post-update order                            | hook before protection finalization                                                          |
+| Scale-up failure                             | Update proceeds; record written with `scale_status = "failed"`; `restore_status = "skipped"` |
+| Restore failure                              | `restore_status = "restore_failed"`; notification attempted; `PostUpdateOutcome` unchanged   |
+| QEMU hotplug absent                          | scaling skipped; no scaling record written                                                   |
+| LXC                                          | no hotplug check; scaling attempted                                                          |
+| `cargo check --all-features`                 | clean                                                                                        |
+| `cargo clippy --all-targets --all-features`  | clean                                                                                        |
+| `cargo test --all-features`                  | passes                                                                                       |

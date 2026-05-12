@@ -1,11 +1,11 @@
 # ATK-08: Shell Injection via Plugins
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | Command execution (plugin system) |
-| Prerequisites | Authenticated user with `manage_software` permission |
-| STRIDE | Elevation of Privilege |
+| Field          | Value                                                |
+| -------------- | ---------------------------------------------------- |
+| Severity       | High                                                 |
+| Attack surface | Command execution (plugin system)                    |
+| Prerequisites  | Authenticated user with `manage_software` permission |
+| STRIDE         | Elevation of Privilege                               |
 
 ## Attack description
 

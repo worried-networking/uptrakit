@@ -16,10 +16,10 @@ Close the last open responsive gap from `docs/development/ui/layout.md`: data vi
 
 Two independent tracks, one plan:
 
-| Track | Deliverable |
-| --- | --- |
-| A | `DataTable` gains `mobileMode`, column-level `mobileHide`/`mobileTitle`, optional `mobileRow` snippet, and scroll-mode table-width fix |
-| B | `SoftwareGroupList.svelte` extracted from `/software/+page.svelte`; adds its own mobile card layout for the hierarchical group/host structure |
+| Track | Deliverable                                                                                                                                   |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | `DataTable` gains `mobileMode`, column-level `mobileHide`/`mobileTitle`, optional `mobileRow` snippet, and scroll-mode table-width fix        |
+| B     | `SoftwareGroupList.svelte` extracted from `/software/+page.svelte`; adds its own mobile card layout for the hierarchical group/host structure |
 
 Two new Playwright projects (`chromium-mobile`, `chromium-mobile-dark`) at 393×852 with DPR=1 cover mobile-width snapshots for both tracks.
 
@@ -86,11 +86,11 @@ Existing props and their behavior are unchanged.
 
 **`mobileMode` behavior summary:**
 
-| `mobileMode` value | Desktop table width | Mobile behaviour |
-| --- | --- | --- |
-| absent (`undefined`) | `min-w-full` | table shown at all viewports (no change from today) |
-| `'scroll'` | `w-max` | table shown at all viewports, scrollable on mobile |
-| `'cards'` | `min-w-full` | table wrapper gets `max-sm:hidden` (hidden on mobile); cards container gets `sm:hidden` (hidden on desktop ≥640px) |
+| `mobileMode` value   | Desktop table width | Mobile behaviour                                                                                                   |
+| -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| absent (`undefined`) | `min-w-full`        | table shown at all viewports (no change from today)                                                                |
+| `'scroll'`           | `w-max`             | table shown at all viewports, scrollable on mobile                                                                 |
+| `'cards'`            | `min-w-full`        | table wrapper gets `max-sm:hidden` (hidden on mobile); cards container gets `sm:hidden` (hidden on desktop ≥640px) |
 
 ---
 
@@ -154,12 +154,12 @@ Using `devices['Desktop Chrome']` as base ensures DPR=1 (required by parity harn
 
 ## Files Changed
 
-| File | Change |
-| --- | --- |
-| `frontend/playwright.config.ts` | Add `chromium-mobile` and `chromium-mobile-dark` projects |
-| `frontend/src/lib/components/ui/DataTable.svelte` | Add `mobileMode`, `mobileRow`, column flags, dual-DOM rendering, scroll mode `w-max` |
-| `frontend/src/lib/components/ui/DataTable.test.ts` | Tests for all new behavior |
-| `frontend/src/lib/components/ui/SoftwareGroupList.svelte` | New: extracted group list + mobile card layout |
-| `frontend/src/routes/software/+page.svelte` | Replace inline group list with `<SoftwareGroupList>` |
-| `frontend/tests/e2e/software-area.spec.ts` | Add mobile snapshot variants |
-| `docs/development/ui/layout.md` | Update responsive status to `Implemented` |
+| File                                                      | Change                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `frontend/playwright.config.ts`                           | Add `chromium-mobile` and `chromium-mobile-dark` projects                            |
+| `frontend/src/lib/components/ui/DataTable.svelte`         | Add `mobileMode`, `mobileRow`, column flags, dual-DOM rendering, scroll mode `w-max` |
+| `frontend/src/lib/components/ui/DataTable.test.ts`        | Tests for all new behavior                                                           |
+| `frontend/src/lib/components/ui/SoftwareGroupList.svelte` | New: extracted group list + mobile card layout                                       |
+| `frontend/src/routes/software/+page.svelte`               | Replace inline group list with `<SoftwareGroupList>`                                 |
+| `frontend/tests/e2e/software-area.spec.ts`                | Add mobile snapshot variants                                                         |
+| `docs/development/ui/layout.md`                           | Update responsive status to `Implemented`                                            |

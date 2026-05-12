@@ -221,16 +221,16 @@ Algorithm:
    values, grouped by `entity_type`. Null/absent cells are skipped (unmatched rows).
 6. For each entity type with collected IDs:
    a. Match on `entity_type`. `SurfaceEntityType::Other(_)` — skip: leave those cells
-      unenriched. `found` remains absent in the JSON; the frontend renders these as plain
-      `entity_id` text (see rendering table row 4 in section 4). Any future named variant
-      added to `SurfaceEntityType` before a match arm is added here should be handled the
-      same way (treat as unrecognised — leave unenriched).
+   unenriched. `found` remains absent in the JSON; the frontend renders these as plain
+   `entity_id` text (see rendering table row 4 in section 4). Any future named variant
+   added to `SurfaceEntityType` before a match arm is added here should be handled the
+   same way (treat as unrecognised — leave unenriched).
    b. Call the static resolver for the matched type. All IDs for that type are collected into
-      a single call — one DB query per type, no N+1.
+   a single call — one DB query per type, no N+1.
    c. On `Err`: log the error; treat all IDs for this type as unresolvable (empty label map).
-      Cells will receive `found: false`. This conflates transient DB errors with permanently
-      deleted entities — the frontend cannot distinguish the two. Accepted limitation; the
-      operator must reload to recover.
+   Cells will receive `found: false`. This conflates transient DB errors with permanently
+   deleted entities — the frontend cannot distinguish the two. Accepted limitation; the
+   operator must reload to recover.
 7. For each entity-link cell whose type was dispatched in step 6, rewrite the JSON object
    in-place. `found` is set unconditionally — `found: None` must not appear in the final wire
    response for cells that were dispatched (successfully or not). Cells for skipped types
@@ -298,15 +298,15 @@ the web-api integration-test level.
 
 ```ts
 export interface SurfaceTableColumn {
-    key: string;
-    label: string;
-    cell_type?: { kind: 'entity_link'; entity_type: SurfaceEntityType };
+  key: string;
+  label: string;
+  cell_type?: { kind: "entity_link"; entity_type: SurfaceEntityType };
 }
 
 export interface SurfaceEntityRef {
-    entity_id: string;
-    label?: string;
-    found?: boolean;
+  entity_id: string;
+  label?: string;
+  found?: boolean;
 }
 ```
 
@@ -320,13 +320,18 @@ Rust variant.
 // unknown types from newer backend versions (forward-compatible).
 // TypeScript switch exhaustiveness is not enforced — the `default` arm is
 // always required to handle unknown future entity types gracefully.
-export type SurfaceEntityType = 'host' | (string & {});
+export type SurfaceEntityType = "host" | (string & {});
 
-export function entityRoute(entityType: SurfaceEntityType, entityId: string): string | null {
-    switch (entityType) {
-        case 'host': return `/hosts/${entityId}`;
-        default: return null;
-    }
+export function entityRoute(
+  entityType: SurfaceEntityType,
+  entityId: string,
+): string | null {
+  switch (entityType) {
+    case "host":
+      return `/hosts/${entityId}`;
+    default:
+      return null;
+  }
 }
 ```
 
@@ -335,14 +340,14 @@ export function entityRoute(entityType: SurfaceEntityType, entityId: string): st
 When any column in the surface node has a `cell_type`, passes a custom `row` snippet to `DataTable`.
 Entity-link cells are parsed as `SurfaceEntityRef`. Rendering rules per cell:
 
-| Condition | Rendering |
-| --- | --- |
-| `entity_link` + `found === true` + route known | `<a href={route}>{label}</a>` |
-| `entity_link` + `found === true` + route unknown | plain `label` text (no link) |
-| `entity_link` + `found === false` | warning badge ("Unknown entity") |
-| `entity_link` + `found` absent (unenriched) | plain `entity_id` text (no link) |
-| `entity_link` + cell is null/absent | `—` |
-| no `cell_type` | `String(value ?? '')` |
+| Condition                                        | Rendering                        |
+| ------------------------------------------------ | -------------------------------- |
+| `entity_link` + `found === true` + route known   | `<a href={route}>{label}</a>`    |
+| `entity_link` + `found === true` + route unknown | plain `label` text (no link)     |
+| `entity_link` + `found === false`                | warning badge ("Unknown entity") |
+| `entity_link` + `found` absent (unenriched)      | plain `entity_id` text (no link) |
+| `entity_link` + cell is null/absent              | `—`                              |
+| no `cell_type`                                   | `String(value ?? '')`            |
 
 The `found` absent row covers two cases: (a) an unregistered entity type with no resolver,
 and (b) any future code path that emits `SurfaceEntityRef` outside the enrichment flow.

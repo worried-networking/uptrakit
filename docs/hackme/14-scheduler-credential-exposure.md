@@ -1,11 +1,11 @@
 # ATK-14: Scheduler Credential Exposure
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | External scheduler / credential delivery |
-| Prerequisites | Compromise of the external scheduler service or its network path |
-| STRIDE | Information Disclosure |
+| Field          | Value                                                            |
+| -------------- | ---------------------------------------------------------------- |
+| Severity       | High                                                             |
+| Attack surface | External scheduler / credential delivery                         |
+| Prerequisites  | Compromise of the external scheduler service or its network path |
+| STRIDE         | Information Disclosure                                           |
 
 ## Attack description
 
@@ -70,7 +70,7 @@ Alternatively, the attacker targets the credential delivery path:
   use `SecretString`, which provides `ZeroizeOnDrop` and redacted `Debug` output.
 - **NATS transport security.** The controller warns when NATS is configured with
   plaintext transport and recommends `nats-tls://` for production.
-- **NATS config encryption.** *(Implemented)* Plugin config fields in
+- **NATS config encryption.** _(Implemented)_ Plugin config fields in
   `CheckVersions`, `ExecuteUpdate`, `ExecuteBatchUpdate`, and
   `DiscoverSoftware` messages are encrypted with AES-256-GCM (via the shared
   master key) before NATS publication. Receiving controllers decrypt the configs

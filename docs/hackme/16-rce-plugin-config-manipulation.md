@@ -1,11 +1,11 @@
 # ATK-16: RCE via Plugin Config Manipulation
 
-| Field | Value |
-| --- | --- |
-| Severity | Critical |
-| Attack surface | Plugin system / command execution |
-| Prerequisites | Authenticated user with `manage_commands` permission (previously `manage_software`) |
-| STRIDE | Elevation of Privilege |
+| Field          | Value                                                                               |
+| -------------- | ----------------------------------------------------------------------------------- |
+| Severity       | Critical                                                                            |
+| Attack surface | Plugin system / command execution                                                   |
+| Prerequisites  | Authenticated user with `manage_commands` permission (previously `manage_software`) |
+| STRIDE         | Elevation of Privilege                                                              |
 
 ## Attack description
 
@@ -91,7 +91,7 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ## Current mitigations
 
-- **Separate `manage_commands` permission.** *(Implemented)* Creating or modifying
+- **Separate `manage_commands` permission.** _(Implemented)_ Creating or modifying
   plugin configs requires the dedicated `manage_commands` permission, which is
   distinct from `manage_software`. Users with `manage_software` alone can manage
   software items, version tracking, and non-command config fields, but cannot alter
@@ -114,47 +114,47 @@ code execution on managed hosts via plugin configuration manipulation.
 - **Plugin config encryption at rest.** Plugin configs are stored encrypted in the
   database via `EncryptedString`, preventing direct database reads from exposing
   command content.
-- **Security audit logging.** *(Implemented)* All plugin config create, update,
+- **Security audit logging.** _(Implemented)_ All plugin config create, update,
   and delete operations emit a `tracing::warn!` event with the `security_audit:`
   prefix. When the config contains command-bearing fields (`version_command`,
   `update_command`, `post_pull_command`, hook commands), the log entry includes
   `command_fields` listing which fields carry executable commands. For updates,
   the log entry includes which command-bearing fields were added, modified, or
   removed compared to the previous config.
-- **Command length limits.** *(Implemented)* All command strings are validated
+- **Command length limits.** _(Implemented)_ All command strings are validated
   against `MAX_COMMAND_LENGTH` (8,192 bytes). `ShellConfig::validate()` checks
   `version_command` and `update_command`; `DockerConfig::validate()` checks
   `post_pull_command`; `HooksConfig::validate()` checks custom hook `commands`
   arrays (both length per command and count per phase via
   `MAX_HOOK_COMMANDS_PER_PHASE`). Validation constants live in
   `uptrakit-shared-types::command_validation`.
-- **Dangerous pattern detection.** *(Implemented)* The controller emits advisory
+- **Dangerous pattern detection.** _(Implemented)_ The controller emits advisory
   `security_audit:` warnings when command-bearing fields contain patterns
   associated with supply chain attacks (e.g., `curl|bash`, `wget|sh`, `rm -rf /`,
   fork bombs). Detection runs on both the create and update paths. Patterns are
   defined in `uptrakit-web-api-types::command_validation::detect_dangerous_patterns`.
-- **Create-path validation.** *(Implemented)* The `create_plugin_config` route
+- **Create-path validation.** _(Implemented)_ The `create_plugin_config` route
   handler validates both plugin-specific config (via `validate_config_str()`) and
   hooks (via `validate_hooks_internal()`), matching the existing update path. This
   closes a gap where the create path previously skipped validation.
-- **Legacy hook array validation.** *(Implemented)* The `validate_hooks_internal()`
+- **Legacy hook array validation.** _(Implemented)_ The `validate_hooks_internal()`
   function now validates `pre_update_commands` and `post_update_commands` legacy flat
   arrays in plugin configs — checking element count against
   `MAX_HOOK_COMMANDS_PER_PHASE`, verifying each element is a string, and validating
   command length via `validate_command_length()`. Previously these arrays bypassed all
   validation.
-- **Malformed hooks rejection.** *(Implemented)* If the `"hooks"` JSON key is present
+- **Malformed hooks rejection.** _(Implemented)_ If the `"hooks"` JSON key is present
   but cannot be parsed as a valid `HooksConfig`, validation now returns HTTP 400
   instead of silently accepting the malformed value.
-- **Docker `working_dir` path traversal check.** *(Implemented)*
+- **Docker `working_dir` path traversal check.** _(Implemented)_
   `DockerConfig::validate()` now rejects `compose_restart.working_dir` values
   containing `..` path segments, matching the existing `compose_file` check.
-- **Pipe-to-shell evasion detection.** *(Implemented)* The dangerous pattern
+- **Pipe-to-shell evasion detection.** _(Implemented)_ The dangerous pattern
   detector now recognizes `sudo`, `env`, `doas`, and `run0` as wrappers that can
   precede a shell interpreter in pipe-to-shell patterns (e.g.,
   `curl ... | sudo bash`, `wget ... | env -i sh`).
 
-- **Dangerous command rejection enabled by default.** *(Implemented)* Dangerous
+- **Dangerous command rejection enabled by default.** _(Implemented)_ Dangerous
   pattern detection is now **on by default**. Plugin config create/update requests
   containing patterns such as `curl|bash`, `rm -rf /`, fork bombs, or bash network
   sockets are rejected with HTTP 400 before the DB write. Operators who need to

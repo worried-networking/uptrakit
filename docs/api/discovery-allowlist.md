@@ -63,11 +63,11 @@ List all tenant-wide discovery allowlist entries.
 
 **`TenantDiscoveryAllowlistEntry` fields:**
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Entry UUID |
-| `plugin_type` | string | Plugin type restricted to (e.g. `"package_manager_homebrew"`) |
-| `created_at` | ISO 8601 datetime | When the entry was created |
+| Field         | Type              | Description                                                   |
+| ------------- | ----------------- | ------------------------------------------------------------- |
+| `id`          | UUID              | Entry UUID                                                    |
+| `plugin_type` | string            | Plugin type restricted to (e.g. `"package_manager_homebrew"`) |
+| `created_at`  | ISO 8601 datetime | When the entry was created                                    |
 
 ---
 
@@ -85,9 +85,9 @@ Add a plugin type to the tenant-wide discovery allowlist.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `plugin_type` | string | Yes | Plugin type to add to the allowlist |
+| Field         | Type   | Required | Description                         |
+| ------------- | ------ | -------- | ----------------------------------- |
+| `plugin_type` | string | Yes      | Plugin type to add to the allowlist |
 
 **Response `201`:** `TenantDiscoveryAllowlistEntry`
 
@@ -104,9 +104,9 @@ entry is returned with status `201`. No duplicate is created.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `400` | `plugin_type` is unknown or the plugin does not have the `DiscoverLocalSoftware` capability |
+| Status | Condition                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------- |
+| `400`  | `plugin_type` is unknown or the plugin does not have the `DiscoverLocalSoftware` capability |
 
 ---
 
@@ -118,9 +118,9 @@ Remove an entry from the tenant-wide discovery allowlist.
 
 **Path parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Allowlist entry UUID |
+| Parameter | Type | Description          |
+| --------- | ---- | -------------------- |
+| `id`      | UUID | Allowlist entry UUID |
 
 **Request body:** none
 
@@ -128,9 +128,9 @@ Remove an entry from the tenant-wide discovery allowlist.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Entry not found |
+| Status | Condition       |
+| ------ | --------------- |
+| `404`  | Entry not found |
 
 ---
 
@@ -143,8 +143,8 @@ List all discovery allowlist entries for a specific host.
 **Path parameters:**
 
 | Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Host UUID |
+| --------- | ---- | ----------- |
+| `id`      | UUID | Host UUID   |
 
 **Request body:** none
 
@@ -163,18 +163,18 @@ List all discovery allowlist entries for a specific host.
 
 **`HostDiscoveryAllowlistEntry` fields:**
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Entry UUID |
-| `host_id` | UUID | Host this entry is scoped to |
-| `plugin_type` | string | Plugin type restricted to |
-| `created_at` | ISO 8601 datetime | When the entry was created |
+| Field         | Type              | Description                  |
+| ------------- | ----------------- | ---------------------------- |
+| `id`          | UUID              | Entry UUID                   |
+| `host_id`     | UUID              | Host this entry is scoped to |
+| `plugin_type` | string            | Plugin type restricted to    |
+| `created_at`  | ISO 8601 datetime | When the entry was created   |
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Host not found or not active |
+| Status | Condition                    |
+| ------ | ---------------------------- |
+| `404`  | Host not found or not active |
 
 ---
 
@@ -187,8 +187,8 @@ Add a plugin type to the allowlist for a specific host.
 **Path parameters:**
 
 | Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Host UUID |
+| --------- | ---- | ----------- |
+| `id`      | UUID | Host UUID   |
 
 **Request body:**
 
@@ -198,9 +198,9 @@ Add a plugin type to the allowlist for a specific host.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `plugin_type` | string | Yes | Plugin type to add to the host allowlist |
+| Field         | Type   | Required | Description                              |
+| ------------- | ------ | -------- | ---------------------------------------- |
+| `plugin_type` | string | Yes      | Plugin type to add to the host allowlist |
 
 **Response `201`:** `HostDiscoveryAllowlistEntry`
 
@@ -218,10 +218,10 @@ the existing entry is returned with status `201`. No duplicate is created.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `400` | `plugin_type` is unknown or the plugin does not have the `DiscoverLocalSoftware` capability |
-| `404` | Host not found or not active |
+| Status | Condition                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------- |
+| `400`  | `plugin_type` is unknown or the plugin does not have the `DiscoverLocalSoftware` capability |
+| `404`  | Host not found or not active                                                                |
 
 ---
 
@@ -233,9 +233,9 @@ Remove an entry from a host's discovery allowlist.
 
 **Path parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Host UUID |
+| Parameter  | Type | Description          |
+| ---------- | ---- | -------------------- |
+| `id`       | UUID | Host UUID            |
 | `entry_id` | UUID | Allowlist entry UUID |
 
 **Request body:** none
@@ -244,9 +244,9 @@ Remove an entry from a host's discovery allowlist.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Host or entry not found |
+| Status | Condition               |
+| ------ | ----------------------- |
+| `404`  | Host or entry not found |
 
 ---
 
@@ -255,12 +255,12 @@ Remove an entry from a host's discovery allowlist.
 Only plugin types that support the `DiscoverLocalSoftware` capability can be added to the
 allowlist. Attempting to add a non-discovery plugin type returns a `400` error.
 
-| Plugin type | Description |
-| --- | --- |
-| `package_manager_apt` | APT package manager (Debian/Ubuntu) |
-| `package_manager_homebrew` | Homebrew formulae and casks (macOS/Linux) |
-| `releases_docker` | Docker container discovery |
-| `discovery_proxmox_helper_scripts` | Proxmox VE helper script applications |
+| Plugin type                        | Description                               |
+| ---------------------------------- | ----------------------------------------- |
+| `package_manager_apt`              | APT package manager (Debian/Ubuntu)       |
+| `package_manager_homebrew`         | Homebrew formulae and casks (macOS/Linux) |
+| `releases_docker`                  | Docker container discovery                |
+| `discovery_proxmox_helper_scripts` | Proxmox VE helper script applications     |
 
 ---
 

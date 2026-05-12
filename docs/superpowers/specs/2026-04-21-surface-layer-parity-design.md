@@ -116,7 +116,9 @@ for them.
 
     Drop any bespoke `aria-invalid` wiring that duplicates the primitive contract; keep `aria-invalid` only if the
     primitive itself still emits it. Never pass `error` directly to `<Checkbox>`.
+
   - Keep `SchemaForm`'s bespoke error rendering. Rejected — duplicates the primitive contract from #2b.
+
 - Reasoning: single source of truth for field-level error visuals. `Checkbox.svelte` intentionally omits `error` — it
   is a bare input control; error display is the responsibility of the `FormFieldRow` wrapper.
 
@@ -243,6 +245,7 @@ out of scope):
 
   `confirmVariantForSeverity` is already typed `'danger' | 'primary'` — the ternary `=== 'danger' ? 'danger' : 'primary'`
   is dead code and must not appear here. Text-swap `{loading ? 'Processing...' : actionLabel}` dropped per Q4.
+
 - Line 484 Cancel footer: `<Button variant="secondary" disabled={ loading} onclick={...}>Cancel</Button>`.
 - Line 494 Back: `<Button variant="secondary" disabled={loading} onclick={handleBack}>Back</Button>`.
 - Line 497-499 Done/Execute review-next:

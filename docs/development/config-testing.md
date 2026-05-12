@@ -72,17 +72,17 @@ POST /api/v1/plugin-configs/test
 
 ### Key components
 
-| Component | Crate | Purpose |
-| :--- | :--- | :--- |
-| `test_plugin_config` route | `web-api` (`routes/plugin_configs.rs`) | REST handler; validates, merges config, dispatches |
-| `ConfigTestProxy` | `web-api` (`config_test_proxy.rs`) | Request/response correlation over WebSocket |
-| `ConfigTestOps` | `plugin-infrastructure-core` (`descriptor.rs`) | Per-plugin metadata: supported kinds and default kind |
-| `ConfigTestKind` | `wire` (`payloads.rs`) | Enum of test kinds sent on the wire |
-| `TestPluginConfigPayload` | `wire` (`payloads.rs`) | Controller-to-agent wire payload |
-| `TestPluginConfigResultPayload` | `wire` (`payloads.rs`) | Agent-to-controller wire result |
-| `run_config_test` | `agent-core` (`config_test.rs`) | Agent-side dispatch and execution |
-| `TestPluginConfigRequest` | `web-api-types` (`plugin_config_test.rs`) | HTTP request body type |
-| `TestPluginConfigResponse` | `web-api-types` (`plugin_config_test.rs`) | HTTP response body type |
+| Component                       | Crate                                          | Purpose                                               |
+| :------------------------------ | :--------------------------------------------- | :---------------------------------------------------- |
+| `test_plugin_config` route      | `web-api` (`routes/plugin_configs.rs`)         | REST handler; validates, merges config, dispatches    |
+| `ConfigTestProxy`               | `web-api` (`config_test_proxy.rs`)             | Request/response correlation over WebSocket           |
+| `ConfigTestOps`                 | `plugin-infrastructure-core` (`descriptor.rs`) | Per-plugin metadata: supported kinds and default kind |
+| `ConfigTestKind`                | `wire` (`payloads.rs`)                         | Enum of test kinds sent on the wire                   |
+| `TestPluginConfigPayload`       | `wire` (`payloads.rs`)                         | Controller-to-agent wire payload                      |
+| `TestPluginConfigResultPayload` | `wire` (`payloads.rs`)                         | Agent-to-controller wire result                       |
+| `run_config_test`               | `agent-core` (`config_test.rs`)                | Agent-side dispatch and execution                     |
+| `TestPluginConfigRequest`       | `web-api-types` (`plugin_config_test.rs`)      | HTTP request body type                                |
+| `TestPluginConfigResponse`      | `web-api-types` (`plugin_config_test.rs`)      | HTTP response body type                               |
 
 ### ConfigTestProxy pattern
 
@@ -100,13 +100,13 @@ returns an error. If the timeout fires first, the pending entry is cleaned up.
 
 ## Supported test kinds
 
-| `ConfigTestKind` | Role used | What it tests | Implemented |
-| :--- | :--- | :--- | :--- |
-| `VersionDetection` | `VersionDetector` | Creates a plugin instance, calls `detect_installed_version()` on the specified package identifier, and returns the detected version string. | Yes |
-| `UpdateCommandValidation` | None (direct) | Extracts `update_command` from the config JSON and runs `sh -n -c "<command>"` to syntax-check it without executing. | Yes |
-| `Connectivity` | `ReleaseFetcher` | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. Used for controller-side plugins. | Planned |
-| `PreUpdateHook` | `LifecycleHook` | Executes the pre-update hook with a mock `UpdateLifecycleContext`. | Planned |
-| `PostUpdateHook` | `LifecycleHook` | Executes the post-update hook with a mock `UpdateLifecycleContext`. | Planned |
+| `ConfigTestKind`          | Role used         | What it tests                                                                                                                               | Implemented |
+| :------------------------ | :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------ | :---------- |
+| `VersionDetection`        | `VersionDetector` | Creates a plugin instance, calls `detect_installed_version()` on the specified package identifier, and returns the detected version string. | Yes         |
+| `UpdateCommandValidation` | None (direct)     | Extracts `update_command` from the config JSON and runs `sh -n -c "<command>"` to syntax-check it without executing.                        | Yes         |
+| `Connectivity`            | `ReleaseFetcher`  | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. Used for controller-side plugins.                      | Planned     |
+| `PreUpdateHook`           | `LifecycleHook`   | Executes the pre-update hook with a mock `UpdateLifecycleContext`.                                                                          | Planned     |
+| `PostUpdateHook`          | `LifecycleHook`   | Executes the post-update hook with a mock `UpdateLifecycleContext`.                                                                         | Planned     |
 
 The `ConfigTestKind` enum is `#[non_exhaustive]` and uses `#[serde(rename_all = "snake_case")]`
 for wire serialization. The agent-side handler falls through to a wildcard arm for unrecognized
@@ -121,7 +121,7 @@ The agent creates a plugin instance via `PluginRegistry::create_plugin`, extract
 - **Version detected** -- `success: true`, `output: "detected version: 1.24.0"`,
   `detected_version: "1.24.0"`.
 - **No version found** -- `success: true`, `output: "no version detected (package may not be
-  installed)"`, `detected_version: null`.
+installed)"`, `detected_version: null`.
 - **Error** -- `success: false`, `error: "version detection failed: ..."`.
 
 ### UpdateCommandValidation
@@ -176,36 +176,36 @@ POST /api/v1/plugin-configs/test
 
 **Request body (`TestPluginConfigRequest`):**
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `plugin_type` | `string` | Yes | Plugin type identifier (e.g. `"generic_shell"`). |
-| `config` | `object` | Yes | Plugin configuration JSON to test. |
-| `plugin_config_id` | `uuid` | No | Saved config ID; incoming `config` is shallow-merged on top. |
-| `host_id` | `uuid` | No | Target host for agent-side tests (required for non-controller-side plugins). |
-| `test_kind` | `string` | No | One of: `version_detection`, `update_command_validation`, `connectivity`, `pre_update_hook`, `post_update_hook`. Defaults to `version_detection` for agent-side plugins. |
-| `package_identifier` | `string` | No | Package identifier for testing (e.g. `"nginx"`, `"owner/repo"`). |
+| Field                | Type     | Required | Description                                                                                                                                                              |
+| :------------------- | :------- | :------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin_type`        | `string` | Yes      | Plugin type identifier (e.g. `"generic_shell"`).                                                                                                                         |
+| `config`             | `object` | Yes      | Plugin configuration JSON to test.                                                                                                                                       |
+| `plugin_config_id`   | `uuid`   | No       | Saved config ID; incoming `config` is shallow-merged on top.                                                                                                             |
+| `host_id`            | `uuid`   | No       | Target host for agent-side tests (required for non-controller-side plugins).                                                                                             |
+| `test_kind`          | `string` | No       | One of: `version_detection`, `update_command_validation`, `connectivity`, `pre_update_hook`, `post_update_hook`. Defaults to `version_detection` for agent-side plugins. |
+| `package_identifier` | `string` | No       | Package identifier for testing (e.g. `"nginx"`, `"owner/repo"`).                                                                                                         |
 
 ### Response
 
 **Success (`TestPluginConfigResponse`):**
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `success` | `bool` | Whether the test passed. |
-| `test_kind` | `string` | The kind of test that was executed. |
-| `output` | `string?` | Command output or status message. |
-| `error` | `string?` | Error message if the test failed. |
+| Field              | Type      | Description                                       |
+| :----------------- | :-------- | :------------------------------------------------ |
+| `success`          | `bool`    | Whether the test passed.                          |
+| `test_kind`        | `string`  | The kind of test that was executed.               |
+| `output`           | `string?` | Command output or status message.                 |
+| `error`            | `string?` | Error message if the test failed.                 |
 | `detected_version` | `string?` | Detected version (for `version_detection` tests). |
-| `duration_ms` | `u64` | Test duration in milliseconds. |
+| `duration_ms`      | `u64`     | Test duration in milliseconds.                    |
 
 **Error responses:**
 
-| Status | Condition |
-| :--- | :--- |
-| 400 | Unknown plugin type, invalid config, missing `host_id`, unknown `test_kind`, dangerous command pattern |
-| 404 | Host or plugin config not found |
-| 502 | Agent disconnected during test or send failure |
-| 504 | Agent did not respond within 30 seconds |
+| Status | Condition                                                                                              |
+| :----- | :----------------------------------------------------------------------------------------------------- |
+| 400    | Unknown plugin type, invalid config, missing `host_id`, unknown `test_kind`, dangerous command pattern |
+| 404    | Host or plugin config not found                                                                        |
+| 502    | Agent disconnected during test or send failure                                                         |
+| 504    | Agent did not respond within 30 seconds                                                                |
 
 ## Adding a new test kind
 

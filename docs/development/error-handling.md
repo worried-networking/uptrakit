@@ -79,20 +79,20 @@ Each boundary owns its error enum and `Result<T>` alias. Cross-boundary conversi
 
 Service runtime transport errors use a three-layer hierarchy:
 
-| Layer | Type | Responsibility |
-| --- | --- | --- |
-| 1 | [`TransportError`](../../crates/shared/wire/src/transport.rs), [`ServiceTransport`](../../crates/shared/wire/src/transport.rs) | Opaque transport abstraction for shared business logic (`transport_recv(): Option<_>`). |
-| 2 | [`EnrollmentError`](../../crates/shared/service-sdk/src/error.rs), [`ControllerConnection::recv()`](../../crates/shared/service-sdk/src/connection.rs) | Rich receive-side classification (`Result<Option<_>, Report<EnrollmentError>>`). |
-| 3 | [`LoopError`](../../crates/shared/service-sdk/src/shared_types.rs), [`handle_recv_error()`](../../crates/shared/service-sdk/src/event_loop.rs) | Lifecycle-facing policy (absorb as disconnected vs propagate with typed error). |
+| Layer | Type                                                                                                                                                   | Responsibility                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| 1     | [`TransportError`](../../crates/shared/wire/src/transport.rs), [`ServiceTransport`](../../crates/shared/wire/src/transport.rs)                         | Opaque transport abstraction for shared business logic (`transport_recv(): Option<_>`). |
+| 2     | [`EnrollmentError`](../../crates/shared/service-sdk/src/error.rs), [`ControllerConnection::recv()`](../../crates/shared/service-sdk/src/connection.rs) | Rich receive-side classification (`Result<Option<_>, Report<EnrollmentError>>`).        |
+| 3     | [`LoopError`](../../crates/shared/service-sdk/src/shared_types.rs), [`handle_recv_error()`](../../crates/shared/service-sdk/src/event_loop.rs)         | Lifecycle-facing policy (absorb as disconnected vs propagate with typed error).         |
 
 `EnrollmentError -> LoopError` classification priority is strict:
 
-| Priority | Predicate | Result |
-| --- | --- | --- |
-| 1 | `is_cert_expired()` | `LoopError::CertExpired` |
-| 2 | `is_receive_closed()` | `LoopError::ReceiveClosed` |
-| 3 | `is_transient_network()` | `LoopError::TransientNetwork(_)` |
-| 4 | fallback | `LoopError::Other(_)` |
+| Priority | Predicate                | Result                           |
+| -------- | ------------------------ | -------------------------------- |
+| 1        | `is_cert_expired()`      | `LoopError::CertExpired`         |
+| 2        | `is_receive_closed()`    | `LoopError::ReceiveClosed`       |
+| 3        | `is_transient_network()` | `LoopError::TransientNetwork(_)` |
+| 4        | fallback                 | `LoopError::Other(_)`            |
 
 `handle_recv_error()` in
 [`event_loop.rs`](../../crates/shared/service-sdk/src/event_loop.rs) applies a
@@ -329,13 +329,13 @@ fn validate(input: &str) -> Result<()> {
 
 ### Pattern 10: Decision guide -- which context method to use
 
-| Scenario | Method | Effect |
-| --- | --- | --- |
-| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
-| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node |
-| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replace context, preserve children |
-| One-off conversion, no impl needed | `.map_err(\|e\| report!(...))` | Manual wrap |
-| Guard clause / early return | `bail!(...)` | Return immediately |
+| Scenario                                     | Method                          | Effect                             |
+| -------------------------------------------- | ------------------------------- | ---------------------------------- |
+| Foreign error has `ReportConversion` impl    | `.context_to()`                 | Delegates to impl                  |
+| Wrap low-level error with high-level meaning | `.context(Higher::Variant)`     | New parent node                    |
+| Change error type in-place (1:1 mapping)     | `.context_transform(\|e\| ...)` | Replace context, preserve children |
+| One-off conversion, no impl needed           | `.map_err(\|e\| report!(...))`  | Manual wrap                        |
+| Guard clause / early return                  | `bail!(...)`                    | Return immediately                 |
 
 ### Pattern 11: Custom error helper methods
 
@@ -552,13 +552,13 @@ These are error handling patterns that MUST NOT be used:
 
 ## Approved Exceptions
 
-| Exception | Reason |
-| --- | --- |
-| `Mutex::lock().unwrap()` / `RwLock::{read,write}().unwrap()` | `panic = "abort"` in release makes poisoning impossible |
-| String-based variants for types without `std::error::Error` | e.g. `aws_lc_rs::Unspecified`, certain `rcgen` errors (Pattern 12) |
-| `Result<T, String>` in clap value parsers | Clap API mandates this signature (Pattern 14) |
-| `Result<T, String>` in HTTP validation helpers | Display-only strings for HTTP 400 responses (Pattern 15) |
-| Display fallbacks (`unwrap_or_else` / `unwrap_or_default`) | Non-critical formatting, not error propagation (Pattern 16) |
+| Exception                                                    | Reason                                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `Mutex::lock().unwrap()` / `RwLock::{read,write}().unwrap()` | `panic = "abort"` in release makes poisoning impossible            |
+| String-based variants for types without `std::error::Error`  | e.g. `aws_lc_rs::Unspecified`, certain `rcgen` errors (Pattern 12) |
+| `Result<T, String>` in clap value parsers                    | Clap API mandates this signature (Pattern 14)                      |
+| `Result<T, String>` in HTTP validation helpers               | Display-only strings for HTTP 400 responses (Pattern 15)           |
+| Display fallbacks (`unwrap_or_else` / `unwrap_or_default`)   | Non-critical formatting, not error propagation (Pattern 16)        |
 
 ## Rules Summary
 

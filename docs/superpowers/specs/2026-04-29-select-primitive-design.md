@@ -18,17 +18,17 @@ type SelectOption = { value: string; label: string };
 
 type SelectProps = {
   id: string;
-  value: string;           // bindable
+  value: string; // bindable
   options: SelectOption[];
   name?: string;
-  placeholder?: string;    // renders as disabled first <option value="">
+  placeholder?: string; // renders as disabled first <option value="">
   disabled?: boolean;
   required?: boolean;
   error?: string;
   onchange?: (e: Event) => void;
   onblur?: (e: FocusEvent) => void;
-  'aria-describedby'?: string;
-  'aria-label'?: string;
+  "aria-describedby"?: string;
+  "aria-label"?: string;
   class?: string;
 };
 ```
@@ -90,22 +90,22 @@ New folder: `src/lib/components/forms/`
 **New barrel:** `src/lib/components/forms/index.ts` with explicit exports:
 
 ```ts
-export { default as Input } from './Input.svelte';
-export type { InputProps, InputType } from './Input.svelte';
+export { default as Input } from "./Input.svelte";
+export type { InputProps, InputType } from "./Input.svelte";
 
-export { default as Textarea } from './Textarea.svelte';
-export type { TextareaProps, TextareaVariant } from './Textarea.svelte';
+export { default as Textarea } from "./Textarea.svelte";
+export type { TextareaProps, TextareaVariant } from "./Textarea.svelte";
 
-export { default as Checkbox } from './Checkbox.svelte';
-export type { CheckboxProps } from './Checkbox.svelte';
+export { default as Checkbox } from "./Checkbox.svelte";
+export type { CheckboxProps } from "./Checkbox.svelte";
 
-export { default as CheckboxList } from './CheckboxList.svelte';
-export type { CheckboxListItem } from './CheckboxList.svelte';
+export { default as CheckboxList } from "./CheckboxList.svelte";
+export type { CheckboxListItem } from "./CheckboxList.svelte";
 
-export { default as FormFieldRow } from './FormFieldRow.svelte';
+export { default as FormFieldRow } from "./FormFieldRow.svelte";
 
-export { default as Select } from './Select.svelte';
-export type { SelectProps, SelectOption } from './Select.svelte';
+export { default as Select } from "./Select.svelte";
+export type { SelectProps, SelectOption } from "./Select.svelte";
 ```
 
 **Import updates:** All import sites across `src/lib/components/`, `src/routes/`, and test
@@ -141,7 +141,7 @@ grep -rn '<select' frontend/src
   option and binds to `string | null`; stays native.
 - Requires non-full-width sizing — `software/+page.svelte` filter select uses `w-auto`; stays
   native (no `tailwind-merge` in project, `class` prop is additive only).
-- Has per-row *conditionally varying* option sets — where different loop iterations need
+- Has per-row _conditionally varying_ option sets — where different loop iterations need
   different option lists based on row-specific logic (e.g., `execution_site` select in
   `AssignToHostModal` conditionally adds a "Controller" option only when `role === 'fetch_releases'`).
   Distinguish from uniformly computed options: `SchemaForm`'s `resolvedOptions(field)` returns

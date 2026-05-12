@@ -108,19 +108,19 @@ only.
 
 ## Scope
 
-| File | Change |
-| --- | --- |
-| `frontend/src/lib/components/ui/Callout.svelte` | `rounded-xl` → `rounded-[4px]` (panel) |
-| `frontend/src/lib/components/ui/EmptyState.svelte` | `rounded-2xl` → `rounded-[3px]` (card) |
-| `frontend/src/lib/components/ui/SectionCard.svelte` | `rounded-2xl` → `rounded-[3px]` (card) |
-| `frontend/src/lib/components/ui/PageShell.svelte` | `text-3xl` → `text-[20px] font-bold text-[var(--text-primary)]` |
-| `frontend/src/lib/components/ui/TabStrip.svelte` | Outer `rounded-xl` → `rounded-[4px]`; tab buttons `rounded-lg` → `rounded-[3px]`; active state → tint |
-| `frontend/src/lib/components/ui/DataTable.svelte` | Header `px-4` → `px-[10px]` |
-| `frontend/src/lib/components/ui/ProviderSelector.svelte` | `rounded-xl` → `rounded-[3px]` per §2.3 (form field = button/card radius) |
-| `frontend/src/lib/components/surfaces/SurfaceSlot.svelte` | `card` utility → `bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4`; `h3` class → `text-[13px] font-bold text-[var(--text-primary)]` |
-| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte` | `h3` class → `text-[13px] font-bold text-[var(--text-primary)]` |
-| `frontend/src/lib/components/Modal.svelte` | `h3` class → `text-[13px] font-bold text-[var(--text-primary)]` |
-| `frontend/src/lib/components/SoftwareMergeWizard.svelte` | `h4` classes → `text-[13px] font-bold text-[var(--text-primary)]` (h4 maps to h3 values per Q5) |
+| File                                                          | Change                                                                                                                                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/lib/components/ui/Callout.svelte`               | `rounded-xl` → `rounded-[4px]` (panel)                                                                                                                            |
+| `frontend/src/lib/components/ui/EmptyState.svelte`            | `rounded-2xl` → `rounded-[3px]` (card)                                                                                                                            |
+| `frontend/src/lib/components/ui/SectionCard.svelte`           | `rounded-2xl` → `rounded-[3px]` (card)                                                                                                                            |
+| `frontend/src/lib/components/ui/PageShell.svelte`             | `text-3xl` → `text-[20px] font-bold text-[var(--text-primary)]`                                                                                                   |
+| `frontend/src/lib/components/ui/TabStrip.svelte`              | Outer `rounded-xl` → `rounded-[4px]`; tab buttons `rounded-lg` → `rounded-[3px]`; active state → tint                                                             |
+| `frontend/src/lib/components/ui/DataTable.svelte`             | Header `px-4` → `px-[10px]`                                                                                                                                       |
+| `frontend/src/lib/components/ui/ProviderSelector.svelte`      | `rounded-xl` → `rounded-[3px]` per §2.3 (form field = button/card radius)                                                                                         |
+| `frontend/src/lib/components/surfaces/SurfaceSlot.svelte`     | `card` utility → `bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4`; `h3` class → `text-[13px] font-bold text-[var(--text-primary)]` |
+| `frontend/src/lib/components/surfaces/SurfaceRenderer.svelte` | `h3` class → `text-[13px] font-bold text-[var(--text-primary)]`                                                                                                   |
+| `frontend/src/lib/components/Modal.svelte`                    | `h3` class → `text-[13px] font-bold text-[var(--text-primary)]`                                                                                                   |
+| `frontend/src/lib/components/SoftwareMergeWizard.svelte`      | `h4` classes → `text-[13px] font-bold text-[var(--text-primary)]` (h4 maps to h3 values per Q5)                                                                   |
 
 > **Cross-spec note:** `SurfaceWorkflow.svelte:471 border-primary-500` is a Skeleton color
 > token violation, not a geometry/typography deviation. It is handled by

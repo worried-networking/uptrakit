@@ -149,9 +149,9 @@ Add the new event name to the `AdminEventType` union:
 
 ```typescript
 export type AdminEventType =
-    | 'host_updated'
-    // ... existing types ...
-    | 'new_variant';
+  | "host_updated"
+  // ... existing types ...
+  | "new_variant";
 ```
 
 ### 5. Subscribe in the relevant page
@@ -159,20 +159,20 @@ export type AdminEventType =
 In the Svelte component that needs to react to the event:
 
 ```typescript
-import { subscribeToEvent } from '$lib/stores/events.svelte';
-import { onMount, onDestroy } from 'svelte';
+import { subscribeToEvent } from "$lib/stores/events.svelte";
+import { onMount, onDestroy } from "svelte";
 
 let unsubscribe: (() => void) | undefined;
 
 onMount(() => {
-    unsubscribe = subscribeToEvent('new_variant', (data) => {
-        // data.id contains the entity UUID
-        // Refetch or invalidate the relevant data here
-    });
+  unsubscribe = subscribeToEvent("new_variant", (data) => {
+    // data.id contains the entity UUID
+    // Refetch or invalidate the relevant data here
+  });
 });
 
 onDestroy(() => {
-    unsubscribe?.();
+  unsubscribe?.();
 });
 ```
 

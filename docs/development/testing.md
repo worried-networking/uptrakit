@@ -17,15 +17,15 @@ break when our code changes (custom parsing, validation, serde annotations
 that define a wire contract, backward compatibility guarantees, custom error
 handling paths, etc.).
 
-| Category | Example | Verdict |
-| --- | --- | --- |
-| `thiserror` `#[error("...")]` Display output | `assert_eq!(err.to_string(), "...")` | Upstream -- remove |
-| `serde_json::to_string` / `from_str` roundtrip on a plain `#[derive(Serialize, Deserialize)]` struct with no custom logic | `assert_eq!(deserialized, original)` | Upstream -- remove |
-| `argon2` salt uniqueness | Two hashes of the same password differ | Upstream -- remove |
-| Custom `#[serde(with = "...")]` module roundtrip | Custom date format serialization | Internal -- keep |
-| `skip_serializing_if` annotation | Optional field absent in JSON when `None` | Internal -- keep |
-| Backward compatibility (old JSON shape still deserializes) | Missing field defaults correctly | Internal -- keep |
-| Wire protocol spec conformance | Serialized JSON matches asyncapi.yaml schema | Internal -- keep |
+| Category                                                                                                                  | Example                                      | Verdict            |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------ |
+| `thiserror` `#[error("...")]` Display output                                                                              | `assert_eq!(err.to_string(), "...")`         | Upstream -- remove |
+| `serde_json::to_string` / `from_str` roundtrip on a plain `#[derive(Serialize, Deserialize)]` struct with no custom logic | `assert_eq!(deserialized, original)`         | Upstream -- remove |
+| `argon2` salt uniqueness                                                                                                  | Two hashes of the same password differ       | Upstream -- remove |
+| Custom `#[serde(with = "...")]` module roundtrip                                                                          | Custom date format serialization             | Internal -- keep   |
+| `skip_serializing_if` annotation                                                                                          | Optional field absent in JSON when `None`    | Internal -- keep   |
+| Backward compatibility (old JSON shape still deserializes)                                                                | Missing field defaults correctly             | Internal -- keep   |
+| Wire protocol spec conformance                                                                                            | Serialized JSON matches asyncapi.yaml schema | Internal -- keep   |
 
 **Prohibition: `thiserror` Display format string tests are forbidden.**
 
@@ -440,13 +440,13 @@ Then import the types inside your test module:
 use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
 ```
 
-| Type | Constructor | Behaviour |
-| --- | --- | --- |
-| `FixedOutputExecutor` | `::success(stdout)` | All commands return `Ok` with exit 0 and the given output |
-| `FixedOutputExecutor` | `::failure(exit_code)` | All commands return empty output; `execute_quiet` returns `Err(CommandFailed)` |
-| `FixedOutputExecutor` | `::new(stdout, exit_code)` | `execute` always `Ok`; `execute_quiet` returns `Err` for non-zero |
-| `RoutedOutputExecutor` | `::success(pairs)` | Routes by program name; all routes succeed with exit 0 |
-| `RoutedOutputExecutor` | `::new(triples)` | Routes by program name; each route has its own `(output, exit_code)` |
+| Type                   | Constructor                | Behaviour                                                                      |
+| ---------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| `FixedOutputExecutor`  | `::success(stdout)`        | All commands return `Ok` with exit 0 and the given output                      |
+| `FixedOutputExecutor`  | `::failure(exit_code)`     | All commands return empty output; `execute_quiet` returns `Err(CommandFailed)` |
+| `FixedOutputExecutor`  | `::new(stdout, exit_code)` | `execute` always `Ok`; `execute_quiet` returns `Err` for non-zero              |
+| `RoutedOutputExecutor` | `::success(pairs)`         | Routes by program name; all routes succeed with exit 0                         |
+| `RoutedOutputExecutor` | `::new(triples)`           | Routes by program name; each route has its own `(output, exit_code)`           |
 
 Do not define local mock executor structs in plugin test modules — always use the shared types above.
 
@@ -557,17 +557,17 @@ as coverage grows.
 
 **Test locations:**
 
-| Test file | What it covers |
-| --- | --- |
-| `src/lib/api.test.ts` | `authenticatedFetch`, token refresh, error extraction, session-expired banner lifecycle |
-| `src/lib/auth.test.ts` | `initialize`, `handleLogin`, `handleLogout`, `handleOidcCallback` |
-| `src/lib/utils.test.ts` | `isValidLogoUrl`, `formatDate`, `safeRedirect`, `copyToClipboard` |
-| `src/routes/services/services.test.ts` | Services page: load, error, empty state, filter buttons |
-| `src/routes/hosts/hosts.test.ts` | Hosts page: load, error, empty state |
-| `src/lib/components/Pagination.test.ts` | Prev/Next disabled states, click handlers, page number buttons, ellipsis rendering, aria-current, total count display |
-| `src/lib/components/ContextMenu.test.ts` | Keyboard navigation (Arrow/Home/End/Enter/Escape) |
-| `src/lib/components/ModalBackdrop.test.ts` | Focus trapping (Tab/Shift+Tab), Escape, backdrop click |
-| `src/lib/components/ConfirmDialog.test.ts` | Confirm/cancel callbacks, disabled state, labels |
+| Test file                                  | What it covers                                                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/api.test.ts`                      | `authenticatedFetch`, token refresh, error extraction, session-expired banner lifecycle                               |
+| `src/lib/auth.test.ts`                     | `initialize`, `handleLogin`, `handleLogout`, `handleOidcCallback`                                                     |
+| `src/lib/utils.test.ts`                    | `isValidLogoUrl`, `formatDate`, `safeRedirect`, `copyToClipboard`                                                     |
+| `src/routes/services/services.test.ts`     | Services page: load, error, empty state, filter buttons                                                               |
+| `src/routes/hosts/hosts.test.ts`           | Hosts page: load, error, empty state                                                                                  |
+| `src/lib/components/Pagination.test.ts`    | Prev/Next disabled states, click handlers, page number buttons, ellipsis rendering, aria-current, total count display |
+| `src/lib/components/ContextMenu.test.ts`   | Keyboard navigation (Arrow/Home/End/Enter/Escape)                                                                     |
+| `src/lib/components/ModalBackdrop.test.ts` | Focus trapping (Tab/Shift+Tab), Escape, backdrop click                                                                |
+| `src/lib/components/ConfirmDialog.test.ts` | Confirm/cancel callbacks, disabled state, labels                                                                      |
 
 Component tests use [`@testing-library/svelte`](https://testing-library.com/docs/svelte-testing-library/intro/)
 with jsdom. The `src/test-setup.ts` file imports `@testing-library/jest-dom` matchers. The `$lib`
@@ -580,10 +580,10 @@ exactly as production code does.
 vitest hoists `vi.mock()` calls, the mock is applied before the component is imported:
 
 ```typescript
-vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/api', () => ({ getServices: vi.fn() }));
+vi.mock("$lib/auth.svelte", () => ({ getUser: vi.fn(() => null) }));
+vi.mock("$lib/api", () => ({ getServices: vi.fn() }));
 
-import ServicesPage from './+page.svelte'; // receives the mocked modules
+import ServicesPage from "./+page.svelte"; // receives the mocked modules
 ```
 
 #### Testing components that accept Svelte 5 snippets
@@ -592,10 +592,10 @@ Components that take a `children: Snippet` prop (e.g. `ContextMenu`, `ModalBackd
 5's `createRawSnippet` to pass static HTML content in tests:
 
 ```typescript
-import { createRawSnippet } from 'svelte';
+import { createRawSnippet } from "svelte";
 
 const children = createRawSnippet(() => ({
-  render: () => '<button role="menuitem">Action</button>'
+  render: () => '<button role="menuitem">Action</button>',
 }));
 
 render(ContextMenu, { top: 0, left: 0, onclose: vi.fn(), children });
@@ -617,15 +617,15 @@ all API calls are intercepted with `page.route()` inside each test.
 
 **Test files:**
 
-| File | Coverage |
-| --- | --- |
-| `tests/e2e/auth.test.ts` | Unauthenticated redirect, login form, successful login, wrong credentials |
-| `tests/e2e/services.test.ts` | Service list rendering, empty state, type filter |
-| `tests/e2e/hosts.test.ts` | Host list rendering, empty state, context menu, deactivate dialog |
-| `tests/e2e/public-entry.test.ts` | Public login + registration flow shell |
-| `tests/e2e/ui-parity.test.ts` | Desktop UI parity fixtures for built-in and surface-backed patterns (mandatory for any visual change) |
-| `tests/e2e/ui-parity-responsive.test.ts` | Mobile UI parity fixtures — bottom navigation, overflow sheet, responsive shell |
-| `tests/e2e/parity-config.ts` | Shared fixtures, mock API, scenario builders for the parity suites |
+| File                                     | Coverage                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `tests/e2e/auth.test.ts`                 | Unauthenticated redirect, login form, successful login, wrong credentials                             |
+| `tests/e2e/services.test.ts`             | Service list rendering, empty state, type filter                                                      |
+| `tests/e2e/hosts.test.ts`                | Host list rendering, empty state, context menu, deactivate dialog                                     |
+| `tests/e2e/public-entry.test.ts`         | Public login + registration flow shell                                                                |
+| `tests/e2e/ui-parity.test.ts`            | Desktop UI parity fixtures for built-in and surface-backed patterns (mandatory for any visual change) |
+| `tests/e2e/ui-parity-responsive.test.ts` | Mobile UI parity fixtures — bottom navigation, overflow sheet, responsive shell                       |
+| `tests/e2e/parity-config.ts`             | Shared fixtures, mock API, scenario builders for the parity suites                                    |
 
 E2E tests are **not** run in CI automatically and are **not** part of the pre-push hook (they
 add several minutes per run). Contributors must run them locally before pushing any change that

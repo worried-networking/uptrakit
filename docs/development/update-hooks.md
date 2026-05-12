@@ -7,10 +7,10 @@ first-class plugin assignments — not embedded in the update plugin's config JS
 
 Two plugin types handle update lifecycle hooks:
 
-| Plugin type | Wire value | Purpose |
-| :--- | :--- | :--- |
-| `HookSystemd` | `hook_systemd` | Stops/starts a systemd service around updates |
-| `HookShell` | `hook_shell` | Runs arbitrary shell commands before/after updates |
+| Plugin type   | Wire value     | Purpose                                            |
+| :------------ | :------------- | :------------------------------------------------- |
+| `HookSystemd` | `hook_systemd` | Stops/starts a systemd service around updates      |
+| `HookShell`   | `hook_shell`   | Runs arbitrary shell commands before/after updates |
 
 These plugins are assigned to host software items via the `PreUpdateHook` (`pre_update_hook`)
 and `PostUpdateHook` (`post_update_hook`) plugin roles. Multiple hooks can be assigned per
@@ -18,10 +18,10 @@ role; the `ordinal` column on `host_software_item_plugins` controls execution or
 
 ## Plugin roles
 
-| Role | String value | Phase | Abort semantics |
-| :--- | :--- | :--- | :--- |
-| `PreUpdateHook` | `pre_update_hook` | Before `execute_update` | First failure aborts the update |
-| `PostUpdateHook` | `post_update_hook` | After `execute_update` | Errors logged as warnings, non-fatal |
+| Role             | String value       | Phase                   | Abort semantics                      |
+| :--------------- | :----------------- | :---------------------- | :----------------------------------- |
+| `PreUpdateHook`  | `pre_update_hook`  | Before `execute_update` | First failure aborts the update      |
+| `PostUpdateHook` | `post_update_hook` | After `execute_update`  | Errors logged as warnings, non-fatal |
 
 ## Systemd hook plugin (`hook_systemd`)
 
@@ -35,9 +35,9 @@ Manages a systemd service around updates.
 }
 ```
 
-| Field | Type | Required | Description |
-| :--- | :--- | :---: | :--- |
-| `service_name` | string | yes | Systemd service unit name (e.g. `"nginx"`, `"my-app.service"`) |
+| Field          | Type   | Required | Description                                                    |
+| :------------- | :----- | :------: | :------------------------------------------------------------- |
+| `service_name` | string |   yes    | Systemd service unit name (e.g. `"nginx"`, `"my-app.service"`) |
 
 ### Validation
 
@@ -72,22 +72,22 @@ Runs arbitrary shell commands before and/or after an update.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `pre_command` | string | no | — | Shell command to run before the update |
-| `post_command` | string | no | — | Shell command to run after the update |
-| `on_failure` | bool | no | `true` | Whether to run `post_command` even when the update fails |
-| `shell` | string | no | `"bash"` | Shell interpreter: `"bash"` or `"sh"` |
+| Field          | Type   | Required | Default  | Description                                              |
+| :------------- | :----- | :------: | :------- | :------------------------------------------------------- |
+| `pre_command`  | string |    no    | —        | Shell command to run before the update                   |
+| `post_command` | string |    no    | —        | Shell command to run after the update                    |
+| `on_failure`   | bool   |    no    | `true`   | Whether to run `post_command` even when the update fails |
+| `shell`        | string |    no    | `"bash"` | Shell interpreter: `"bash"` or `"sh"`                    |
 
 At least one of `pre_command` or `post_command` must be set. Commands are limited to 4096
 characters.
 
 ### Shell types
 
-| Shell | Fail-early settings | Description |
-| :--- | :--- | :--- |
-| `bash` (default) | `set -euo pipefail` | Exit on error, undefined vars, pipe failures |
-| `sh` | `set -eu` | POSIX-compatible exit on error, undefined vars |
+| Shell            | Fail-early settings | Description                                    |
+| :--------------- | :------------------ | :--------------------------------------------- |
+| `bash` (default) | `set -euo pipefail` | Exit on error, undefined vars, pipe failures   |
+| `sh`             | `set -eu`           | POSIX-compatible exit on error, undefined vars |
 
 Commands are wrapped with fail-early settings before execution.
 
@@ -118,13 +118,13 @@ During a software update, hook plugins execute in this order:
 
 Hook plugins receive an `UpdateLifecycleContext` with:
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `package_identifier` | `String` | The package being updated |
-| `to_version` | `String` | Target version |
-| `from_version` | `Option<String>` | Installed version before the update (if detected) |
-| `release_info` | `Option<ReleaseInfo>` | Release metadata from upstream |
-| `update_succeeded` | `Option<bool>` | `None` during pre-hooks, `Some(true/false)` during post-hooks |
+| Field                | Type                  | Description                                                   |
+| :------------------- | :-------------------- | :------------------------------------------------------------ |
+| `package_identifier` | `String`              | The package being updated                                     |
+| `to_version`         | `String`              | Target version                                                |
+| `from_version`       | `Option<String>`      | Installed version before the update (if detected)             |
+| `release_info`       | `Option<ReleaseInfo>` | Release metadata from upstream                                |
+| `update_succeeded`   | `Option<bool>`        | `None` during pre-hooks, `Some(true/false)` during post-hooks |
 
 ### Phase markers in output
 
@@ -213,14 +213,14 @@ uptrakit software-items assign "$ITEM_ID" \
 
 ## Key files
 
-| File | Purpose |
-| :--- | :--- |
-| `crates/plugins/hooks/systemd/` | Systemd hook plugin crate |
-| `crates/plugins/hooks/shell/` | Shell hook plugin crate |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `UpdateLifecyclePlugin` trait |
-| `crates/plugins/infrastructure/core/src/traits.rs` | `UpdateLifecycleContext`, `PreUpdateHookResult` |
-| `crates/shared/agent-core/src/update.rs` | Hook execution in update pipeline |
-| `crates/shared/wire/asyncapi.yaml` | Wire protocol schema |
+| File                                                    | Purpose                                         |
+| :------------------------------------------------------ | :---------------------------------------------- |
+| `crates/plugins/hooks/systemd/`                         | Systemd hook plugin crate                       |
+| `crates/plugins/hooks/shell/`                           | Shell hook plugin crate                         |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `UpdateLifecyclePlugin` trait                   |
+| `crates/plugins/infrastructure/core/src/traits.rs`      | `UpdateLifecycleContext`, `PreUpdateHookResult` |
+| `crates/shared/agent-core/src/update.rs`                | Hook execution in update pipeline               |
+| `crates/shared/wire/asyncapi.yaml`                      | Wire protocol schema                            |
 
 ## Related documentation
 

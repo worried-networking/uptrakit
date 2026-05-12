@@ -20,7 +20,7 @@ For each tracked package, Uptrakit:
 - Resolves the **latest available version** from the configured APT repository index via
   `apt-cache madison`.
 - Executes package updates using `sudo apt-get install --yes --no-install-recommends
-  <package>=<version>`.
+<package>=<version>`.
 
 ### Version Format
 
@@ -46,11 +46,11 @@ See [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tr
 
 ### `discovery_filter` field
 
-| Value | Description |
-| --- | --- |
-| *(omitted — default `{}`)* | All installed packages reported by `dpkg`. Plugin config is auto-created on first discovery. |
-| `"all"` | All installed packages reported by `dpkg` (explicit; uses pre-existing plugin config). |
-| `"manual"` | Only packages the user explicitly installed (`apt-mark showmanual`). |
+| Value                      | Description                                                                                  |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| _(omitted — default `{}`)_ | All installed packages reported by `dpkg`. Plugin config is auto-created on first discovery. |
+| `"all"`                    | All installed packages reported by `dpkg` (explicit; uses pre-existing plugin config).       |
+| `"manual"`                 | Only packages the user explicitly installed (`apt-mark showmanual`).                         |
 
 **Default config** — no `discovery_filter` key, serialises as `{}`):
 

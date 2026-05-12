@@ -27,15 +27,15 @@ crates proper crates.io consumers.
 
 All start at version `0.0.1` with independent versioning (not `version.workspace = true`):
 
-| Crate                     | Path                            |
-| ------------------------- | ------------------------------- |
-| `uptrakit-shared-macros`  | `crates/shared/macros`          |
-| `uptrakit-surfaces`       | `crates/shared/surfaces`        |
-| `uptrakit-shared-types`   | `crates/shared/types`           |
-| `uptrakit-wire`           | `crates/shared/wire`            |
-| `uptrakit-web-api-types`  | `crates/shared/web-api-types`   |
-| `uptrakit-service-sdk`    | `crates/shared/service-sdk`     |
-| `uptrakit-openapi-client` | `crates/shared/openapi-client`  |
+| Crate                     | Path                           |
+| ------------------------- | ------------------------------ |
+| `uptrakit-shared-macros`  | `crates/shared/macros`         |
+| `uptrakit-surfaces`       | `crates/shared/surfaces`       |
+| `uptrakit-shared-types`   | `crates/shared/types`          |
+| `uptrakit-wire`           | `crates/shared/wire`           |
+| `uptrakit-web-api-types`  | `crates/shared/web-api-types`  |
+| `uptrakit-service-sdk`    | `crates/shared/service-sdk`    |
+| `uptrakit-openapi-client` | `crates/shared/openapi-client` |
 
 The 5 shared crates have zero internal path deps outside this set and depend only on public crates —
 they are publishable as-is once `publish` is configured correctly.

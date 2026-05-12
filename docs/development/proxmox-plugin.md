@@ -45,22 +45,22 @@ Controller
 
 ## Module Structure
 
-| Module | Purpose |
-| --- | --- |
-| `config.rs` | `ProxmoxConfig` — API URL, token, TLS, node filter |
-| `error.rs` | `ProxmoxError` enum with `impl_report_conversion!` |
-| `client.rs` | `ProxmoxClient` — HTTP client for Proxmox REST API |
-| `api_types.rs` | Serde structs for PVE API JSON responses |
-| `plugin.rs` | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent) |
-| `agent/plugin.rs` | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin` |
+| Module                     | Purpose                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| `config.rs`                | `ProxmoxConfig` — API URL, token, TLS, node filter                                  |
+| `error.rs`                 | `ProxmoxError` enum with `impl_report_conversion!`                                  |
+| `client.rs`                | `ProxmoxClient` — HTTP client for Proxmox REST API                                  |
+| `api_types.rs`             | Serde structs for PVE API JSON responses                                            |
+| `plugin.rs`                | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)      |
+| `agent/plugin.rs`          | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`    |
 | `agent/surface_actions.rs` | Agent surface action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
-| `agent/db_ops.rs` | Agent-local DB operations (PVE host state, pending matches) |
-| `agent/migration.rs` | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`) |
-| `discovery.rs` | `discover_guests()` — queries nodes for VMs/CTs |
-| `matching.rs` | `manual_match()` / `unmatch()` — manual-only host matching |
-| `surfaces.rs` | Surface action definitions + handler dispatch |
-| `pve_setup.rs` | PVE node detection and API credential creation (agent-side) |
-| `guest_exec.rs` | Guest command execution via `pct exec` / `qm guest exec` (agent-side) |
+| `agent/db_ops.rs`          | Agent-local DB operations (PVE host state, pending matches)                         |
+| `agent/migration.rs`       | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)         |
+| `discovery.rs`             | `discover_guests()` — queries nodes for VMs/CTs                                     |
+| `matching.rs`              | `manual_match()` / `unmatch()` — manual-only host matching                          |
+| `surfaces.rs`              | Surface action definitions + handler dispatch                                       |
+| `pve_setup.rs`             | PVE node detection and API credential creation (agent-side)                         |
+| `guest_exec.rs`            | Guest command execution via `pct exec` / `qm guest exec` (agent-side)               |
 
 ## Proxmox API Client
 
@@ -79,15 +79,15 @@ intended only for controlled bootstrap scenarios with self-signed certificates.
 
 ### Endpoints Used
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api2/json/nodes` | List cluster nodes |
-| GET | `/api2/json/nodes/{node}/qemu` | List QEMU VMs |
-| GET | `/api2/json/nodes/{node}/lxc` | List LXC containers |
-| GET | `/api2/json/nodes/{node}/qemu/{vmid}/config` | QEMU VM config |
-| GET | `/api2/json/nodes/{node}/lxc/{vmid}/config` | LXC container config |
-| GET | `/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces` | Guest agent network info |
-| GET | `/api2/json/version` | API version (connectivity test) |
+| Method | Path                                                               | Purpose                         |
+| ------ | ------------------------------------------------------------------ | ------------------------------- |
+| GET    | `/api2/json/nodes`                                                 | List cluster nodes              |
+| GET    | `/api2/json/nodes/{node}/qemu`                                     | List QEMU VMs                   |
+| GET    | `/api2/json/nodes/{node}/lxc`                                      | List LXC containers             |
+| GET    | `/api2/json/nodes/{node}/qemu/{vmid}/config`                       | QEMU VM config                  |
+| GET    | `/api2/json/nodes/{node}/lxc/{vmid}/config`                        | LXC container config            |
+| GET    | `/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces` | Guest agent network info        |
+| GET    | `/api2/json/version`                                               | API version (connectivity test) |
 
 ## Database
 
@@ -95,22 +95,22 @@ intended only for controlled bootstrap scenarios with self-signed certificates.
 
 Stores discovered VMs/CTs and their optional link to an Uptrakit host.
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID PK | Row identifier |
-| `tenant_id` | UUID FK(tenants) | Tenant scope |
-| `plugin_config_id` | UUID FK(plugin_configs) | Source plugin configuration |
-| `host_id` | UUID FK(hosts) NULL | Matched Uptrakit host (NULL = unmatched) |
-| `proxmox_node` | TEXT | Proxmox node name |
-| `proxmox_vmid` | INTEGER | VM/CT identifier |
-| `proxmox_type` | TEXT | `"qemu"` or `"lxc"` |
-| `proxmox_name` | TEXT NULL | Guest name |
-| `proxmox_status` | TEXT | Current status |
-| `hostname` | TEXT NULL | Hostname from config |
-| `ip_addresses` | TEXT NULL | JSON array of IPs |
-| `match_method` | TEXT NULL | `"manual"` or NULL |
-| `discovered_at` | TIMESTAMP | First discovery time |
-| `updated_at` | TIMESTAMP | Last update time |
+| Column             | Type                    | Description                              |
+| ------------------ | ----------------------- | ---------------------------------------- |
+| `id`               | UUID PK                 | Row identifier                           |
+| `tenant_id`        | UUID FK(tenants)        | Tenant scope                             |
+| `plugin_config_id` | UUID FK(plugin_configs) | Source plugin configuration              |
+| `host_id`          | UUID FK(hosts) NULL     | Matched Uptrakit host (NULL = unmatched) |
+| `proxmox_node`     | TEXT                    | Proxmox node name                        |
+| `proxmox_vmid`     | INTEGER                 | VM/CT identifier                         |
+| `proxmox_type`     | TEXT                    | `"qemu"` or `"lxc"`                      |
+| `proxmox_name`     | TEXT NULL               | Guest name                               |
+| `proxmox_status`   | TEXT                    | Current status                           |
+| `hostname`         | TEXT NULL               | Hostname from config                     |
+| `ip_addresses`     | TEXT NULL               | JSON array of IPs                        |
+| `match_method`     | TEXT NULL               | `"manual"` or NULL                       |
+| `discovered_at`    | TIMESTAMP               | First discovery time                     |
+| `updated_at`       | TIMESTAMP               | Last update time                         |
 
 **Unique constraint**: `(plugin_config_id, proxmox_node, proxmox_vmid)`
 
@@ -130,16 +130,16 @@ Users manually link discovered Proxmox guests to Uptrakit hosts via the
 All actions are dispatched through the shared-surface runtime. No dedicated CLI
 commands or REST routes exist.
 
-| Surface | Action | Parameters | Description |
-| --- | --- | --- | --- |
-| `proxmox.hosts` | `list` | `plugin_config_id` | List discovered guests with inline match suggestions |
-| `proxmox.hosts` | `discover` | `plugin_config_id` | Trigger discovery |
-| `proxmox.hosts` | `test-connection` | `plugin_config_id` | Test API connectivity |
-| `proxmox.hosts` | `match` | `mapping_id`, `host_id` | Manual match |
-| `proxmox.hosts` | `approve-match` | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback) |
-| `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
-| `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests sorted by name across all configs |
-| `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
+| Surface             | Action               | Parameters                                  | Description                                                          |
+| ------------------- | -------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
+| `proxmox.hosts`     | `list`               | `plugin_config_id`                          | List discovered guests with inline match suggestions                 |
+| `proxmox.hosts`     | `discover`           | `plugin_config_id`                          | Trigger discovery                                                    |
+| `proxmox.hosts`     | `test-connection`    | `plugin_config_id`                          | Test API connectivity                                                |
+| `proxmox.hosts`     | `match`              | `mapping_id`, `host_id`                     | Manual match                                                         |
+| `proxmox.hosts`     | `approve-match`      | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback)  |
+| `proxmox.hosts`     | `unmatch`            | `mapping_id`                                | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
+| `proxmox.hosts`     | `list-all-unmatched` | (none)                                      | List unmatched guests sorted by name across all configs              |
+| `proxmox.host-info` | `get-info`           | `host_id`                                   | Get Proxmox info for host                                            |
 
 In the current shared-surface slice, `proxmox.hosts` is intentionally **not**
 rendered as the old selector-driven data table. The page currently exposes only
@@ -195,12 +195,12 @@ Proxmox REST API client — they operate via SSH commands on the PVE node.
 
 Used during SSH agent bootstrap to detect and configure PVE nodes.
 
-| Function | Description |
-| --- | --- |
-| `detect_pve_node(executor)` | Runs `command -v pveversion` to detect a PVE node |
-| `check_pve_token_exists(executor, tenant_id)` | Checks whether an Uptrakit PVE token already exists on the cluster and determines ownership |
-| `create_pve_api_credentials(executor, tenant_id)` | Creates a PVE API user and token via `pveum` commands |
-| `pve_user_realm(tenant_id)` | Returns the tenant-specific PVE username: `uptrakit-{tenant_id}@pve` |
+| Function                                          | Description                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `detect_pve_node(executor)`                       | Runs `command -v pveversion` to detect a PVE node                                           |
+| `check_pve_token_exists(executor, tenant_id)`     | Checks whether an Uptrakit PVE token already exists on the cluster and determines ownership |
+| `create_pve_api_credentials(executor, tenant_id)` | Creates a PVE API user and token via `pveum` commands                                       |
+| `pve_user_realm(tenant_id)`                       | Returns the tenant-specific PVE username: `uptrakit-{tenant_id}@pve`                        |
 
 #### PVE Cluster Deduplication
 
@@ -240,22 +240,22 @@ include the `/api2/json` path — that prefix is added per-request by `ProxmoxCl
 
 Provides transport-agnostic guest command execution via PVE CLI tools.
 
-| Function | Description |
-| --- | --- |
-| `exec_in_guest(executor, vmid, guest_type, command)` | Execute a command inside a PVE guest |
-| `get_guest_ip(executor, vmid, guest_type)` | Get the primary IP address of a guest |
-| `list_guests(executor)` | List all guests on the cluster |
+| Function                                             | Description                           |
+| ---------------------------------------------------- | ------------------------------------- |
+| `exec_in_guest(executor, vmid, guest_type, command)` | Execute a command inside a PVE guest  |
+| `get_guest_ip(executor, vmid, guest_type)`           | Get the primary IP address of a guest |
+| `list_guests(executor)`                              | List all guests on the cluster        |
 
 **LXC** commands use `pct exec {vmid} -- bash -c '{command}'`.
 
 **QEMU** commands use `qm guest exec {vmid} -- bash -c '{command}'` and parse
 the JSON output for stdout/stderr/exit code.
 
-| Type | Description |
-| --- | --- |
-| `PveGuestType` | Enum: `Lxc`, `Qemu` |
-| `GuestExecResult` | Command output: `stdout`, `stderr`, `exit_code` |
-| `PveGuest` | Guest metadata: `vmid`, `name`, `guest_type`, `status`, `node` |
+| Type              | Description                                                    |
+| ----------------- | -------------------------------------------------------------- |
+| `PveGuestType`    | Enum: `Lxc`, `Qemu`                                            |
+| `GuestExecResult` | Command output: `stdout`, `stderr`, `exit_code`                |
+| `PveGuest`        | Guest metadata: `vmid`, `name`, `guest_type`, `status`, `node` |
 
 ### `RemoteExecutor` Integration
 

@@ -58,10 +58,10 @@ Before executing a plugin update, the agent independently re-verifies the attest
 
 ## AttestationStatus
 
-| Value | Meaning |
-| --- | --- |
-| `Verified` | At least one attestation was found for the release asset digest. |
-| `NotFound` | The GitHub Attestations API returned no attestations (404 or empty array). |
+| Value        | Meaning                                                                         |
+| ------------ | ------------------------------------------------------------------------------- |
+| `Verified`   | At least one attestation was found for the release asset digest.                |
+| `NotFound`   | The GitHub Attestations API returned no attestations (404 or empty array).      |
 | `Unverified` | The check was skipped or inconclusive (no checksums file, network error, etc.). |
 
 ## Configuration

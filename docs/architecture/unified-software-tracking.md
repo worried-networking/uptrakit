@@ -128,14 +128,14 @@ Gained two columns for batch output streaming:
 
 ## Plugin `featured` assignment
 
-| Plugin | `featured` | Rationale |
-| :--- | :---: | :--- |
-| Docker | `true` | Users care about individual container images |
-| Proxmox Helper Scripts | `true` | Users care about individual PHS-managed apps |
-| APT | `false` | Hundreds of system packages; aggregate view preferred |
-| Homebrew | `false` | Dozens to hundreds of packages; aggregate view preferred |
-| npm | `false` | Global npm packages; aggregate view preferred |
-| Mac App Store | `false` | App Store apps; aggregate view preferred |
+| Plugin                 | `featured` | Rationale                                                |
+| :--------------------- | :--------: | :------------------------------------------------------- |
+| Docker                 |   `true`   | Users care about individual container images             |
+| Proxmox Helper Scripts |   `true`   | Users care about individual PHS-managed apps             |
+| APT                    |  `false`   | Hundreds of system packages; aggregate view preferred    |
+| Homebrew               |  `false`   | Dozens to hundreds of packages; aggregate view preferred |
+| npm                    |  `false`   | Global npm packages; aggregate view preferred            |
+| Mac App Store          |  `false`   | App Store apps; aggregate view preferred                 |
 
 ## Visibility model
 

@@ -10,16 +10,16 @@ Two tables support the feature:
 
 ### `host_tags`
 
-| Column | Type | Constraints | Description |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | Tag identifier (UUID v7) |
-| `tenant_id` | UUID | FK `tenants.id`, NOT NULL | Owning tenant |
-| `name` | TEXT | NOT NULL | Human-readable tag name (max 100 characters) |
-| `color` | TEXT | NOT NULL | Hex color code (e.g. `#3B82F6`) |
-| `description` | TEXT | nullable | Optional description (max 500 characters) |
-| `created_at` | TIMESTAMPTZ | NOT NULL | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | NOT NULL | Last modification timestamp |
-| `deactivated_at` | TIMESTAMPTZ | nullable | Soft-delete timestamp; non-null means deleted |
+| Column           | Type        | Constraints               | Description                                   |
+| ---------------- | ----------- | ------------------------- | --------------------------------------------- |
+| `id`             | UUID        | PK                        | Tag identifier (UUID v7)                      |
+| `tenant_id`      | UUID        | FK `tenants.id`, NOT NULL | Owning tenant                                 |
+| `name`           | TEXT        | NOT NULL                  | Human-readable tag name (max 100 characters)  |
+| `color`          | TEXT        | NOT NULL                  | Hex color code (e.g. `#3B82F6`)               |
+| `description`    | TEXT        | nullable                  | Optional description (max 500 characters)     |
+| `created_at`     | TIMESTAMPTZ | NOT NULL                  | Creation timestamp                            |
+| `updated_at`     | TIMESTAMPTZ | NOT NULL                  | Last modification timestamp                   |
+| `deactivated_at` | TIMESTAMPTZ | nullable                  | Soft-delete timestamp; non-null means deleted |
 
 **Indexes:**
 
@@ -34,11 +34,11 @@ Two tables support the feature:
 
 ### `host_tag_assignments`
 
-| Column | Type | Constraints | Description |
-| --- | --- | --- | --- |
-| `host_tag_id` | UUID | PK (composite), FK `host_tags.id` | Tag being assigned |
-| `host_id` | UUID | PK (composite), FK `hosts.id` | Host receiving the tag |
-| `assigned_at` | TIMESTAMPTZ | NOT NULL | When the assignment was created |
+| Column        | Type        | Constraints                       | Description                     |
+| ------------- | ----------- | --------------------------------- | ------------------------------- |
+| `host_tag_id` | UUID        | PK (composite), FK `host_tags.id` | Tag being assigned              |
+| `host_id`     | UUID        | PK (composite), FK `hosts.id`     | Host receiving the tag          |
+| `assigned_at` | TIMESTAMPTZ | NOT NULL                          | When the assignment was created |
 
 **Indexes:**
 
@@ -116,25 +116,25 @@ N+1 queries when listing hosts.
 
 Four SSE admin events are emitted for real-time UI updates:
 
-| Event | Trigger |
-| --- | --- |
-| `host_tag_created` | New tag created |
-| `host_tag_updated` | Tag name, color, or description changed |
-| `host_tag_deleted` | Tag soft-deleted |
-| `host_tags_changed` | Tags assigned/unassigned on a host |
+| Event               | Trigger                                 |
+| ------------------- | --------------------------------------- |
+| `host_tag_created`  | New tag created                         |
+| `host_tag_updated`  | Tag name, color, or description changed |
+| `host_tag_deleted`  | Tag soft-deleted                        |
+| `host_tags_changed` | Tags assigned/unassigned on a host      |
 
 ## Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/db/src/entity/host_tag.rs` | SeaORM entity for `host_tags` |
-| `crates/shared/db/src/entity/host_tag_assignment.rs` | SeaORM entity for `host_tag_assignments` |
-| `crates/shared/db/src/migration/m20260309_000003_host_tags.rs` | Migration creating both tables |
-| `crates/shared/web-api-types/src/host_tags.rs` | Request/response types and validation |
-| `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions (CRUD, batch load, batch delete) |
-| `crates/ui/web-api/src/routes/host_tags.rs` | Axum route handlers |
-| `crates/shared/openapi-client/src/host_tags.rs` | Typed API client methods |
-| `crates/ui/cli/src/commands/host_tags.rs` | CLI command implementations |
+| File                                                           | Purpose                                          |
+| -------------------------------------------------------------- | ------------------------------------------------ |
+| `crates/shared/db/src/entity/host_tag.rs`                      | SeaORM entity for `host_tags`                    |
+| `crates/shared/db/src/entity/host_tag_assignment.rs`           | SeaORM entity for `host_tag_assignments`         |
+| `crates/shared/db/src/migration/m20260309_000003_host_tags.rs` | Migration creating both tables                   |
+| `crates/shared/web-api-types/src/host_tags.rs`                 | Request/response types and validation            |
+| `crates/ui/web-api-queries/src/queries/host_tags.rs`           | Query functions (CRUD, batch load, batch delete) |
+| `crates/ui/web-api/src/routes/host_tags.rs`                    | Axum route handlers                              |
+| `crates/shared/openapi-client/src/host_tags.rs`                | Typed API client methods                         |
+| `crates/ui/cli/src/commands/host_tags.rs`                      | CLI command implementations                      |
 
 ## See also
 

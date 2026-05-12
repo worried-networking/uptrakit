@@ -31,11 +31,11 @@ The method carries `#[must_use]`, following the same pattern as `PluginRegistry:
 
 Masked fields per channel type:
 
-| Channel type | Masked fields |
-| --- | --- |
-| `webhook` | `secret` |
-| `telegram` | `bot_token`, `webhook_secret` |
-| `email` | none (per-channel config stores only `to_addresses`) |
+| Channel type | Masked fields                                        |
+| ------------ | ---------------------------------------------------- |
+| `webhook`    | `secret`                                             |
+| `telegram`   | `bot_token`, `webhook_secret`                        |
+| `email`      | none (per-channel config stores only `to_addresses`) |
 
 All other config fields (e.g. `url`, `chat_id`) are returned unmasked.
 
@@ -66,11 +66,11 @@ management.
 
 ### TLS mode recommendations
 
-| Mode | Security level | Recommended use |
-| --- | --- | --- |
-| `tls` | Highest — full SMTPS, no downgrade possible | Production (port 465) |
-| `starttls` | Good — opportunistic TLS upgrade | Production (port 587), widely supported |
-| `none` | Plaintext — credentials and email transmitted in the clear | Development/testing only, never production |
+| Mode       | Security level                                             | Recommended use                            |
+| ---------- | ---------------------------------------------------------- | ------------------------------------------ |
+| `tls`      | Highest — full SMTPS, no downgrade possible                | Production (port 465)                      |
+| `starttls` | Good — opportunistic TLS upgrade                           | Production (port 587), widely supported    |
+| `none`     | Plaintext — credentials and email transmitted in the clear | Development/testing only, never production |
 
 The default TLS mode is `"starttls"`. Administrators are advised to use `"tls"` whenever possible.
 
@@ -98,12 +98,12 @@ on the relevant action definitions.
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` -- SMTP delivery, config validation, internal SMTP merge |
+| File                                                 | Purpose                                                                 |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| `crates/plugins/notifications/email/src/lib.rs`      | `EmailPlugin` -- SMTP delivery, config validation, internal SMTP merge  |
 | `crates/plugins/notifications/email/src/surfaces.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
-| `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
-| `crates/shared/db/src/raw_settings.rs` | Raw-key settings store functions used by notification plugins |
+| `crates/ui/web-api/src/settings.rs`                  | `SmtpSettingsSnapshot` with masked `Debug` impl                         |
+| `crates/shared/db/src/raw_settings.rs`               | Raw-key settings store functions used by notification plugins           |
 
 ## Webhook URL Validation and Header Blocklist
 
@@ -145,11 +145,11 @@ webhook requests.
 
 ### Key files
 
-| File | Purpose |
-| --- | --- |
-| `crates/shared/types/src/network.rs` | Shared `is_private_host()` function |
+| File                                              | Purpose                                            |
+| ------------------------------------------------- | -------------------------------------------------- |
+| `crates/shared/types/src/network.rs`              | Shared `is_private_host()` function                |
 | `crates/plugins/notifications/webhook/src/lib.rs` | `validate_config()` with URL and header validation |
-| `crates/core/controller/src/cli.rs` | `--allow-private-notification-urls` CLI flag |
+| `crates/core/controller/src/cli.rs`               | `--allow-private-notification-urls` CLI flag       |
 
 The threat model: a user with `manage_notifications` permission can configure a webhook URL
 targeting internal services (cloud metadata endpoints, private IPs) to probe the internal network
@@ -220,9 +220,9 @@ The UNIQUE index on `action_token` prevents duplicate tokens at the database lev
 
 Two dedicated permissions govern access to the notification subsystem:
 
-| Permission | Serialized name | Grants |
-| --- | --- | --- |
-| `ViewNotifications` | `view_notifications` | Read channels, rules, and delivery log |
+| Permission            | Serialized name        | Grants                                                           |
+| --------------------- | ---------------------- | ---------------------------------------------------------------- |
+| `ViewNotifications`   | `view_notifications`   | Read channels, rules, and delivery log                           |
 | `ManageNotifications` | `manage_notifications` | Create, update, delete channels and rules; test channel delivery |
 
 These permissions use the standard typed-extractor pattern (`CanViewNotifications`, `CanManageNotifications`)
@@ -234,11 +234,11 @@ full RBAC architecture.
 
 All notification data is tenant-scoped:
 
-| Table | Tenant column |
-| --- | --- |
-| `notification_channels` | `tenant_id` |
-| `notification_rules` | `tenant_id` |
-| `notification_log` | `tenant_id` |
+| Table                   | Tenant column |
+| ----------------------- | ------------- |
+| `notification_channels` | `tenant_id`   |
+| `notification_rules`    | `tenant_id`   |
+| `notification_log`      | `tenant_id`   |
 
 All authenticated API queries use `TenantDb`, which automatically filters by the authenticated user's tenant.
 Foreign keys from `notification_rules` and `notification_log` reference `notification_channels`, which is
@@ -277,23 +277,23 @@ provide defense-in-depth against abuse.
 
 ## Key Files
 
-| File | Purpose |
-| --- | --- |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `NotificationTransportPlugin` trait with `#[must_use]` on `mask_config_secrets` |
-| `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin: HMAC-SHA256 signing, secret masking |
-| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
-| `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin: bot token masking, webhook secret masking |
-| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback verification) |
-| `crates/plugins/notifications/email/src/lib.rs` | Email plugin: SMTP delivery, no per-channel secrets |
-| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (SMTP settings with password encryption) |
-| `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
-| `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `notification_transport()` for channel type dispatch |
-| `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including generic `notification_callback` |
-| `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, generic delivery |
-| `crates/shared/db/src/entity/notification_channel.rs` | `notification_channels` entity with `EncryptedString` config |
-| `crates/shared/db/src/entity/notification_log.rs` | `notification_log` entity with `action_token` and `action_taken` |
-| `crates/shared/db/src/entity/notification_rule.rs` | `notification_rules` entity with scope filters |
-| `crates/shared/db/src/migration/m20260301_000001_notifications.rs` | Database migration: tables, indexes, foreign keys |
+| File                                                               | Purpose                                                                            |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs`            | `NotificationTransportPlugin` trait with `#[must_use]` on `mask_config_secrets`    |
+| `crates/plugins/notifications/webhook/src/lib.rs`                  | Webhook plugin: HMAC-SHA256 signing, secret masking                                |
+| `crates/plugins/notifications/webhook/src/surfaces.rs`             | Webhook surface action handler                                                     |
+| `crates/plugins/notifications/telegram/src/lib.rs`                 | Telegram plugin: bot token masking, webhook secret masking                         |
+| `crates/plugins/notifications/telegram/src/surfaces.rs`            | Telegram surface action handler (including callback verification)                  |
+| `crates/plugins/notifications/email/src/lib.rs`                    | Email plugin: SMTP delivery, no per-channel secrets                                |
+| `crates/plugins/notifications/email/src/surfaces.rs`               | Email surface action handler (SMTP settings with password encryption)              |
+| `crates/ui/web-api/src/settings.rs`                                | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only          |
+| `crates/plugins/infrastructure/registry/src/registry.rs`           | Unified `PluginRegistry` with `notification_transport()` for channel type dispatch |
+| `crates/ui/web-api/src/routes/notifications.rs`                    | API route handlers including generic `notification_callback`                       |
+| `crates/ui/web-api/src/notifications/dispatcher.rs`                | Background dispatcher: rule matching, action token generation, generic delivery    |
+| `crates/shared/db/src/entity/notification_channel.rs`              | `notification_channels` entity with `EncryptedString` config                       |
+| `crates/shared/db/src/entity/notification_log.rs`                  | `notification_log` entity with `action_token` and `action_taken`                   |
+| `crates/shared/db/src/entity/notification_rule.rs`                 | `notification_rules` entity with scope filters                                     |
+| `crates/shared/db/src/migration/m20260301_000001_notifications.rs` | Database migration: tables, indexes, foreign keys                                  |
 
 ## See Also
 

@@ -38,7 +38,7 @@ and into the subtitle line as an inline pill button.
 All software rows — header and host sub-rows, single- and multi-host — use:
 
 ```css
-grid-template-columns: minmax(0,1fr) 120px 88px
+grid-template-columns: minmax(0, 1fr) 120px 88px;
 ```
 
 The 16px caret column is removed entirely. No spacer or placeholder needed.
@@ -49,7 +49,7 @@ The 16px caret column is removed entirely. No spacer or placeholder needed.
 the tablet grid becomes:
 
 ```css
-grid-template-columns: minmax(0,1fr) 90px 88px
+grid-template-columns: minmax(0, 1fr) 90px 88px;
 ```
 
 Badge column (`88px`) is unchanged. Version column compresses from `120px` to `90px` on tablet,
@@ -86,21 +86,21 @@ This is an **interactive accent-tinted button**, not a §4.2 categorical pill. �
 pills (`12px`, `7.5px` bold uppercase, no border) label agent type, OS, and plugin type. The
 expand pill is a clickable control at badge scale with an accent border.
 
-| Property         | Value                                                                |
-| ---------------- | -------------------------------------------------------------------- |
-| Idle background  | `rgba(var(--accent-rgb), .08)`                                       |
-| Idle border      | `rgba(var(--accent-rgb), .22)`                                       |
-| Idle text        | `var(--accent)`                                                      |
-| Hover background | `rgba(var(--accent-rgb), .18)`                                       |
-| Hover border     | `rgba(var(--accent-rgb), .42)`                                       |
-| Hover text       | `var(--accent-bright)`                                               |
-| Height           | `14px`                                                               |
-| Padding          | `0 5px`                                                              |
-| Border radius    | `2px` (chips/badges rule, §2.3)                                      |
-| Font size        | `9px`, weight `600`, `text-transform: none`                          |
-| Internal gap     | `3px` between glyph and count text                                   |
-| Overflow         | `hidden` (prevents glyph clip artifact)                              |
-| Transition       | standard triplet per §2.5                                            |
+| Property         | Value                                       |
+| ---------------- | ------------------------------------------- |
+| Idle background  | `rgba(var(--accent-rgb), .08)`              |
+| Idle border      | `rgba(var(--accent-rgb), .22)`              |
+| Idle text        | `var(--accent)`                             |
+| Hover background | `rgba(var(--accent-rgb), .18)`              |
+| Hover border     | `rgba(var(--accent-rgb), .42)`              |
+| Hover text       | `var(--accent-bright)`                      |
+| Height           | `14px`                                      |
+| Padding          | `0 5px`                                     |
+| Border radius    | `2px` (chips/badges rule, §2.3)             |
+| Font size        | `9px`, weight `600`, `text-transform: none` |
+| Internal gap     | `3px` between glyph and count text          |
+| Overflow         | `hidden` (prevents glyph clip artifact)     |
+| Transition       | standard triplet per §2.5                   |
 
 Font weight `600` and no uppercase: the pill label is informational text (`4 hosts`), not a
 command or category label. Button labels (§4.3) are `700` uppercase; this pill is not a §4.3
@@ -123,10 +123,10 @@ The unfeatured star `☆` currently uses `text-surface-400` (Skeleton cerberus: 
 New values — chosen for visual legibility at `13px`, positioned between `--text-muted` and
 `--text-secondary` for clear inactive appearance without competing with the featured star:
 
-| Theme | Value     | Range                                  |
-| ----- | --------- | -------------------------------------- |
-| Dark  | `#78788a` | `#52525b` muted – `#a1a1aa` secondary  |
-| Light | `#8496a8` | `#64748b` secondary – `#94a3b8` muted  |
+| Theme | Value     | Range                                 |
+| ----- | --------- | ------------------------------------- |
+| Dark  | `#78788a` | `#52525b` muted – `#a1a1aa` secondary |
+| Light | `#8496a8` | `#64748b` secondary – `#94a3b8` muted |
 
 Note: in light theme, `--text-muted` (`#94a3b8`) is lighter than `--text-secondary` (`#64748b`),
 which is the inverse of the dark theme relationship. The table ordering reflects each theme's
@@ -142,8 +142,12 @@ tokens.md rule against raw Tailwind palette utilities.
 
 ```css
 /* in +page.svelte <style> */
-.star-unfeatured { color: #8496a8; }               /* light */
-:global(.dark) .star-unfeatured { color: #78788a; } /* dark */
+.star-unfeatured {
+  color: #8496a8;
+} /* light */
+:global(.dark) .star-unfeatured {
+  color: #78788a;
+} /* dark */
 ```
 
 `:global(.dark)` targets the `.dark` class that Skeleton cerberus applies to the root element
@@ -160,17 +164,17 @@ Host sub-rows indent their name cell by `padding-left: 18px`. The leading dot `�
 
 ## Spec delta from §5.1
 
-| Area                    | Current spec §5.1                           | This design              |
-| ----------------------- | ------------------------------------------- | ------------------------ |
-| Multi-host desktop grid | `16px 1fr 120px 88px`                       | `1fr 120px 88px`         |
-| Single-host desktop     | `1fr 120px 88px`                            | `1fr 120px 88px`         |
-| Multi-host tablet grid  | `16px 1fr 90px 88px`                        | `1fr 90px 88px`          |
-| Caret/spacer column     | 16px dedicated grid column                  | Removed                  |
-| Expand/collapse trigger | `▾/▸` button in col 1                       | Expand pill in sub-line  |
-| Pill contains           | glyph only                                  | glyph + host count       |
-| Star-off color          | `text-surface-400` (`oklch(0.62 0 0)`)      | `#78788a` / `#8496a8`    |
-| §5.1 ASCII diagram      | Canonical                                   | Superseded               |
-| §5.1 column prose block | Canonical                                   | Superseded               |
+| Area                    | Current spec §5.1                      | This design             |
+| ----------------------- | -------------------------------------- | ----------------------- |
+| Multi-host desktop grid | `16px 1fr 120px 88px`                  | `1fr 120px 88px`        |
+| Single-host desktop     | `1fr 120px 88px`                       | `1fr 120px 88px`        |
+| Multi-host tablet grid  | `16px 1fr 90px 88px`                   | `1fr 90px 88px`         |
+| Caret/spacer column     | 16px dedicated grid column             | Removed                 |
+| Expand/collapse trigger | `▾/▸` button in col 1                  | Expand pill in sub-line |
+| Pill contains           | glyph only                             | glyph + host count      |
+| Star-off color          | `text-surface-400` (`oklch(0.62 0 0)`) | `#78788a` / `#8496a8`   |
+| §5.1 ASCII diagram      | Canonical                              | Superseded              |
+| §5.1 column prose block | Canonical                              | Superseded              |
 
 All other §5.1 rules remain in force: version column stack, badge spec, host sub-row
 background, truncation pattern, single-host compact row rules, `↑ Update all` button.

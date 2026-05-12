@@ -28,11 +28,11 @@ The instance name is derived from the controller's hostname.
 
 The mDNS advertisement includes TXT record properties:
 
-| Key | Required | Description |
-| --- | :---: | --- |
-| `ca_fp` | Yes | SHA-256 fingerprint of the active CA certificate, for TOFU verification |
-| `url` | No | Override URL for reverse proxy deployments (services connect to this instead of the mDNS-resolved address) |
-| `pki_addr` | No | PKI endpoint address override |
+| Key        | Required | Description                                                                                                |
+| ---------- | :------: | ---------------------------------------------------------------------------------------------------------- |
+| `ca_fp`    |   Yes    | SHA-256 fingerprint of the active CA certificate, for TOFU verification                                    |
+| `url`      |    No    | Override URL for reverse proxy deployments (services connect to this instead of the mDNS-resolved address) |
+| `pki_addr` |    No    | PKI endpoint address override                                                                              |
 
 When `url` is absent, services construct the controller URL from the mDNS-resolved IP address and port.
 
@@ -54,9 +54,9 @@ If no controller is found within the timeout, the service exits with an error in
 The feature uses the `mdns-sd` crate (pure Rust, async-compatible). Both the controller advertiser and the
 service browser depend on it.
 
-| Crate | Dependency |
-| --- | --- |
-| `uptrakit-controller` | `mdns-sd` (gated on `zeroconf` feature) |
+| Crate                  | Dependency                              |
+| ---------------------- | --------------------------------------- |
+| `uptrakit-controller`  | `mdns-sd` (gated on `zeroconf` feature) |
 | `uptrakit-service-sdk` | `mdns-sd` (gated on `zeroconf` feature) |
 
 ## Key files
@@ -90,10 +90,10 @@ The controller must explicitly opt in to mDNS advertising. There are two ways to
 
 **CLI flags:**
 
-| Flag | Description |
-| --- | --- |
-| `--zeroconf` | Enable mDNS advertising at startup |
-| `--zeroconf-url <URL>` | Override URL advertised in the `url` TXT property (requires `--zeroconf`) |
+| Flag                        | Description                                                                 |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `--zeroconf`                | Enable mDNS advertising at startup                                          |
+| `--zeroconf-url <URL>`      | Override URL advertised in the `url` TXT property (requires `--zeroconf`)   |
 | `--zeroconf-pki-addr <URL>` | Override PKI address in the `pki_addr` TXT property (requires `--zeroconf`) |
 
 **Web UI / API:**
@@ -110,22 +110,22 @@ The controller must be restarted for changes to take effect.
 
 ### Services
 
-| Flag | Description |
-| --- | --- |
-| (no `--url`) | Triggers automatic mDNS discovery |
-| `--url <URL>` | Disables discovery; connects directly to the specified URL |
-| `--clear-discovery-cache` | Removes `discovery.json` before discovery, forcing a fresh mDNS browse |
-| `--tofu-fingerprint <HEX>` | Overrides the discovered CA fingerprint with a strict pinned value |
+| Flag                       | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| (no `--url`)               | Triggers automatic mDNS discovery                                      |
+| `--url <URL>`              | Disables discovery; connects directly to the specified URL             |
+| `--clear-discovery-cache`  | Removes `discovery.json` before discovery, forcing a fresh mDNS browse |
+| `--tofu-fingerprint <HEX>` | Overrides the discovered CA fingerprint with a strict pinned value     |
 
 ## Database settings
 
 Zeroconf settings are stored in the `global_settings` table under the following keys:
 
-| Key | Type | Description |
-| --- | --- | --- |
-| `zeroconf.enabled` | boolean | Whether mDNS advertising is enabled |
-| `zeroconf.url` | string / null | Override URL for reverse proxy deployments |
-| `zeroconf.pki_addr` | string / null | Override PKI endpoint address |
+| Key                 | Type          | Description                                |
+| ------------------- | ------------- | ------------------------------------------ |
+| `zeroconf.enabled`  | boolean       | Whether mDNS advertising is enabled        |
+| `zeroconf.url`      | string / null | Override URL for reverse proxy deployments |
+| `zeroconf.pki_addr` | string / null | Override PKI endpoint address              |
 
 These are reconciled at startup using the standard `reconcile_setting()` pattern (same as NATS and SMTP
 settings). CLI flags take precedence on the first run; subsequent runs use the database value. See

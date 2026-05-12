@@ -1,7 +1,7 @@
 # Command Executor
 
 The `CommandExecutor` trait decouples plugin logic from the command execution transport. Plugins build a
-`CommandSpec` describing *what* to run, and the injected executor decides *how* to run it (locally, over SSH, etc.).
+`CommandSpec` describing _what_ to run, and the injected executor decides _how_ to run it (locally, over SSH, etc.).
 
 **Related docs:**
 
@@ -32,13 +32,13 @@ pub struct CommandSpec {
 
 Convenience constructors:
 
-| Constructor | Description |
-| --- | --- |
-| `CommandSpec::exec(program, args)` | Direct program execution (no shell). |
-| `CommandSpec::shell(command)` | Shell command via Bash with fail-early settings (`set -euo pipefail`). |
-| `CommandSpec::shell_with(command, shell)` | Shell command with a specific shell (`Bash`, `Sh`). |
-| `.with_working_dir(dir)` | Builder method to set the working directory. |
-| `.privileged()` | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`). |
+| Constructor                               | Description                                                                               |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `CommandSpec::exec(program, args)`        | Direct program execution (no shell).                                                      |
+| `CommandSpec::shell(command)`             | Shell command via Bash with fail-early settings (`set -euo pipefail`).                    |
+| `CommandSpec::shell_with(command, shell)` | Shell command with a specific shell (`Bash`, `Sh`).                                       |
+| `.with_working_dir(dir)`                  | Builder method to set the working directory.                                              |
+| `.privileged()`                           | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`). |
 
 #### The `privileged` flag
 
@@ -146,11 +146,11 @@ pub struct SudoContext {
 
 `SudoPolicy` (default: `Auto`) determines the behavior:
 
-| Variant | String | Behavior |
-| --- | --- | --- |
-| `Auto` | `"auto"` | Prepend `sudo` when not root AND `sudo_available` is `true` |
-| `ForceWith` | `"force_with"` | Always prepend `sudo` (unless root) |
-| `ForceWithout` | `"force_without"` | Never prepend `sudo` |
+| Variant        | String            | Behavior                                                    |
+| -------------- | ----------------- | ----------------------------------------------------------- |
+| `Auto`         | `"auto"`          | Prepend `sudo` when not root AND `sudo_available` is `true` |
+| `ForceWith`    | `"force_with"`    | Always prepend `sudo` (unless root)                         |
+| `ForceWithout` | `"force_without"` | Never prepend `sudo`                                        |
 
 `SudoContext::default()` encodes the backward-compatible assumption used by the local agent:
 non-root user, sudo available, auto policy. This matches the old hardcoded-sudo behavior.
@@ -300,10 +300,10 @@ pub trait StdioTunnel: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unp
 
 Two opt-in methods on `CommandExecutor` expose the capability:
 
-| Method | Default | Description |
-| --- | --- | --- |
-| `supports_stdio_tunnel()` | `false` | Whether this executor can open tunnels |
-| `open_stdio_tunnel(command)` | Returns `UnsupportedOperation` error | Open a tunnel to the given command |
+| Method                       | Default                              | Description                            |
+| ---------------------------- | ------------------------------------ | -------------------------------------- |
+| `supports_stdio_tunnel()`    | `false`                              | Whether this executor can open tunnels |
+| `open_stdio_tunnel(command)` | Returns `UnsupportedOperation` error | Open a tunnel to the given command     |
 
 `SudoAwareCommandExecutor` delegates both methods directly to its inner executor — tunnels are raw
 byte streams that bypass sudo wrapping.

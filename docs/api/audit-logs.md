@@ -17,18 +17,18 @@ Lists tenant-scoped semantic audit entries.
 
 #### Query parameters
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `page` | integer | Page number (1-based). Defaults to 1. |
-| `per_page` | integer | Items per page. Defaults to 20. Maximum 1000. |
-| `actor_type` | string | Filter by actor type: `user`, `api_token`, `oidc`, `service`, `system`. |
-| `action_type` | string | Filter by semantic action (for example `plugin_config.create`). |
-| `outcome` | string | Filter by action outcome (`success`, `denied`, `validation_failed`, `failed`, `partial`). |
-| `target_type` | string | Filter by semantic target type. |
-| `target_id` | string | Filter by semantic target identifier. |
-| `from` | string | Lower bound timestamp (inclusive), RFC 3339 format. |
-| `to` | string | Upper bound timestamp (inclusive), RFC 3339 format. |
-| `actor_id` | UUID | Filter entries by a specific actor UUID. |
+| Parameter     | Type    | Description                                                                               |
+| ------------- | ------- | ----------------------------------------------------------------------------------------- |
+| `page`        | integer | Page number (1-based). Defaults to 1.                                                     |
+| `per_page`    | integer | Items per page. Defaults to 20. Maximum 1000.                                             |
+| `actor_type`  | string  | Filter by actor type: `user`, `api_token`, `oidc`, `service`, `system`.                   |
+| `action_type` | string  | Filter by semantic action (for example `plugin_config.create`).                           |
+| `outcome`     | string  | Filter by action outcome (`success`, `denied`, `validation_failed`, `failed`, `partial`). |
+| `target_type` | string  | Filter by semantic target type.                                                           |
+| `target_id`   | string  | Filter by semantic target identifier.                                                     |
+| `from`        | string  | Lower bound timestamp (inclusive), RFC 3339 format.                                       |
+| `to`          | string  | Upper bound timestamp (inclusive), RFC 3339 format.                                       |
+| `actor_id`    | UUID    | Filter entries by a specific actor UUID.                                                  |
 
 #### Response
 
@@ -111,20 +111,20 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ### `AuditLogResponse` / `SystemAuditLogResponse`
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | UUIDv7 identifier of this audit log entry. |
-| `actor_type` | string | `"user"`, `"api_token"`, `"oidc"`, `"service"`, or `"system"`. |
-| `actor_id` | UUID \| null | Actor UUID when available. |
-| `actor_display` | string \| null | Human-readable actor label. |
-| `action_type` | string | Canonical semantic action. |
-| `target_type` | string \| null | Semantic target type. |
-| `target_id` | string \| null | Semantic target identifier. |
-| `target_display` | string \| null | Human-readable target label. |
-| `outcome` | string | Action outcome (`success`, `denied`, `validation_failed`, `failed`, `partial`). |
-| `details_json` | object \| null | Optional structured details payload. |
-| `request_id` | string \| null | Optional request correlation identifier. |
-| `occurred_at` | string | RFC 3339 timestamp. |
+| Field            | Type           | Description                                                                     |
+| ---------------- | -------------- | ------------------------------------------------------------------------------- |
+| `id`             | UUID           | UUIDv7 identifier of this audit log entry.                                      |
+| `actor_type`     | string         | `"user"`, `"api_token"`, `"oidc"`, `"service"`, or `"system"`.                  |
+| `actor_id`       | UUID \| null   | Actor UUID when available.                                                      |
+| `actor_display`  | string \| null | Human-readable actor label.                                                     |
+| `action_type`    | string         | Canonical semantic action.                                                      |
+| `target_type`    | string \| null | Semantic target type.                                                           |
+| `target_id`      | string \| null | Semantic target identifier.                                                     |
+| `target_display` | string \| null | Human-readable target label.                                                    |
+| `outcome`        | string         | Action outcome (`success`, `denied`, `validation_failed`, `failed`, `partial`). |
+| `details_json`   | object \| null | Optional structured details payload.                                            |
+| `request_id`     | string \| null | Optional request correlation identifier.                                        |
+| `occurred_at`    | string         | RFC 3339 timestamp.                                                             |
 
 ---
 
@@ -132,22 +132,22 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 Both endpoints use the standard paginated response format:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `items` | array | Array of log entries for this page. |
-| `total` | integer | Total number of matching entries. |
-| `page` | integer | Current page number. |
-| `per_page` | integer | Items per page used in this response. |
-| `total_pages` | integer | Total number of pages. |
+| Field         | Type    | Description                           |
+| ------------- | ------- | ------------------------------------- |
+| `items`       | array   | Array of log entries for this page.   |
+| `total`       | integer | Total number of matching entries.     |
+| `page`        | integer | Current page number.                  |
+| `per_page`    | integer | Items per page used in this response. |
+| `total_pages` | integer | Total number of pages.                |
 
 ---
 
 ## Permissions
 
-| Permission | Granted to | Endpoint |
-| --- | --- | --- |
-| `view_audit_logs` | `owner`, `admin` | `GET /api/v1/audit-logs` |
-| `view_system_audit_logs` | `owner` only | `GET /api/v1/system-audit-logs` |
+| Permission               | Granted to       | Endpoint                        |
+| ------------------------ | ---------------- | ------------------------------- |
+| `view_audit_logs`        | `owner`, `admin` | `GET /api/v1/audit-logs`        |
+| `view_system_audit_logs` | `owner` only     | `GET /api/v1/system-audit-logs` |
 
 A user with neither permission receives `403 Forbidden`.
 

@@ -111,27 +111,27 @@ uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
 
 ### CLI arguments
 
-| Argument/Flag | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--target` | Yes | -- | SSH target: `[user@]host[:port]` or `ssh://[user@]host[:port]` |
-| `--service-id` | Yes | -- | UUID of the SSH agent service instance |
-| `--name` | No | target hostname | Friendly name for the host (must be unique) |
-| `--auth-method` | No | `ssh_agent` | Authentication method: `password`, `private_key`, or `ssh_agent` |
-| `--target-username` | No | `uptrakit` (when auth is `root`), else auth username | Username for the managed account |
-| `--allow-all` | No | `false` | Write `NOPASSWD: ALL` instead of specific command entries (less secure) |
-| `--remove-stale-keys` | No | `false` | Extend stale-key removal to all Uptrakit-managed keys |
-| `--preview` | No | `false` | Show the plan without executing |
-| `--auto` | No | `false` | Skip the review step (execute all planned actions automatically) |
+| Argument/Flag         | Required | Default                                              | Description                                                             |
+| --------------------- | -------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| `--target`            | Yes      | --                                                   | SSH target: `[user@]host[:port]` or `ssh://[user@]host[:port]`          |
+| `--service-id`        | Yes      | --                                                   | UUID of the SSH agent service instance                                  |
+| `--name`              | No       | target hostname                                      | Friendly name for the host (must be unique)                             |
+| `--auth-method`       | No       | `ssh_agent`                                          | Authentication method: `password`, `private_key`, or `ssh_agent`        |
+| `--target-username`   | No       | `uptrakit` (when auth is `root`), else auth username | Username for the managed account                                        |
+| `--allow-all`         | No       | `false`                                              | Write `NOPASSWD: ALL` instead of specific command entries (less secure) |
+| `--remove-stale-keys` | No       | `false`                                              | Extend stale-key removal to all Uptrakit-managed keys                   |
+| `--preview`           | No       | `false`                                              | Show the plan without executing                                         |
+| `--auto`              | No       | `false`                                              | Skip the review step (execute all planned actions automatically)        |
 
 ## SSH config resolution
 
 The bootstrap operation reads `~/.ssh/config` to fill in defaults for the target
 host. The following directives are supported:
 
-| Directive | Applies to |
-| --- | --- |
-| `User` | Auth username (when not specified in the target) |
-| `Port` | SSH port (when not specified in the target) |
+| Directive  | Applies to                                                           |
+| ---------- | -------------------------------------------------------------------- |
+| `User`     | Auth username (when not specified in the target)                     |
+| `Port`     | SSH port (when not specified in the target)                          |
 | `HostName` | Resolved hostname (allows SSH aliases like `myserver` -> `10.0.0.5`) |
 
 Resolution never fails due to a missing or malformed SSH config -- defaults are
@@ -168,14 +168,13 @@ The bootstrap operation performs these steps in order:
 
 3. **Create target user** (if different from auth user) -- Checks whether the
    target user exists (`id -u`). If not, creates it with `useradd --create-home
-   --shell /bin/sh`. The `/bin/sh` shell is used because the managed account
+--shell /bin/sh`. The `/bin/sh` shell is used because the managed account
    only needs non-interactive command execution.
 
 4. **Deploy SSH key** -- If no target private key is provided, generates a
    new Ed25519 keypair in memory. Reads the existing `authorized_keys` (if any),
    then applies two-tier stale-key handling (see
    [Stale key detection](#stale-key-detection) below):
-
    - **Automatic removal** -- any existing entry written by this service on a
      previous bootstrap run (comment matching
      `uptrakit-svc:<service-uuid>-host:*`) is removed without any flag.
@@ -190,7 +189,6 @@ The bootstrap operation performs these steps in order:
    command execution that the agent requires.
 
    The key entry is written with a comment that identifies its origin:
-
    - `uptrakit-svc:<service-uuid>-host:<host-uuid>` -- when the service has
      already been enrolled with the controller.
    - `uptrakit-host:<host-uuid>` -- when bootstrap runs before first enrollment
@@ -244,7 +242,7 @@ Any existing entry whose comment matches
 `uptrakit-svc:<this-service-uuid>-host:*` is removed **without any flag**.
 This keeps `authorized_keys` clean when the same service re-bootstraps a
 machine -- for example, after key rotation or when a host was previously
-bootstrapped under a different name. Keys placed by *other* Uptrakit services
+bootstrapped under a different name. Keys placed by _other_ Uptrakit services
 and non-Uptrakit keys are left untouched.
 
 Example output when one same-service key is found and removed:
@@ -324,10 +322,10 @@ Both the auth username (from the target string or SSH config) and
 
 ## Host key verification
 
-| Mode | Behavior |
-| --- | --- |
-| Host key fingerprint provided | Strict pinning -- rejects mismatched keys |
-| Host key fingerprint omitted | TOFU -- accepts any key, displays and stores the fingerprint |
+| Mode                          | Behavior                                                     |
+| ----------------------------- | ------------------------------------------------------------ |
+| Host key fingerprint provided | Strict pinning -- rejects mismatched keys                    |
+| Host key fingerprint omitted  | TOFU -- accepts any key, displays and stores the fingerprint |
 
 The verification step (step 7) always uses strict pinning with the fingerprint
 observed during the initial connection. See

@@ -68,7 +68,6 @@ crates/shared/openapi-client/
     ├── update_history.rs   # Update history list/get
     ├── sse.rs              # Lightweight SSE protocol parser (parse_sse_stream)
     ├── update_output_stream.rs  # Typed SSE streaming (stream_update_output)
-    ├── device_auth_stream.rs    # Typed SSE streaming for device auth (stream_device_auth)
     └── events_stream.rs         # Typed SSE streaming for admin events (stream_events)
 ```
 
@@ -138,15 +137,15 @@ UUIDs (the `v7` feature is only needed by crates that create new entities).
 
 The `ClientError` enum covers all failure modes:
 
-| Variant | Meaning |
-| --- | --- |
-| `Http(reqwest::Error)` | Network/transport error |
-| `Json(serde_json::Error)` | JSON serialization/deserialization error |
-| `Api { status: StatusCode, message }` | Server returned an error response (4xx/5xx); `status` is `reqwest::StatusCode` |
+| Variant                               | Meaning                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `Http(reqwest::Error)`                | Network/transport error                                                                                            |
+| `Json(serde_json::Error)`             | JSON serialization/deserialization error                                                                           |
+| `Api { status: StatusCode, message }` | Server returned an error response (4xx/5xx); `status` is `reqwest::StatusCode`                                     |
 | `RateLimited { retry_after_seconds }` | Server returned HTTP 429; `retry_after_seconds: Option<u64>` parsed from the `Retry-After` header (seconds format) |
-| `NotFound(String)` | Server returned HTTP 404 |
-| `NotAuthenticated` | Server returned HTTP 401, or no bearer token available |
-| `InvalidMethod(String)` | Invalid HTTP method string (raw request only) |
+| `NotFound(String)`                    | Server returned HTTP 404                                                                                           |
+| `NotAuthenticated`                    | Server returned HTTP 401, or no bearer token available                                                             |
+| `InvalidMethod(String)`               | Invalid HTTP method string (raw request only)                                                                      |
 
 All methods return `Result<T>` which is `std::result::Result<T, rootcause::Report<ClientError>>`. The CLI maps these to `CliError` variants via `impl_report_conversion!`.
 
@@ -310,21 +309,21 @@ and handles event boundaries, multi-line data fields, and comment lines.
 
 The `UptrakitClient` provides these internal HTTP methods used by endpoint modules:
 
-| Helper | Auth | Description |
-| --- | --- | --- |
-| `get<T>(path)` | yes | GET with JSON response |
-| `get_with_query<T>(path, query)` | yes | GET with query params |
-| `get_unauth<T>(path)` | no | GET without auth |
-| `get_text_unauth(path)` | no | GET returning raw text (PKI, health) |
-| `post_json<T>(path, body)` | yes | POST with JSON body |
-| `post_empty<T>(path)` | yes | POST without body |
-| `post_empty_with_query<T>(path, query)` | yes | POST with query params, no body |
-| `post_json_unauth<T>(path, body)` | no | POST without auth |
-| `post_json_no_content(path, body)` | yes | POST expecting 204 No Content |
-| `put_json<T>(path, body)` | yes | PUT with JSON body |
-| `delete(path)` | yes | DELETE expecting empty response |
-| `delete_json<T>(path)` | yes | DELETE with JSON response |
-| `delete_with_query(path, query)` | yes | DELETE with query params |
+| Helper                                  | Auth | Description                          |
+| --------------------------------------- | ---- | ------------------------------------ |
+| `get<T>(path)`                          | yes  | GET with JSON response               |
+| `get_with_query<T>(path, query)`        | yes  | GET with query params                |
+| `get_unauth<T>(path)`                   | no   | GET without auth                     |
+| `get_text_unauth(path)`                 | no   | GET returning raw text (PKI, health) |
+| `post_json<T>(path, body)`              | yes  | POST with JSON body                  |
+| `post_empty<T>(path)`                   | yes  | POST without body                    |
+| `post_empty_with_query<T>(path, query)` | yes  | POST with query params, no body      |
+| `post_json_unauth<T>(path, body)`       | no   | POST without auth                    |
+| `post_json_no_content(path, body)`      | yes  | POST expecting 204 No Content        |
+| `put_json<T>(path, body)`               | yes  | PUT with JSON body                   |
+| `delete(path)`                          | yes  | DELETE expecting empty response      |
+| `delete_json<T>(path)`                  | yes  | DELETE with JSON response            |
+| `delete_with_query(path, query)`        | yes  | DELETE with query params             |
 
 ## Adding a new endpoint
 
@@ -408,16 +407,16 @@ async fn list_hosts_returns_empty() {
 
 All response methods use `reqwest::StatusCode` for type safety:
 
-| Method | Status | Notes |
-| --- | --- | --- |
-| `ok(body)` | 200 OK | Serializes `body` as JSON |
-| `no_content()` | 204 No Content | No response body |
-| `unauthorized()` | 401 Unauthorized | JSON `{"error":"Unauthorized"}` |
-| `not_found(msg)` | 404 Not Found | JSON `{"error":"<msg>"}` |
-| `rate_limited(secs)` | 429 Too Many Requests | Optional `Retry-After` header |
-| `internal_error(msg)` | 500 Internal Server Error | JSON `{"error":"<msg>"}` |
-| `respond(status, body)` | custom | Serializes `body` as JSON |
-| `respond_raw(status, json)` | custom | Raw JSON string |
+| Method                      | Status                    | Notes                           |
+| --------------------------- | ------------------------- | ------------------------------- |
+| `ok(body)`                  | 200 OK                    | Serializes `body` as JSON       |
+| `no_content()`              | 204 No Content            | No response body                |
+| `unauthorized()`            | 401 Unauthorized          | JSON `{"error":"Unauthorized"}` |
+| `not_found(msg)`            | 404 Not Found             | JSON `{"error":"<msg>"}`        |
+| `rate_limited(secs)`        | 429 Too Many Requests     | Optional `Retry-After` header   |
+| `internal_error(msg)`       | 500 Internal Server Error | JSON `{"error":"<msg>"}`        |
+| `respond(status, body)`     | custom                    | Serializes `body` as JSON       |
+| `respond_raw(status, json)` | custom                    | Raw JSON string                 |
 
 All methods return `httpmock::Mock<'_>` which can be used for call-count assertions:
 
@@ -435,164 +434,166 @@ provides `on_*` helpers for every endpoint, so tests never hard-code paths.
 
 #### `server.auth()` → `MockAuth`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_register()` | POST | `/api/v1/auth/register` |
-| `on_login()` | POST | `/api/v1/auth/login` |
-| `on_refresh()` | POST | `/api/v1/auth/refresh` |
-| `on_logout()` | POST | `/api/v1/auth/logout` |
-| `on_me()` | GET | `/api/v1/auth/me` |
-| `on_auth_methods()` | GET | `/api/v1/auth/methods` |
-| `on_device_auth_start()` | POST | `/api/v1/auth/device` |
-| `on_device_auth_poll()` | POST | `/api/v1/auth/device/poll` |
-| `on_device_auth_approve()` | POST | `/api/v1/auth/device/approve` |
+| Method                                     | HTTP | Path                                      |
+| ------------------------------------------ | ---- | ----------------------------------------- |
+| `on_register()`                            | POST | `/api/v1/auth/register`                   |
+| `on_login()`                               | POST | `/api/v1/auth/login`                      |
+| `on_refresh()`                             | POST | `/api/v1/auth/refresh`                    |
+| `on_logout()`                              | POST | `/api/v1/auth/logout`                     |
+| `on_me()`                                  | GET  | `/api/v1/auth/me`                         |
+| `on_auth_methods()`                        | GET  | `/api/v1/auth/methods`                    |
+| `on_oauth_device_authorization()`          | POST | `/api/v1/oauth/device_authorization`      |
+| `on_oauth_token()`                         | POST | `/api/v1/oauth/token`                     |
+| `on_oauth_authorization_server_metadata()` | GET  | `/.well-known/oauth-authorization-server` |
+| `on_device_auth_deny()`                    | POST | `/api/v1/auth/device/deny`                |
+| `on_device_auth_lookup()`                  | GET  | `/api/v1/auth/device/lookup`              |
 
 #### `server.api_tokens()` → `MockApiTokens`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/auth/api-tokens` |
-| `on_create()` | POST | `/api/v1/auth/api-tokens` |
+| Method          | HTTP   | Path                           |
+| --------------- | ------ | ------------------------------ |
+| `on_list()`     | GET    | `/api/v1/auth/api-tokens`      |
+| `on_create()`   | POST   | `/api/v1/auth/api-tokens`      |
 | `on_revoke(id)` | DELETE | `/api/v1/auth/api-tokens/{id}` |
 
 #### `server.enrollment_tokens()` → `MockEnrollmentTokens`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/enrollment-tokens` |
-| `on_create()` | POST | `/api/v1/enrollment-tokens` |
-| `on_get(id)` | GET | `/api/v1/enrollment-tokens/{id}` |
+| Method          | HTTP   | Path                             |
+| --------------- | ------ | -------------------------------- |
+| `on_list()`     | GET    | `/api/v1/enrollment-tokens`      |
+| `on_create()`   | POST   | `/api/v1/enrollment-tokens`      |
+| `on_get(id)`    | GET    | `/api/v1/enrollment-tokens/{id}` |
 | `on_revoke(id)` | DELETE | `/api/v1/enrollment-tokens/{id}` |
 
 #### `server.health()` → `MockHealth`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_healthz()` | GET | `/healthz` |
+| Method         | HTTP | Path       |
+| -------------- | ---- | ---------- |
+| `on_healthz()` | GET  | `/healthz` |
 
 #### `server.hosts()` → `MockHosts`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/hosts` |
-| `on_get(id)` | GET | `/api/v1/hosts/{id}` |
-| `on_update(id)` | PUT | `/api/v1/hosts/{id}` |
+| Method              | HTTP   | Path                 |
+| ------------------- | ------ | -------------------- |
+| `on_list()`         | GET    | `/api/v1/hosts`      |
+| `on_get(id)`        | GET    | `/api/v1/hosts/{id}` |
+| `on_update(id)`     | PUT    | `/api/v1/hosts/{id}` |
 | `on_deactivate(id)` | DELETE | `/api/v1/hosts/{id}` |
 
 #### `server.oidc_auth()` → `MockOidcAuth`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_authorize(provider_id)` | GET | `/api/v1/auth/oidc/{provider_id}/authorize` |
-| `on_exchange()` | POST | `/api/v1/auth/oidc/exchange` |
-| `on_link()` | POST | `/api/v1/auth/oidc/link` |
-| `on_complete_registration()` | POST | `/api/v1/auth/oidc/complete-registration` |
+| Method                       | HTTP | Path                                        |
+| ---------------------------- | ---- | ------------------------------------------- |
+| `on_authorize(provider_id)`  | GET  | `/api/v1/auth/oidc/{provider_id}/authorize` |
+| `on_exchange()`              | POST | `/api/v1/auth/oidc/exchange`                |
+| `on_link()`                  | POST | `/api/v1/auth/oidc/link`                    |
+| `on_complete_registration()` | POST | `/api/v1/auth/oidc/complete-registration`   |
 
 #### `server.oidc_providers()` → `MockOidcProviders`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/settings/oidc-providers` |
-| `on_create()` | POST | `/api/v1/settings/oidc-providers` |
-| `on_get(id)` | GET | `/api/v1/settings/oidc-providers/{id}` |
-| `on_update(id)` | PUT | `/api/v1/settings/oidc-providers/{id}` |
-| `on_delete(id)` | DELETE | `/api/v1/settings/oidc-providers/{id}` |
-| `on_activate(id)` | POST | `/api/v1/settings/oidc-providers/{id}/activate` |
-| `on_deactivate(id)` | POST | `/api/v1/settings/oidc-providers/{id}/deactivate` |
+| Method              | HTTP   | Path                                              |
+| ------------------- | ------ | ------------------------------------------------- |
+| `on_list()`         | GET    | `/api/v1/settings/oidc-providers`                 |
+| `on_create()`       | POST   | `/api/v1/settings/oidc-providers`                 |
+| `on_get(id)`        | GET    | `/api/v1/settings/oidc-providers/{id}`            |
+| `on_update(id)`     | PUT    | `/api/v1/settings/oidc-providers/{id}`            |
+| `on_delete(id)`     | DELETE | `/api/v1/settings/oidc-providers/{id}`            |
+| `on_activate(id)`   | POST   | `/api/v1/settings/oidc-providers/{id}/activate`   |
+| `on_deactivate(id)` | POST   | `/api/v1/settings/oidc-providers/{id}/deactivate` |
 
 #### `server.pki()` → `MockPki`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_ca_cert()` | GET | `/api/v1/pki/ca.crt` |
-| `on_ca_crl()` | GET | `/api/v1/pki/ca.crl` |
+| Method         | HTTP | Path                 |
+| -------------- | ---- | -------------------- |
+| `on_ca_cert()` | GET  | `/api/v1/pki/ca.crt` |
+| `on_ca_crl()`  | GET  | `/api/v1/pki/ca.crl` |
 
 #### `server.plugin_configs()` → `MockPluginConfigs`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/plugin-configs` |
-| `on_create()` | POST | `/api/v1/plugin-configs` |
-| `on_get(id)` | GET | `/api/v1/plugin-configs/{id}` |
-| `on_update(id)` | PUT | `/api/v1/plugin-configs/{id}` |
+| Method          | HTTP   | Path                          |
+| --------------- | ------ | ----------------------------- |
+| `on_list()`     | GET    | `/api/v1/plugin-configs`      |
+| `on_create()`   | POST   | `/api/v1/plugin-configs`      |
+| `on_get(id)`    | GET    | `/api/v1/plugin-configs/{id}` |
+| `on_update(id)` | PUT    | `/api/v1/plugin-configs/{id}` |
 | `on_delete(id)` | DELETE | `/api/v1/plugin-configs/{id}` |
 
 #### `server.scheduler()` → `MockScheduler`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/scheduler/tasks` |
-| `on_get(id)` | GET | `/api/v1/scheduler/tasks/{id}` |
-| `on_update(id)` | PUT | `/api/v1/scheduler/tasks/{id}` |
+| Method           | HTTP | Path                                   |
+| ---------------- | ---- | -------------------------------------- |
+| `on_list()`      | GET  | `/api/v1/scheduler/tasks`              |
+| `on_get(id)`     | GET  | `/api/v1/scheduler/tasks/{id}`         |
+| `on_update(id)`  | PUT  | `/api/v1/scheduler/tasks/{id}`         |
 | `on_trigger(id)` | POST | `/api/v1/scheduler/tasks/{id}/trigger` |
 
 #### `server.services()` → `MockServices`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/services` |
-| `on_get(id)` | GET | `/api/v1/services/{id}` |
-| `on_update(id)` | PUT | `/api/v1/services/{id}` |
-| `on_approve(id)` | POST | `/api/v1/services/{id}/approve` |
-| `on_reject(id)` | POST | `/api/v1/services/{id}/reject` |
-| `on_remove(id)` | DELETE | `/api/v1/services/{id}` |
-| `on_merge(target_id)` | POST | `/api/v1/services/{id}/merge` |
+| Method                | HTTP   | Path                            |
+| --------------------- | ------ | ------------------------------- |
+| `on_list()`           | GET    | `/api/v1/services`              |
+| `on_get(id)`          | GET    | `/api/v1/services/{id}`         |
+| `on_update(id)`       | PUT    | `/api/v1/services/{id}`         |
+| `on_approve(id)`      | POST   | `/api/v1/services/{id}/approve` |
+| `on_reject(id)`       | POST   | `/api/v1/services/{id}/reject`  |
+| `on_remove(id)`       | DELETE | `/api/v1/services/{id}`         |
+| `on_merge(target_id)` | POST   | `/api/v1/services/{id}/merge`   |
 
 #### `server.settings()` → `MockSettings`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_get_combined()` | GET | `/api/v1/settings` |
-| `on_get_registration()` | GET | `/api/v1/settings/registration` |
-| `on_update_registration()` | PUT | `/api/v1/settings/registration` |
-| `on_get_authentication()` | GET | `/api/v1/settings/authentication` |
-| `on_update_authentication()` | PUT | `/api/v1/settings/authentication` |
-| `on_get_agent_certificates()` | GET | `/api/v1/settings/agent-certificates` |
-| `on_update_agent_certificates()` | PUT | `/api/v1/settings/agent-certificates` |
-| `on_get_network()` | GET | `/api/v1/settings/network` |
-| `on_update_network()` | PUT | `/api/v1/settings/network` |
-| `on_rotate_ca()` | POST | `/api/v1/settings/rotate-ca` |
-| `on_renew_server_certificate()` | POST | `/api/v1/settings/renew-server-certificate` |
+| Method                           | HTTP | Path                                        |
+| -------------------------------- | ---- | ------------------------------------------- |
+| `on_get_combined()`              | GET  | `/api/v1/settings`                          |
+| `on_get_registration()`          | GET  | `/api/v1/settings/registration`             |
+| `on_update_registration()`       | PUT  | `/api/v1/settings/registration`             |
+| `on_get_authentication()`        | GET  | `/api/v1/settings/authentication`           |
+| `on_update_authentication()`     | PUT  | `/api/v1/settings/authentication`           |
+| `on_get_agent_certificates()`    | GET  | `/api/v1/settings/agent-certificates`       |
+| `on_update_agent_certificates()` | PUT  | `/api/v1/settings/agent-certificates`       |
+| `on_get_network()`               | GET  | `/api/v1/settings/network`                  |
+| `on_update_network()`            | PUT  | `/api/v1/settings/network`                  |
+| `on_rotate_ca()`                 | POST | `/api/v1/settings/rotate-ca`                |
+| `on_renew_server_certificate()`  | POST | `/api/v1/settings/renew-server-certificate` |
 
 #### `server.settings_mqtt()` → `MockSettingsMqtt`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/settings/mqtt` |
-| `on_create()` | POST | `/api/v1/settings/mqtt` |
-| `on_get_limit()` | GET | `/api/v1/settings/mqtt/limit` |
-| `on_update_limit()` | PUT | `/api/v1/settings/mqtt/limit` |
-| `on_get(id)` | GET | `/api/v1/settings/mqtt/{id}` |
-| `on_update(id)` | PUT | `/api/v1/settings/mqtt/{id}` |
-| `on_delete(id)` | DELETE | `/api/v1/settings/mqtt/{id}` |
+| Method              | HTTP   | Path                          |
+| ------------------- | ------ | ----------------------------- |
+| `on_list()`         | GET    | `/api/v1/settings/mqtt`       |
+| `on_create()`       | POST   | `/api/v1/settings/mqtt`       |
+| `on_get_limit()`    | GET    | `/api/v1/settings/mqtt/limit` |
+| `on_update_limit()` | PUT    | `/api/v1/settings/mqtt/limit` |
+| `on_get(id)`        | GET    | `/api/v1/settings/mqtt/{id}`  |
+| `on_update(id)`     | PUT    | `/api/v1/settings/mqtt/{id}`  |
+| `on_delete(id)`     | DELETE | `/api/v1/settings/mqtt/{id}`  |
 
 #### `server.software_items()` → `MockSoftwareItems`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/software-items` |
-| `on_create()` | POST | `/api/v1/software-items` |
-| `on_get(id)` | GET | `/api/v1/software-items/{id}` |
-| `on_update(id)` | PUT | `/api/v1/software-items/{id}` |
-| `on_delete(id)` | DELETE | `/api/v1/software-items/{id}` |
-| `on_assign_hosts(id)` | POST | `/api/v1/software-items/{id}/hosts` |
-| `on_unassign_host(item_id, host_id)` | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` |
-| `on_check_versions(id)` | POST | `/api/v1/software-items/{id}/check-versions` |
-| `on_check_versions_host(item_id, host_id)` | POST | `/api/v1/software-items/{id}/hosts/{host_id}/check-versions` |
-| `on_trigger_update(item_id, host_id)` | POST | `/api/v1/software-items/{id}/hosts/{host_id}/update` |
+| Method                                     | HTTP   | Path                                                         |
+| ------------------------------------------ | ------ | ------------------------------------------------------------ |
+| `on_list()`                                | GET    | `/api/v1/software-items`                                     |
+| `on_create()`                              | POST   | `/api/v1/software-items`                                     |
+| `on_get(id)`                               | GET    | `/api/v1/software-items/{id}`                                |
+| `on_update(id)`                            | PUT    | `/api/v1/software-items/{id}`                                |
+| `on_delete(id)`                            | DELETE | `/api/v1/software-items/{id}`                                |
+| `on_assign_hosts(id)`                      | POST   | `/api/v1/software-items/{id}/hosts`                          |
+| `on_unassign_host(item_id, host_id)`       | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}`                |
+| `on_check_versions(id)`                    | POST   | `/api/v1/software-items/{id}/check-versions`                 |
+| `on_check_versions_host(item_id, host_id)` | POST   | `/api/v1/software-items/{id}/hosts/{host_id}/check-versions` |
+| `on_trigger_update(item_id, host_id)`      | POST   | `/api/v1/software-items/{id}/hosts/{host_id}/update`         |
 
 #### `server.system_alerts()` → `MockSystemAlerts`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_get()` | GET | `/api/v1/system/alerts` |
+| Method     | HTTP | Path                    |
+| ---------- | ---- | ----------------------- |
+| `on_get()` | GET  | `/api/v1/system/alerts` |
 
 #### `server.update_history()` → `MockUpdateHistory`
 
-| Method | HTTP | Path |
-| --- | --- | --- |
-| `on_list()` | GET | `/api/v1/update-history` |
-| `on_get(id)` | GET | `/api/v1/update-history/{id}` |
+| Method       | HTTP | Path                          |
+| ------------ | ---- | ----------------------------- |
+| `on_list()`  | GET  | `/api/v1/update-history`      |
+| `on_get(id)` | GET  | `/api/v1/update-history/{id}` |
 
 #### Generic escape hatch
 

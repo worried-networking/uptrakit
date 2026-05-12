@@ -25,12 +25,12 @@ initialization — libraries must not configure the global dispatcher.
 
 Span names use **dot-separated** `module.operation` format:
 
-| Span name | Location |
-| --- | --- |
-| `http.request` | Request-ID middleware |
-| `ws.deserialize` | WebSocket protocol |
-| `service.event_loop` | Service-SDK event loop |
-| `scheduler.poll_cycle` | Scheduler poll loop |
+| Span name              | Location               |
+| ---------------------- | ---------------------- |
+| `http.request`         | Request-ID middleware  |
+| `ws.deserialize`       | WebSocket protocol     |
+| `service.event_loop`   | Service-SDK event loop |
+| `scheduler.poll_cycle` | Scheduler poll loop    |
 
 For `#[instrument]` annotations, the span name defaults to the function name.
 Use `name = "module.operation"` only when the function name is unclear.
@@ -55,15 +55,15 @@ async fn my_function(...) { ... }
 
 ### Fields to include
 
-| Context | Fields |
-| --- | --- |
-| HTTP handlers | (inherit from `http.request` span: `request_id`, `method`, `path`) |
-| WebSocket handlers | `service_id`, `msg_type` |
-| Update flows | `software_item`, `update_history_id`, `plugin_type` |
-| Scheduler tasks | `task` (task name), `controller_id` |
-| MQTT handlers | `service_id`, `mqtt_client_id` |
-| Discovery | `host_id`, `plugin_count` |
-| Version checks | `assignment_count` |
+| Context            | Fields                                                             |
+| ------------------ | ------------------------------------------------------------------ |
+| HTTP handlers      | (inherit from `http.request` span: `request_id`, `method`, `path`) |
+| WebSocket handlers | `service_id`, `msg_type`                                           |
+| Update flows       | `software_item`, `update_history_id`, `plugin_type`                |
+| Scheduler tasks    | `task` (task name), `controller_id`                                |
+| MQTT handlers      | `service_id`, `mqtt_client_id`                                     |
+| Discovery          | `host_id`, `plugin_count`                                          |
+| Version checks     | `assignment_count`                                                 |
 
 ### Fields to never capture
 
@@ -107,10 +107,10 @@ tracing correlation:
 
 ### TraceContext Fields
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `trace_id` | string | 32 lowercase hex chars (128-bit W3C trace ID) |
-| `span_id` | string (optional) | 16 lowercase hex chars (64-bit W3C span ID) |
+| Field      | Type              | Description                                   |
+| ---------- | ----------------- | --------------------------------------------- |
+| `trace_id` | string            | 32 lowercase hex chars (128-bit W3C trace ID) |
+| `span_id`  | string (optional) | 16 lowercase hex chars (64-bit W3C span ID)   |
 
 ### Propagation
 

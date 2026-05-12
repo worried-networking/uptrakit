@@ -18,13 +18,13 @@ external coordination.
 
 ## Wire Messages
 
-| Message | Direction | Description |
-| --- | --- | --- |
-| `store_service_config` | service → controller | Store a named config entry (tenant-scoped or global). The controller persists to DB, ACKs, and broadcasts `service_config_updated` to all other connected instances of the same `service_app_name`. |
-| `delete_service_config` | service → controller | Delete a config entry by key. The controller removes from DB, ACKs, and broadcasts `service_config_updated` with `deleted: true`. |
-| `service_config_ack` | controller → service | Acknowledges a store or delete operation. Carries `request_id` for correlation, a `success` flag, and an optional `error` message. Sent only to the requesting instance. |
-| `service_config_delivery` | controller → service | Sent once after mTLS authentication. Contains all stored config entries (tenant-scoped and global) for the connecting service's `app_name`. |
-| `service_config_updated` | controller → service | Pushed to all connected instances when any instance changes a config entry. Contains the updated key, value (absent when deleted), `tenant_id` (absent for global entries), and a `deleted` flag. |
+| Message                   | Direction            | Description                                                                                                                                                                                         |
+| ------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `store_service_config`    | service → controller | Store a named config entry (tenant-scoped or global). The controller persists to DB, ACKs, and broadcasts `service_config_updated` to all other connected instances of the same `service_app_name`. |
+| `delete_service_config`   | service → controller | Delete a config entry by key. The controller removes from DB, ACKs, and broadcasts `service_config_updated` with `deleted: true`.                                                                   |
+| `service_config_ack`      | controller → service | Acknowledges a store or delete operation. Carries `request_id` for correlation, a `success` flag, and an optional `error` message. Sent only to the requesting instance.                            |
+| `service_config_delivery` | controller → service | Sent once after mTLS authentication. Contains all stored config entries (tenant-scoped and global) for the connecting service's `app_name`.                                                         |
+| `service_config_updated`  | controller → service | Pushed to all connected instances when any instance changes a config entry. Contains the updated key, value (absent when deleted), `tenant_id` (absent for global entries), and a `deleted` flag.   |
 
 See [Wire Protocol — Generic Service Config Messages](../api/wire-protocol.md#generic-service-config-messages)
 for full payload schemas.
@@ -35,15 +35,15 @@ for full payload schemas.
 
 Stores service config entries scoped to a specific tenant.
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID (PK) | Row identifier |
-| `service_app_name` | TEXT NOT NULL | Binary/crate name of the service (from `env!("CARGO_PKG_NAME")`) |
-| `tenant_id` | UUID NOT NULL (FK → tenants) | Tenant that owns this entry |
-| `key` | TEXT NOT NULL | Config entry key (max 512 chars, namespaced by convention) |
-| `value` | TEXT NOT NULL | JSON config value, stored as `EncryptedString` |
-| `created_at` | TIMESTAMPTZ NOT NULL | Creation time |
-| `updated_at` | TIMESTAMPTZ NOT NULL | Last modification time |
+| Column             | Type                         | Description                                                      |
+| ------------------ | ---------------------------- | ---------------------------------------------------------------- |
+| `id`               | UUID (PK)                    | Row identifier                                                   |
+| `service_app_name` | TEXT NOT NULL                | Binary/crate name of the service (from `env!("CARGO_PKG_NAME")`) |
+| `tenant_id`        | UUID NOT NULL (FK → tenants) | Tenant that owns this entry                                      |
+| `key`              | TEXT NOT NULL                | Config entry key (max 512 chars, namespaced by convention)       |
+| `value`            | TEXT NOT NULL                | JSON config value, stored as `EncryptedString`                   |
+| `created_at`       | TIMESTAMPTZ NOT NULL         | Creation time                                                    |
+| `updated_at`       | TIMESTAMPTZ NOT NULL         | Last modification time                                           |
 
 UNIQUE constraint: `(service_app_name, tenant_id, key)`.
 
@@ -51,14 +51,14 @@ UNIQUE constraint: `(service_app_name, tenant_id, key)`.
 
 Stores service config entries not scoped to any tenant (e.g. system-wide defaults).
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID (PK) | Row identifier |
-| `service_app_name` | TEXT NOT NULL | Binary/crate name of the service |
-| `key` | TEXT NOT NULL | Config entry key |
-| `value` | TEXT NOT NULL | JSON config value, stored as `EncryptedString` |
-| `created_at` | TIMESTAMPTZ NOT NULL | Creation time |
-| `updated_at` | TIMESTAMPTZ NOT NULL | Last modification time |
+| Column             | Type                 | Description                                    |
+| ------------------ | -------------------- | ---------------------------------------------- |
+| `id`               | UUID (PK)            | Row identifier                                 |
+| `service_app_name` | TEXT NOT NULL        | Binary/crate name of the service               |
+| `key`              | TEXT NOT NULL        | Config entry key                               |
+| `value`            | TEXT NOT NULL        | JSON config value, stored as `EncryptedString` |
+| `created_at`       | TIMESTAMPTZ NOT NULL | Creation time                                  |
+| `updated_at`       | TIMESTAMPTZ NOT NULL | Last modification time                         |
 
 UNIQUE constraint: `(service_app_name, key)`.
 
@@ -81,7 +81,7 @@ pending.wait(&config_proxy, Duration::from_secs(10)).await?;
 ```
 
 - `ServiceConfigProxy::store(key, value, tenant_id)` — returns a `(StoreServiceConfigPayload,
-  PendingServiceConfigRequest)` pair. The payload is ready to send; the pending handle waits
+PendingServiceConfigRequest)` pair. The payload is ready to send; the pending handle waits
   for the matching ACK.
 - `ServiceConfigProxy::delete(key, tenant_id)` — same pattern with
   `DeleteServiceConfigPayload`.

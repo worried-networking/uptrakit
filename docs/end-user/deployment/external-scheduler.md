@@ -16,12 +16,12 @@ controller's embedded scheduler because they require in-process access to contro
 
 ## When to use the external scheduler
 
-| Deployment | Scheduler | Notes |
-| --- | --- | --- |
-| Single controller, simple | Embedded (`--features embedded-scheduler`) | Everything runs in one process |
-| Single controller + NATS | External binary | Decoupled scheduling, independent scaling |
-| Multi-controller HA | External binary | Avoids duplicate scheduling across controllers |
-| Resilient single instance | Embedded + external | Embedded defers external tasks when external connects; resumes on disconnect |
+| Deployment                | Scheduler                                  | Notes                                                                        |
+| ------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------- |
+| Single controller, simple | Embedded (`--features embedded-scheduler`) | Everything runs in one process                                               |
+| Single controller + NATS  | External binary                            | Decoupled scheduling, independent scaling                                    |
+| Multi-controller HA       | External binary                            | Avoids duplicate scheduling across controllers                               |
+| Resilient single instance | Embedded + external                        | Embedded defers external tasks when external connects; resumes on disconnect |
 
 ## Prerequisites
 
@@ -78,30 +78,30 @@ uptrakit-scheduler --url wss://controller.example.com:8443 --enrollment-token <t
 
 ## CLI options
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--url` | (required) | Controller WebSocket URL |
-| `--poll-interval-secs` | `15` | How often the scheduler polls for due tasks (seconds) |
-| `--tofu` | — | Trust-on-first-use CA pinning |
-| `--ca-cert` | — | Path to controller's CA certificate |
-| `--pki-addr` | — | PKI endpoint for CA certificate |
-| `--config-dir` | Platform default | Override config directory |
-| `--state-dir` | Platform default | Override state directory |
-| `--friendly-name` | Hostname | Human-readable service name |
-| `--enrollment-token` | — | Auto-approval token |
-| `--force-enroll` | — | Force fresh enrollment |
-| `-v`, `--verbose` | 0 | Verbosity (up to `-vvv`) |
-| `--version` | — | Print build info and exit |
+| Flag                   | Default          | Description                                           |
+| ---------------------- | ---------------- | ----------------------------------------------------- |
+| `--url`                | (required)       | Controller WebSocket URL                              |
+| `--poll-interval-secs` | `15`             | How often the scheduler polls for due tasks (seconds) |
+| `--tofu`               | —                | Trust-on-first-use CA pinning                         |
+| `--ca-cert`            | —                | Path to controller's CA certificate                   |
+| `--pki-addr`           | —                | PKI endpoint for CA certificate                       |
+| `--config-dir`         | Platform default | Override config directory                             |
+| `--state-dir`          | Platform default | Override state directory                              |
+| `--friendly-name`      | Hostname         | Human-readable service name                           |
+| `--enrollment-token`   | —                | Auto-approval token                                   |
+| `--force-enroll`       | —                | Force fresh enrollment                                |
+| `-v`, `--verbose`      | 0                | Verbosity (up to `-vvv`)                              |
+| `--version`            | —                | Print build info and exit                             |
 
 ## Credential flow
 
 The scheduler advertises **credential capabilities** during enrollment. The controller automatically
 sends `ServiceCredentials` on each authenticated connection:
 
-| Capability | Credential | Description |
-| --- | --- | --- |
-| `database_access` | `db_url` | Database connection string |
-| `nats_access` | `nats_url` | NATS server URL |
+| Capability          | Credential       | Description                         |
+| ------------------- | ---------------- | ----------------------------------- |
+| `database_access`   | `db_url`         | Database connection string          |
+| `nats_access`       | `nats_url`       | NATS server URL                     |
 | `master_key_access` | `master_key_hex` | 256-bit master encryption key (hex) |
 
 The `scheduler` capability is a marker — it does not grant credentials but identifies the service

@@ -51,11 +51,11 @@ for details.
 
 ### `discovery_filter` field
 
-| Value | Description |
-| --- | --- |
-| *(omitted — default `{}`)* | All installed RPM packages reported by `rpm -qa`. Plugin config is auto-created on first discovery. |
-| `"all"` | All installed RPM packages reported by `rpm -qa` (explicit; uses pre-existing plugin config). |
-| `"user_installed"` | Only packages installed by the user (`dnf repoquery --userinstalled`). |
+| Value                      | Description                                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| _(omitted — default `{}`)_ | All installed RPM packages reported by `rpm -qa`. Plugin config is auto-created on first discovery. |
+| `"all"`                    | All installed RPM packages reported by `rpm -qa` (explicit; uses pre-existing plugin config).       |
+| `"user_installed"`         | Only packages installed by the user (`dnf repoquery --userinstalled`).                              |
 
 **Default config** (no `discovery_filter` key, serialises as `{}`):
 
@@ -111,7 +111,7 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 
 > [!CAUTION]
 > These rules restrict the allowed `sudo` invocations to `dnf
-> makecache` and `dnf install` only. See
+makecache` and `dnf install` only. See
 > [Filesystem and Dependency Security](../../security/filesystem-dependency-security.md)
 > for background on the agent's privilege model.
 
@@ -186,13 +186,13 @@ This pins the installation to the exact build selected by the user.
 ### Batch Operations
 
 - **`batch_detect_installed_version`**: Single `rpm -qa <pkg1> <pkg2> ...
-  --queryformat ...` call. A non-zero exit code (any package unknown) is treated as
+--queryformat ...` call. A non-zero exit code (any package unknown) is treated as
   partial success; found packages are matched by name from the output.
 - **`batch_fetch_releases`**: Single `dnf check-update --quiet <pkg1> <pkg2> ...`.
   Exit code 0 = all up to date (empty releases). Exit code 100 = parse output per
   package. Exit code 1 = error.
 - **`execute_batch_update`**: Single `sudo dnf install -y <pkg1>-<ver1> <pkg2>-<ver2>
-  ...`. DNF handles atomic multi-package installs natively.
+...`. DNF handles atomic multi-package installs natively.
 
 ## Related Documentation
 

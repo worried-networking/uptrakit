@@ -13,12 +13,12 @@ not yet loaded.
 
 ## Behaviour
 
-| Count | Badge |
-| --- | --- |
-| `null` (not yet fetched) | hidden |
-| `0` | hidden |
-| `1 – 99` | label = `String(count)` |
-| `≥ 100` | label = `"99+"` |
+| Count                    | Badge                   |
+| ------------------------ | ----------------------- |
+| `null` (not yet fetched) | hidden                  |
+| `0`                      | hidden                  |
+| `1 – 99`                 | label = `String(count)` |
+| `≥ 100`                  | label = `"99+"`         |
 
 Badge is fetched once on page load (after authentication) and does not update
 again until the next full page load. Live SSE updates are out of scope for this
@@ -32,8 +32,8 @@ New file, parallel in shape to `events.svelte.ts`.
 
 ```typescript
 // Public API
-export function getUpdatableSoftwareCount(): number | null
-export function fetchUpdatableSoftwareCount(): Promise<void>
+export function getUpdatableSoftwareCount(): number | null;
+export function fetchUpdatableSoftwareCount(): Promise<void>;
 ```
 
 - `getUpdatableSoftwareCount()` returns a `$state`-backed value: `null` before first
@@ -62,7 +62,7 @@ type ShellNavItem = {
   priority: number;
   origin: NavItemOrigin;
   stableId: string;
-  badge?: string;   // ← new
+  badge?: string; // ← new
 };
 ```
 
@@ -86,7 +86,7 @@ Helper function (local to layout):
 ```typescript
 function formatBadge(count: number | null): string | undefined {
   if (count === null || count === 0) return undefined;
-  return count >= 100 ? '99+' : String(count);
+  return count >= 100 ? "99+" : String(count);
 }
 ```
 
@@ -151,13 +151,13 @@ centering. Instead let badge sit inline after the label:
 
 ## Design-language compliance
 
-| Rule | How satisfied |
-| --- | --- |
+| Rule                 | How satisfied                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------- |
 | No hardcoded hex/rgb | `StatusBadge tone="info"` uses `--color-info` / `--color-info-bg` / `--color-info-border` |
-| Badge radius | `rounded-badge` (2px) — via `StatusBadge` |
-| Badge typography | `text-badge font-bold uppercase tracking-badge` — via `StatusBadge` |
-| Badge min-height | `min-h-badge` (14px) — via `StatusBadge` |
-| No new primitive | Reuses existing `StatusBadge` |
+| Badge radius         | `rounded-badge` (2px) — via `StatusBadge`                                                 |
+| Badge typography     | `text-badge font-bold uppercase tracking-badge` — via `StatusBadge`                       |
+| Badge min-height     | `min-h-badge` (14px) — via `StatusBadge`                                                  |
+| No new primitive     | Reuses existing `StatusBadge`                                                             |
 
 ---
 

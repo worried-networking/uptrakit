@@ -1,11 +1,11 @@
 # ATK-09: Discovery Result Poisoning
 
-| Field | Value |
-| --- | --- |
-| Severity | Low |
-| Attack surface | Discovery subsystem |
-| Prerequisites | Ability to modify `/usr/bin/update` or discovery script output on a managed host |
-| STRIDE | Tampering |
+| Field          | Value                                                                            |
+| -------------- | -------------------------------------------------------------------------------- |
+| Severity       | Low                                                                              |
+| Attack surface | Discovery subsystem                                                              |
+| Prerequisites  | Ability to modify `/usr/bin/update` or discovery script output on a managed host |
+| STRIDE         | Tampering                                                                        |
 
 ## Attack description
 

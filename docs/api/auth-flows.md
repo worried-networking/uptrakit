@@ -2,11 +2,12 @@
 
 ## Device Authorization (CLI) - Overview
 
-1. `POST /api/v1/auth/device` with optional `client_name` → returns `device_code`, `user_code`, `verification_url`, `expires_in` (600s), `interval`
-   (5s).
-1. CLI opens `verification_url` and displays `user_code` for the user.
-1. User logs in via browser (password or OIDC) and approves the request (`POST /api/v1/auth/device/approve`).
-1. CLI polls `POST /api/v1/auth/device/poll` every `interval` seconds until approval; response contains access token and refresh token.
+1. `POST /api/v1/oauth/device_authorization` with `client_id` → returns `device_code`, `user_code`, `verification_uri`, `verification_uri_complete`,
+   `expires_in` (600s), `interval` (5s).
+1. CLI opens `verification_uri` and displays `user_code` for the user.
+1. User logs in via browser (password or OIDC) and approves the request at the verification URI.
+1. CLI polls `POST /api/v1/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` every `interval` seconds until
+   approval; success response contains `access_token` and `token_type: "Bearer"`.
 1. On approval, the flow is removed from the DB to prevent reuse.
 
 ## Device Authorization (CLI) - Detailed Flow
@@ -16,23 +17,23 @@ authenticate even when password auth is disabled (OIDC-only environments).
 
 ### Flow
 
-1. CLI calls `POST /api/v1/auth/device` with an optional `client_name`. Returns `device_code`, `user_code`,
-   `verification_url`, `expires_in` (600s), and `interval` (5s).
-1. CLI opens `verification_url` in the user's browser and displays the `user_code`.
-1. User logs in via the browser (password or OIDC) and approves the device code at `/device?code=XXXX-XXXX`.
-1. CLI connects to `GET /api/v1/auth/device/stream?device_code=<code>` (SSE). On approval, receives an
-   `authorized` event with the API token immediately. Falls back to polling if SSE is unavailable.
-1. Fallback: CLI polls `POST /api/v1/auth/device/poll` with the `device_code` every `interval` seconds.
-1. On approval, the poll response contains an API token. The CLI stores it locally.
+1. CLI calls `POST /api/v1/oauth/device_authorization` with `client_id=uptrakit-cli`. Returns `device_code`,
+   `user_code`, `verification_uri`, `verification_uri_complete`, `expires_in` (600s), and `interval` (5s).
+1. CLI opens `verification_uri` in the user's browser and displays the `user_code`.
+1. User logs in via the browser (password or OIDC) and approves the device code at `/device?user_code=XXXX-XXXX`.
+1. CLI polls `POST /api/v1/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` every `interval` seconds.
+   On `authorization_pending`, waits and retries. On `slow_down`, increases interval by 5s. On success, receives `access_token`.
+1. On approval, the poll response contains `access_token` and `token_type: "Bearer"`. The CLI stores it locally.
 
 ### Endpoints
 
-| Endpoint | Auth | Purpose |
-| --- | --- | --- |
-| `POST /api/v1/auth/device` | Public | Start device flow, get device code + user code |
-| `GET /api/v1/auth/device/stream` | Public | SSE stream for real-time approval notification (preferred) |
-| `POST /api/v1/auth/device/poll` | Public | Poll for authorization status (fallback) |
-| `POST /api/v1/auth/device/approve` | Bearer (JWT or API token) | Approve a device code (browser-side) |
+| Endpoint                                      | Auth                      | Purpose                                                                 |
+| --------------------------------------------- | ------------------------- | ----------------------------------------------------------------------- |
+| `POST /api/v1/oauth/device_authorization`     | Public                    | Start device flow, get device code + user code (RFC 8628 §3.1)          |
+| `POST /api/v1/oauth/token`                    | Public                    | Poll for authorization / exchange device code for token (RFC 8628 §3.4) |
+| `GET /.well-known/oauth-authorization-server` | Public                    | OAuth authorization server metadata (RFC 8414)                          |
+| `POST /api/v1/auth/device/deny`               | Bearer (JWT or API token) | Operator-driven denial of a pending device flow                         |
+| `GET /api/v1/auth/device/lookup`              | Bearer (JWT or API token) | Look up a pending device flow by user code                              |
 
 ### Security
 
@@ -41,7 +42,7 @@ authenticate even when password auth is disabled (OIDC-only environments).
   entropy, formatted `XXXX-XXXX`.
 - **Rate limiting**: all public auth endpoints (including device/poll) are rate-limited via the unified
   `api_rate_limits` DB table; see the "API rate limiting" section below.
-- **URL scheme validation**: the CLI validates that the `verification_url` uses `https://` (or `http://` when
+- **URL scheme validation**: the CLI validates that the `verification_uri` uses `https://` (or `http://` when
   `--insecure` is active) before opening it in the user's browser. This prevents a compromised server from triggering
   dangerous URL schemes (e.g., `file://`, `javascript:`).
 - **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.

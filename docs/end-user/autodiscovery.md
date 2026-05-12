@@ -29,10 +29,10 @@ and returns a list of installed packages.
 Each discovered item declares a **featured** flag that determines how the controller presents
 it:
 
-| Featured | UI location | Typical plugins |
-| --- | --- | --- |
-| `true` | Main Software list (individual entries) | Docker, Proxmox Helper Scripts |
-| `false` | Host detail page (aggregated package view) | APT, APK, Homebrew, Mac App Store, npm |
+| Featured | UI location                                | Typical plugins                        |
+| -------- | ------------------------------------------ | -------------------------------------- |
+| `true`   | Main Software list (individual entries)    | Docker, Proxmox Helper Scripts         |
+| `false`  | Host detail page (aggregated package view) | APT, APK, Homebrew, Mac App Store, npm |
 
 Plugins set the `featured` flag explicitly during discovery. The controller routes items based
 on this flag -- see [Plugin Guidelines](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for plugin
@@ -47,11 +47,11 @@ exactly which plugin config and roles to create.
 For featured items with discovery targets, the controller creates role-based plugin
 assignments:
 
-| Role | Assignment |
-| --- | --- |
+| Role             | Assignment                                                                 |
+| ---------------- | -------------------------------------------------------------------------- |
 | `detect_version` | Uses the target plugin config to detect the installed version on the host. |
-| `fetch_releases` | Uses the target plugin config to fetch the latest upstream version. |
-| `execute_update` | Uses the target plugin config to run updates. |
+| `fetch_releases` | Uses the target plugin config to fetch the latest upstream version.        |
+| `execute_update` | Uses the target plugin config to run updates.                              |
 
 All assignments default to `execution_site: auto`, meaning the system decides where each
 operation runs based on the plugin's capabilities. Plugins that support controller-side release
@@ -70,15 +70,15 @@ config).
 
 Discovery-capable plugins currently supported:
 
-| Plugin | What it discovers |
-| --- | --- |
-| APT | Debian/Ubuntu packages installed via APT |
-| APK | Alpine Linux packages installed via APK |
-| Docker | Running and stopped containers on the host -- one software item per container |
-| Homebrew (Formulae) | Homebrew formula packages installed on the host |
-| Homebrew (Casks) | Homebrew cask packages installed on the host |
-| Mac App Store | Apps installed from the Mac App Store via `mas list` |
-| Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts |
+| Plugin                 | What it discovers                                                             |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| APT                    | Debian/Ubuntu packages installed via APT                                      |
+| APK                    | Alpine Linux packages installed via APK                                       |
+| Docker                 | Running and stopped containers on the host -- one software item per container |
+| Homebrew (Formulae)    | Homebrew formula packages installed on the host                               |
+| Homebrew (Casks)       | Homebrew cask packages installed on the host                                  |
+| Mac App Store          | Apps installed from the Mac App Store via `mas list`                          |
+| Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts                   |
 
 If no plugin config exists for a discovery-capable plugin when a host registers, the plugin
 emits **discovery targets** that tell the controller which plugin configs to create

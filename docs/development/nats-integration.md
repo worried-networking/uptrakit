@@ -49,10 +49,10 @@ replace the password component with `***`, ensuring credentials are never leaked
 `NatsConnection::connect(url)` accepts any NATS connection URL. The URL scheme determines whether the
 connection is encrypted:
 
-| Scheme | Transport | Notes |
-| --- | --- | --- |
-| `nats://` | Plaintext TCP | **Not recommended for production.** Emits a `tracing::warn!` at startup. |
-| `nats-tls://` | TLS | Recommended for production deployments. |
+| Scheme                                         | Transport                     | Notes                                                                                  |
+| ---------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| `nats://`                                      | Plaintext TCP                 | **Not recommended for production.** Emits a `tracing::warn!` at startup.               |
+| `nats-tls://`                                  | TLS                           | Recommended for production deployments.                                                |
 | `nats://` + `tls_required: true` server config | TLS (server-side enforcement) | Accepted, but `nats-tls://` is preferred so the client also validates the requirement. |
 
 When a `nats://` URL is detected, `NatsConnection::connect` emits:
@@ -74,10 +74,10 @@ for the full security rationale.
 
 NATS primitives are split across two crates:
 
-| Crate | Path | Purpose |
-| --- | --- | --- |
-| `uptrakit-nats` | `crates/shared/nats/` | Shared: envelope, subjects, connection, publish |
-| `uptrakit-web-api` | `crates/ui/web-api/` | Controller-specific: `NatsTransport`, consumer, delivery |
+| Crate              | Path                  | Purpose                                                  |
+| ------------------ | --------------------- | -------------------------------------------------------- |
+| `uptrakit-nats`    | `crates/shared/nats/` | Shared: envelope, subjects, connection, publish          |
+| `uptrakit-web-api` | `crates/ui/web-api/`  | Controller-specific: `NatsTransport`, consumer, delivery |
 
 The `uptrakit-nats` crate is unconditional — it is always compiled (no feature gate). Both the
 controller's `NatsTransport` and the external scheduler's `NatsSchedulerNotifier` depend on it.
@@ -126,11 +126,11 @@ addition to local delivery. Without NATS, messages are delivered locally only.
 
 Key methods:
 
-| Method | Behaviour |
-| --- | --- |
-| `send(service_id, msg)` | Local delivery + NATS publish (unless MQTT credential message) |
-| `broadcast(msg)` | Local broadcast + NATS publish (unless MQTT credential message) |
-| `publish_controller_event(msg)` | NATS-only publish to controller subject (no-op without NATS) |
+| Method                                      | Behaviour                                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `send(service_id, msg)`                     | Local delivery + NATS publish (unless MQTT credential message)                                                          |
+| `broadcast(msg)`                            | Local broadcast + NATS publish (unless MQTT credential message)                                                         |
+| `publish_controller_event(msg)`             | NATS-only publish to controller subject (no-op without NATS)                                                            |
 | `signal_software_states_changed(tenant_id)` | Sends `SoftwareStatesChanged` signal; controller's event delivery loads and pushes states to `update_tracking` services |
 
 ### NatsTransport (controller-specific)
@@ -169,37 +169,37 @@ used by the NATS consumer to deliver messages to locally connected services:
 
 ## Subject scheme
 
-| Routing | Subject | When |
-| --- | --- | --- |
-| Broadcast | `uptrakit.events.broadcast` | `target_service_id` and `target_capability` are both `None` |
-| Service-targeted | `uptrakit.events.service.<uuid>` | `target_service_id` is `Some` |
-| Capability-targeted | `uptrakit.events.capability.<cap>` | `target_capability` is `Some` (not `"controller"`) |
-| Controller events | `uptrakit.events.controller` | `target_capability` is `Some("controller")` |
+| Routing             | Subject                            | When                                                        |
+| ------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| Broadcast           | `uptrakit.events.broadcast`        | `target_service_id` and `target_capability` are both `None` |
+| Service-targeted    | `uptrakit.events.service.<uuid>`   | `target_service_id` is `Some`                               |
+| Capability-targeted | `uptrakit.events.capability.<cap>` | `target_capability` is `Some` (not `"controller"`)          |
+| Controller events   | `uptrakit.events.controller`       | `target_capability` is `Some("controller")`                 |
 
 Service-targeted routing takes precedence over capability-targeted when both are specified.
 
 ## JetStream stream configuration
 
-| Setting | Value |
-| --- | --- |
-| Stream name | `UPTRAKIT_EVENTS` |
-| Subjects | `uptrakit.events.>` |
-| Max age | 24 hours |
-| Storage | File |
-| Retention | Limits |
+| Setting     | Value               |
+| ----------- | ------------------- |
+| Stream name | `UPTRAKIT_EVENTS`   |
+| Subjects    | `uptrakit.events.>` |
+| Max age     | 24 hours            |
+| Storage     | File                |
+| Retention   | Limits              |
 
 ## Consumer configuration
 
 Each controller creates a durable pull consumer named `controller-<controller_id_hex>`:
 
-| Setting | Value |
-| --- | --- |
-| Deliver policy | `DeliverNew` (on first creation) |
-| Ack policy | Explicit |
-| Max deliver | 3 |
-| Filter subject | `uptrakit.events.>` |
-| Pull batch size | 10 |
-| Pull expiry | 5 seconds |
+| Setting         | Value                            |
+| --------------- | -------------------------------- |
+| Deliver policy  | `DeliverNew` (on first creation) |
+| Ack policy      | Explicit                         |
+| Max deliver     | 3                                |
+| Filter subject  | `uptrakit.events.>`              |
+| Pull batch size | 10                               |
+| Pull expiry     | 5 seconds                        |
 
 ## Testing
 
@@ -254,12 +254,12 @@ The `uptrakit_nats::config_protection` module provides two functions:
 
 ### Affected message types
 
-| Variant | Encrypted fields |
-| :--- | :--- |
-| `CheckVersions` | `assignments[].detect_version.config`, `assignments[].fetch_releases.config` |
-| `ExecuteUpdate` | `detect_version_plugin.config`, `execute_update_plugin.config` |
-| `ExecuteBatchUpdate` | `plugin_config` |
-| `DiscoverSoftware` | `plugins[].config` |
+| Variant              | Encrypted fields                                                             |
+| :------------------- | :--------------------------------------------------------------------------- |
+| `CheckVersions`      | `assignments[].detect_version.config`, `assignments[].fetch_releases.config` |
+| `ExecuteUpdate`      | `detect_version_plugin.config`, `execute_update_plugin.config`               |
+| `ExecuteBatchUpdate` | `plugin_config`                                                              |
+| `DiscoverSoftware`   | `plugins[].config`                                                           |
 
 All other `ControllerMessage` variants pass through unchanged.
 

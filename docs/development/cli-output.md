@@ -2,11 +2,11 @@
 
 The CLI supports three output formats via the global `--output` / `-o` flag:
 
-| Format | Flag value | Behaviour |
-| --- | --- | --- |
-| Human (default) | `human` | Columnar / free-text output identical to pre-flag behaviour |
-| JSON | `json` | Compact single-line JSON, suitable for `jq` piping |
-| YAML | `yaml` | YAML output via `serde_yaml_ng` |
+| Format          | Flag value | Behaviour                                                   |
+| --------------- | ---------- | ----------------------------------------------------------- |
+| Human (default) | `human`    | Columnar / free-text output identical to pre-flag behaviour |
+| JSON            | `json`     | Compact single-line JSON, suitable for `jq` piping          |
+| YAML            | `yaml`     | YAML output via `serde_yaml_ng`                             |
 
 ## Implementation
 
@@ -76,10 +76,10 @@ interactive and has no structured output.
 
 ### Special-case wrapper types
 
-| Type | Location | Purpose |
-| --- | --- | --- |
-| `MergeServiceOutput` | `commands/services.rs` | Bundles `source_id` with the merged `ServiceResponse` |
-| `DeletedOutput` | `commands/settings.rs` | Wraps a plain `{ message }` for MQTT/OIDC delete endpoints |
+| Type                 | Location               | Purpose                                                    |
+| -------------------- | ---------------------- | ---------------------------------------------------------- |
+| `MergeServiceOutput` | `commands/services.rs` | Bundles `source_id` with the merged `ServiceResponse`      |
+| `DeletedOutput`      | `commands/settings.rs` | Wraps a plain `{ message }` for MQTT/OIDC delete endpoints |
 
 Both implement `Serialize` (for JSON/YAML output) and `HumanOutput`.
 

@@ -20,14 +20,14 @@ optionally followed by a **container name qualifier**:
 [registry/][repository/]image[:tag][#container_name]
 ```
 
-| Example | Registry | Repository | Tag | Container |
-| --- | --- | --- | --- | --- |
-| `nginx` | Docker Hub | `library/nginx` | `latest` (implied) | (all containers) |
-| `myuser/myapp:v2` | Docker Hub | `myuser/myapp` | `v2` | (all containers) |
-| `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` | (all containers) |
-| `myhost:5000/app:latest` | `myhost:5000` | `app` | `latest` | (all containers) |
-| `nginx:latest#web-server` | Docker Hub | `library/nginx` | `latest` | `web-server` only |
-| `ghcr.io/owner/app:main#my-app` | `ghcr.io` | `owner/app` | `main` | `my-app` only |
+| Example                         | Registry      | Repository      | Tag                | Container         |
+| ------------------------------- | ------------- | --------------- | ------------------ | ----------------- |
+| `nginx`                         | Docker Hub    | `library/nginx` | `latest` (implied) | (all containers)  |
+| `myuser/myapp:v2`               | Docker Hub    | `myuser/myapp`  | `v2`               | (all containers)  |
+| `ghcr.io/owner/app:main`        | `ghcr.io`     | `owner/app`     | `main`             | (all containers)  |
+| `myhost:5000/app:latest`        | `myhost:5000` | `app`           | `latest`           | (all containers)  |
+| `nginx:latest#web-server`       | Docker Hub    | `library/nginx` | `latest`           | `web-server` only |
+| `ghcr.io/owner/app:main#my-app` | `ghcr.io`     | `owner/app`     | `main`             | `my-app` only     |
 
 The tag embedded in `package_identifier` is used as the default tag to track. It can be
 overridden with the `tracked_tag` config field.
@@ -85,18 +85,18 @@ is **skipped** in favour of those mechanisms.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `tracked_tag` | String \| `null` | No | tag from `package_identifier` | Override the tag to track (e.g. `"stable"`) |
-| `auth` | `DockerAuth` \| `null` | No | `null` | Registry authentication credentials |
-| `docker_host` | String \| `null` | No | `null` | Docker daemon endpoint override (see [Remote Docker via SSH](#remote-docker-via-ssh)) |
-| `container_runtime` | `"auto"` \| `"docker"` \| `"podman"` | No | `"auto"` | Runtime for SSH `dial-stdio` tunnelling; `auto` probes Docker then Podman |
-| `tls` | `DockerTlsConfig` \| `null` | No | `null` | TLS certificates for encrypted TCP daemon connections |
-| `include_labels` | `{String: String}` | No | `{}` | Include only containers with ALL specified labels |
-| `exclude_labels` | `{String: String}` | No | `{}` | Exclude containers matching ANY specified label |
-| `use_system_credentials` | Boolean | No | `false` | Read registry credentials from `~/.docker/config.json` |
-| `compose_restart` | `ComposeRestartConfig` \| `null` | No | `null` | Run `docker compose up` after pulling instead of auto-recreating containers |
-| `post_pull_command` | String \| `null` | No | `null` | Custom shell command to run after pulling (disables auto-recreate) |
+| Field                    | Type                                 | Required | Default                       | Description                                                                           |
+| ------------------------ | ------------------------------------ | -------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| `tracked_tag`            | String \| `null`                     | No       | tag from `package_identifier` | Override the tag to track (e.g. `"stable"`)                                           |
+| `auth`                   | `DockerAuth` \| `null`               | No       | `null`                        | Registry authentication credentials                                                   |
+| `docker_host`            | String \| `null`                     | No       | `null`                        | Docker daemon endpoint override (see [Remote Docker via SSH](#remote-docker-via-ssh)) |
+| `container_runtime`      | `"auto"` \| `"docker"` \| `"podman"` | No       | `"auto"`                      | Runtime for SSH `dial-stdio` tunnelling; `auto` probes Docker then Podman             |
+| `tls`                    | `DockerTlsConfig` \| `null`          | No       | `null`                        | TLS certificates for encrypted TCP daemon connections                                 |
+| `include_labels`         | `{String: String}`                   | No       | `{}`                          | Include only containers with ALL specified labels                                     |
+| `exclude_labels`         | `{String: String}`                   | No       | `{}`                          | Exclude containers matching ANY specified label                                       |
+| `use_system_credentials` | Boolean                              | No       | `false`                       | Read registry credentials from `~/.docker/config.json`                                |
+| `compose_restart`        | `ComposeRestartConfig` \| `null`     | No       | `null`                        | Run `docker compose up` after pulling instead of auto-recreating containers           |
+| `post_pull_command`      | String \| `null`                     | No       | `null`                        | Custom shell command to run after pulling (disables auto-recreate)                    |
 
 An empty config object `{}` is valid. No field is required.
 
@@ -118,11 +118,11 @@ Controls which binary is invoked for `dial-stdio` SSH tunnelling. Only relevant 
 SSH agent (`uptrakit-agent-ssh`) with the automatic proxy — local connections use sockets
 directly and are unaffected.
 
-| Value | Behaviour |
-| --- | --- |
+| Value              | Behaviour                                            |
+| ------------------ | ---------------------------------------------------- |
 | `"auto"` (default) | Probe remote host: try `docker` first, then `podman` |
-| `"docker"` | Always use `docker system dial-stdio` |
-| `"podman"` | Always use `podman system dial-stdio` |
+| `"docker"`         | Always use `docker system dial-stdio`                |
+| `"podman"`         | Always use `podman system dial-stdio`                |
 
 Podman 4.1 and later provide `podman system dial-stdio` as a Docker-compatible alternative.
 Use `"podman"` on hosts running RHEL 8/9, Fedora, Alma Linux, Rocky Linux, or any host where
@@ -143,11 +143,11 @@ TLS certificate paths for encrypted TCP connections. Only used when `docker_host
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `ca_cert_path` | String \| `null` | No | CA certificate to verify the daemon |
-| `client_cert_path` | String \| `null` | No | Client certificate for mutual TLS |
-| `client_key_path` | String \| `null` | No | Client private key for mutual TLS |
+| Field              | Type             | Required | Description                         |
+| ------------------ | ---------------- | -------- | ----------------------------------- |
+| `ca_cert_path`     | String \| `null` | No       | CA certificate to verify the daemon |
+| `client_cert_path` | String \| `null` | No       | Client certificate for mutual TLS   |
+| `client_key_path`  | String \| `null` | No       | Client private key for mutual TLS   |
 
 Paths must not contain `..` segments. When `tls` is set the plugin uses
 `bollard::Docker::connect_with_ssl()` instead of plain HTTP.
@@ -217,22 +217,22 @@ instead of the automatic container recreation.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `compose_file` | String \| `null` | No | Path to the Compose file (`-f` flag) |
-| `service` | String \| `null` | No | Service name to restart (omit to restart all services) |
-| `working_dir` | String \| `null` | No | Working directory for the `docker compose` command |
+| Field          | Type             | Required | Description                                            |
+| -------------- | ---------------- | -------- | ------------------------------------------------------ |
+| `compose_file` | String \| `null` | No       | Path to the Compose file (`-f` flag)                   |
+| `service`      | String \| `null` | No       | Service name to restart (omit to restart all services) |
+| `working_dir`  | String \| `null` | No       | Working directory for the `docker compose` command     |
 
 ### post_pull_command
 
 A custom shell command executed after a successful pull. Supports the following placeholders
 (shell-escaped automatically):
 
-| Placeholder | Value |
-| --- | --- |
-| `{image}` | Image name without tag (e.g. `ghcr.io/owner/app`) |
-| `{tag}` | Tag pulled (e.g. `latest`) |
-| `{digest}` | SHA digest of the locally installed image (e.g. `sha256:abc…`) |
+| Placeholder | Value                                                          |
+| ----------- | -------------------------------------------------------------- |
+| `{image}`   | Image name without tag (e.g. `ghcr.io/owner/app`)              |
+| `{tag}`     | Tag pulled (e.g. `latest`)                                     |
+| `{digest}`  | SHA digest of the locally installed image (e.g. `sha256:abc…`) |
 
 `compose_restart` and `post_pull_command` can be set simultaneously; `compose_restart` runs
 first. When either is set, automatic container recreation is disabled.
@@ -268,7 +268,7 @@ stopped) via `list_containers`. For each container that is not using a bare SHA 
 2. `inspect_image` is called to retrieve the local SHA digest from `RepoDigests` (deduplicated —
    the same image is only inspected once even when multiple containers share it).
 3. Images with no registry provenance (locally built images with no `RepoDigests`) are skipped.
-4. One **software item** is created per *image* (e.g. `nginx`), but multiple containers
+4. One **software item** is created per _image_ (e.g. `nginx`), but multiple containers
    using the same image each get their own **`host_software_item` row**, distinguished by the
    container name stored in the `qualifier` field.
 
@@ -382,12 +382,12 @@ endpoint instead.
 
 Supported endpoint formats:
 
-| Format | Description |
-| --- | --- |
-| (omitted) | Auto-tunnel via `dial-stdio` when SSH; probe sockets locally on Unix |
-| `unix:///path/to/docker.sock` | Unix socket at a custom path |
-| `http://host:2375` | Unencrypted HTTP |
-| `tcp://host:2376` + `tls` | Encrypted TCP (TLS) |
+| Format                        | Description                                                          |
+| ----------------------------- | -------------------------------------------------------------------- |
+| (omitted)                     | Auto-tunnel via `dial-stdio` when SSH; probe sockets locally on Unix |
+| `unix:///path/to/docker.sock` | Unix socket at a custom path                                         |
+| `http://host:2375`            | Unencrypted HTTP                                                     |
+| `tcp://host:2376` + `tls`     | Encrypted TCP (TLS)                                                  |
 
 ## Example Configurations
 

@@ -1,11 +1,11 @@
 # ATK-02: Rogue or Compromised Agent
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | Agent / wire protocol |
-| Prerequisites | Compromised agent host or stolen agent mTLS certificate |
-| STRIDE | Tampering, Repudiation |
+| Field          | Value                                                   |
+| -------------- | ------------------------------------------------------- |
+| Severity       | High                                                    |
+| Attack surface | Agent / wire protocol                                   |
+| Prerequisites  | Compromised agent host or stolen agent mTLS certificate |
+| STRIDE         | Tampering, Repudiation                                  |
 
 ## Attack description
 

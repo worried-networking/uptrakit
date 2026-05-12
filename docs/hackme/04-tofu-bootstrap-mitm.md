@@ -1,11 +1,11 @@
 # ATK-04: TOFU Bootstrap Man-in-the-Middle
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | TLS / PKI (initial CA bootstrap) |
-| Prerequisites | Network position between agent and controller during first connection |
-| STRIDE | Spoofing |
+| Field          | Value                                                                 |
+| -------------- | --------------------------------------------------------------------- |
+| Severity       | High                                                                  |
+| Attack surface | TLS / PKI (initial CA bootstrap)                                      |
+| Prerequisites  | Network position between agent and controller during first connection |
+| STRIDE         | Spoofing                                                              |
 
 ## Attack description
 

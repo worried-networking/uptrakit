@@ -21,18 +21,18 @@ also omits the standard transition and focus ring required by the design token s
 ### Tone type
 
 ```typescript
-export type StatCardTone = 'muted' | 'success' | 'info' | 'warning' | 'danger';
+export type StatCardTone = "muted" | "success" | "info" | "warning" | "danger";
 ```
 
 Tone-to-token mapping:
 
-| Tone | CSS token |
-| --- | --- |
-| `muted` | `--text-muted` |
+| Tone      | CSS token         |
+| --------- | ----------------- |
+| `muted`   | `--text-muted`    |
 | `success` | `--color-success` |
-| `info` | `--color-info` |
+| `info`    | `--color-info`    |
 | `warning` | `--color-warning` |
-| `danger` | `--color-error` |
+| `danger`  | `--color-error`   |
 
 ### Props
 
@@ -41,7 +41,7 @@ let {
   href,
   label,
   value,
-  valueTone = 'muted',
+  valueTone = "muted",
   subLabel,
 }: {
   href: string;
@@ -61,11 +61,11 @@ A `toneTokens` map in the script block resolves the tone to the CSS custom prope
 
 ```typescript
 const toneTokens: Record<StatCardTone, string> = {
-  muted:   '--text-muted',
-  success: '--color-success',
-  info:    '--color-info',
-  warning: '--color-warning',
-  danger:  '--color-error',
+  muted: "--text-muted",
+  success: "--color-success",
+  info: "--color-info",
+  warning: "--color-warning",
+  danger: "--color-error",
 };
 const toneToken = toneTokens[valueTone];
 ```
@@ -125,8 +125,8 @@ Add to `frontend/src/lib/components/ui/index.ts` after the `DataTable` export li
 `ContextMenuItem`):
 
 ```typescript
-export { default as StatCard } from './StatCard.svelte';
-export type { StatCardTone } from './StatCard.svelte';
+export { default as StatCard } from "./StatCard.svelte";
+export type { StatCardTone } from "./StatCard.svelte";
 ```
 
 ## Home Page Migration
@@ -136,7 +136,14 @@ File: `frontend/src/routes/+page.svelte`
 **Script block:** add `StatCard` to the existing barrel import:
 
 ```typescript
-import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
+import {
+  Callout,
+  DataTable,
+  PageShell,
+  SectionCard,
+  StatCard,
+  StatusBadge,
+} from "$lib/components/ui";
 ```
 
 **Template:** replace the four inline `<a>` blocks with `StatCard` components. Conditional
@@ -205,13 +212,13 @@ order:
 
 ```typescript
 // frontend/src/lib/components/ui/StatCard.svelte
-export type StatCardTone = 'muted' | 'success' | 'info' | 'warning' | 'danger';
+export type StatCardTone = "muted" | "success" | "info" | "warning" | "danger";
 
 let {
   href,
   label,
   value,
-  valueTone = 'muted',
+  valueTone = "muted",
   subLabel,
 }: {
   href: string;

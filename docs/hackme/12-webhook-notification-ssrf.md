@@ -1,11 +1,11 @@
 # ATK-12: Webhook Notification SSRF
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Notifications (webhook channel) |
-| Prerequisites | Authenticated user with `manage_notifications` permission |
-| STRIDE | Information Disclosure |
+| Field          | Value                                                     |
+| -------------- | --------------------------------------------------------- |
+| Severity       | Medium                                                    |
+| Attack surface | Notifications (webhook channel)                           |
+| Prerequisites  | Authenticated user with `manage_notifications` permission |
+| STRIDE         | Information Disclosure                                    |
 
 ## Attack description
 
@@ -39,14 +39,14 @@
 
 ## Current mitigations
 
-- **Private host validation.** *(Implemented)* `validate_config()` now rejects webhook
+- **Private host validation.** _(Implemented)_ `validate_config()` now rejects webhook
   URLs pointing to private, loopback, link-local, CGNAT, and reserved addresses via
   the shared `is_private_host()` function. Blocked ranges include `10.x`, `172.16-31.x`,
   `192.168.x`, `127.x`, `169.254.x`, `100.64-127.x` (CGNAT), `localhost`,
   `*.local`/`*.internal`/`*.localhost`, IPv6 loopback/unspecified/ULA/link-local. This
   check is **configurable** — the `--allow-private-notification-urls` controller CLI
   flag disables it for self-hosted deployments where internal URLs are legitimate.
-- **Header blocklist.** *(Implemented)* Custom webhook headers are validated against a
+- **Header blocklist.** _(Implemented)_ Custom webhook headers are validated against a
   blocklist of security-sensitive header names: `authorization`, `cookie`, `host`,
   `proxy-authorization`, `x-forwarded-for`, `x-forwarded-host`, `x-real-ip`. This
   blocklist is always enforced regardless of the `--allow-private-notification-urls`

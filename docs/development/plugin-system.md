@@ -59,13 +59,13 @@ assignment links a software item to a specific host and tracks per-host state su
 Each host assignment has **plugin assignments** (`host_software_item_plugins`), one per
 **plugin role**:
 
-| Role | String value | Responsibility |
-| :--- | :--- | :--- |
-| `DetectVersion` | `detect_version` | Detect the currently installed version on the agent host. |
-| `FetchReleases` | `fetch_releases` | Fetch the latest available version from an upstream source. |
-| `ExecuteUpdate` | `execute_update` | Execute the actual software update on the agent host. |
-| `PreUpdateHook` | `pre_update_hook` | Run logic before an update; can abort. Multiple allowed, ordered by `ordinal`. |
-| `PostUpdateHook` | `post_update_hook` | Run logic after an update; non-fatal. Multiple allowed, ordered by `ordinal`. |
+| Role             | String value       | Responsibility                                                                 |
+| :--------------- | :----------------- | :----------------------------------------------------------------------------- |
+| `DetectVersion`  | `detect_version`   | Detect the currently installed version on the agent host.                      |
+| `FetchReleases`  | `fetch_releases`   | Fetch the latest available version from an upstream source.                    |
+| `ExecuteUpdate`  | `execute_update`   | Execute the actual software update on the agent host.                          |
+| `PreUpdateHook`  | `pre_update_hook`  | Run logic before an update; can abort. Multiple allowed, ordered by `ordinal`. |
+| `PostUpdateHook` | `post_update_hook` | Run logic after an update; non-fatal. Multiple allowed, ordered by `ordinal`.  |
 
 Each plugin assignment row carries:
 
@@ -249,13 +249,13 @@ Decision rationale: [ADR-0022](../internal/changes/TASK-0012/ADR-0022.md).
 
 The `PluginFamily` enum categorizes plugins for UI grouping and catalog queries:
 
-| Family | Description | Examples |
-| :--- | :--- | :--- |
-| `Software` | Version detection, release fetching, updates | APT, Homebrew, GitHub, Docker |
-| `Hook` | Pre/post-update lifecycle hooks | Shell Hook, Systemd Hook |
-| `Notification` | Notification delivery channels | Webhook, Telegram, Email |
-| `Infrastructure` | Host lifecycle, guest execution | Proxmox |
-| `Enhancement` | Controller-side item enrichment | Dashboard Icons |
+| Family           | Description                                  | Examples                      |
+| :--------------- | :------------------------------------------- | :---------------------------- |
+| `Software`       | Version detection, release fetching, updates | APT, Homebrew, GitHub, Docker |
+| `Hook`           | Pre/post-update lifecycle hooks              | Shell Hook, Systemd Hook      |
+| `Notification`   | Notification delivery channels               | Webhook, Telegram, Email      |
+| `Infrastructure` | Host lifecycle, guest execution              | Proxmox                       |
+| `Enhancement`    | Controller-side item enrichment              | Dashboard Icons               |
 
 ## Plugin Capabilities
 
@@ -263,19 +263,19 @@ The `PluginCapability` enum defines the optional behaviors a plugin may support.
 automatically derived from declared roles by the `declare_plugin!` macro, with optional
 `extra_capabilities` for capabilities not tied to a role.
 
-| Capability | Derived from role | Description |
-| :--- | :--- | :--- |
-| `DiscoverLocalSoftware` | `Discoverer` | Enumerate locally installed software. |
-| `DetectHostCompatibility` | `Discoverer` | Determine if plugin is applicable to the current host. |
-| `VersionDetection` | `VersionDetector` | Detect installed versions. |
-| `ReleaseFetching` | `ReleaseFetcher` | Fetch upstream releases. |
-| `RefreshPackageIndex` | `PackageIndexer` | Refresh local package index (e.g. `apt update`). |
-| `UpdateExecution` | `UpdateExecutor` | Execute software updates. |
-| `UpdateLifecycle` | `LifecycleHook` | Pre/post-update hooks. |
-| `NotificationDelivery` | `NotificationTransport` | Deliver notification messages. |
-| `SoftwareItemLifecycle` | `SoftwareItemLifecycle` | React to software item lifecycle events. |
-| `ControllerSideFetchReleases` | (extra) | `fetch_releases()` can run on the controller. |
-| `ConfigTest` | (config_test) | Plugin supports config testing. |
+| Capability                    | Derived from role       | Description                                            |
+| :---------------------------- | :---------------------- | :----------------------------------------------------- |
+| `DiscoverLocalSoftware`       | `Discoverer`            | Enumerate locally installed software.                  |
+| `DetectHostCompatibility`     | `Discoverer`            | Determine if plugin is applicable to the current host. |
+| `VersionDetection`            | `VersionDetector`       | Detect installed versions.                             |
+| `ReleaseFetching`             | `ReleaseFetcher`        | Fetch upstream releases.                               |
+| `RefreshPackageIndex`         | `PackageIndexer`        | Refresh local package index (e.g. `apt update`).       |
+| `UpdateExecution`             | `UpdateExecutor`        | Execute software updates.                              |
+| `UpdateLifecycle`             | `LifecycleHook`         | Pre/post-update hooks.                                 |
+| `NotificationDelivery`        | `NotificationTransport` | Deliver notification messages.                         |
+| `SoftwareItemLifecycle`       | `SoftwareItemLifecycle` | React to software item lifecycle events.               |
+| `ControllerSideFetchReleases` | (extra)                 | `fetch_releases()` can run on the controller.          |
+| `ConfigTest`                  | (config_test)           | Plugin supports config testing.                        |
 
 ### `ControllerSideFetchReleases` Capability
 
@@ -286,12 +286,12 @@ rather than delegating to an agent.
 
 Current plugins with this capability:
 
-| Plugin | Reason |
-| :--- | :--- |
-| `GitHubPlugin` | Fetches releases via the GitHub REST API -- pure HTTP calls. |
-| `GitLabPlugin` | Fetches releases via the GitLab REST API -- pure HTTP calls. |
-| `ForgejoPlugin` | Fetches releases via the Forgejo REST API -- pure HTTP calls. |
-| `DockerPlugin` | Queries OCI registry tag lists via HTTP -- no local Docker daemon needed. |
+| Plugin          | Reason                                                                    |
+| :-------------- | :------------------------------------------------------------------------ |
+| `GitHubPlugin`  | Fetches releases via the GitHub REST API -- pure HTTP calls.              |
+| `GitLabPlugin`  | Fetches releases via the GitLab REST API -- pure HTTP calls.              |
+| `ForgejoPlugin` | Fetches releases via the Forgejo REST API -- pure HTTP calls.             |
+| `DockerPlugin`  | Queries OCI registry tag lists via HTTP -- no local Docker daemon needed. |
 
 Plugins **without** this capability (e.g. `HomebrewPlugin`, `AptPlugin`) require a local package
 index and must always run `fetch_releases()` on the agent.
@@ -310,17 +310,17 @@ controller binary.
 The `execution_site` field on each plugin assignment controls where the operation runs. The three
 values are:
 
-| Value | Behaviour |
-| :--- | :--- |
-| `auto` | **Default.** The system decides based on plugin capabilities. For the `fetch_releases` role: if the plugin declares `ControllerSideFetchReleases`, the controller runs `fetch_releases()` once per unique `(plugin_config_id, package_identifier)` and propagates the result to all hosts sharing that combination. Otherwise, the agent runs it. For `detect_version` and `execute_update` roles, the agent always runs them. |
-| `agent` | Force agent-side execution regardless of plugin capabilities. Useful when the controller cannot reach the upstream source (e.g. registry behind a firewall accessible only from the agent host). |
-| `controller` | Force controller-side execution. Only valid for the `fetch_releases` role. The controller creates a plugin instance with a `ControllerRuntime` and calls `fetch_releases()` directly. |
+| Value        | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| :----------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto`       | **Default.** The system decides based on plugin capabilities. For the `fetch_releases` role: if the plugin declares `ControllerSideFetchReleases`, the controller runs `fetch_releases()` once per unique `(plugin_config_id, package_identifier)` and propagates the result to all hosts sharing that combination. Otherwise, the agent runs it. For `detect_version` and `execute_update` roles, the agent always runs them. |
+| `agent`      | Force agent-side execution regardless of plugin capabilities. Useful when the controller cannot reach the upstream source (e.g. registry behind a firewall accessible only from the agent host).                                                                                                                                                                                                                               |
+| `controller` | Force controller-side execution. Only valid for the `fetch_releases` role. The controller creates a plugin instance with a `ControllerRuntime` and calls `fetch_releases()` directly.                                                                                                                                                                                                                                          |
 
 The version check executor runs in two phases:
 
 1. **Phase A -- Controller-side `fetch_releases`:** Queries `host_software_item_plugins` rows with
    `role = 'fetch_releases'` that resolve to controller-side execution (`execution_site =
-   'controller'`, or `execution_site = 'auto'` with `ControllerSideFetchReleases`). Groups by
+'controller'`, or `execution_site = 'auto'` with `ControllerSideFetchReleases`). Groups by
    `(plugin_config_id, package_identifier)` to deduplicate API calls, then stores the result in
    `host_software_items.latest_version`.
 2. **Phase B -- Agent-side assignments:** Builds `VersionCheckAssignment` per
@@ -352,10 +352,10 @@ that are not applicable to the current host. The method returns `HostCompatibili
 
 Current implementations:
 
-| Plugin | Check performed |
-| :--- | :--- |
-| `AptPlugin` | `which apt-get` -- compatible if exit code 0 |
-| `HomebrewPlugin` | `which brew` -- compatible if exit code 0 |
+| Plugin           | Check performed                              |
+| :--------------- | :------------------------------------------- |
+| `AptPlugin`      | `which apt-get` -- compatible if exit code 0 |
+| `HomebrewPlugin` | `which brew` -- compatible if exit code 0    |
 
 The controller can use compatibility results to surface per-host plugin status in the UI (planned).
 
@@ -374,10 +374,10 @@ pub trait HostRuntime: Send + Sync + 'static {
 
 Plugins downcast to the concrete runtime they need via `as_any()`. Two implementations exist:
 
-| Runtime | Used by | Provides |
-| :--- | :--- | :--- |
-| `PosixHostRuntime` | Agent-side plugins on POSIX hosts | `Arc<dyn CommandExecutor>` via `executor()` |
-| `ControllerRuntime` | Controller-side `fetch_releases` | `CatalogConfig`, shared HTTP client, cancellation token |
+| Runtime             | Used by                           | Provides                                                |
+| :------------------ | :-------------------------------- | :------------------------------------------------------ |
+| `PosixHostRuntime`  | Agent-side plugins on POSIX hosts | `Arc<dyn CommandExecutor>` via `executor()`             |
+| `ControllerRuntime` | Controller-side `fetch_releases`  | `CatalogConfig`, shared HTTP client, cancellation token |
 
 The convenience helper `require_posix_executor(runtime)` performs the downcast and returns the
 executor, or a clear error if the runtime is not POSIX. POSIX plugins use this in their `new()`
@@ -408,11 +408,11 @@ different requirements.
 
 Named constants cover common cases:
 
-| Constant | OS families | Features | Controller-only |
-| :--- | :--- | :--- | :---: |
-| `HostRequirements::POSIX` | Linux, macOS, FreeBSD | `PosixShell` | No |
-| `HostRequirements::POSIX_PRIVILEGED` | Linux, macOS, FreeBSD | `PosixShell`, `PrivilegeEscalation` | No |
-| `HostRequirements::CONTROLLER_ONLY` | any | none | Yes |
+| Constant                             | OS families           | Features                            | Controller-only |
+| :----------------------------------- | :-------------------- | :---------------------------------- | :-------------: |
+| `HostRequirements::POSIX`            | Linux, macOS, FreeBSD | `PosixShell`                        |       No        |
+| `HostRequirements::POSIX_PRIVILEGED` | Linux, macOS, FreeBSD | `PosixShell`, `PrivilegeEscalation` |       No        |
+| `HostRequirements::CONTROLLER_ONLY`  | any                   | none                                |       Yes       |
 
 Per-role overrides in `declare_plugin!`:
 
@@ -433,14 +433,14 @@ The old monolithic `PluginOps` god trait (21 methods) is split into six focused 
 `PluginCatalog` implements all six. Most consuming code should depend on the narrowest trait
 it actually needs.
 
-| Trait | Responsibility |
-| :--- | :--- |
-| `PluginMetadataOps` | Descriptor lookup, known type IDs, capability queries, host requirements |
-| `PluginConfigOps` (extends `PluginMetadataOps`) | Config validation, secret masking, form schemas, type settings |
-| `PluginSurfaceActionOps` | Surface action routing |
-| `PluginSurfaceOps` | Plugin-owned shared-surface provider registrations |
-| `NotificationOps` | Notification transport lookup, supported types |
-| `SoftwareItemLifecycleOps` | Fire `on_software_item_created` across all lifecycle plugins |
+| Trait                                           | Responsibility                                                           |
+| :---------------------------------------------- | :----------------------------------------------------------------------- |
+| `PluginMetadataOps`                             | Descriptor lookup, known type IDs, capability queries, host requirements |
+| `PluginConfigOps` (extends `PluginMetadataOps`) | Config validation, secret masking, form schemas, type settings           |
+| `PluginSurfaceActionOps`                        | Surface action routing                                                   |
+| `PluginSurfaceOps`                              | Plugin-owned shared-surface provider registrations                       |
+| `NotificationOps`                               | Notification transport lookup, supported types                           |
+| `SoftwareItemLifecycleOps`                      | Fire `on_software_item_created` across all lifecycle plugins             |
 
 A blanket `PluginOps` alias combines all six for the few places that need the full surface
 (e.g., `AppState`):
@@ -501,11 +501,11 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
 The `InfraSlot.create` function returns an `InfraBundle` -- a struct of optional narrow trait
 objects:
 
-| Trait | Responsibility |
-| :--- | :--- |
-| `HostLifecycle` | Bootstrap detection, sync, post-report hooks |
-| `HostReport` | Check whether infra state exists for a host |
-| `GuestExec` | Execute commands inside guest VMs, handle service-side surface actions |
+| Trait           | Responsibility                                                         |
+| :-------------- | :--------------------------------------------------------------------- |
+| `HostLifecycle` | Bootstrap detection, sync, post-report hooks                           |
+| `HostReport`    | Check whether infra state exists for a host                            |
+| `GuestExec`     | Execute commands inside guest VMs, handle service-side surface actions |
 
 All three traits are `#[cfg(feature = "agent-infra")]`-gated. The `InfraBundle` carries `Option`
 for each, so an infrastructure plugin can implement any subset. The catalog creates all infra
@@ -561,11 +561,11 @@ created, merging any `SoftwareItemPatch` results (e.g., setting `icon_url`).
 
 `CatalogConfig` provides shared deployment-level resources to singleton plugin constructors:
 
-| Field | Feature gate | Description |
-| :--- | :--- | :--- |
-| `allow_private_urls` | always | Whether HTTP clients allow private/loopback addresses |
-| `http_client` | `catalog` | Pre-configured `reqwest::Client` with SSRF protection and timeouts |
-| `cancellation_token` | `catalog` | `CancellationToken` for graceful shutdown of background tasks |
+| Field                | Feature gate | Description                                                        |
+| :------------------- | :----------- | :----------------------------------------------------------------- |
+| `allow_private_urls` | always       | Whether HTTP clients allow private/loopback addresses              |
+| `http_client`        | `catalog`    | Pre-configured `reqwest::Client` with SSRF protection and timeouts |
+| `cancellation_token` | `catalog`    | `CancellationToken` for graceful shutdown of background tasks      |
 
 The struct is always compiled (not feature-gated) so that `CreateTransportFn` and
 `CreateEnhancementFn` type signatures are visible in all plugin crates. Feature-gated fields
@@ -573,31 +573,31 @@ only exist when the `catalog` feature is active (controller builds).
 
 ## First-Party Plugin Crates
 
-| Plugin type | Crate | Family | Discovery | Controller-side fetch | Host compat | Lifecycle hooks |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
-| `releases_github` | `uptrakit-plugin-releases-github` | Software | No | Yes | No | No |
-| `releases_gitlab` | `uptrakit-plugin-releases-gitlab` | Software | No | Yes | No | No |
-| `releases_forgejo` | `uptrakit-plugin-releases-forgejo` | Software | No | Yes | No | No |
-| `releases_docker` | `uptrakit-plugin-releases-docker` | Software | Yes | Yes | No | No |
-| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software | Yes | No | No | No |
-| `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Software | Yes | No | Yes | No |
-| `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Software | Yes | No | Yes | No |
-| `package_manager_dnf` | `uptrakit-plugin-package-manager-dnf` | Software | Yes | No | Yes | No |
-| `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Software | Yes | No | Yes | No |
-| `package_manager_mas` | `uptrakit-plugin-package-manager-mas` | Software | Yes | No | Yes | No |
-| `package_manager_pacman` | `uptrakit-plugin-package-manager-pacman` | Software | Yes | No | Yes | No |
-| `package_manager_pkg` | `uptrakit-plugin-package-manager-pkg` | Software | Yes | No | Yes | No |
-| `package_manager_apk` | `uptrakit-plugin-package-manager-apk` | Software | Yes | No | Yes | No |
-| `package_manager_snap` | `uptrakit-plugin-package-manager-snap` | Software | Yes | No | Yes | No |
-| `package_manager_cargo` | `uptrakit-plugin-package-manager-cargo` | Software | Yes | No | Yes | No |
-| `generic_shell` | `uptrakit-plugin-generic-shell` | Software | No | No | No | No |
-| `hook_systemd` | `uptrakit-plugin-hook-systemd` | Hook | No | No | No | Yes |
-| `hook_shell` | `uptrakit-plugin-hook-shell` | Hook | No | No | No | Yes |
-| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Infrastructure | No | No | No | No |
-| `webhook` | `uptrakit-notification-plugin-webhook` | Notification | No | No | No | No |
-| `telegram` | `uptrakit-notification-plugin-telegram` | Notification | No | No | No | No |
-| `email` | `uptrakit-notification-plugin-email` | Notification | No | No | No | No |
-| `enhancement_dashboard_icons` | `uptrakit-plugin-enhancement-dashboard-icons` | Enhancement | No | No | No | No |
+| Plugin type                        | Crate                                              | Family         | Discovery | Controller-side fetch | Host compat | Lifecycle hooks |
+| :--------------------------------- | :------------------------------------------------- | :------------- | :-------: | :-------------------: | :---------: | :-------------: |
+| `releases_github`                  | `uptrakit-plugin-releases-github`                  | Software       |    No     |          Yes          |     No      |       No        |
+| `releases_gitlab`                  | `uptrakit-plugin-releases-gitlab`                  | Software       |    No     |          Yes          |     No      |       No        |
+| `releases_forgejo`                 | `uptrakit-plugin-releases-forgejo`                 | Software       |    No     |          Yes          |     No      |       No        |
+| `releases_docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     No      |       No        |
+| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     No      |       No        |
+| `package_manager_apt`              | `uptrakit-plugin-package-manager-apt`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_homebrew`         | `uptrakit-plugin-package-manager-homebrew`         | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_dnf`              | `uptrakit-plugin-package-manager-dnf`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_npm`              | `uptrakit-plugin-package-manager-npm`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_mas`              | `uptrakit-plugin-package-manager-mas`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_pacman`           | `uptrakit-plugin-package-manager-pacman`           | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_pkg`              | `uptrakit-plugin-package-manager-pkg`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_apk`              | `uptrakit-plugin-package-manager-apk`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_snap`             | `uptrakit-plugin-package-manager-snap`             | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package_manager_cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          No           |     Yes     |       No        |
+| `generic_shell`                    | `uptrakit-plugin-generic-shell`                    | Software       |    No     |          No           |     No      |       No        |
+| `hook_systemd`                     | `uptrakit-plugin-hook-systemd`                     | Hook           |    No     |          No           |     No      |       Yes       |
+| `hook_shell`                       | `uptrakit-plugin-hook-shell`                       | Hook           |    No     |          No           |     No      |       Yes       |
+| `infrastructure_proxmox`           | `uptrakit-plugin-infrastructure-proxmox`           | Infrastructure |    No     |          No           |     No      |       No        |
+| `webhook`                          | `uptrakit-notification-plugin-webhook`             | Notification   |    No     |          No           |     No      |       No        |
+| `telegram`                         | `uptrakit-notification-plugin-telegram`            | Notification   |    No     |          No           |     No      |       No        |
+| `email`                            | `uptrakit-notification-plugin-email`               | Notification   |    No     |          No           |     No      |       No        |
+| `enhancement_dashboard_icons`      | `uptrakit-plugin-enhancement-dashboard-icons`      | Enhancement    |    No     |          No           |     No      |       No        |
 
 **Shell plugin** (`uptrakit-plugin-generic-shell`): agent-side plugin with two independently-optional
 shell commands. `version_command` detects the installed version (first non-empty trimmed stdout

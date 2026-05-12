@@ -10,23 +10,23 @@ Quality gates are automatically enforced locally via git hooks managed by
 
 **`pre-commit`** (fast, ~30 s) — checks only staged files:
 
-| Condition | Command |
-| --- | --- |
-| Any `.rs` file staged | `cargo fmt --all -- --check` |
-| Any `.md` file staged | `markdownlint --config .markdownlint.json '**/*.md'` |
+| Condition                   | Command                                                             |
+| --------------------------- | ------------------------------------------------------------------- |
+| Any `.rs` file staged       | `cargo fmt --all -- --check`                                        |
+| Any `.md` file staged       | `markdownlint --config .markdownlint.json '**/*.md'`                |
 | Any `frontend/` file staged | `npm run lint` + `npm run format:check` (if `node_modules` present) |
 
 **`pre-push`** (thorough) — always runs on every push:
 
-| Command | Notes |
-| --- | --- |
-| `cargo check --no-default-features --features db-sqlite` | |
-| `cargo clippy --all-targets --no-default-features --features db-sqlite` | |
-| `cargo deny check` | Fast (~3 s) |
-| `python3 ci/check_plugin_semantic_boundary.py` | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
-| `cargo test --no-default-features --features db-sqlite` | |
-| `sentrux check .` | Skipped gracefully if `sentrux` is not installed |
-| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`) | Guarded by `node_modules` |
+| Command                                                                 | Notes                                                                                        |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `cargo check --no-default-features --features db-sqlite`                |                                                                                              |
+| `cargo clippy --all-targets --no-default-features --features db-sqlite` |                                                                                              |
+| `cargo deny check`                                                      | Fast (~3 s)                                                                                  |
+| `python3 ci/check_plugin_semantic_boundary.py`                          | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
+| `cargo test --no-default-features --features db-sqlite`                 |                                                                                              |
+| `sentrux check .`                                                       | Skipped gracefully if `sentrux` is not installed                                             |
+| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)   | Guarded by `node_modules`                                                                    |
 
 ### Bypass methods
 

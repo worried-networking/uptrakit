@@ -61,16 +61,16 @@ Remove `actions/setup-node` and `npm ci && npm run build` from:
 
 ### What stays unchanged
 
-| Item | Reason |
-| --- | --- |
-| `frontend` job in `ci.yml` | Sole npm health gate; runs lint, format check, type check, tests, and build |
-| `reverse-proxy-tests` | Already has no npm steps |
-| `markdown` job | Uses npm only for `markdownlint-cli` global install; unrelated to frontend assets |
-| `frontend/build.rs` stub | Already handles absent `frontend/build/`; no Rust changes needed |
-| `docker/Dockerfile.test` | Already self-contained with its own `frontend-builder` stage |
-| `release-plz.yml` `release-pr` job | Runs `npm run build` to populate `frontend/build/` so `cargo package` embeds real assets; load-bearing even though the CI wrapper injects `--no-verify`, because the embedded content must be present for a valid package |
-| `release-plz.yml` `build-frontend` job | Builds frontend artifact uploaded to `build-artifacts`; feeds the release binary pipeline; intentionally retained |
-| `docker.yml` `build-frontend` job | Production Docker images embed the real frontend; this coupling is intentional and out of scope |
+| Item                                   | Reason                                                                                                                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend` job in `ci.yml`             | Sole npm health gate; runs lint, format check, type check, tests, and build                                                                                                                                               |
+| `reverse-proxy-tests`                  | Already has no npm steps                                                                                                                                                                                                  |
+| `markdown` job                         | Uses npm only for `markdownlint-cli` global install; unrelated to frontend assets                                                                                                                                         |
+| `frontend/build.rs` stub               | Already handles absent `frontend/build/`; no Rust changes needed                                                                                                                                                          |
+| `docker/Dockerfile.test`               | Already self-contained with its own `frontend-builder` stage                                                                                                                                                              |
+| `release-plz.yml` `release-pr` job     | Runs `npm run build` to populate `frontend/build/` so `cargo package` embeds real assets; load-bearing even though the CI wrapper injects `--no-verify`, because the embedded content must be present for a valid package |
+| `release-plz.yml` `build-frontend` job | Builds frontend artifact uploaded to `build-artifacts`; feeds the release binary pipeline; intentionally retained                                                                                                         |
+| `docker.yml` `build-frontend` job      | Production Docker images embed the real frontend; this coupling is intentional and out of scope                                                                                                                           |
 
 ### Known remaining coupling
 
@@ -96,7 +96,7 @@ image builds are a legitimate gate on frontend health. That decision is out of s
    If it is not a required check, a broken frontend can merge, trigger `release-plz`, produce a
    GitHub release and crates.io publish, then cause `build-frontend` in `release-plz.yml` to fail
    — leaving a release with no binary assets attached. Verify and enforce this in branch
-   protection *before* opening the decoupling PR, not concurrently.
+   protection _before_ opening the decoupling PR, not concurrently.
 
 3. **Grep for `Assets::` usage in test modules.** The stub embeds a single placeholder HTML file.
    Any test that calls `Assets::get(...)` and asserts on file count, content, content-type, or

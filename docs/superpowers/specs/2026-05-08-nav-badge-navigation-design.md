@@ -26,7 +26,10 @@ type ShellNavItem = {
   stableId: string;
   badge?: string;
   icon?: ComponentType<SvelteComponent>;
-} & ({ badgeHref?: undefined; badgeAriaLabel?: undefined } | { badgeHref: string; badgeAriaLabel: string });
+} & (
+  | { badgeHref?: undefined; badgeAriaLabel?: undefined }
+  | { badgeHref: string; badgeAriaLabel: string }
+);
 ```
 
 The discriminated union enforces that `badgeAriaLabel` is always provided when `badgeHref` is set.

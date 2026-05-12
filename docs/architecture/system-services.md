@@ -9,10 +9,10 @@ enrollment tokens.
 
 The controller supports two service tiers:
 
-| Tier | Table | Scoped to | Enrollment token | Example services |
-| --- | --- | --- | --- | --- |
-| Tenant services | `services` | Tenant (`tenant_id` column) | Per-tenant Argon2id tokens in `enrollment_tokens` | Agents, SSH agents, MQTT bridge (legacy) |
-| System services | `system_services` | Global (no `tenant_id`) | Single global plaintext token (encrypted at rest) | MQTT bridge, external scheduler |
+| Tier            | Table             | Scoped to                   | Enrollment token                                  | Example services                         |
+| --------------- | ----------------- | --------------------------- | ------------------------------------------------- | ---------------------------------------- |
+| Tenant services | `services`        | Tenant (`tenant_id` column) | Per-tenant Argon2id tokens in `enrollment_tokens` | Agents, SSH agents, MQTT bridge (legacy) |
+| System services | `system_services` | Global (no `tenant_id`)     | Single global plaintext token (encrypted at rest) | MQTT bridge, external scheduler          |
 
 The MQTT bridge and external scheduler must serve all tenants simultaneously. Placing them in a
 per-tenant `services` table would require associating them with an arbitrary tenant or duplicating
@@ -37,48 +37,48 @@ tracking, certificate lookup, and status polling all branch on `is_system`.
 
 ### Current system service capability sets
 
-| Component | Capabilities |
-| --- | --- |
-| MQTT bridge (`uptrakit-mqtt`) | `system_service`, `update_tracking`, `graceful_shutdown`, `workload_claims`, `ui_surfaces` |
+| Component                                 | Capabilities                                                                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| MQTT bridge (`uptrakit-mqtt`)             | `system_service`, `update_tracking`, `graceful_shutdown`, `workload_claims`, `ui_surfaces`                                 |
 | External scheduler (`uptrakit-scheduler`) | `system_service`, `scheduler`, `database_access`, `nats_access`, `master_key_access`, `ca_management`, `graceful_shutdown` |
 
 ## Database Schema
 
 ### `system_services` table
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID (PK, v7) | Service identifier |
-| `capabilities` | TEXT | JSON array of capability strings |
-| `hostname` | TEXT | Hostname reported at enrollment |
-| `friendly_name` | TEXT | Human-readable display name |
-| `ip_address` | TEXT (nullable) | Client IP address, refreshed on each connect |
-| `status` | TEXT | `pending`, `approved`, `rejected`, or `deactivated` |
-| `enrollment_secret_hash` | TEXT (UNIQUE) | SHA-256 hash of the enrollment secret |
-| `client_version` | TEXT (nullable) | Client software version |
-| `last_seen_at` | TIMESTAMP (nullable) | Last connect or heartbeat time |
-| `created_at` | TIMESTAMP | Row creation time |
-| `updated_at` | TIMESTAMP | Last modification time |
-| `deactivated_at` | TIMESTAMP (nullable) | Soft-delete timestamp |
-| `ping_interval_seconds` | INTEGER (nullable) | Per-service ping interval override |
-| `cert_lifetime_hours` | INTEGER (nullable) | Per-service certificate lifetime override in hours |
+| Column                   | Type                 | Description                                         |
+| ------------------------ | -------------------- | --------------------------------------------------- |
+| `id`                     | UUID (PK, v7)        | Service identifier                                  |
+| `capabilities`           | TEXT                 | JSON array of capability strings                    |
+| `hostname`               | TEXT                 | Hostname reported at enrollment                     |
+| `friendly_name`          | TEXT                 | Human-readable display name                         |
+| `ip_address`             | TEXT (nullable)      | Client IP address, refreshed on each connect        |
+| `status`                 | TEXT                 | `pending`, `approved`, `rejected`, or `deactivated` |
+| `enrollment_secret_hash` | TEXT (UNIQUE)        | SHA-256 hash of the enrollment secret               |
+| `client_version`         | TEXT (nullable)      | Client software version                             |
+| `last_seen_at`           | TIMESTAMP (nullable) | Last connect or heartbeat time                      |
+| `created_at`             | TIMESTAMP            | Row creation time                                   |
+| `updated_at`             | TIMESTAMP            | Last modification time                              |
+| `deactivated_at`         | TIMESTAMP (nullable) | Soft-delete timestamp                               |
+| `ping_interval_seconds`  | INTEGER (nullable)   | Per-service ping interval override                  |
+| `cert_lifetime_hours`    | INTEGER (nullable)   | Per-service certificate lifetime override in hours  |
 
 There is no `tenant_id` column and no `enrollment_token_id` column. System services are global and
 use a separate enrollment mechanism.
 
 ### `system_service_certificates` table
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `ca_fingerprint` | TEXT (PK) | Fingerprint of the signing CA |
-| `serial_number` | TEXT (PK) | Certificate serial number |
-| `system_service_id` | UUID (FK → `system_services.id`) | Owning system service |
-| `not_before` | TIMESTAMP | Certificate validity start |
-| `not_after` | TIMESTAMP | Certificate validity end |
-| `revoked_at` | TIMESTAMP (nullable) | Revocation timestamp |
-| `revocation_reason` | TEXT (nullable) | `certificate_renewed` or `service_deactivated` |
-| `created_at` | TIMESTAMP | Row creation time |
-| `last_seen_at` | TIMESTAMP (nullable) | Last connection using this certificate |
+| Column              | Type                             | Description                                    |
+| ------------------- | -------------------------------- | ---------------------------------------------- |
+| `ca_fingerprint`    | TEXT (PK)                        | Fingerprint of the signing CA                  |
+| `serial_number`     | TEXT (PK)                        | Certificate serial number                      |
+| `system_service_id` | UUID (FK → `system_services.id`) | Owning system service                          |
+| `not_before`        | TIMESTAMP                        | Certificate validity start                     |
+| `not_after`         | TIMESTAMP                        | Certificate validity end                       |
+| `revoked_at`        | TIMESTAMP (nullable)             | Revocation timestamp                           |
+| `revocation_reason` | TEXT (nullable)                  | `certificate_renewed` or `service_deactivated` |
+| `created_at`        | TIMESTAMP                        | Row creation time                              |
+| `last_seen_at`      | TIMESTAMP (nullable)             | Last connection using this certificate         |
 
 The FK points to `system_services`, not `services`. The two revocation reasons reflect that system
 services cannot be merged (unlike tenant services), so only renewal and deactivation trigger
@@ -240,19 +240,19 @@ when a `service_id` query parameter is present.
               REST: /api/v1/services   REST: /api/v1/system-services
 ```
 
-| Property | Tenant services | System services |
-| --- | --- | --- |
-| Database table | `services` | `system_services` |
-| `tenant_id` | Required | None |
-| `enrollment_token_id` | FK to `enrollment_tokens` | None |
-| Enrollment token storage | Argon2id hash in `enrollment_tokens` | AES-256-GCM encrypted in `settings` |
-| Token comparison | Argon2id verify | Direct string equality |
-| Token returned to operator | No (hash only) | Yes (plaintext in GET response) |
-| Certificate table | `service_certificates` | `system_service_certificates` |
-| Merge support | Yes | No |
-| REST path prefix | `/api/v1/services` | `/api/v1/system-services` |
-| Required permission (view) | `view_agents` | `view_system_services` |
-| Required permission (manage) | `manage_agents` | `manage_system_services` |
+| Property                     | Tenant services                      | System services                     |
+| ---------------------------- | ------------------------------------ | ----------------------------------- |
+| Database table               | `services`                           | `system_services`                   |
+| `tenant_id`                  | Required                             | None                                |
+| `enrollment_token_id`        | FK to `enrollment_tokens`            | None                                |
+| Enrollment token storage     | Argon2id hash in `enrollment_tokens` | AES-256-GCM encrypted in `settings` |
+| Token comparison             | Argon2id verify                      | Direct string equality              |
+| Token returned to operator   | No (hash only)                       | Yes (plaintext in GET response)     |
+| Certificate table            | `service_certificates`               | `system_service_certificates`       |
+| Merge support                | Yes                                  | No                                  |
+| REST path prefix             | `/api/v1/services`                   | `/api/v1/system-services`           |
+| Required permission (view)   | `view_agents`                        | `view_system_services`              |
+| Required permission (manage) | `manage_agents`                      | `manage_system_services`            |
 
 ## Related Documentation
 

@@ -22,9 +22,9 @@ Each entry records:
 
 ## Two log tables
 
-| Log | Contents | Who can view |
-| --- | --- | --- |
-| Tenant Logs | Tenant-scoped actions | Users with `view_audit_logs` |
+| Log         | Contents              | Who can view                        |
+| ----------- | --------------------- | ----------------------------------- |
+| Tenant Logs | Tenant-scoped actions | Users with `view_audit_logs`        |
 | System Logs | Global/system actions | Users with `view_system_audit_logs` |
 
 ## Viewing audit logs in the UI
@@ -45,27 +45,27 @@ Users with access to only one log see that log directly with no tab bar.
 
 Apply filters to narrow results:
 
-| Filter | Description |
-| --- | --- |
-| Actor Type | `user`, `api_token`, `oidc`, `service`, `system` |
-| Action | Exact semantic action (for example `plugin_config.create`) |
-| Outcome | `success`, `denied`, `validation_failed`, `failed`, `partial` |
+| Filter      | Description                                                    |
+| ----------- | -------------------------------------------------------------- |
+| Actor Type  | `user`, `api_token`, `oidc`, `service`, `system`               |
+| Action      | Exact semantic action (for example `plugin_config.create`)     |
+| Outcome     | `success`, `denied`, `validation_failed`, `failed`, `partial`  |
 | Target Type | Semantic target category (for example `plugin_config`, `host`) |
-| Target ID | Exact target identifier |
-| From | Lower time bound (inclusive). Use the date-time picker. |
-| To | Upper time bound (inclusive). Use the date-time picker. |
+| Target ID   | Exact target identifier                                        |
+| From        | Lower time bound (inclusive). Use the date-time picker.        |
+| To          | Upper time bound (inclusive). Use the date-time picker.        |
 
 Click **Apply** to load results with the current filters. Click **Clear** to reset all filters.
 
 ### Table columns
 
-| Column | Description |
-| --- | --- |
-| Occurred At | Event timestamp (local display). |
-| Action | Semantic action name. |
-| Target | Target display or target type/ID fallback. |
-| Outcome | Action result badge. |
-| Actor | Actor display or actor type/ID fallback. |
+| Column      | Description                                |
+| ----------- | ------------------------------------------ |
+| Occurred At | Event timestamp (local display).           |
+| Action      | Semantic action name.                      |
+| Target      | Target display or target type/ID fallback. |
+| Outcome     | Action result badge.                       |
+| Actor       | Actor display or actor type/ID fallback.   |
 
 Results are shown newest first and support pagination.
 
@@ -100,10 +100,10 @@ uptrakit --output json audit-logs list --per-page 50
 
 ## Permissions required
 
-| Permission | Role | Endpoint |
-| --- | --- | --- |
-| `view_audit_logs` | `owner`, `admin` | Tenant log |
-| `view_system_audit_logs` | `owner` only | System log |
+| Permission               | Role             | Endpoint   |
+| ------------------------ | ---------------- | ---------- |
+| `view_audit_logs`        | `owner`, `admin` | Tenant log |
+| `view_system_audit_logs` | `owner` only     | System log |
 
 A user without either permission will see a "You do not have permission" message and the
 Audit Logs nav link will not appear in the sidebar.

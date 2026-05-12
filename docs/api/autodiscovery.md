@@ -22,8 +22,8 @@ returns results.
 **Path parameters:**
 
 | Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Host UUID |
+| --------- | ---- | ----------- |
+| `id`      | UUID | Host UUID   |
 
 **Request body:** none
 
@@ -36,16 +36,16 @@ returns results.
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field            | Type    | Description                                   |
+| ---------------- | ------- | --------------------------------------------- |
 | `plugins_queued` | integer | Number of plugin configs queued for discovery |
-| `message` | string | Human-readable confirmation |
+| `message`        | string  | Human-readable confirmation                   |
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Host not found or not active |
+| Status | Condition                    |
+| ------ | ---------------------------- |
+| `404`  | Host not found or not active |
 
 ---
 
@@ -58,9 +58,9 @@ Returns an error if the plugin type does not support the `DiscoverLocalSoftware`
 
 **Path parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Plugin config UUID |
+| Parameter | Type | Description        |
+| --------- | ---- | ------------------ |
+| `id`      | UUID | Plugin config UUID |
 
 **Request body:** none
 
@@ -73,17 +73,17 @@ Returns an error if the plugin type does not support the `DiscoverLocalSoftware`
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field            | Type    | Description                           |
+| ---------------- | ------- | ------------------------------------- |
 | `plugins_queued` | integer | Number of agents queued for discovery |
-| `message` | string | Human-readable confirmation |
+| `message`        | string  | Human-readable confirmation           |
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `400` | Plugin type does not support software discovery |
-| `404` | Plugin config not found or not active |
+| Status | Condition                                       |
+| ------ | ----------------------------------------------- |
+| `400`  | Plugin type does not support software discovery |
+| `404`  | Plugin config not found or not active           |
 
 ---
 
@@ -99,10 +99,10 @@ host-specific.
 
 **Query parameters:**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `page` | integer | `1` | Page number (1-indexed) |
-| `per_page` | integer | `20` | Items per page (max 1000) |
+| Parameter  | Type    | Default | Description               |
+| ---------- | ------- | ------- | ------------------------- |
+| `page`     | integer | `1`     | Page number (1-indexed)   |
+| `per_page` | integer | `20`    | Items per page (max 1000) |
 
 **Response `200`:** Paginated list of ignore rules
 
@@ -127,14 +127,14 @@ host-specific.
 
 **Ignore rule fields:**
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Ignore rule UUID |
-| `host_id` | UUID or null | Host UUID for host-specific rules; `null` for tenant-wide rules |
-| `plugin_config_id` | UUID or null | Plugin config scope (host-specific rules) |
-| `name` | string or null | Software item name to suppress (tenant-wide rules) |
-| `package_identifier` | string or null | Package identifier to suppress (host-specific rules) |
-| `created_at` | ISO 8601 datetime | When the rule was created |
+| Field                | Type              | Description                                                     |
+| -------------------- | ----------------- | --------------------------------------------------------------- |
+| `id`                 | UUID              | Ignore rule UUID                                                |
+| `host_id`            | UUID or null      | Host UUID for host-specific rules; `null` for tenant-wide rules |
+| `plugin_config_id`   | UUID or null      | Plugin config scope (host-specific rules)                       |
+| `name`               | string or null    | Software item name to suppress (tenant-wide rules)              |
+| `package_identifier` | string or null    | Package identifier to suppress (host-specific rules)            |
+| `created_at`         | ISO 8601 datetime | When the rule was created                                       |
 
 ---
 
@@ -169,20 +169,20 @@ Two types of rules are supported:
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Conditional | Software item name to suppress (required for tenant-wide rules) |
-| `host_id` | UUID | Conditional | Host UUID (required for host-specific rules) |
-| `plugin_config_id` | UUID | No | Plugin config scope |
-| `package_identifier` | string | No | Package identifier scope |
+| Field                | Type   | Required    | Description                                                     |
+| -------------------- | ------ | ----------- | --------------------------------------------------------------- |
+| `name`               | string | Conditional | Software item name to suppress (required for tenant-wide rules) |
+| `host_id`            | UUID   | Conditional | Host UUID (required for host-specific rules)                    |
+| `plugin_config_id`   | UUID   | No          | Plugin config scope                                             |
+| `package_identifier` | string | No          | Package identifier scope                                        |
 
 **Response `201`:** Ignore rule response
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `400` | Missing required fields for the rule type |
+| Status | Condition                                 |
+| ------ | ----------------------------------------- |
+| `400`  | Missing required fields for the rule type |
 
 ---
 
@@ -195,9 +195,9 @@ discovery runs.
 
 **Path parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Ignore rule UUID |
+| Parameter | Type | Description      |
+| --------- | ---- | ---------------- |
+| `id`      | UUID | Ignore rule UUID |
 
 **Request body:** none
 
@@ -205,9 +205,9 @@ discovery runs.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Ignore rule not found |
+| Status | Condition             |
+| ------ | --------------------- |
+| `404`  | Ignore rule not found |
 
 ---
 
@@ -223,9 +223,9 @@ DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 
 **Query parameters:**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `ignore` | boolean | `false` | When `true`, also create an ignore rule for the software item's name |
+| Parameter | Type    | Default | Description                                                          |
+| --------- | ------- | ------- | -------------------------------------------------------------------- |
+| `ignore`  | boolean | `false` | When `true`, also create an ignore rule for the software item's name |
 
 The ignore rule is scoped to the software item's name and applies tenant-wide -- future discovery
 runs on any host will skip that name across all plugin configs and discovery targets.
@@ -244,9 +244,9 @@ rediscovery, omit the `?ignore=true` parameter.
 
 **Error responses:**
 
-| Status | Condition |
-| --- | --- |
-| `404` | Software item or host assignment not found |
+| Status | Condition                                  |
+| ------ | ------------------------------------------ |
+| `404`  | Software item or host assignment not found |
 
 ---
 
@@ -261,21 +261,21 @@ plugin-specific synthesis logic exists in the web-API layer.
 
 The controller routes each discovered item through one of two paths:
 
-| Condition | Processing |
-| --- | --- |
-| `targets` is non-empty | For each target: find-or-create the plugin config matching `(plugin_type, plugin_config)`, then create role assignments per `target.roles`. |
-| `targets` is empty, `plugin_config_id` is set | Use the discovering plugin's own config for all three roles (`detect_version`, `fetch_releases`, `execute_update`). |
+| Condition                                     | Processing                                                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `targets` is non-empty                        | For each target: find-or-create the plugin config matching `(plugin_type, plugin_config)`, then create role assignments per `target.roles`. |
+| `targets` is empty, `plugin_config_id` is set | Use the discovering plugin's own config for all three roles (`detect_version`, `fetch_releases`, `execute_update`).                         |
 
 ### PHS discovery targets
 
 The PHS plugin (`discovery_proxmox_helper_scripts`) always emits `DiscoveryTarget` values. It analyzes
 each container's CT script and builds targets:
 
-| Script analysis result | `DiscoveryTarget` emitted |
-| --- | --- |
+| Script analysis result     | `DiscoveryTarget` emitted                                                                                                                     |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub repository detected | `plugin_type: releases_github`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
-| APT package detected | `plugin_type: package_manager_apt`, config: `{}`. Name: `"APT (auto)"`. |
-| Neither detected | Item skipped (warning logged on agent). |
+| APT package detected       | `plugin_type: package_manager_apt`, config: `{}`. Name: `"APT (auto)"`.                                                                       |
+| Neither detected           | Item skipped (warning logged on agent).                                                                                                       |
 
 The PHS plugin config itself is never directly linked to `host_software_item_plugins` — it is used
 only as the discovery trigger. All version tracking and update execution happen through the target
@@ -285,10 +285,10 @@ configs.
 
 The Homebrew plugin always emits per-item discovery targets:
 
-| Package type | `DiscoveryTarget` emitted |
-| --- | --- |
-| Formula | `plugin_type: package_manager_homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
-| Cask | `plugin_type: package_manager_homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`. |
+| Package type | `DiscoveryTarget` emitted                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------- |
+| Formula      | `plugin_type: package_manager_homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
+| Cask         | `plugin_type: package_manager_homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`.       |
 
 When running with an existing config (pre-created with a specific `package_type`), targets are
 empty and the controller uses the config-ID path.
@@ -298,11 +298,11 @@ empty and the controller uses the config-ID path.
 When autodiscovery processes a target, it creates `host_software_item_plugins` rows for each role
 listed in `target.roles` (typically all three):
 
-| Role | Plugin config | Description |
-| --- | --- | --- |
+| Role             | Plugin config                                                   | Description                                     |
+| ---------------- | --------------------------------------------------------------- | ----------------------------------------------- |
 | `detect_version` | Target config (e.g. `releases_github` or `package_manager_apt`) | Detects the installed version on the agent host |
-| `fetch_releases` | Target config (same as above) | Fetches the latest available upstream version |
-| `execute_update` | Target config (same as above) | Executes the actual software update |
+| `fetch_releases` | Target config (same as above)                                   | Fetches the latest available upstream version   |
+| `execute_update` | Target config (same as above)                                   | Executes the actual software update             |
 
 For PHS discoveries with a `releases_github` target config, the `fetch_releases` role
 typically runs controller-side (via the scheduler) because the GitHub Releases plugin has the

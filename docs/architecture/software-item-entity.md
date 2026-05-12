@@ -72,10 +72,10 @@ host to use different plugins for version detection, release fetching, and updat
 
 The `featured` boolean flag controls how a software item is presented in the UI:
 
-| Value | UI location | Typical plugins |
-| ----- | ----------- | --------------- |
-| `true` | Main Software list (individual entries) | Docker, Proxmox Helper Scripts, GitHub Releases |
-| `false` | Host detail page (aggregated package view) | APT, Homebrew, Mac App Store, npm |
+| Value   | UI location                                | Typical plugins                                 |
+| ------- | ------------------------------------------ | ----------------------------------------------- |
+| `true`  | Main Software list (individual entries)    | Docker, Proxmox Helper Scripts, GitHub Releases |
+| `false` | Host detail page (aggregated package view) | APT, Homebrew, Mac App Store, npm               |
 
 Plugins set the `featured` flag during discovery. Manually created items default to `featured = true`.
 All discovered items are tracked immediately with `enabled: true` -- there is no pending state or
@@ -85,55 +85,55 @@ approval workflow. See [Autodiscovery](../end-user/autodiscovery.md) for the dis
 
 ### `SoftwareItemResponse` (list and mutation responses)
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | `Uuid` | Item UUID |
-| `name` | `String` | Display name |
-| `plugins` | `Vec<String>` | Distinct plugin type identifiers across all active host assignments (for display in lists) |
-| `enabled` | `bool` | Whether version checks are active |
-| `featured` | `bool` | Whether the item appears individually in the Software list (`true`) or as part of aggregated host summaries (`false`) |
-| `last_checked_at` | `Option<OffsetDateTime>` | When the last successful version check completed; updated in batch after `VersionCheckResults` is received |
-| `host_count` | `u64` | Number of hosts currently assigned |
-| `latest_version` | `Option<String>` | Latest known version derived as the maximum across all hosts' per-host `latest_version` values. `null` when no host has a known latest version yet. |
-| `update_available` | `bool` | `true` if at least one assigned host has an `installed_version` that differs from its per-host `latest_version` (and both values are known). Uses string equality -- no semver parsing. |
-| `created_at` | `OffsetDateTime` | |
-| `updated_at` | `OffsetDateTime` | |
+| Field              | Type                     | Description                                                                                                                                                                             |
+| ------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | `Uuid`                   | Item UUID                                                                                                                                                                               |
+| `name`             | `String`                 | Display name                                                                                                                                                                            |
+| `plugins`          | `Vec<String>`            | Distinct plugin type identifiers across all active host assignments (for display in lists)                                                                                              |
+| `enabled`          | `bool`                   | Whether version checks are active                                                                                                                                                       |
+| `featured`         | `bool`                   | Whether the item appears individually in the Software list (`true`) or as part of aggregated host summaries (`false`)                                                                   |
+| `last_checked_at`  | `Option<OffsetDateTime>` | When the last successful version check completed; updated in batch after `VersionCheckResults` is received                                                                              |
+| `host_count`       | `u64`                    | Number of hosts currently assigned                                                                                                                                                      |
+| `latest_version`   | `Option<String>`         | Latest known version derived as the maximum across all hosts' per-host `latest_version` values. `null` when no host has a known latest version yet.                                     |
+| `update_available` | `bool`                   | `true` if at least one assigned host has an `installed_version` that differs from its per-host `latest_version` (and both values are known). Uses string equality -- no semver parsing. |
+| `created_at`       | `OffsetDateTime`         |                                                                                                                                                                                         |
+| `updated_at`       | `OffsetDateTime`         |                                                                                                                                                                                         |
 
 ### `SoftwareItemDetailResponse` (detail and assignment responses)
 
 Extends `SoftwareItemResponse` with:
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field   | Type                           | Description                 |
+| ------- | ------------------------------ | --------------------------- |
 | `hosts` | `Vec<SoftwareItemHostSummary>` | Per-host assignment records |
 
 ### `SoftwareItemHostSummary`
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `host_id` | `Uuid` | |
-| `hostname` | `String` | |
-| `friendly_name` | `String` | |
-| `plugins` | `Vec<HostPluginRoleSummary>` | Role-specific plugin assignments for this host-software pair (see below) |
-| `installed_version` | `Option<String>` | Version detected on this host |
-| `installed_version_detected_at` | `Option<OffsetDateTime>` | |
-| `latest_version` | `Option<String>` | Per-host latest known version from the `fetch_releases` role plugin. `null` when no upstream version has been resolved yet for this host. |
-| `latest_release_metadata` | `Option<Value>` | Rich release metadata (notes, date, assets) from the latest fetch |
-| `update_available` | `bool` | `true` when `installed_version` and `latest_version` are both `Some` and differ |
-| `last_updated_at` | `Option<OffsetDateTime>` | |
-| `linked_at` | `OffsetDateTime` | |
+| Field                           | Type                         | Description                                                                                                                               |
+| ------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `host_id`                       | `Uuid`                       |                                                                                                                                           |
+| `hostname`                      | `String`                     |                                                                                                                                           |
+| `friendly_name`                 | `String`                     |                                                                                                                                           |
+| `plugins`                       | `Vec<HostPluginRoleSummary>` | Role-specific plugin assignments for this host-software pair (see below)                                                                  |
+| `installed_version`             | `Option<String>`             | Version detected on this host                                                                                                             |
+| `installed_version_detected_at` | `Option<OffsetDateTime>`     |                                                                                                                                           |
+| `latest_version`                | `Option<String>`             | Per-host latest known version from the `fetch_releases` role plugin. `null` when no upstream version has been resolved yet for this host. |
+| `latest_release_metadata`       | `Option<Value>`              | Rich release metadata (notes, date, assets) from the latest fetch                                                                         |
+| `update_available`              | `bool`                       | `true` when `installed_version` and `latest_version` are both `Some` and differ                                                           |
+| `last_updated_at`               | `Option<OffsetDateTime>`     |                                                                                                                                           |
+| `linked_at`                     | `OffsetDateTime`             |                                                                                                                                           |
 
 ### `HostPluginRoleSummary`
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `role` | `PluginRole` | `detect_version`, `fetch_releases`, or `execute_update` |
-| `plugin_config_id` | `Option<Uuid>` | Referenced plugin config (nullable) |
-| `plugin_config_name` | `Option<String>` | Display name of the plugin config |
-| `plugin_type` | `String` | Plugin type identifier (e.g. `"package_manager_homebrew"`, `"releases_github"`) |
-| `package_identifier` | `String` | Plugin-specific package identifier |
-| `config` | `Option<Value>` | Per-role overrides merged onto the profile config and type settings |
-| `execution_site` | `String` | `"auto"`, `"agent"`, or `"controller"` |
+| Field                | Type             | Description                                                                     |
+| -------------------- | ---------------- | ------------------------------------------------------------------------------- |
+| `role`               | `PluginRole`     | `detect_version`, `fetch_releases`, or `execute_update`                         |
+| `plugin_config_id`   | `Option<Uuid>`   | Referenced plugin config (nullable)                                             |
+| `plugin_config_name` | `Option<String>` | Display name of the plugin config                                               |
+| `plugin_type`        | `String`         | Plugin type identifier (e.g. `"package_manager_homebrew"`, `"releases_github"`) |
+| `package_identifier` | `String`         | Plugin-specific package identifier                                              |
+| `config`             | `Option<Value>`  | Per-role overrides merged onto the profile config and type settings             |
+| `execution_site`     | `String`         | `"auto"`, `"agent"`, or `"controller"`                                          |
 
 > **Note:** `update_available` uses string equality only. Because version format is
 > plugin-specific (e.g. Homebrew may return `"1.2.3"`, GitHub Releases may return `"v1.2.3"`), no
@@ -144,17 +144,17 @@ Extends `SoftwareItemResponse` with:
 
 ## REST API
 
-| Method | Path | Permission | Status | Description |
-| :----- | :---------------------------------------------------- | :------------- | :----- | :------------------------------------------------------------------ |
-| POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item (name + enabled only) |
-| GET | `/api/v1/software-items` | ViewSoftware | 200 | List active software items; supports `?featured=true\|false` filter |
-| GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + per-host plugin info |
-| PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name and/or enabled flag |
-| DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete the software item |
-| POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments |
-| PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update a specific role assignment (plugin type, plugin config, package identifier, config, or execution site) for a host |
-| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host; add `?ignore=true` to also create an ignore rule |
-| POST | `/api/v1/software-items/{id}/hosts/{host_id}/update` | ManageSoftware | 200 | Trigger a software update on a specific host; returns `TriggerUpdateResponse` |
+| Method | Path                                                 | Permission     | Status | Description                                                                                                              |
+| :----- | :--------------------------------------------------- | :------------- | :----- | :----------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/software-items`                             | ManageSoftware | 201    | Create a new software item (name + enabled only)                                                                         |
+| GET    | `/api/v1/software-items`                             | ViewSoftware   | 200    | List active software items; supports `?featured=true\|false` filter                                                      |
+| GET    | `/api/v1/software-items/{id}`                        | ViewSoftware   | 200    | Get software item with assigned hosts + per-host plugin info                                                             |
+| PUT    | `/api/v1/software-items/{id}`                        | ManageSoftware | 200    | Update name and/or enabled flag                                                                                          |
+| DELETE | `/api/v1/software-items/{id}`                        | ManageSoftware | 204    | Soft-delete the software item                                                                                            |
+| POST   | `/api/v1/software-items/{id}/hosts`                  | ManageSoftware | 200    | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments                         |
+| PUT    | `/api/v1/software-items/{id}/hosts/{host_id}`        | ManageSoftware | 200    | Update a specific role assignment (plugin type, plugin config, package identifier, config, or execution site) for a host |
+| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}`        | ManageSoftware | 204    | Unassign from a host; add `?ignore=true` to also create an ignore rule                                                   |
+| POST   | `/api/v1/software-items/{id}/hosts/{host_id}/update` | ManageSoftware | 200    | Trigger a software update on a specific host; returns `TriggerUpdateResponse`                                            |
 
 ## Validation rules
 

@@ -58,12 +58,12 @@ uptrakit plugin-configs create \
 
 #### Configuration Fields
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `api_url` | Yes | — | Proxmox VE API URL (must be HTTPS) |
-| `api_token` | Yes | — | API token in `USER@REALM!TOKENID=SECRET` format |
-| `verify_tls` | No | `true` | Set to `false` for self-signed certificates |
-| `node_filter` | No | `[]` | Restrict discovery to specific node names |
+| Field         | Required | Default | Description                                     |
+| ------------- | -------- | ------- | ----------------------------------------------- |
+| `api_url`     | Yes      | —       | Proxmox VE API URL (must be HTTPS)              |
+| `api_token`   | Yes      | —       | API token in `USER@REALM!TOKENID=SECRET` format |
+| `verify_tls`  | No       | `true`  | Set to `false` for self-signed certificates     |
+| `node_filter` | No       | `[]`    | Restrict discovery to specific node names       |
 
 ## Usage
 
@@ -157,14 +157,14 @@ node without needing SSH access to the guest.
 Available in the SSH Hosts surface page when at least one PVE node has been
 bootstrapped.
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| PVE Host | Yes | — | PVE node to use as gateway (select from bootstrapped nodes) |
-| Guest VMID | Yes | — | VMID of the target container or VM |
-| Guest Type | Yes | `lxc` | LXC Container or QEMU VM |
-| Host Name | Yes | — | Friendly name for identification |
-| Target Username | No | `uptrakit` | User to create/use in the guest |
-| Allow All | No | `false` | Use NOPASSWD: ALL in sudoers |
+| Field           | Required | Default    | Description                                                 |
+| --------------- | -------- | ---------- | ----------------------------------------------------------- |
+| PVE Host        | Yes      | —          | PVE node to use as gateway (select from bootstrapped nodes) |
+| Guest VMID      | Yes      | —          | VMID of the target container or VM                          |
+| Guest Type      | Yes      | `lxc`      | LXC Container or QEMU VM                                    |
+| Host Name       | Yes      | —          | Friendly name for identification                            |
+| Target Username | No       | `uptrakit` | User to create/use in the guest                             |
+| Allow All       | No       | `false`    | Use NOPASSWD: ALL in sudoers                                |
 
 ### What Happens During Guest Bootstrap
 

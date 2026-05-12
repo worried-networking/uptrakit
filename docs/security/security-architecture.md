@@ -23,15 +23,15 @@ the `security_headers` middleware (`crates/ui/web-api/src/middleware/security_he
 The middleware is applied as the outermost layer on both the main HTTPS router and the
 PKI HTTP router.
 
-| Header | Value | Purpose |
-| --- | --- | --- |
-| `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
-| `X-Frame-Options` | `DENY` | Blocks framing (clickjacking protection) |
-| `X-XSS-Protection` | `0` | Disables legacy XSS filter (can introduce vulnerabilities) |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referrer leakage |
-| `Content-Security-Policy` | `frame-ancestors 'none'` | Prevents clickjacking (complements `X-Frame-Options`). The full CSP (script-src hashes, style-src, etc.) is emitted by SvelteKit at build time as a `<meta http-equiv="content-security-policy">` tag using hash mode. `frame-ancestors` cannot be set via a meta tag, so it lives in this HTTP header only. |
-| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` | Enforces HTTPS |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Disables unnecessary browser APIs |
+| Header                      | Value                                      | Purpose                                                                                                                                                                                                                                                                                                      |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `X-Content-Type-Options`    | `nosniff`                                  | Prevents MIME-type sniffing                                                                                                                                                                                                                                                                                  |
+| `X-Frame-Options`           | `DENY`                                     | Blocks framing (clickjacking protection)                                                                                                                                                                                                                                                                     |
+| `X-XSS-Protection`          | `0`                                        | Disables legacy XSS filter (can introduce vulnerabilities)                                                                                                                                                                                                                                                   |
+| `Referrer-Policy`           | `strict-origin-when-cross-origin`          | Limits referrer leakage                                                                                                                                                                                                                                                                                      |
+| `Content-Security-Policy`   | `frame-ancestors 'none'`                   | Prevents clickjacking (complements `X-Frame-Options`). The full CSP (script-src hashes, style-src, etc.) is emitted by SvelteKit at build time as a `<meta http-equiv="content-security-policy">` tag using hash mode. `frame-ancestors` cannot be set via a meta tag, so it lives in this HTTP header only. |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains`      | Enforces HTTPS                                                                                                                                                                                                                                                                                               |
+| `Permissions-Policy`        | `camera=(), microphone=(), geolocation=()` | Disables unnecessary browser APIs                                                                                                                                                                                                                                                                            |
 
 See also [coding-standards.md](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for middleware ordering
 conventions.

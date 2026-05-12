@@ -14,14 +14,14 @@ plugin configuration, autodiscovery management, and server settings management.
 
 Every command accepts these global flags:
 
-| Flag | Description |
-| --- | --- |
-| `--server <URL>` | Controller URL (overrides stored config and `UPTRAKIT_SERVER` env var) |
-| `--token <TOKEN>` | API token (overrides stored credentials and `UPTRAKIT_TOKEN` env var) |
-| `--insecure` | Skip TLS certificate verification (development only; prints a warning to stderr) |
-| `--timeout <SECONDS>` | API request timeout in seconds (overrides `UPTRAKIT_TIMEOUT`; default: 30) |
-| `-o`, `--output <FORMAT>` | Output format: `human` (default), `json`, `yaml` |
-| `--version` | Show version and build metadata |
+| Flag                      | Description                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `--server <URL>`          | Controller URL (overrides stored config and `UPTRAKIT_SERVER` env var)           |
+| `--token <TOKEN>`         | API token (overrides stored credentials and `UPTRAKIT_TOKEN` env var)            |
+| `--insecure`              | Skip TLS certificate verification (development only; prints a warning to stderr) |
+| `--timeout <SECONDS>`     | API request timeout in seconds (overrides `UPTRAKIT_TIMEOUT`; default: 30)       |
+| `-o`, `--output <FORMAT>` | Output format: `human` (default), `json`, `yaml`                                 |
+| `--version`               | Show version and build metadata                                                  |
 
 ## Entity IDs
 
@@ -34,10 +34,10 @@ rejects invalid values immediately with a descriptive error message.
 The CLI reads the following environment variables. CLI flags take precedence over environment
 variables, which take precedence over stored configuration.
 
-| Variable | Description |
-| --- | --- |
-| `UPTRAKIT_SERVER` | Controller URL (equivalent to `--server`) |
-| `UPTRAKIT_TOKEN` | API token (equivalent to `--token`; preferred over `--token` for automation to avoid exposing tokens in process listings) |
+| Variable           | Description                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `UPTRAKIT_SERVER`  | Controller URL (equivalent to `--server`)                                                                                               |
+| `UPTRAKIT_TOKEN`   | API token (equivalent to `--token`; preferred over `--token` for automation to avoid exposing tokens in process listings)               |
 | `UPTRAKIT_TIMEOUT` | API request timeout in seconds (equivalent to `--timeout`; default: 30). Useful for CI pipelines or long-running controller operations. |
 
 **Priority order:** CLI flag > environment variable > stored credentials file.
@@ -441,14 +441,14 @@ uptrakit plugin-configs test \
 
 ### `plugin-configs test` flags
 
-| Flag | Required | Description |
-| --- | :---: | --- |
-| `--plugin-type <TYPE>` | Yes | Plugin type to test (e.g. `releases_github`, `generic_shell`, `package_manager_apt`). |
-| `--config <JSON>` | Yes | Plugin configuration JSON to test. |
-| `--host-id <UUID>` | No | Target host for agent-side tests. Required for plugins that run on the agent. |
-| `--test-kind <KIND>` | No | What to test. Auto-detected when omitted. Values: `version_detection`, `update_command_validation`, `pre_update_hook`, `post_update_hook`, `connectivity`. |
-| `--package-identifier <PKG>` | No | Package identifier (e.g. `nginx`, `owner/repo`). Required for version detection tests. |
-| `--plugin-config-id <UUID>` | No | Existing config to merge with. The saved config is loaded and `--config` is shallow-merged on top. |
+| Flag                         | Required | Description                                                                                                                                                |
+| ---------------------------- | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--plugin-type <TYPE>`       |   Yes    | Plugin type to test (e.g. `releases_github`, `generic_shell`, `package_manager_apt`).                                                                      |
+| `--config <JSON>`            |   Yes    | Plugin configuration JSON to test.                                                                                                                         |
+| `--host-id <UUID>`           |    No    | Target host for agent-side tests. Required for plugins that run on the agent.                                                                              |
+| `--test-kind <KIND>`         |    No    | What to test. Auto-detected when omitted. Values: `version_detection`, `update_command_validation`, `pre_update_hook`, `post_update_hook`, `connectivity`. |
+| `--package-identifier <PKG>` |    No    | Package identifier (e.g. `nginx`, `owner/repo`). Required for version detection tests.                                                                     |
+| `--plugin-config-id <UUID>`  |    No    | Existing config to merge with. The saved config is loaded and `--config` is shallow-merged on top.                                                         |
 
 See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscovery.md).
 

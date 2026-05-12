@@ -23,12 +23,12 @@ added in the future.
 
 ## Token rename table
 
-| Old name | New name |
-| --- | --- |
-| `--color-error` | `--color-danger` |
-| `--color-error-bg` | `--color-danger-bg` |
-| `--color-error-border` | `--color-danger-border` |
-| `--color-error-bg-hover` | `--color-danger-bg-hover` |
+| Old name                     | New name                      |
+| ---------------------------- | ----------------------------- |
+| `--color-error`              | `--color-danger`              |
+| `--color-error-bg`           | `--color-danger-bg`           |
+| `--color-error-border`       | `--color-danger-border`       |
+| `--color-error-bg-hover`     | `--color-danger-bg-hover`     |
 | `--color-error-border-hover` | `--color-danger-border-hover` |
 
 Values for both themes are unchanged.
@@ -121,15 +121,15 @@ and unchanged.
 
 **`docs/development/ui/primitives.md`**
 
-| Location | Change |
-| --- | --- |
-| Callout tone table (line 178) | `danger` row: all three token cells → `--color-danger`, `--color-danger-bg`, `--color-danger-border` |
-| StatusBadge tone table (line 249) | `danger` row: same three cells → `--color-danger`, `--color-danger-bg`, `--color-danger-border` |
-| Input/FormFieldRow error-state line (line 399) | `--color-error-border` → `--color-danger-border`; `--color-error-bg` → `--color-danger-bg` |
-| ContextMenuItem prop comment (line 561) | `renders text in --color-error` → `renders text in --color-danger` |
-| ContextMenuItem rule (line 614) | `--color-error text token` → `--color-danger text token` |
-| Button variant table (line 680) | `danger` row: `--color-error-bg`, `--color-error-border`, `--color-error` → `--color-danger-bg`, `--color-danger-border`, `--color-danger` |
-| StatCard tone table (added by `2026-04-23-stat-card-design.md`) | `danger` row: `--color-error` → `--color-danger` |
+| Location                                                        | Change                                                                                                                                     |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Callout tone table (line 178)                                   | `danger` row: all three token cells → `--color-danger`, `--color-danger-bg`, `--color-danger-border`                                       |
+| StatusBadge tone table (line 249)                               | `danger` row: same three cells → `--color-danger`, `--color-danger-bg`, `--color-danger-border`                                            |
+| Input/FormFieldRow error-state line (line 399)                  | `--color-error-border` → `--color-danger-border`; `--color-error-bg` → `--color-danger-bg`                                                 |
+| ContextMenuItem prop comment (line 561)                         | `renders text in --color-error` → `renders text in --color-danger`                                                                         |
+| ContextMenuItem rule (line 614)                                 | `--color-error text token` → `--color-danger text token`                                                                                   |
+| Button variant table (line 680)                                 | `danger` row: `--color-error-bg`, `--color-error-border`, `--color-error` → `--color-danger-bg`, `--color-danger-border`, `--color-danger` |
+| StatCard tone table (added by `2026-04-23-stat-card-design.md`) | `danger` row: `--color-error` → `--color-danger`                                                                                           |
 
 > The StatCard tone table does not exist yet — it is added by the stat-card spec. Update it as
 > part of this rename along with the other primitives.md changes.
@@ -143,44 +143,44 @@ All `.svelte` and `.ts` files containing `--color-error`. The grep command in th
 pattern is authoritative — run it at implementation time to catch files added after this spec
 was written. Known files at spec time:
 
-| File | Notes |
-| --- | --- |
-| `src/lib/components/ui/ActionBadge.svelte` | |
-| `src/lib/components/ui/StatusBadge.svelte` | |
-| `src/lib/components/ui/Callout.svelte` | |
-| `src/lib/components/ui/ContextMenuItem.svelte` | |
-| `src/lib/components/ui/ContextMenuItem.test.ts` | |
-| `src/lib/components/ui/FormFieldRow.svelte` | |
-| `src/lib/components/ui/StatCard.svelte` | Created by `2026-04-23-stat-card-design.md`. `toneTokens` map: `danger: '--color-error'` → `danger: '--color-danger'` |
-| `src/lib/components/Button.svelte` | |
-| `src/lib/components/Button.test.ts` | |
-| `src/lib/components/Input.svelte` | |
-| `src/lib/components/Input.test.ts` | |
-| `src/lib/components/Textarea.svelte` | |
-| `src/lib/components/Textarea.test.ts` | |
-| `src/lib/components/Link.svelte` | |
-| `src/lib/components/Link.test.ts` | |
-| `src/lib/components/ToastNotifications.svelte` | |
-| `src/lib/components/EditHostAssignmentModal.svelte` | |
-| `src/lib/components/AssignToHostModal.svelte` | |
-| `src/lib/components/BatchResultDialog.svelte` | |
-| `src/routes/+page.svelte` | |
-| `src/routes/hosts/+page.svelte` | |
-| `src/routes/history/+page.svelte` | |
-| `src/routes/settings/OidcProvidersSettings.svelte` | |
-| `src/routes/settings/NotificationRulesSettings.svelte` | |
-| `src/routes/settings/NotificationLogView.svelte` | |
-| `src/routes/settings/SchedulerTab.svelte` | |
-| `src/routes/settings/PluginConfigsTab.svelte` | |
-| `src/routes/settings/SystemServicesSettings.test.ts` | |
-| `src/routes/settings/OidcProvidersSettings.test.ts` | |
-| `src/routes/settings/NotificationRulesSettings.test.ts` | |
-| `src/routes/settings/EnrollmentTokenSettings.test.ts` | |
-| `src/routes/profile/profile.test.ts` | |
-| `src/routes/hosts/hosts.test.ts` | |
-| `src/routes/layout-button-migration.test.ts` | |
-| `src/routes/software/ignore-rules-tab.test.ts` | |
-| `src/routes/software/[id]/software-detail-update-trigger.test.ts` | |
+| File                                                              | Notes                                                                                                                 |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/components/ui/ActionBadge.svelte`                        |                                                                                                                       |
+| `src/lib/components/ui/StatusBadge.svelte`                        |                                                                                                                       |
+| `src/lib/components/ui/Callout.svelte`                            |                                                                                                                       |
+| `src/lib/components/ui/ContextMenuItem.svelte`                    |                                                                                                                       |
+| `src/lib/components/ui/ContextMenuItem.test.ts`                   |                                                                                                                       |
+| `src/lib/components/ui/FormFieldRow.svelte`                       |                                                                                                                       |
+| `src/lib/components/ui/StatCard.svelte`                           | Created by `2026-04-23-stat-card-design.md`. `toneTokens` map: `danger: '--color-error'` → `danger: '--color-danger'` |
+| `src/lib/components/Button.svelte`                                |                                                                                                                       |
+| `src/lib/components/Button.test.ts`                               |                                                                                                                       |
+| `src/lib/components/Input.svelte`                                 |                                                                                                                       |
+| `src/lib/components/Input.test.ts`                                |                                                                                                                       |
+| `src/lib/components/Textarea.svelte`                              |                                                                                                                       |
+| `src/lib/components/Textarea.test.ts`                             |                                                                                                                       |
+| `src/lib/components/Link.svelte`                                  |                                                                                                                       |
+| `src/lib/components/Link.test.ts`                                 |                                                                                                                       |
+| `src/lib/components/ToastNotifications.svelte`                    |                                                                                                                       |
+| `src/lib/components/EditHostAssignmentModal.svelte`               |                                                                                                                       |
+| `src/lib/components/AssignToHostModal.svelte`                     |                                                                                                                       |
+| `src/lib/components/BatchResultDialog.svelte`                     |                                                                                                                       |
+| `src/routes/+page.svelte`                                         |                                                                                                                       |
+| `src/routes/hosts/+page.svelte`                                   |                                                                                                                       |
+| `src/routes/history/+page.svelte`                                 |                                                                                                                       |
+| `src/routes/settings/OidcProvidersSettings.svelte`                |                                                                                                                       |
+| `src/routes/settings/NotificationRulesSettings.svelte`            |                                                                                                                       |
+| `src/routes/settings/NotificationLogView.svelte`                  |                                                                                                                       |
+| `src/routes/settings/SchedulerTab.svelte`                         |                                                                                                                       |
+| `src/routes/settings/PluginConfigsTab.svelte`                     |                                                                                                                       |
+| `src/routes/settings/SystemServicesSettings.test.ts`              |                                                                                                                       |
+| `src/routes/settings/OidcProvidersSettings.test.ts`               |                                                                                                                       |
+| `src/routes/settings/NotificationRulesSettings.test.ts`           |                                                                                                                       |
+| `src/routes/settings/EnrollmentTokenSettings.test.ts`             |                                                                                                                       |
+| `src/routes/profile/profile.test.ts`                              |                                                                                                                       |
+| `src/routes/hosts/hosts.test.ts`                                  |                                                                                                                       |
+| `src/routes/layout-button-migration.test.ts`                      |                                                                                                                       |
+| `src/routes/software/ignore-rules-tab.test.ts`                    |                                                                                                                       |
+| `src/routes/software/[id]/software-detail-update-trigger.test.ts` |                                                                                                                       |
 
 The full set is reproduced by:
 
@@ -227,8 +227,8 @@ primitives.md entry will already exist at implementation time.
 5. Replace all `var(--color-error*)` occurrences in the component/route/test files.
    A project-wide find-and-replace of `--color-error` → `--color-danger` across `frontend/src`
    is sufficient — the suffix structure is identical across all five token variants.
-5b. Update `docs/development/ui/tokens.md` and `docs/development/ui/primitives.md` per the
-    UI documentation scope section above.
+   5b. Update `docs/development/ui/tokens.md` and `docs/development/ui/primitives.md` per the
+   UI documentation scope section above.
 6. Verify no remaining occurrences:
 
    ```sh
@@ -236,6 +236,7 @@ primitives.md entry will already exist at implementation time.
    ```
 
    Expected: zero matches. If any remain, fix before proceeding.
+
 7. Run `cd frontend && npm run check && npm run test`.
 
 **Note:** Steps 3–5 will have failing tests until all steps are complete. Run `npm run test`

@@ -1,11 +1,11 @@
 # ATK-01: Enrollment Token Brute Force and Timing
 
-| Field | Value |
-| --- | --- |
-| Severity | Medium |
-| Attack surface | Authentication (WebSocket enrollment) |
-| Prerequisites | Network access to the controller WebSocket endpoint |
-| STRIDE | Spoofing |
+| Field          | Value                                               |
+| -------------- | --------------------------------------------------- |
+| Severity       | Medium                                              |
+| Attack surface | Authentication (WebSocket enrollment)               |
+| Prerequisites  | Network access to the controller WebSocket endpoint |
+| STRIDE         | Spoofing                                            |
 
 ## Attack description
 

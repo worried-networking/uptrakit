@@ -16,31 +16,31 @@ because `pct` and `qm` are privileged commands.
 All commands below run as root inside the guest via `pct exec` or
 `qm guest exec`. Each command, its purpose, and security rationale:
 
-| Command | Purpose | Security rationale |
-| --- | --- | --- |
-| `id -u {username}` | Check if user exists | Avoid duplicate user creation |
-| `useradd -m -s /bin/bash {username}` | Create the target user | Dedicated non-root user for Uptrakit SSH access |
-| `getent passwd {username}` | Resolve home directory path | Deploy SSH keys to the correct location |
-| `mkdir -p {home}/.ssh` | Create SSH directory | Required for `authorized_keys` |
-| `chmod 700 {home}/.ssh` | Restrict SSH directory | OpenSSH requires strict permissions |
-| `echo '{key}' >> {home}/.ssh/authorized_keys` | Deploy public key with restrictions | Authenticate Uptrakit SSH sessions; `no-pty,no-agent-forwarding,no-X11-forwarding` restrictions limit key to command execution only |
-| `chmod 600 {home}/.ssh/authorized_keys` | Restrict key file | OpenSSH requires strict permissions |
-| `chown -R {username}:{username} {home}/.ssh` | Fix ownership | User must own their SSH directory |
-| `command -v {cmd}` | Resolve absolute paths for sudo commands | Sudoers entries use full paths for security |
-| Write `/etc/sudoers.d/uptrakit-{username}` | Grant passwordless sudo for specific commands (or ALL) | Plugins need root for package management (`apt-get install`, etc.) |
-| `chmod 440 /etc/sudoers.d/uptrakit-{username}` | Restrict sudoers file | sudo requires strict file permissions |
-| `ssh-keygen -lf /etc/ssh/ssh_host_{algo}_key.pub` | Read host key fingerprint | Verify host identity on subsequent direct SSH connections |
-| `hostname -I` (LXC) or `qm guest cmd ... network-get-interfaces` (QEMU) | Discover guest IP | Determine the SSH target address for direct connections |
+| Command                                                                 | Purpose                                                | Security rationale                                                                                                                  |
+| ----------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id -u {username}`                                                      | Check if user exists                                   | Avoid duplicate user creation                                                                                                       |
+| `useradd -m -s /bin/bash {username}`                                    | Create the target user                                 | Dedicated non-root user for Uptrakit SSH access                                                                                     |
+| `getent passwd {username}`                                              | Resolve home directory path                            | Deploy SSH keys to the correct location                                                                                             |
+| `mkdir -p {home}/.ssh`                                                  | Create SSH directory                                   | Required for `authorized_keys`                                                                                                      |
+| `chmod 700 {home}/.ssh`                                                 | Restrict SSH directory                                 | OpenSSH requires strict permissions                                                                                                 |
+| `echo '{key}' >> {home}/.ssh/authorized_keys`                           | Deploy public key with restrictions                    | Authenticate Uptrakit SSH sessions; `no-pty,no-agent-forwarding,no-X11-forwarding` restrictions limit key to command execution only |
+| `chmod 600 {home}/.ssh/authorized_keys`                                 | Restrict key file                                      | OpenSSH requires strict permissions                                                                                                 |
+| `chown -R {username}:{username} {home}/.ssh`                            | Fix ownership                                          | User must own their SSH directory                                                                                                   |
+| `command -v {cmd}`                                                      | Resolve absolute paths for sudo commands               | Sudoers entries use full paths for security                                                                                         |
+| Write `/etc/sudoers.d/uptrakit-{username}`                              | Grant passwordless sudo for specific commands (or ALL) | Plugins need root for package management (`apt-get install`, etc.)                                                                  |
+| `chmod 440 /etc/sudoers.d/uptrakit-{username}`                          | Restrict sudoers file                                  | sudo requires strict file permissions                                                                                               |
+| `ssh-keygen -lf /etc/ssh/ssh_host_{algo}_key.pub`                       | Read host key fingerprint                              | Verify host identity on subsequent direct SSH connections                                                                           |
+| `hostname -I` (LXC) or `qm guest cmd ... network-get-interfaces` (QEMU) | Discover guest IP                                      | Determine the SSH target address for direct connections                                                                             |
 
 ## PVE API token privileges (controller-side discovery)
 
 The Proxmox infrastructure plugin on the controller uses a PVE API token
 to discover VMs and containers. Required privileges:
 
-| Privilege | Scope | Purpose |
-| --- | --- | --- |
-| `Sys.Audit` | `/` | List cluster nodes |
-| `VM.Audit` | `/vms` | List VMs/CTs and read their configs |
+| Privilege               | Scope  | Purpose                                         |
+| ----------------------- | ------ | ----------------------------------------------- |
+| `Sys.Audit`             | `/`    | List cluster nodes                              |
+| `VM.Audit`              | `/vms` | List VMs/CTs and read their configs             |
 | `VM.Monitor` (optional) | `/vms` | Query QEMU guest agent for IPs and `machine_id` |
 
 The built-in **PVEAuditor** role covers `Sys.Audit` and `VM.Audit`. Adding

@@ -6,20 +6,20 @@ This document covers building, testing, and publishing Docker images for Uptraki
 
 The project uses a single multi-stage `docker/Dockerfile` parameterized via build args:
 
-| Arg | Description | Example |
-| --- | --- | --- |
-| `PACKAGE` | Cargo package name | `uptrakit-controller` |
-| `BINARY` | Output binary name | `uptrakit-controller` |
+| Arg        | Description                    | Example                      |
+| ---------- | ------------------------------ | ---------------------------- |
+| `PACKAGE`  | Cargo package name             | `uptrakit-controller`        |
+| `BINARY`   | Output binary name             | `uptrakit-controller`        |
 | `FEATURES` | Comma-separated Cargo features | `embed-frontend,db-all,oidc` |
 
 ### Build Stages
 
-| Stage | Base Image | Purpose |
-| --- | --- | --- |
-| `frontend-builder` | `node:lts-bookworm-slim` | Builds the SvelteKit SPA |
-| `planner` | `rust:1-bookworm` + cargo-chef | Generates a dependency recipe |
-| `builder` | `rust:1-bookworm` + cargo-chef | Cooks dependencies (cached), then builds the binary |
-| `runtime` | `debian:bookworm-slim` | Non-root `uptrakit` user, `/data/{config,state}` |
+| Stage              | Base Image                     | Purpose                                             |
+| ------------------ | ------------------------------ | --------------------------------------------------- |
+| `frontend-builder` | `node:lts-bookworm-slim`       | Builds the SvelteKit SPA                            |
+| `planner`          | `rust:1-bookworm` + cargo-chef | Generates a dependency recipe                       |
+| `builder`          | `rust:1-bookworm` + cargo-chef | Cooks dependencies (cached), then builds the binary |
+| `runtime`          | `debian:bookworm-slim`         | Non-root `uptrakit` user, `/data/{config,state}`    |
 
 The builder stage installs `cmake`, `clang`, and `pkg-config` for `aws-lc-sys`. The runtime stage
 installs only `ca-certificates`.
@@ -42,14 +42,14 @@ docker build -f docker/Dockerfile \
 
 These are the standard image configurations built by CI:
 
-| Image suffix | Package | Binary | Features |
-| --- | --- | --- | --- |
-| `controller` | `uptrakit-controller` | `uptrakit-controller` | `embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all` |
+| Image suffix         | Package               | Binary                | Features                                                                          |
+| -------------------- | --------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| `controller`         | `uptrakit-controller` | `uptrakit-controller` | `embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all`            |
 | `controller-swagger` | `uptrakit-controller` | `uptrakit-controller` | `embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui` |
-| `scheduler` | `uptrakit-scheduler` | `uptrakit-scheduler` | `db-all,oidc` |
-| `mqtt` | `uptrakit-mqtt` | `uptrakit-mqtt` | *(none)* |
-| `agent-ssh` | `uptrakit-agent-ssh` | `uptrakit-agent-ssh` | *(none)* |
-| `cli` | `uptrakit-cli` | `uptrakit` | *(none)* |
+| `scheduler`          | `uptrakit-scheduler`  | `uptrakit-scheduler`  | `db-all,oidc`                                                                     |
+| `mqtt`               | `uptrakit-mqtt`       | `uptrakit-mqtt`       | _(none)_                                                                          |
+| `agent-ssh`          | `uptrakit-agent-ssh`  | `uptrakit-agent-ssh`  | _(none)_                                                                          |
+| `cli`                | `uptrakit-cli`        | `uptrakit`            | _(none)_                                                                          |
 
 ## Docker Compose
 
@@ -82,11 +82,11 @@ The `.github/workflows/docker.yml` workflow:
 
 ### Tag Strategy
 
-| Trigger | Tags |
-| --- | --- |
-| Push to `main` | `main`, `sha-<commit>` |
-| Tag `v1.2.3` | `1.2.3`, `1.2`, `1`, `sha-<commit>` |
-| Pull request | `pr-<number>` |
+| Trigger        | Tags                                |
+| -------------- | ----------------------------------- |
+| Push to `main` | `main`, `sha-<commit>`              |
+| Tag `v1.2.3`   | `1.2.3`, `1.2`, `1`, `sha-<commit>` |
+| Pull request   | `pr-<number>`                       |
 
 ## Enrollment Token Bootstrap
 
@@ -148,11 +148,11 @@ the remote Docker/Podman daemon via a Unix socket proxy:
 
 The `dial_stdio_cmd` is determined by the `container_runtime` config field:
 
-| Config | Command |
-| --- | --- |
-| `auto` | Probe remote: `docker` first, then `podman`; restart proxy with winner |
-| `docker` | `docker system dial-stdio` |
-| `podman` | `podman system dial-stdio` |
+| Config   | Command                                                                |
+| -------- | ---------------------------------------------------------------------- |
+| `auto`   | Probe remote: `docker` first, then `podman`; restart proxy with winner |
+| `docker` | `docker system dial-stdio`                                             |
+| `podman` | `podman system dial-stdio`                                             |
 
 Auto-detection runs inside `detect_host_compatibility()` via `detect_and_apply_runtime()`.
 Detection uses `command -v docker` / `command -v podman` (with 5-second timeouts). When a

@@ -76,48 +76,48 @@ No behaviour changes. Drop-in primitive substitution.
 
 ### `lib/components/` files
 
-| File | Line(s) | Change |
-| --- | --- | --- |
-| `CheckboxList.svelte` | 40 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `AddSoftwareModal.svelte` | 67, 86 | `<input class="input w-full">` → `<Input class="w-full">` |
-| `AddSoftwareModal.svelte` | 99 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `AssignToHostModal.svelte` | 302 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `AssignToHostModal.svelte` | 339, 465 | `<input class="input text-sm">` → `<Input class="text-sm">` |
-| `EditHostAssignmentModal.svelte` | 738, 803 | `<input class="input text-sm">` → `<Input class="text-sm">` |
+| File                             | Line(s)              | Change                                                                        |
+| -------------------------------- | -------------------- | ----------------------------------------------------------------------------- |
+| `CheckboxList.svelte`            | 40                   | `<input type="checkbox" class="checkbox">` → `<Checkbox>`                     |
+| `AddSoftwareModal.svelte`        | 67, 86               | `<input class="input w-full">` → `<Input class="w-full">`                     |
+| `AddSoftwareModal.svelte`        | 99                   | `<input type="checkbox" class="checkbox">` → `<Checkbox>`                     |
+| `AssignToHostModal.svelte`       | 302                  | `<input type="checkbox" class="checkbox">` → `<Checkbox>`                     |
+| `AssignToHostModal.svelte`       | 339, 465             | `<input class="input text-sm">` → `<Input class="text-sm">`                   |
+| `EditHostAssignmentModal.svelte` | 738, 803             | `<input class="input text-sm">` → `<Input class="text-sm">`                   |
 | `EditHostAssignmentModal.svelte` | 770, 891, 1090, 1220 | `<textarea class="textarea font-mono text-xs">` → `<Textarea variant="mono">` |
-| `EditHostAssignmentModal.svelte` | 789, 915, 1106 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `SoftwareMergeWizard.svelte` | 261 | `<input class="input" type="search">` → `<Input type="search">` |
-| `surfaces/SurfaceForm.svelte` | 137 | `<textarea class="textarea font-mono text-xs">` → `<Textarea variant="mono">` |
+| `EditHostAssignmentModal.svelte` | 789, 915, 1106       | `<input type="checkbox" class="checkbox">` → `<Checkbox>`                     |
+| `SoftwareMergeWizard.svelte`     | 261                  | `<input class="input" type="search">` → `<Input type="search">`               |
+| `surfaces/SurfaceForm.svelte`    | 137                  | `<textarea class="textarea font-mono text-xs">` → `<Textarea variant="mono">` |
 
 ### `routes/settings/` files
 
-| File | Line(s) | Change |
-| --- | --- | --- |
-| `AuthenticationSettings.svelte` | 50 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `AgentCertificateSettings.svelte` | 69 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `AgentCertificateSettings.svelte` | 77 | `<input class="input">` → `<Input>` |
-| `EnrollmentTokenSettings.svelte` | 246 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `NotificationRulesSettings.svelte` | 284 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `OidcProvidersSettings.svelte` | 336, 348 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `RegistrationSettings.svelte` | 90 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| File                               | Line(s)  | Change                                                    |
+| ---------------------------------- | -------- | --------------------------------------------------------- |
+| `AuthenticationSettings.svelte`    | 50       | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `AgentCertificateSettings.svelte`  | 69       | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `AgentCertificateSettings.svelte`  | 77       | `<input class="input">` → `<Input>`                       |
+| `EnrollmentTokenSettings.svelte`   | 246      | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `NotificationRulesSettings.svelte` | 284      | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `OidcProvidersSettings.svelte`     | 336, 348 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `RegistrationSettings.svelte`      | 90       | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
 
 ### `routes/software/` files
 
-| File | Line(s) | Change |
-| --- | --- | --- |
-| `+page.svelte` | 889, 940, 972, 1499 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `+page.svelte` | 1487 | `<input type="text" class="input">` → `<Input>` |
-| `[id]/+page.svelte` | 1119 | `<input type="text">` → `<Input>` |
-| `[id]/+page.svelte` | 1129 | `<input type="checkbox">` → `<Checkbox>` |
-| `IgnoreRulesTab.svelte` | 162, 184 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
-| `IgnoreRulesTab.svelte` | 249 | `<input type="text">` → `<Input>` |
+| File                    | Line(s)             | Change                                                    |
+| ----------------------- | ------------------- | --------------------------------------------------------- |
+| `+page.svelte`          | 889, 940, 972, 1499 | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `+page.svelte`          | 1487                | `<input type="text" class="input">` → `<Input>`           |
+| `[id]/+page.svelte`     | 1119                | `<input type="text">` → `<Input>`                         |
+| `[id]/+page.svelte`     | 1129                | `<input type="checkbox">` → `<Checkbox>`                  |
+| `IgnoreRulesTab.svelte` | 162, 184            | `<input type="checkbox" class="checkbox">` → `<Checkbox>` |
+| `IgnoreRulesTab.svelte` | 249                 | `<input type="text">` → `<Input>`                         |
 
 ### Other route files
 
-| File | Line | Change |
-| --- | --- | --- |
-| `routes/services/+page.svelte` | 688 | `<input class="input w-full">` → `<Input class="w-full">` |
-| `routes/system-services/+page.svelte` | 661 | `<input class="input w-full">` → `<Input class="w-full">` |
+| File                                  | Line | Change                                                    |
+| ------------------------------------- | ---- | --------------------------------------------------------- |
+| `routes/services/+page.svelte`        | 688  | `<input class="input w-full">` → `<Input class="w-full">` |
+| `routes/system-services/+page.svelte` | 661  | `<input class="input w-full">` → `<Input class="w-full">` |
 
 ---
 

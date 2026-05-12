@@ -25,12 +25,12 @@ fails (`fail_before_agent_dispatch` marks the DB row Failed but does not call
 
 ## Root Cause Summary
 
-| Failure | Cause |
-| --- | --- |
-| WS 409 during protection | `interactive_ws` rejects `execution_owner_service_id = NULL` |
-| WS 409 on immediate open | Frontend opens WS before orchestrator transitions `Pending → InProgress` |
-| Channel leak on protection failure | `fail_before_agent_dispatch` never calls `send_completed` |
-| History page can't attach terminal | Status is InProgress but `execution_owner_service_id` still NULL |
+| Failure                            | Cause                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| WS 409 during protection           | `interactive_ws` rejects `execution_owner_service_id = NULL`             |
+| WS 409 on immediate open           | Frontend opens WS before orchestrator transitions `Pending → InProgress` |
+| Channel leak on protection failure | `fail_before_agent_dispatch` never calls `send_completed`                |
+| History page can't attach terminal | Status is InProgress but `execution_owner_service_id` still NULL         |
 
 ## Design — Option A (chosen)
 
@@ -158,12 +158,12 @@ transitioned the record to `InProgress` and the broadcast channel exists.
 The SSE handler adds:
 
 ```typescript
-subscribeToEvent('update_protection_started', (data) => {
-    if (data.update_history_id === pendingLiveHistoryId) {
-        openLiveModal(pendingLiveHistoryId, pendingLiveHostName);
-        pendingLiveHistoryId = null;
-    }
-})
+subscribeToEvent("update_protection_started", (data) => {
+  if (data.update_history_id === pendingLiveHistoryId) {
+    openLiveModal(pendingLiveHistoryId, pendingLiveHostName);
+    pendingLiveHistoryId = null;
+  }
+});
 ```
 
 `update_started` SSE handler on this page currently calls `loadItem(true)` — it does not
@@ -204,13 +204,13 @@ WS subscriber receives Completed → closes cleanly
 
 ## Error Handling
 
-| Scenario | Behaviour |
-| --- | --- |
-| `AgentClaimed` arrives but agent already disconnected | Keep `service_id = None`; reconnect recovery re-sends `AgentClaimed` when agent reconnects |
-| WS connects after update already completed | No channel in broadcaster → "No active output stream" error sent, WS closes (existing path, unchanged) |
-| Client sends stdin during protection phase | Silently ignored; no error to client |
-| Protection fails | `send_completed("failed")` closes subscriber and removes channel |
-| Dispatch to agent fails | `fail_before_agent_dispatch` then `send_completed("failed")` — same closure path |
+| Scenario                                              | Behaviour                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `AgentClaimed` arrives but agent already disconnected | Keep `service_id = None`; reconnect recovery re-sends `AgentClaimed` when agent reconnects             |
+| WS connects after update already completed            | No channel in broadcaster → "No active output stream" error sent, WS closes (existing path, unchanged) |
+| Client sends stdin during protection phase            | Silently ignored; no error to client                                                                   |
+| Protection fails                                      | `send_completed("failed")` closes subscriber and removes channel                                       |
+| Dispatch to agent fails                               | `fail_before_agent_dispatch` then `send_completed("failed")` — same closure path                       |
 
 ## Testing
 
@@ -225,12 +225,12 @@ WS subscriber receives Completed → closes cleanly
 
 ## Files Changed
 
-| File | Change |
-| --- | --- |
-| `crates/ui/web-api/src/update_output_broadcaster.rs` | Add `AgentClaimed` variant + `send_agent_claimed` |
-| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Call `send_agent_claimed` after channel create/get in `handle_update_started` |
-| `crates/ui/web-api/src/update_orchestrator.rs` | Call `send_completed` on all three failure paths (protection fail, protection error, dispatch error) |
-| `crates/ui/web-api/src/routes/interactive_ws.rs` | Allow `service_id = None`, handle `AgentClaimed`, skip stdin when None |
-| `frontend/src/lib/sse.ts` | Add `'update_protection_started'` to `AdminEventType` |
-| `frontend/src/routes/software/[id]/+page.svelte` | Defer `openLiveModal` until protection-started/update-started SSE |
-| `frontend/src/routes/history/+page.svelte` | Handle `update_protection_started` SSE → status update |
+| File                                                         | Change                                                                                               |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/update_output_broadcaster.rs`         | Add `AgentClaimed` variant + `send_agent_claimed`                                                    |
+| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Call `send_agent_claimed` after channel create/get in `handle_update_started`                        |
+| `crates/ui/web-api/src/update_orchestrator.rs`               | Call `send_completed` on all three failure paths (protection fail, protection error, dispatch error) |
+| `crates/ui/web-api/src/routes/interactive_ws.rs`             | Allow `service_id = None`, handle `AgentClaimed`, skip stdin when None                               |
+| `frontend/src/lib/sse.ts`                                    | Add `'update_protection_started'` to `AdminEventType`                                                |
+| `frontend/src/routes/software/[id]/+page.svelte`             | Defer `openLiveModal` until protection-started/update-started SSE                                    |
+| `frontend/src/routes/history/+page.svelte`                   | Handle `update_protection_started` SSE → status update                                               |

@@ -159,14 +159,14 @@ operator-visible output.
 
 **Accepted risks:**
 
-- *`UnboundedSender` backpressure* — `output_tx` is unbounded; a stalled consumer (blocked
+- _`UnboundedSender` backpressure_ — `output_tx` is unbounded; a stalled consumer (blocked
   WebSocket write) can accumulate buffered messages during a long backup. This is an inherited
   property of the existing `output_tx` pattern used throughout the protection code and is
   accepted as-is.
-- *UPID uniqueness* — the loop assumes a UPID is not reassigned to a different task during the
+- _UPID uniqueness_ — the loop assumes a UPID is not reassigned to a different task during the
   polling window. Proxmox UPIDs encode a timestamp and PID and are not reused within a task's
   lifetime. This assumption holds in all practical deployments.
-- *Single-page final drain* — the drain on task completion fetches one page (max 500 lines)
+- _Single-page final drain_ — the drain on task completion fetches one page (max 500 lines)
   starting at `next_n`. If a burst of completion output exceeds 500 lines in the last polling
   window, trailing lines are silently dropped. This is not a concern for typical snapshot or
   backup workloads; the full log is always available in the Proxmox UI.

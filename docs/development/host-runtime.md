@@ -145,12 +145,12 @@ pub struct HostRequirements {
 
 ### Named Constants
 
-| Constant | OS Families | Required Features | Controller Only |
-| --- | --- | --- | --- |
-| `CONTROLLER_ONLY` | (any) | (none) | `true` |
-| `NONE` | alias for `CONTROLLER_ONLY` | | |
-| `POSIX` | Linux, MacOs, FreeBsd | `PosixShell` | `false` |
-| `POSIX_PRIVILEGED` | Linux, MacOs, FreeBsd | `PosixShell`, `PrivilegeEscalation` | `false` |
+| Constant           | OS Families                 | Required Features                   | Controller Only |
+| ------------------ | --------------------------- | ----------------------------------- | --------------- |
+| `CONTROLLER_ONLY`  | (any)                       | (none)                              | `true`          |
+| `NONE`             | alias for `CONTROLLER_ONLY` |                                     |                 |
+| `POSIX`            | Linux, MacOs, FreeBsd       | `PosixShell`                        | `false`         |
+| `POSIX_PRIVILEGED` | Linux, MacOs, FreeBsd       | `PosixShell`, `PrivilegeEscalation` | `false`         |
 
 Custom requirements use `HostRequirements::new()`, which is `const fn` and usable in `static` contexts:
 
@@ -245,11 +245,11 @@ shared HTTP client.
 Shared resources provided to singleton plugins during catalog construction. Always compiled (not
 feature-gated), but gains additional fields when the `catalog` feature is active:
 
-| Field | Feature Gate | Description |
-| --- | --- | --- |
-| `allow_private_urls` | (none) | When `true`, HTTP clients allow private/loopback URLs |
-| `http_client` | `catalog` | Pre-configured `reqwest::Client` with SSRF protection |
-| `cancellation_token` | `catalog` | `CancellationToken` for graceful shutdown |
+| Field                | Feature Gate | Description                                           |
+| -------------------- | ------------ | ----------------------------------------------------- |
+| `allow_private_urls` | (none)       | When `true`, HTTP clients allow private/loopback URLs |
+| `http_client`        | `catalog`    | Pre-configured `reqwest::Client` with SSRF protection |
+| `cancellation_token` | `catalog`    | `CancellationToken` for graceful shutdown             |
 
 ## construct_host_runtime
 
@@ -338,12 +338,12 @@ Typed error enum for host compatibility validation failures. Propagated as
 `rootcause::Report<HostCompatibilityError>` and converted to `PluginError::UnsupportedOperation` via
 `impl_report_conversion!`.
 
-| Variant | Meaning |
-| --- | --- |
-| `IncompatibleOsFamily { actual, expected }` | Host OS is not in the role's allowed list |
-| `UnknownOsFamily` | Host has no `os_type` set (cannot validate) |
-| `MissingFeature(HostFeature)` | Host lacks a required feature |
-| `UnsupportedRole { plugin_type, role }` | Plugin does not implement the requested role |
+| Variant                                     | Meaning                                      |
+| ------------------------------------------- | -------------------------------------------- |
+| `IncompatibleOsFamily { actual, expected }` | Host OS is not in the role's allowed list    |
+| `UnknownOsFamily`                           | Host has no `os_type` set (cannot validate)  |
+| `MissingFeature(HostFeature)`               | Host lacks a required feature                |
+| `UnsupportedRole { plugin_type, role }`     | Plugin does not implement the requested role |
 
 ## How to Add a New Host Type
 

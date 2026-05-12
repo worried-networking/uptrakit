@@ -110,7 +110,13 @@ sub-spec. Migration lives in downstream sub-specs (#3a2 and the #3b–k sweep).
 ```ts
 import type { Snippet } from "svelte";
 
-export type InputType = "text" | "email" | "password" | "url" | "number" | "search";
+export type InputType =
+  | "text"
+  | "email"
+  | "password"
+  | "url"
+  | "number"
+  | "search";
 
 export type InputProps = {
   id: string;

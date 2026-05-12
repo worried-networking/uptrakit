@@ -1,11 +1,11 @@
 # ATK-18: RCE via Wire Protocol Deserialization
 
-| Field | Value |
-| --- | --- |
-| Severity | High |
-| Attack surface | Wire protocol / serde |
-| Prerequisites | Ability to send WebSocket messages to the controller (mTLS or anonymous) |
-| STRIDE | Tampering, Denial of Service |
+| Field          | Value                                                                    |
+| -------------- | ------------------------------------------------------------------------ |
+| Severity       | High                                                                     |
+| Attack surface | Wire protocol / serde                                                    |
+| Prerequisites  | Ability to send WebSocket messages to the controller (mTLS or anonymous) |
+| STRIDE         | Tampering, Denial of Service                                             |
 
 ## Attack description
 
@@ -90,7 +90,7 @@ and data integrity.
 - **`Unknown` variant handling.** Unrecognized message types are deserialized to
   `Unknown` (no payload materialized), logged at `warn` level, and the event loop
   continues without processing.
-- **Per-field and per-collection size limits (`WireValidate`).** *(Implemented)*
+- **Per-field and per-collection size limits (`WireValidate`).** _(Implemented)_
   All `Vec<T>` and `String` fields in wire protocol payloads are validated after
   deserialization via the `WireValidate` trait. Collection limits (e.g.,
   `MAX_REPORT_HOSTS = 500`, `MAX_VERSION_CHECK_ASSIGNMENTS = 2,000`) and string
@@ -98,12 +98,12 @@ and data integrity.
   `MAX_OUTPUT_STRING_LEN = 1,048,576`) are enforced. Payloads exceeding any limit
   are rejected as deserialization failures (hard fail, connection close). See
   `crates/shared/wire/src/limits.rs` and `crates/shared/wire/src/wire_validate_impls.rs`.
-- **Sliding-window rate limiter.** *(Implemented)* The message rate limiter uses a
+- **Sliding-window rate limiter.** _(Implemented)_ The message rate limiter uses a
   sliding-window-counter algorithm instead of a fixed window. The effective estimate
   is `prev_count * (1 - elapsed_fraction) + curr_count`, preventing boundary burst
   attacks where 2× the limit could be processed in rapid succession. See
   `crates/ui/web-api/src/routes/service_ws/protocol.rs`.
-- **Consecutive unknown message counter.** *(Implemented)* The authenticated
+- **Consecutive unknown message counter.** _(Implemented)_ The authenticated
   message loop tracks consecutive `Unknown` messages and closes the connection
   after `MAX_CONSECUTIVE_UNKNOWN_MESSAGES` (10) consecutive unknowns. The counter
   resets on any known message. Prevents fuzzing or probing clients from keeping

@@ -174,12 +174,12 @@ Each tool enforces its own fine-grained permission check against `McpRequestCont
 before calling the underlying action — mirroring the `CanX` extractor pattern in the REST
 handlers:
 
-| Tool                       | Required permissions              |
-|----------------------------|-----------------------------------|
-| `get_current_user`         | `AccessMcp` only                  |
-| `list_update_history`      | `AccessMcp` + `ViewSoftware`      |
-| `get_update_history_detail`| `AccessMcp` + `ViewSoftware`      |
-| `trigger_update`           | `AccessMcp` + `TriggerUpdates`    |
+| Tool                        | Required permissions           |
+| --------------------------- | ------------------------------ |
+| `get_current_user`          | `AccessMcp` only               |
+| `list_update_history`       | `AccessMcp` + `ViewSoftware`   |
+| `get_update_history_detail` | `AccessMcp` + `ViewSoftware`   |
+| `trigger_update`            | `AccessMcp` + `TriggerUpdates` |
 
 ### `get_current_user`
 
@@ -243,7 +243,7 @@ Triggers a software update for a specific host.
 Added to `web-api/Cargo.toml` behind `[features] mcp`:
 
 | Crate   | Purpose                                                                      |
-|---------|------------------------------------------------------------------------------|
+| ------- | ---------------------------------------------------------------------------- |
 | `rmcp`  | MCP protocol, Streamable HTTP transport (`transport-streamable-http-server`) |
 | `vt100` | VT100 terminal emulator for output rendering                                 |
 

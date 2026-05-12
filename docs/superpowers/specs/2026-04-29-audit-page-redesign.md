@@ -63,7 +63,9 @@ When `hasBoth` is false, two sub-cases:
 Add the following class to `<tbody>`:
 
 ```html
-<tbody class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]">
+<tbody
+  class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]"
+></tbody>
 ```
 
 Token roles:

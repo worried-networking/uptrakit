@@ -54,17 +54,17 @@ will be specified separately.
 
 ## 3. Verified-present (no work required)
 
-| Capability | Where | Evidence |
-| --- | --- | --- |
-| Per-Host single-flight on active Updates | `update_history` unique index `uix_update_history_host_active` + `has_active_update_for_host` | `update_dispatch.rs` |
-| Queueing fallback when Host busy | `trigger_update_for_host` inserts `Queued` row | `update_triggers.rs::trigger_update_for_host` |
-| `AwaitingRestart` blocks new dispatch | `has_active_update_for_host` counts the awaiting-restart row | `test_has_active_update_includes_awaiting_restart` |
-| Scheduler executor extensibility | `Scheduler::register(task_type: ScheduledTaskType, executor: Box<dyn TaskExecutor>)` | `scheduler-runtime/src/scheduler.rs` |
-| Typed actor at controller-core boundary | `ActorInfo { actor_type: ActorType, actor_id: String }`, `#[non_exhaustive]` | `controller-core/src/update/mod.rs` |
-| `UpdateDispatcher` trait | Single entry point for one-Host dispatch from any source | `controller-core/src/update/mod.rs` |
-| `UpdateCategory` wire-safe enum | `Security` / `Bugfix` / `Feature` / `Unknown` / `Other(String)` | `shared/types/src/update_category.rs` |
-| Per-Host candidate discovery with category filter | `find_outdated_items_for_host` | `update_batches/candidates.rs` |
-| Per-Item candidate discovery across Hosts | `find_outdated_hosts_for_item` | `update_batches/candidates.rs` |
+| Capability                                        | Where                                                                                         | Evidence                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Per-Host single-flight on active Updates          | `update_history` unique index `uix_update_history_host_active` + `has_active_update_for_host` | `update_dispatch.rs`                               |
+| Queueing fallback when Host busy                  | `trigger_update_for_host` inserts `Queued` row                                                | `update_triggers.rs::trigger_update_for_host`      |
+| `AwaitingRestart` blocks new dispatch             | `has_active_update_for_host` counts the awaiting-restart row                                  | `test_has_active_update_includes_awaiting_restart` |
+| Scheduler executor extensibility                  | `Scheduler::register(task_type: ScheduledTaskType, executor: Box<dyn TaskExecutor>)`          | `scheduler-runtime/src/scheduler.rs`               |
+| Typed actor at controller-core boundary           | `ActorInfo { actor_type: ActorType, actor_id: String }`, `#[non_exhaustive]`                  | `controller-core/src/update/mod.rs`                |
+| `UpdateDispatcher` trait                          | Single entry point for one-Host dispatch from any source                                      | `controller-core/src/update/mod.rs`                |
+| `UpdateCategory` wire-safe enum                   | `Security` / `Bugfix` / `Feature` / `Unknown` / `Other(String)`                               | `shared/types/src/update_category.rs`              |
+| Per-Host candidate discovery with category filter | `find_outdated_items_for_host`                                                                | `update_batches/candidates.rs`                     |
+| Per-Item candidate discovery across Hosts         | `find_outdated_hosts_for_item`                                                                | `update_batches/candidates.rs`                     |
 
 None of these need changes. The refactors below build on top of them.
 
@@ -120,6 +120,7 @@ Work:
    Do **not** add `Policy` here. The future policy executor adds that variant in the same commit
    that introduces the executor. Pre-adding it churns every exhaustive `match` site for a variant
    with no consumer.
+
 3. **Closed enum, no `Other(String)`**.
    - Keep `as_str(self) -> &'static str` returning the same on-disk strings (no DB migration).
    - Add `FromStr` returning `Err(ParseActorTypeError::Invalid)` on unknown strings (mirrors
@@ -144,7 +145,7 @@ the hot path.
 Work:
 
 1. Add `pub async fn find_hosts_with_any_tag(tenant_db: &TenantDb, tag_ids: &[Uuid])
-   -> Result<Vec<host::Model>, sea_orm::DbErr>` (matches the return shape used by other helpers in
+-> Result<Vec<host::Model>, sea_orm::DbErr>` (matches the return shape used by other helpers in
    this module — `host::Model` is the canonical internal-query return type per the surrounding
    code; mapping to a UI response type is the caller's job). No `mode` parameter and no
    `TagMatchMode` enum: when `AllOf` semantics are needed in the future, add a separate function
@@ -178,6 +179,7 @@ Work:
 
    The exact `TenantDb` accessor names and join-relation direction may differ — match the
    conventions already in this module.
+
 6. Unit tests in the module: empty input, single tag, multiple tags, tag belonging to another
    tenant excluded, deactivated host excluded.
 7. Doc comment includes a one-line N+1 advisory: callers enumerating outdated items per host
@@ -216,7 +218,7 @@ Work:
      - `tracing::warn!` with the parameter name (production observability).
      - Return `Ok(vec![])` immediately (no DB query).
    - Document this contract in the helper's doc comment, including the **caller obligation**:
-     callers must collapse post-filter empties to `None` *before* invoking the helper, not pass
+     callers must collapse post-filter empties to `None` _before_ invoking the helper, not pass
      `Some(&empty_vec)`. The `debug_assert` enforces this contract.
    - Until a future HTTP `Validate` impl lands (deferred to feature spec), this helper's
      debug-assert + warn-and-empty is the sole defence. That is intentional and correct: the
@@ -334,18 +336,18 @@ whether to normalize at the plugin write boundary (preferred) or in the policy f
 
 The following snapshot rules apply and are satisfied or explicitly addressed:
 
-| Rule (from `.superpowers/standards-snapshot.md`) | Compliance |
-| --- | --- |
-| Prefer typed enums or newtypes over raw String mode flags | R1, R3, R4 enforce this on the dispatch path |
-| Prefer typed request/response/config structs over `serde_json::Value` | No new structs introduced; existing typed shape preserved |
-| Use `rootcause::Report`, `report!`, `.context_to()` for errors | R2, R3 inherit existing module conventions; no new error types |
-| `#[non_exhaustive]` on extensible public enums | `ActorType` and `BatchType` are exempt per `coding-standards.md` §"Typed enums for internal write-path discriminators" |
-| Public functions returning `Result` include `# Errors` section | R2 helper requires a `# Errors` doc comment |
-| Tests use `start_paused = true` only when tokio time APIs are used | New tests in R2/R3 do not touch time; no `start_paused` needed |
-| Markdown line length 150 chars | Enforced by `markdownlint`; this file conforms |
-| Conventional Commits with scope; small granular commits | Each refactor lands as a separate commit, e.g. `refactor(actor-type): consolidate ad-hoc actor strings into typed enum` |
-| Tenant isolation via `TenantDb` for join tables | R2 (`find_hosts_with_any_tag`) uses `TenantDb` with primary + belt-and-suspenders filtering |
-| Database query patterns (`BEGIN IMMEDIATE`, multi-statement atomic) | R2/R3 are read-only single-statement queries; rule not triggered |
+| Rule (from `.superpowers/standards-snapshot.md`)                      | Compliance                                                                                                              |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Prefer typed enums or newtypes over raw String mode flags             | R1, R3, R4 enforce this on the dispatch path                                                                            |
+| Prefer typed request/response/config structs over `serde_json::Value` | No new structs introduced; existing typed shape preserved                                                               |
+| Use `rootcause::Report`, `report!`, `.context_to()` for errors        | R2, R3 inherit existing module conventions; no new error types                                                          |
+| `#[non_exhaustive]` on extensible public enums                        | `ActorType` and `BatchType` are exempt per `coding-standards.md` §"Typed enums for internal write-path discriminators"  |
+| Public functions returning `Result` include `# Errors` section        | R2 helper requires a `# Errors` doc comment                                                                             |
+| Tests use `start_paused = true` only when tokio time APIs are used    | New tests in R2/R3 do not touch time; no `start_paused` needed                                                          |
+| Markdown line length 150 chars                                        | Enforced by `markdownlint`; this file conforms                                                                          |
+| Conventional Commits with scope; small granular commits               | Each refactor lands as a separate commit, e.g. `refactor(actor-type): consolidate ad-hoc actor strings into typed enum` |
+| Tenant isolation via `TenantDb` for join tables                       | R2 (`find_hosts_with_any_tag`) uses `TenantDb` with primary + belt-and-suspenders filtering                             |
+| Database query patterns (`BEGIN IMMEDIATE`, multi-statement atomic)   | R2/R3 are read-only single-statement queries; rule not triggered                                                        |
 
 No deviations.
 
@@ -391,6 +393,7 @@ This spec is complete when:
 
    Workspace lints already enforce `warnings = "deny"` and `clippy::all = "deny"`; no
    `-- -D warnings` flag is needed on clippy commands.
+
 3. No `actor_type: &str` field remains in `CreateUpdateRecordParams`, `TriggerUpdateParams`, or
    `CreateBatchParams`. No `'a` lifetime parameter exists solely to support `actor_id: &'a str`
    in those structs.

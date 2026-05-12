@@ -29,12 +29,12 @@ last page is received.
 Once an MQTT client is **enabled** and connected to the broker, Uptrakit publishes the following retained
 topics for every `(software item, host)` pair regardless of whether Home Assistant Discovery is enabled:
 
-| Topic | Retained | Purpose |
-| --- | :---: | --- |
-| `{prefix}/hosts/{host_id}/items/{item_id}/state` | ✓ | Installed version string (empty if unknown) |
-| `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` | ✓ | Latest available version string (empty if unknown) |
-| `{prefix}/hosts/{host_id}/items/{item_id}/attributes` | ✓ | JSON attributes (see below) |
-| `{prefix}/hosts/{host_id}/items/{item_id}/set` | — | Command topic — publish `"install"` to trigger an update |
+| Topic                                                     | Retained | Purpose                                                  |
+| --------------------------------------------------------- | :------: | -------------------------------------------------------- |
+| `{prefix}/hosts/{host_id}/items/{item_id}/state`          |    ✓     | Installed version string (empty if unknown)              |
+| `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` |    ✓     | Latest available version string (empty if unknown)       |
+| `{prefix}/hosts/{host_id}/items/{item_id}/attributes`     |    ✓     | JSON attributes (see below)                              |
+| `{prefix}/hosts/{host_id}/items/{item_id}/set`            |    —     | Command topic — publish `"install"` to trigger an update |
 
 The `items/{item_id}/attributes` payload contains:
 
@@ -47,24 +47,24 @@ The `items/{item_id}/attributes` payload contains:
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `in_progress` | boolean | `true` while an update is pending or executing |
+| Field             | Type    | Description                                                                                                                    |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `in_progress`     | boolean | `true` while an update is pending or executing                                                                                 |
 | `update_category` | string? | Classification of the pending update: `"security"`, `"bugfix"`, `"feature"`, or `"unknown"`. Absent if no update is available. |
-| `release_date` | string? | ISO 8601 date of the latest release (`"YYYY-MM-DD"`). Absent when release metadata is unavailable. |
-| `last_checked_at` | string? | ISO 8601 timestamp of the last installed-version check. Absent if never checked. |
+| `release_date`    | string? | ISO 8601 date of the latest release (`"YYYY-MM-DD"`). Absent when release metadata is unavailable.                             |
+| `last_checked_at` | string? | ISO 8601 timestamp of the last installed-version check. Absent if never checked.                                               |
 
 Additionally, Uptrakit publishes the following retained identity and metadata topics per host:
 
-| Topic | Retained | Purpose |
-| --- | :---: | --- |
-| `{prefix}/hosts/{host_id}/hostname` | ✓ | Raw hostname string |
-| `{prefix}/hosts/{host_id}/friendly_name` | ✓ | User-defined display name |
-| `{prefix}/hosts/{host_id}/info` | ✓ | JSON: OS type, OS version, architecture |
-| `{prefix}/hosts/{host_id}/tags` | ✓ | JSON array of tag names assigned to the host |
-| `{prefix}/hosts/{host_id}/agent` | ✓ | JSON: agent last-seen timestamp and version |
-| `{prefix}/hosts/{host_id}/connectivity/state` | ✓ | `"online"` or `"offline"` — real-time agent connectivity |
-| `{prefix}/hosts/{host_id}/connectivity/attributes` | ✓ | JSON: `{"last_seen": "…", "version": "…"}` |
+| Topic                                              | Retained | Purpose                                                  |
+| -------------------------------------------------- | :------: | -------------------------------------------------------- |
+| `{prefix}/hosts/{host_id}/hostname`                |    ✓     | Raw hostname string                                      |
+| `{prefix}/hosts/{host_id}/friendly_name`           |    ✓     | User-defined display name                                |
+| `{prefix}/hosts/{host_id}/info`                    |    ✓     | JSON: OS type, OS version, architecture                  |
+| `{prefix}/hosts/{host_id}/tags`                    |    ✓     | JSON array of tag names assigned to the host             |
+| `{prefix}/hosts/{host_id}/agent`                   |    ✓     | JSON: agent last-seen timestamp and version              |
+| `{prefix}/hosts/{host_id}/connectivity/state`      |    ✓     | `"online"` or `"offline"` — real-time agent connectivity |
+| `{prefix}/hosts/{host_id}/connectivity/attributes` |    ✓     | JSON: `{"last_seen": "…", "version": "…"}`               |
 
 The `info` payload:
 
@@ -89,16 +89,16 @@ propagated across all controllers via NATS. It reflects live connection status, 
 
 For every **host** that has at least one tracked non-featured software item, Uptrakit also publishes:
 
-| Topic | Retained | Purpose |
-| --- | :---: | --- |
-| `{prefix}/hosts/{host_id}/state` | ✓ | `"unknown"` when updates pending, `"up-to-date"` otherwise |
-| `{prefix}/hosts/{host_id}/latest_version` | ✓ | `"N available"` when updates pending, `"up-to-date"` otherwise |
-| `{prefix}/hosts/{host_id}/attributes` | ✓ | JSON: package update summary (see below) |
-| `{prefix}/hosts/{host_id}/set` | — | Command topic — publish `"install"` to update all outdated non-featured items |
-| `{prefix}/hosts/{host_id}/security/state` | ✓ | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
-| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | `"N available"` when security updates pending, `"up-to-date"` otherwise |
-| `{prefix}/hosts/{host_id}/security/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
-| `{prefix}/hosts/{host_id}/security/set` | — | Command topic — publish `"install"` to update security packages only |
+| Topic                                              | Retained | Purpose                                                                       |
+| -------------------------------------------------- | :------: | ----------------------------------------------------------------------------- |
+| `{prefix}/hosts/{host_id}/state`                   |    ✓     | `"unknown"` when updates pending, `"up-to-date"` otherwise                    |
+| `{prefix}/hosts/{host_id}/latest_version`          |    ✓     | `"N available"` when updates pending, `"up-to-date"` otherwise                |
+| `{prefix}/hosts/{host_id}/attributes`              |    ✓     | JSON: package update summary (see below)                                      |
+| `{prefix}/hosts/{host_id}/set`                     |    —     | Command topic — publish `"install"` to update all outdated non-featured items |
+| `{prefix}/hosts/{host_id}/security/state`          |    ✓     | `"unknown"` when security updates pending, `"up-to-date"` otherwise           |
+| `{prefix}/hosts/{host_id}/security/latest_version` |    ✓     | `"N available"` when security updates pending, `"up-to-date"` otherwise       |
+| `{prefix}/hosts/{host_id}/security/attributes`     |    ✓     | JSON: `{"in_progress": bool, "pending_count": N}`                             |
+| `{prefix}/hosts/{host_id}/security/set`            |    —     | Command topic — publish `"install"` to update security packages only          |
 
 The `hosts/{host_id}/attributes` payload contains:
 
@@ -112,13 +112,13 @@ The `hosts/{host_id}/attributes` payload contains:
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `in_progress` | boolean | `true` while a batch update is pending or executing |
-| `pending_count` | integer | Packages with an available update (any category) |
-| `total_count` | integer | Total tracked packages on this host |
-| `bugfix_count` | integer | Pending packages classified as `"bugfix"` |
-| `feature_count` | integer | Pending packages classified as `"feature"` |
+| Field           | Type    | Description                                         |
+| --------------- | ------- | --------------------------------------------------- |
+| `in_progress`   | boolean | `true` while a batch update is pending or executing |
+| `pending_count` | integer | Packages with an available update (any category)    |
+| `total_count`   | integer | Total tracked packages on this host                 |
+| `bugfix_count`  | integer | Pending packages classified as `"bugfix"`           |
+| `feature_count` | integer | Pending packages classified as `"feature"`          |
 
 Where `{prefix}` is the **Topic Prefix** configured on the MQTT client (default: `uptrakit`).
 
@@ -164,18 +164,18 @@ Uptrakit creates one Home Assistant `update` entity for every `(software item, h
 
 Each entity displays:
 
-| Attribute | Description |
-| --- | --- |
-| Installed version | The currently installed version on the host (blank if unknown) |
-| Latest version | The newest available version (blank if unknown) |
-| Update available | `true` when latest > installed |
-| In progress | `true` while an update is pending or executing (displays a spinner in the HA UI) |
-| Update category | Classification of the pending update (`"security"`, `"bugfix"`, `"feature"`, `"unknown"`) — shown as an entity attribute when an update is available |
-| Release date | Date of the latest release (when available from release metadata) |
-| Last checked at | Timestamp of the most recent installed-version check |
-| Release URL | Link to the upstream release page (GitHub releases only; absent otherwise) |
-| Release summary | First 500 characters of the release notes (GitHub releases only; absent otherwise) |
-| Entity picture | Software item icon/logo displayed as a thumbnail in the HA dashboard (when an icon URL is set on the software item) |
+| Attribute         | Description                                                                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Installed version | The currently installed version on the host (blank if unknown)                                                                                       |
+| Latest version    | The newest available version (blank if unknown)                                                                                                      |
+| Update available  | `true` when latest > installed                                                                                                                       |
+| In progress       | `true` while an update is pending or executing (displays a spinner in the HA UI)                                                                     |
+| Update category   | Classification of the pending update (`"security"`, `"bugfix"`, `"feature"`, `"unknown"`) — shown as an entity attribute when an update is available |
+| Release date      | Date of the latest release (when available from release metadata)                                                                                    |
+| Last checked at   | Timestamp of the most recent installed-version check                                                                                                 |
+| Release URL       | Link to the upstream release page (GitHub releases only; absent otherwise)                                                                           |
+| Release summary   | First 500 characters of the release notes (GitHub releases only; absent otherwise)                                                                   |
+| Entity picture    | Software item icon/logo displayed as a thumbnail in the HA dashboard (when an icon URL is set on the software item)                                  |
 
 When the plugin for a software item fetches releases from GitHub, Uptrakit includes `release_url` and
 `release_summary` in the HA MQTT discovery config for each entity. Home Assistant surfaces these as
@@ -282,10 +282,10 @@ If a host has no tracked non-featured items, no entities are published for it.
 
 ### What the Entities Show
 
-| Pending | `state` (installed) | `latest_version` | HA behaviour |
-| --- | --- | --- | --- |
-| 0 | `"up-to-date"` | `"up-to-date"` | No update badge |
-| N > 0 | `"unknown"` | `"N available"` | Update badge, shows "N available" |
+| Pending | `state` (installed) | `latest_version` | HA behaviour                      |
+| ------- | ------------------- | ---------------- | --------------------------------- |
+| 0       | `"up-to-date"`      | `"up-to-date"`   | No update badge                   |
+| N > 0   | `"unknown"`         | `"N available"`  | Update badge, shows "N available" |
 
 Home Assistant shows the **Update available** badge whenever `installed_version != latest_version`.
 When updates are pending, `state` is `"unknown"` (there is no single aggregate installed version)
@@ -293,12 +293,12 @@ and `latest_version` shows the count, triggering the badge.
 
 Each entity exposes the following attributes:
 
-| Attribute | Type | Description |
-| --- | --- | --- |
-| `in_progress` | boolean | `true` while a batch update is pending or running |
-| `pending_count` | integer | Number of qualifying packages with an available update |
-| `total_count` | integer | Total tracked packages on this host (all-packages entity only) |
-| `bugfix_count` | integer | Pending packages classified as `"bugfix"` (all-packages entity only) |
+| Attribute       | Type    | Description                                                           |
+| --------------- | ------- | --------------------------------------------------------------------- |
+| `in_progress`   | boolean | `true` while a batch update is pending or running                     |
+| `pending_count` | integer | Number of qualifying packages with an available update                |
+| `total_count`   | integer | Total tracked packages on this host (all-packages entity only)        |
+| `bugfix_count`  | integer | Pending packages classified as `"bugfix"` (all-packages entity only)  |
 | `feature_count` | integer | Pending packages classified as `"feature"` (all-packages entity only) |
 
 ### Triggering a Host Batch Update from Home Assistant
@@ -333,12 +333,12 @@ All entities (featured software items, host summaries, security) are grouped und
 
 - **Device**: `identifiers: ["uptrakit_host_{tenant_hex}_{host_hex}"]`, `name: {friendly_name}`
 
-| Entity | Unique ID | Name | Default entity ID |
-| --- | --- | --- | --- |
-| Software item | `uptrakit_{tenant_hex}_{host_hex}_{item_hex}` | `{item_name}` | `update.uptrakit_{fn_slug}_{item_slug}` |
-| All-packages | `uptrakit_{tenant_hex}_{host_hex}_pkgs` | `{friendly_name} packages` | `update.uptrakit_{fn_slug}_packages` |
-| Security | `uptrakit_{tenant_hex}_{host_hex}_sec` | `{friendly_name} security updates` | `update.uptrakit_{fn_slug}_security_updates` |
-| Connectivity | `uptrakit_{tenant_hex}_{host_hex}_conn` | `{friendly_name} agent` | `binary_sensor.uptrakit_{fn_slug}_agent` |
+| Entity        | Unique ID                                     | Name                               | Default entity ID                            |
+| ------------- | --------------------------------------------- | ---------------------------------- | -------------------------------------------- |
+| Software item | `uptrakit_{tenant_hex}_{host_hex}_{item_hex}` | `{item_name}`                      | `update.uptrakit_{fn_slug}_{item_slug}`      |
+| All-packages  | `uptrakit_{tenant_hex}_{host_hex}_pkgs`       | `{friendly_name} packages`         | `update.uptrakit_{fn_slug}_packages`         |
+| Security      | `uptrakit_{tenant_hex}_{host_hex}_sec`        | `{friendly_name} security updates` | `update.uptrakit_{fn_slug}_security_updates` |
+| Connectivity  | `uptrakit_{tenant_hex}_{host_hex}_conn`       | `{friendly_name} agent`            | `binary_sensor.uptrakit_{fn_slug}_agent`     |
 
 Where `{tenant_hex}` and `{host_hex}` are UUID strings with dashes removed, and `{fn_slug}` is the
 friendly name slugified (lowercased, non-alphanumeric characters replaced by underscores).
@@ -350,13 +350,13 @@ agent for that host is currently connected to the controller.
 
 ### Entity properties
 
-| Property | Value |
-| --- | --- |
-| Platform | `binary_sensor` |
-| Device class | `connectivity` |
-| State `ON` | Agent is connected (`"online"`) |
-| State `OFF` | Agent is disconnected (`"offline"`) |
-| Enabled by default | Yes |
+| Property           | Value                               |
+| ------------------ | ----------------------------------- |
+| Platform           | `binary_sensor`                     |
+| Device class       | `connectivity`                      |
+| State `ON`         | Agent is connected (`"online"`)     |
+| State `OFF`        | Agent is disconnected (`"offline"`) |
+| Enabled by default | Yes                                 |
 
 Unlike the `update` entities (which are disabled by default), the connectivity sensor is
 **enabled by default** because knowing whether an agent is reachable is core operational
@@ -427,16 +427,16 @@ Cleanup runs automatically on every state update push. No manual intervention is
 
 ## Why Some Software Items May Not Appear
 
-| Symptom | Cause |
-| --- | --- |
-| Item not visible in HA | Software item is not featured (non-featured items appear in host summary entities) |
-| Item not visible in HA | Software item or host is deactivated |
-| Entity shows blank versions | Version check has not run yet since the MQTT client was configured |
-| Entity shows blank versions | No agent is connected for that host |
-| No entities at all | HA discovery not enabled on the MQTT client |
-| No entities at all | MQTT service is not connected to the broker |
-| No entities at all | HA MQTT integration not configured for the same broker |
-| State topics absent on broker | MQTT client not enabled or MQTT service not running |
+| Symptom                       | Cause                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| Item not visible in HA        | Software item is not featured (non-featured items appear in host summary entities) |
+| Item not visible in HA        | Software item or host is deactivated                                               |
+| Entity shows blank versions   | Version check has not run yet since the MQTT client was configured                 |
+| Entity shows blank versions   | No agent is connected for that host                                                |
+| No entities at all            | HA discovery not enabled on the MQTT client                                        |
+| No entities at all            | MQTT service is not connected to the broker                                        |
+| No entities at all            | HA MQTT integration not configured for the same broker                             |
+| State topics absent on broker | MQTT client not enabled or MQTT service not running                                |
 
 ## Custom CA Certificates for Private Brokers
 
