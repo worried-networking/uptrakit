@@ -19,7 +19,7 @@ pub use device::{
     DeviceAuthDenyRequest, DeviceAuthDenyResponse, DeviceAuthLookupQuery, DeviceAuthLookupResponse,
     DeviceAuthorizationRequest, DeviceAuthorizationResponse, OAuthAuthorizationServerMetadata,
     OAuthErrorCode, OAuthErrorResponse, OAuthTokenRequest, OAuthTokenResponse,
-    ParseOAuthErrorCodeError,
+    ParseOAuthErrorCodeError, USER_CODE_ALPHABET,
 };
 pub use error::OAuthError;
 pub use grant_type::{CodeChallengeMethod, OAuthGrantType, ResponseType, TokenEndpointAuthMethod};

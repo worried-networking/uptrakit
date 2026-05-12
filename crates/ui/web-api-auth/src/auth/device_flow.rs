@@ -11,16 +11,13 @@ use uptrakit_shared_db::entity::pending_device_flow;
 use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::{DeviceAuthStatus, SecretString};
-use uptrakit_web_api_types::oauth::OAuthErrorCode;
+use uptrakit_web_api_types::oauth::{OAuthErrorCode, USER_CODE_ALPHABET};
 use uuid::Uuid;
 
 use super::token::{generate_secure_token, generate_uuid, hash_token};
 
 /// TTL for device flow sessions (10 minutes).
 const DEVICE_CODE_TTL_SECONDS: i64 = 600;
-
-/// Consonant alphabet for user codes (avoids vowels to prevent offensive words).
-const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
 
 /// Hardcoded OAuth public-client identifier for the CLI. Future migration
 /// (Seam 3 in the spec): replace this constant with a lookup against an

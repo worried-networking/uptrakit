@@ -260,22 +260,26 @@ impl OAuthAuthorizationServerMetadata {
 
 // --- UI-internal: deny + lookup ---------------------------------------
 
+/// Consonant alphabet used for user-code generation and validation.
+/// Shared with the device-flow store so both sides enforce the same charset.
+pub const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
+
 /// Validate that a `user_code` string matches the `XXXX-XXXX` format:
-/// exactly 9 characters, a dash at position 4, uppercase letters elsewhere.
+/// exactly 9 characters, a dash at position 4, consonants (no vowels) elsewhere.
 fn validate_user_code_format(user_code: &str) -> Result<(), ValidationError> {
     let bytes = user_code.as_bytes();
     let valid = bytes.len() == 9
         && bytes.get(4).copied() == Some(b'-')
         && bytes
             .get(..4)
-            .is_some_and(|s| s.iter().all(|b| b.is_ascii_uppercase()))
+            .is_some_and(|s| s.iter().all(|b| USER_CODE_ALPHABET.contains(b)))
         && bytes
             .get(5..)
-            .is_some_and(|s| s.iter().all(|b| b.is_ascii_uppercase()));
+            .is_some_and(|s| s.iter().all(|b| USER_CODE_ALPHABET.contains(b)));
     if !valid {
         return Err(ValidationError {
             field: "user_code",
-            message: "user_code must be in XXXX-XXXX format (uppercase letters)".to_string(),
+            message: "user_code must be in XXXX-XXXX format (uppercase consonants)".to_string(),
         });
     }
     Ok(())
@@ -438,6 +442,36 @@ mod tests {
             "refresh_token must be omitted"
         );
         assert!(json.get("scope").is_none(), "scope must be omitted");
+    }
+
+    #[test]
+    fn validate_user_code_accepts_consonant_code() {
+        let req = DeviceAuthDenyRequest {
+            user_code: "BCDF-GHJK".into(),
+        };
+        req.validate().expect("valid consonant code should pass");
+    }
+
+    #[test]
+    fn validate_user_code_rejects_vowels() {
+        for bad in &["AEIA-UUUU", "BCDA-GHJK", "BCDF-GHAK"] {
+            let req = DeviceAuthDenyRequest {
+                user_code: (*bad).into(),
+            };
+            req.validate()
+                .expect_err(&format!("{bad} contains vowels — must fail"));
+        }
+    }
+
+    #[test]
+    fn validate_user_code_rejects_bad_format() {
+        for bad in &["BCDFGHJK", "BCDF_GHJK", "bcdf-ghjk", "BCDF-GHJKL"] {
+            let req = DeviceAuthDenyRequest {
+                user_code: (*bad).into(),
+            };
+            req.validate()
+                .expect_err(&format!("{bad} should fail format check"));
+        }
     }
 
     #[test]
