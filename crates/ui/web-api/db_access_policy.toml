@@ -135,6 +135,8 @@ get_as_metadata = "full-state"
 [routes."oauth/token.rs"]
 token = "full-state"
 device_code_grant = "ignore"
+mcp_token = "full-state"
+authorization_code_grant = "ignore"
 
 [routes."notifications.rs"]
 create_channel = "full-state"

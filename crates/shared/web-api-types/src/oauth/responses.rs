@@ -24,6 +24,31 @@ pub struct TokenResponse {
     pub scope: String,
 }
 
+impl TokenResponse {
+    /// Construct a new token response.
+    ///
+    /// Required because `#[non_exhaustive]` prevents struct-literal construction
+    /// outside the defining crate.
+    #[must_use]
+    pub fn new(
+        access_token: String,
+        token_type: String,
+        expires_in: i64,
+        refresh_token: Option<String>,
+        refresh_expires_in: Option<i64>,
+        scope: String,
+    ) -> Self {
+        Self {
+            access_token,
+            token_type,
+            expires_in,
+            refresh_token,
+            refresh_expires_in,
+            scope,
+        }
+    }
+}
+
 /// Dynamic client registration request body (RFC 7591 §2).
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
