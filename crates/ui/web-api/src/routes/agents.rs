@@ -476,7 +476,7 @@ pub(crate) fn parse_cert_metadata(
     let cert =
         Certificate::from_pem(pem.as_bytes()).map_err(|_| report!(CertRecordError::PemParse))?;
     let tbs = &cert.tbs_certificate;
-    let serial = tbs.serial_number.to_string().to_lowercase();
+    let serial = tbs.serial_number.to_string();
     let not_before = OffsetDateTime::from_unix_timestamp(
         tbs.validity.not_before.to_unix_duration().as_secs() as i64,
     )

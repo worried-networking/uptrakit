@@ -95,7 +95,7 @@ async fn record_renewal_certificate(
     let cert =
         Certificate::from_pem(cert_pem.as_bytes()).map_err(|_| report!(RenewalError::PemParse))?;
     let tbs = &cert.tbs_certificate;
-    let serial = tbs.serial_number.to_string().to_lowercase();
+    let serial = tbs.serial_number.to_string();
     let not_before = time::OffsetDateTime::from_unix_timestamp(
         tbs.validity.not_before.to_unix_duration().as_secs() as i64,
     )
@@ -155,7 +155,7 @@ pub(super) async fn sign_renewal_csr_system(
     let sys_cert = X509Certificate::from_pem(bundle.cert_pem.as_bytes())
         .map_err(|_| report!(RenewalError::PemParse))?;
     let sys_tbs = &sys_cert.tbs_certificate;
-    let serial = sys_tbs.serial_number.to_string().to_lowercase();
+    let serial = sys_tbs.serial_number.to_string();
     let not_before = time::OffsetDateTime::from_unix_timestamp(
         sys_tbs.validity.not_before.to_unix_duration().as_secs() as i64,
     )
