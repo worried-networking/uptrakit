@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use parking_lot::RwLock;
 use rcgen::{
     CertificateRevocationListParams, Issuer, KeyIdMethod, KeyPair, RevokedCertParams, SerialNumber,
 };
 use rustls::pki_types::CertificateRevocationListDer;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::Notify;
 use uptrakit_shared_db::entity::{crl_cache, prelude::*, service_certificate};
 
 use crate::pki::{self, CaSnapshot};
@@ -19,7 +20,7 @@ pub(crate) struct CrlManagerConfig {
     pub db: DatabaseConnection,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<Notify>,
-    pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
+    pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,
 }
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
@@ -313,7 +314,7 @@ impl CrlManager {
             trusted.push(TrustedIssuer::from_pem(&ca.cert_pem, key)?);
         }
 
-        let mut issuers = self.issuers.write().await;
+        let mut issuers = self.issuers.write();
         issuers.trusted = trusted;
         issuers.bundle_pem = snapshot.bundle_pem.clone();
 
@@ -322,7 +323,7 @@ impl CrlManager {
 
     /// Update server cert material (after renewal).
     pub(crate) async fn update_server_cert(&self, cert_pem: String, key_pem: String) {
-        let mut cert = self.server_cert.write().await;
+        let mut cert = self.server_cert.write();
         *cert = (cert_pem, key_pem);
     }
 
@@ -331,7 +332,7 @@ impl CrlManager {
         &self,
         fingerprint: &str,
     ) -> Option<Arc<Issuer<'static, KeyPair>>> {
-        let issuers = self.issuers.read().await;
+        let issuers = self.issuers.read();
         issuers
             .trusted
             .iter()
@@ -352,7 +353,7 @@ impl CrlManager {
         // block `update_ca` (write-lock) for the full duration of every DB
         // round-trip during CA rotation.
         let (issuers_snapshot, crl_number) = {
-            let issuers = self.issuers.read().await;
+            let issuers = self.issuers.read();
             let snapshot: Vec<(Arc<Issuer<'static, KeyPair>>, String)> = issuers
                 .trusted
                 .iter()
@@ -405,11 +406,11 @@ impl CrlManager {
 
         // Snapshot under each lock in order, then release before crypto work.
         let bundle_pem = {
-            let issuers = self.issuers.read().await;
+            let issuers = self.issuers.read();
             issuers.bundle_pem.clone()
         };
         let (cert_pem, key_pem) = {
-            let server_cert = self.server_cert.read().await;
+            let server_cert = self.server_cert.read();
             (server_cert.0.clone(), server_cert.1.clone())
         };
 
@@ -425,7 +426,7 @@ impl CrlManager {
             .reload_from_config(Arc::new(server_config));
 
         // Update the CRL PEM cache for the HTTP endpoint
-        *self.config.crl_pem_cache.write().await = crl_pem;
+        *self.config.crl_pem_cache.write() = crl_pem;
 
         // Persist each CA's CRL to the database cache (best-effort).
         for (ca_fingerprint, pem, crl_number, this_update, next_update) in persist_entries {

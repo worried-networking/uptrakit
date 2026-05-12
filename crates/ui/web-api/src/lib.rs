@@ -211,7 +211,7 @@ mod tests {
                 ca_snapshot: ca_rx,
                 ca_key_store,
                 revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-                crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+                crl_pem_cache: Arc::new(parking_lot::RwLock::new(String::new())),
                 ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             },
             auth: crate::app_state::AuthState::new(

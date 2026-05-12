@@ -17,7 +17,7 @@ pub async fn ca_cert(State(cert): State<CertState>) -> impl IntoResponse {
 
 #[tracing::instrument(skip_all)]
 pub async fn ca_crl(State(cert): State<CertState>) -> impl IntoResponse {
-    let crl_pem = cert.crl_pem_cache.read().await.clone();
+    let crl_pem = cert.crl_pem_cache.read().clone();
     if crl_pem.is_empty() {
         return error_response(StatusCode::NOT_FOUND, "Not found");
     }
