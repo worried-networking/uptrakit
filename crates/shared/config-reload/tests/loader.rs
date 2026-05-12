@@ -220,3 +220,32 @@ fn runtime_config_captures_unknown_keys() {
     let warnings = cfg.warn_about_extras();
     assert!(warnings.iter().any(|w| w.contains("poool_size")));
 }
+
+// ── TomlConfigLoader tests ──────────────────────────────────────────────────
+
+use std::io::Write;
+use tempfile::NamedTempFile;
+use uptrakit_config_reload::TomlConfigLoader;
+
+#[test]
+fn loader_validate_only_passes_for_minimal_valid_toml() {
+    let mut f = NamedTempFile::new().unwrap();
+    writeln!(f, "{}", minimal_toml()).unwrap();
+    assert!(TomlConfigLoader::validate_only(f.path()).is_ok());
+}
+
+#[test]
+fn loader_validate_only_fails_for_bad_toml() {
+    let mut f = NamedTempFile::new().unwrap();
+    writeln!(f, "not valid toml = =").unwrap();
+    assert!(TomlConfigLoader::validate_only(f.path()).is_err());
+}
+
+#[test]
+fn loader_load_emits_extras_warnings() {
+    let mut f = NamedTempFile::new().unwrap();
+    write!(f, "{}", minimal_toml_with_typo()).unwrap();
+    let loaded = TomlConfigLoader::load(f.path()).unwrap();
+    assert!(!loaded.warnings.is_empty());
+    assert!(loaded.warnings.iter().any(|w| w.contains("poool_size")));
+}
