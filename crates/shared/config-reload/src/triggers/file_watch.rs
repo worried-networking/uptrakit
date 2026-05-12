@@ -40,7 +40,10 @@ pub fn spawn_file_watch_task(
         let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<DebounceEventResult>();
 
         let mut debouncer = match new_debouncer(FILE_WATCH_DEBOUNCE, None, move |events| {
-            let _ = notify_tx.send(events);
+            // Receiver lives as long as the spawned task; a send failure means
+            // the task has already exited, so we silently stop forwarding.
+            // Receiver dropped means coordinator is shut down; stop watching.
+            drop(notify_tx.send(events));
         }) {
             Ok(d) => d,
             Err(e) => {
