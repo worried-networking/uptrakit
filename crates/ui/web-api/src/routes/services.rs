@@ -1174,6 +1174,7 @@ mod tests {
             master_key_config_rx: config_rx_for_services.master_key,
             embedded_services_config_rx: config_rx_for_services.embedded_services,
             zeroconf_config_rx: config_rx_for_services.zeroconf,
+            oauth: crate::oauth::OAuthState::disabled(),
         })
     }
 

@@ -316,6 +316,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         master_key_config_rx: config_rx_for_harness.master_key,
         embedded_services_config_rx: config_rx_for_harness.embedded_services,
         zeroconf_config_rx: config_rx_for_harness.zeroconf,
+        oauth: crate::oauth::OAuthState::disabled(),
     });
 
     (state, jwt)

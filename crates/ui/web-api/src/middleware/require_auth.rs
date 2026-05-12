@@ -495,6 +495,7 @@ mod tests {
             master_key_config_rx: config_rx_for_require_auth.master_key,
             embedded_services_config_rx: config_rx_for_require_auth.embedded_services,
             zeroconf_config_rx: config_rx_for_require_auth.zeroconf,
+            oauth: crate::oauth::OAuthState::disabled(),
         })
     }
 

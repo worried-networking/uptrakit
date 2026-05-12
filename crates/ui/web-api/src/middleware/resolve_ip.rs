@@ -331,6 +331,7 @@ mod tests {
             master_key_config_rx: config_rx_for_resolve_ip.master_key,
             embedded_services_config_rx: config_rx_for_resolve_ip.embedded_services,
             zeroconf_config_rx: config_rx_for_resolve_ip.zeroconf,
+            oauth: crate::oauth::OAuthState::disabled(),
         })
     }
 
