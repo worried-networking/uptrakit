@@ -25,7 +25,7 @@ use crate::oauth::services::authorization_request::{
 };
 use crate::oauth::services::client::OAuthClientService;
 use crate::oauth::services::consent::OAuthConsentService;
-use crate::routes::oauth::helpers::oauth_400;
+use crate::routes::oauth::helpers::{oauth_400, percent_encode, redirect_302};
 use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 
 /// OAuth 2.1 §12.1 authorization endpoint.
@@ -236,21 +236,6 @@ fn build_authorize_uri(req: &AuthorizeRequest) -> String {
         percent_encode(&req.code_challenge_method),
         percent_encode(&req.resource),
     )
-}
-
-/// Percent-encode a string for safe use in query string values.
-fn percent_encode(s: &str) -> String {
-    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-    utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
-}
-
-/// Return a 302 redirect response.
-fn redirect_302(location: &str) -> Response {
-    (
-        StatusCode::FOUND,
-        [(axum::http::header::LOCATION, location)],
-    )
-        .into_response()
 }
 
 // ---------------------------------------------------------------------------

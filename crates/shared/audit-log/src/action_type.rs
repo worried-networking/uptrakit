@@ -746,7 +746,27 @@ uptrakit_audit_log_derive::audit_actions! {
     system_service_update_gate => SYSTEM_SERVICE_UPDATE_GATE, Event;
     system_service_machine_id_validate => SYSTEM_SERVICE_MACHINE_ID_VALIDATE, Event;
     system_service_update_freeze_apply => SYSTEM_SERVICE_UPDATE_FREEZE_APPLY, Event;
-    system_scheduler_audit_log_cleanup => SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP, Event
+    system_scheduler_audit_log_cleanup => SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP, Event;
+
+    // oauth
+    oauth_authorize_request => OAUTH_AUTHORIZE_REQUEST, Event;
+    oauth_token_issued => OAUTH_TOKEN_ISSUED, Event;
+    oauth_token_rejected => OAUTH_TOKEN_REJECTED, Event;
+    oauth_refresh_rotated => OAUTH_REFRESH_ROTATED, Event;
+    oauth_refresh_replay_detected => OAUTH_REFRESH_REPLAY_DETECTED, Event;
+    oauth_client_registered => OAUTH_CLIENT_REGISTERED, Event;
+    oauth_client_first_use => OAUTH_CLIENT_FIRST_USE, Event;
+    oauth_client_metadata_refreshed => OAUTH_CLIENT_METADATA_REFRESHED, Event;
+    oauth_client_metadata_changed_materially => OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY, Event;
+    oauth_client_trusted => OAUTH_CLIENT_TRUSTED, Event;
+    oauth_client_revoked => OAUTH_CLIENT_REVOKED, Event;
+    oauth_client_registration_rate_limited => OAUTH_CLIENT_REGISTRATION_RATE_LIMITED, Event;
+    oauth_config_audience_hosts_changed => OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED, Event;
+    oauth_cimd_parse_failed => OAUTH_CIMD_PARSE_FAILED, Event;
+    oauth_consent_grant => OAUTH_CONSENT_GRANT, Event;
+    oauth_consent_deny => OAUTH_CONSENT_DENY, Event;
+    oauth_consent_revoke => OAUTH_CONSENT_REVOKE, Event;
+    oauth_rate_limited => OAUTH_RATE_LIMITED, Event
 }
 
 #[cfg(test)]
