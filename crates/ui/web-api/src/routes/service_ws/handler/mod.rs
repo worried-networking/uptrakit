@@ -3533,6 +3533,11 @@ mod tests {
             "https://localhost".to_string(),
         );
 
+        let (_, config_rx_for_ws_handler) =
+            uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
+                &uptrakit_config_reload::RuntimeConfig::default(),
+            );
+
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
             cert: crate::app_state::CertState {
@@ -3612,6 +3617,20 @@ mod tests {
             instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
                 uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
             )),
+            coordinator_handle: {
+                let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+                uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+            },
+            settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
+            db_config_rx: config_rx_for_ws_handler.db,
+            network_config_rx: config_rx_for_ws_handler.network,
+            nats_config_rx: config_rx_for_ws_handler.nats,
+            tls_config_rx: config_rx_for_ws_handler.tls,
+            audit_config_rx: config_rx_for_ws_handler.audit,
+            log_config_rx: config_rx_for_ws_handler.log,
+            master_key_config_rx: config_rx_for_ws_handler.master_key,
+            embedded_services_config_rx: config_rx_for_ws_handler.embedded_services,
+            zeroconf_config_rx: config_rx_for_ws_handler.zeroconf,
         })
     }
 

@@ -911,6 +911,10 @@ mod tests {
             .expect("default tenant")
             .id;
 
+        let (_, config_rx_for_auth) = uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
+            &uptrakit_config_reload::RuntimeConfig::default(),
+        );
+
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
             cert: crate::app_state::CertState {
@@ -992,6 +996,20 @@ mod tests {
             instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
                 uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
             )),
+            coordinator_handle: {
+                let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+                uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+            },
+            settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
+            db_config_rx: config_rx_for_auth.db,
+            network_config_rx: config_rx_for_auth.network,
+            nats_config_rx: config_rx_for_auth.nats,
+            tls_config_rx: config_rx_for_auth.tls,
+            audit_config_rx: config_rx_for_auth.audit,
+            log_config_rx: config_rx_for_auth.log,
+            master_key_config_rx: config_rx_for_auth.master_key,
+            embedded_services_config_rx: config_rx_for_auth.embedded_services,
+            zeroconf_config_rx: config_rx_for_auth.zeroconf,
         })
     }
 

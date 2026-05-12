@@ -233,6 +233,11 @@ mod tests {
             "https://localhost".to_string(),
         );
 
+        let (_, config_rx_for_resolve_ip) =
+            uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
+                &uptrakit_config_reload::RuntimeConfig::default(),
+            );
+
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
             cert: crate::app_state::CertState {
@@ -314,6 +319,20 @@ mod tests {
             instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
                 uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
             )),
+            coordinator_handle: {
+                let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+                uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+            },
+            settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
+            db_config_rx: config_rx_for_resolve_ip.db,
+            network_config_rx: config_rx_for_resolve_ip.network,
+            nats_config_rx: config_rx_for_resolve_ip.nats,
+            tls_config_rx: config_rx_for_resolve_ip.tls,
+            audit_config_rx: config_rx_for_resolve_ip.audit,
+            log_config_rx: config_rx_for_resolve_ip.log,
+            master_key_config_rx: config_rx_for_resolve_ip.master_key,
+            embedded_services_config_rx: config_rx_for_resolve_ip.embedded_services,
+            zeroconf_config_rx: config_rx_for_resolve_ip.zeroconf,
         })
     }
 

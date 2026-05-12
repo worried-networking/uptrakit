@@ -1083,6 +1083,11 @@ mod tests {
 
         let backend = Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone()));
 
+        let (_, config_rx_for_surfaces) =
+            uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
+                &uptrakit_config_reload::RuntimeConfig::default(),
+            );
+
         (
             Arc::new(AppState {
                 db: crate::app_state::DbState::new(db.clone()),
@@ -1164,6 +1169,20 @@ mod tests {
                 instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
                     uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
                 )),
+                coordinator_handle: {
+                    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+                    uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+                },
+                settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
+                db_config_rx: config_rx_for_surfaces.db,
+                network_config_rx: config_rx_for_surfaces.network,
+                nats_config_rx: config_rx_for_surfaces.nats,
+                tls_config_rx: config_rx_for_surfaces.tls,
+                audit_config_rx: config_rx_for_surfaces.audit,
+                log_config_rx: config_rx_for_surfaces.log,
+                master_key_config_rx: config_rx_for_surfaces.master_key,
+                embedded_services_config_rx: config_rx_for_surfaces.embedded_services,
+                zeroconf_config_rx: config_rx_for_surfaces.zeroconf,
             }),
             db,
             tenant_id,

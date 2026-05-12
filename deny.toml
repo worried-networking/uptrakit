@@ -135,6 +135,11 @@ allow = [
     # applies only to MPL-licensed files. OSI approved, FSF Free/Libre.
     # Used by: option-ext (transitive via directories crate for cross-platform paths)
     "MPL-2.0",
+    # CC0-1.0: Creative Commons Zero — public domain dedication.
+    # No restrictions whatsoever on use, modification, or redistribution.
+    # FSF Free/Libre. Used by: notify v8.2.0 (transitive via notify-debouncer-full
+    # pulled by uptrakit-config-reload for filesystem watch support).
+    "CC0-1.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the

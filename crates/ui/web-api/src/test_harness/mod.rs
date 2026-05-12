@@ -233,6 +233,10 @@ pub(crate) async fn build_test_state_with_plugin_ops(
             ),
         );
 
+    let (_, config_rx_for_harness) = uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
+        &uptrakit_config_reload::RuntimeConfig::default(),
+    );
+
     let state = Arc::new(AppState {
         db: crate::app_state::DbState::new(db.clone()),
         cert: crate::app_state::CertState {
@@ -299,6 +303,20 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
         )),
+        coordinator_handle: {
+            let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+            uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+        },
+        settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
+        db_config_rx: config_rx_for_harness.db,
+        network_config_rx: config_rx_for_harness.network,
+        nats_config_rx: config_rx_for_harness.nats,
+        tls_config_rx: config_rx_for_harness.tls,
+        audit_config_rx: config_rx_for_harness.audit,
+        log_config_rx: config_rx_for_harness.log,
+        master_key_config_rx: config_rx_for_harness.master_key,
+        embedded_services_config_rx: config_rx_for_harness.embedded_services,
+        zeroconf_config_rx: config_rx_for_harness.zeroconf,
     });
 
     (state, jwt)
