@@ -68,6 +68,56 @@ pub fn update_renewal_schedule(
     );
 }
 
+/// Returns `true` when the cert arriving via the Certificate message is close
+/// enough to expiry that a natural reconnect would likely not happen in time.
+///
+/// Threshold: `max(60s, cert_lifetime / 50)` before `not_after`.
+pub fn should_force_reconnect(
+    not_after: time::OffsetDateTime,
+    now: time::OffsetDateTime,
+    cert_lifetime: std::time::Duration,
+) -> bool {
+    let window_secs = std::cmp::max(60, cert_lifetime.as_secs() / 50);
+    let until_expiry = (not_after - now).whole_seconds();
+    if until_expiry <= 0 {
+        return true;
+    }
+    (until_expiry as u64) <= window_secs
+}
+
+/// Parse the `not_after` timestamp from a PEM-encoded certificate.
+fn parse_cert_not_after(cert_pem: &str) -> Option<time::OffsetDateTime> {
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert = Certificate::from_pem(cert_pem.as_bytes()).ok()?;
+    let secs = cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs();
+    time::OffsetDateTime::from_unix_timestamp(secs as i64).ok()
+}
+
+/// Build a [`rustls::sign::CertifiedKey`] from PEM-encoded certificate and key.
+fn build_certified_key_from_pem(
+    cert_pem: &str,
+    key_pem: &str,
+) -> std::result::Result<rustls::sign::CertifiedKey, String> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| e.to_string())?;
+    let signing_key = rustls::crypto::CryptoProvider::get_default()
+        .ok_or("no crypto provider")?
+        .key_provider
+        .load_private_key(key)
+        .map_err(|e| e.to_string())?;
+    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
+}
+
 /// Handles certificate lifecycle controller messages shared across all service
 /// types.
 ///
@@ -79,7 +129,8 @@ pub fn update_renewal_schedule(
 /// - [`handle_request_cert_renewal`](Self::handle_request_cert_renewal) —
 ///   generate a CSR and send a `RenewCertificate` message.
 /// - [`handle_certificate`](Self::handle_certificate) — persist the renewed
-///   certificate and private key, trigger reconnect.
+///   certificate and private key; swap resolver if available, otherwise force
+///   reconnect.
 ///
 /// Create one instance per connection and pass it across message-loop
 /// iterations. The handler tracks the pending renewal key internally between
@@ -91,6 +142,13 @@ pub struct CertificateRenewalHandler {
     /// `initiate_renewal` and the matching `Certificate` response.
     /// Wrapped in `Zeroizing` so the buffer is wiped on drop.
     pending_renewal_key: Option<zeroize::Zeroizing<String>>,
+    /// Hot-swappable certificate resolver. When set, a renewed certificate
+    /// is swapped in-place without forcing a reconnect (unless the cert is
+    /// close to expiry).
+    pub cert_resolver: Option<std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>>,
+    /// Expected lifetime of issued certificates in hours. Used to compute
+    /// the `should_force_reconnect` threshold.
+    pub cert_lifetime_hours: u32,
 }
 
 impl CertificateRenewalHandler {
@@ -98,7 +156,25 @@ impl CertificateRenewalHandler {
     pub fn new() -> Self {
         Self {
             pending_renewal_key: None,
+            cert_resolver: None,
+            cert_lifetime_hours: 168,
         }
+    }
+
+    /// Set the certificate resolver. Call before entering the event loop.
+    pub fn with_resolver(
+        mut self,
+        resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
+    ) -> Self {
+        self.cert_resolver = Some(resolver);
+        self
+    }
+
+    /// Set the expected certificate lifetime in hours. Used to compute the
+    /// force-reconnect threshold in [`handle_certificate`](Self::handle_certificate).
+    pub fn with_cert_lifetime_hours(mut self, hours: u32) -> Self {
+        self.cert_lifetime_hours = hours;
+        self
     }
 
     /// Handle a `CaBundleUpdated` message by persisting the new CA bundle.
@@ -160,25 +236,80 @@ impl CertificateRenewalHandler {
     /// Handle a `Certificate` message by persisting the renewed certificate
     /// and private key.
     ///
-    /// Returns `LoopOutcome::Reconnect` on success (the service should
-    /// reconnect with the new credentials). Returns
-    /// `LoopOutcome::Disconnected` if no pending renewal key exists.
+    /// When a [`cert_resolver`](Self::cert_resolver) is set, the new
+    /// certificate is swapped in-place via the resolver so the next TLS
+    /// handshake uses the fresh credentials without forcing a reconnect.
+    /// A reconnect is still forced when:
+    ///
+    /// - The certificate's `not_after` cannot be parsed.
+    /// - [`should_force_reconnect`] returns `true` (cert close to expiry).
+    /// - Building a [`rustls::sign::CertifiedKey`] from the PEM fails.
+    ///
+    /// Returns `Ok(None)` when the swap succeeds and the session can be
+    /// retained. Returns `Ok(Some(LoopOutcome::Reconnect))` when a full
+    /// reconnect is required. Returns `Ok(Some(LoopOutcome::Disconnected))`
+    /// when no pending renewal key exists.
     pub async fn handle_certificate(
         &mut self,
         identity: &mut ServiceIdentityState,
         payload: &CertificatePayload,
-    ) -> Result<LoopOutcome> {
+    ) -> Result<Option<LoopOutcome>> {
         let key_pem = match self.pending_renewal_key.take() {
             Some(k) => k,
             None => {
                 tracing::error!("received certificate but no pending renewal key");
-                return Ok(LoopOutcome::Disconnected);
+                return Ok(Some(LoopOutcome::Disconnected));
             }
         };
         identity.save_certificate(&payload.cert_pem).await?;
         identity.save_private_key(&key_pem).await?;
-        tracing::info!("renewed certificate saved, reconnecting");
-        Ok(LoopOutcome::Reconnect)
+        tracing::info!("renewed certificate saved");
+
+        // Parse not_after from the saved cert.
+        let not_after = match parse_cert_not_after(&payload.cert_pem) {
+            Some(t) => t,
+            None => {
+                // Can't determine expiry — force reconnect to be safe.
+                tracing::warn!("cannot parse cert not_after, forcing reconnect");
+                if let Some(ref resolver) = self.cert_resolver
+                    && let Ok(ck) = build_certified_key_from_pem(&payload.cert_pem, &key_pem)
+                {
+                    resolver.swap(std::sync::Arc::new(ck));
+                }
+                return Ok(Some(LoopOutcome::Reconnect));
+            }
+        };
+
+        // Build the new CertifiedKey and swap resolver.
+        if let Some(ref resolver) = self.cert_resolver {
+            match build_certified_key_from_pem(&payload.cert_pem, &key_pem) {
+                Ok(ck) => resolver.swap(std::sync::Arc::new(ck)),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to build CertifiedKey for resolver swap, forcing reconnect"
+                    );
+                    return Ok(Some(LoopOutcome::Reconnect));
+                }
+            }
+        }
+
+        let now = time::OffsetDateTime::now_utc();
+        let cert_lifetime =
+            std::time::Duration::from_secs(u64::from(self.cert_lifetime_hours) * 3600);
+        if should_force_reconnect(not_after, now, cert_lifetime) {
+            tracing::info!(
+                not_after = %not_after,
+                "cert renewal close to expiry, forcing reconnect"
+            );
+            return Ok(Some(LoopOutcome::Reconnect));
+        }
+
+        tracing::debug!(
+            not_after = %not_after,
+            "cert renewal applied via resolver swap, session retained"
+        );
+        Ok(None)
     }
 
     /// Generate a keypair and CSR for certificate renewal, storing the private
@@ -357,7 +488,7 @@ mod tests {
             .handle_certificate(&mut identity, &payload)
             .await
             .expect("should not error");
-        assert_eq!(outcome, LoopOutcome::Disconnected);
+        assert_eq!(outcome, Some(LoopOutcome::Disconnected));
     }
 
     #[tokio::test]
@@ -375,9 +506,12 @@ mod tests {
         let mut handler = CertificateRenewalHandler::new();
         let _csr = handler.initiate_renewal(&identity).expect("initiate");
 
-        // Create a real self-signed cert for the payload.
+        // Create a real self-signed cert with a far-future not_after so
+        // should_force_reconnect returns false.
         let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
-        let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
+        let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
+        // Set not_after to 10 years in the future.
+        params.not_after = rcgen::date_time_ymd(2035, 1, 1);
         let cert = params.self_signed(&kp).expect("self-sign");
 
         let payload: CertificatePayload = serde_json::from_value(serde_json::json!({
@@ -390,7 +524,11 @@ mod tests {
             .handle_certificate(&mut identity, &payload)
             .await
             .expect("handle_certificate");
-        assert_eq!(outcome, LoopOutcome::Reconnect);
+        // No resolver set and cert is far from expiry → session retained (None).
+        assert!(
+            outcome.is_none(),
+            "far-future cert with no resolver should not force reconnect, got: {outcome:?}"
+        );
 
         // Verify files were written.
         assert!(identity.cert_pem().is_some());
@@ -516,5 +654,54 @@ mod tests {
             !dir.path().join("ca.pem").exists(),
             "ca.pem must not be created from empty CaBundleUpdated"
         );
+    }
+
+    // ── should_force_reconnect ───────────────────────────────────────────
+
+    #[test]
+    fn force_reconnect_threshold_default_lifetime() {
+        let lifetime_hours = 168u64;
+        let now = time::OffsetDateTime::now_utc();
+        let cert_lifetime = std::time::Duration::from_secs(lifetime_hours * 3600);
+        // threshold = max(60, 168*3600/50) = max(60, 12096) = 12096s
+        let cases = [
+            (lifetime_hours * 3600 - 1, false),
+            (12_097u64, false),
+            (12_095u64, true),
+            (60u64, true),
+            (1u64, true),
+        ];
+        for (until_expiry, expected) in cases {
+            let not_after = now + time::Duration::seconds(until_expiry as i64);
+            assert_eq!(
+                should_force_reconnect(not_after, now, cert_lifetime),
+                expected,
+                "until_expiry={until_expiry}",
+            );
+        }
+    }
+
+    #[test]
+    fn force_reconnect_threshold_minimum_60s() {
+        // cert_lifetime = 120s → cert_lifetime/50 = 2s < 60s → floor at 60s
+        let cert_lifetime = std::time::Duration::from_secs(120);
+        let now = time::OffsetDateTime::now_utc();
+        let not_after_inside = now + time::Duration::seconds(45);
+        assert!(should_force_reconnect(not_after_inside, now, cert_lifetime));
+        let not_after_outside = now + time::Duration::seconds(75);
+        assert!(!should_force_reconnect(
+            not_after_outside,
+            now,
+            cert_lifetime
+        ));
+    }
+
+    #[test]
+    fn force_reconnect_expired_cert() {
+        let cert_lifetime = std::time::Duration::from_secs(3600);
+        let now = time::OffsetDateTime::now_utc();
+        // not_after in the past → should force reconnect
+        let not_after = now - time::Duration::seconds(1);
+        assert!(should_force_reconnect(not_after, now, cert_lifetime));
     }
 }

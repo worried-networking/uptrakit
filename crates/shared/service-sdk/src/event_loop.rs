@@ -66,6 +66,20 @@ async fn send_keepalive_ping(conn: &mut ControllerConnection) -> Option<LoopOutc
     None
 }
 
+/// TLS connection parameters for [`run_event_loop`].
+///
+/// Bundles host/port, the TLS connector, and the hot-swap cert resolver so
+/// that `run_event_loop` stays within the argument-count limit.
+pub(crate) struct ConnectParams<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub tls_connector: &'a tokio_rustls::TlsConnector,
+    /// Hot-swap resolver built once per process lifetime and threaded into
+    /// [`CertificateRenewalHandler`] so that renewed certificates are applied
+    /// in-place without forcing a reconnect.
+    pub cert_resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
+}
+
 /// Run the unified event loop for an authenticated service connection.
 ///
 /// Handles:
@@ -88,25 +102,37 @@ async fn send_keepalive_ping(conn: &mut ControllerConnection) -> Option<LoopOutc
 #[tracing::instrument(skip_all, name = "service.event_loop")]
 pub(crate) async fn run_event_loop<H: ServiceHandler>(
     handler: &mut H,
-    host: &str,
-    port: u16,
-    tls_connector: &tokio_rustls::TlsConnector,
+    conn_params: &ConnectParams<'_>,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
     signals: &mut SignalWatcher,
 ) -> LoopResult<LoopOutcome> {
     tracing::info!("connecting to controller (authenticated)");
-    let mut conn = ControllerConnection::connect(host, port, tls_connector, None)
-        .await
-        .context_to::<LoopError>()?;
+    let mut conn = ControllerConnection::connect(
+        conn_params.host,
+        conn_params.port,
+        conn_params.tls_connector,
+        None,
+    )
+    .await
+    .context_to::<LoopError>()?;
 
-    run_event_loop_connected(handler, &mut conn, identity, ctx, signals).await
+    run_event_loop_connected(
+        handler,
+        &mut conn,
+        std::sync::Arc::clone(&conn_params.cert_resolver),
+        identity,
+        ctx,
+        signals,
+    )
+    .await
 }
 
 /// Inner connected event loop shared by the lifecycle and tests.
 pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
     handler: &mut H,
     conn: &mut ControllerConnection,
+    cert_resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
     signals: &mut SignalWatcher,
@@ -125,7 +151,7 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
 
     // Renewal timer — initially far-future, reset when ServiceSettings arrives.
     let mut renewal_sleep = create_renewal_sleep();
-    let mut cert_handler = CertificateRenewalHandler::new();
+    let mut cert_handler = CertificateRenewalHandler::new().with_resolver(cert_resolver);
 
     let mut shutdown_timeout: Duration = DEFAULT_SHUTDOWN_TIMEOUT;
 
@@ -403,13 +429,10 @@ async fn handle_controller_message<H: ServiceHandler>(
             );
             Ok(None)
         }
-        Some(ControllerMessage::Certificate(payload)) => {
-            let outcome = cert_handler
-                .handle_certificate(identity, &payload)
-                .await
-                .context_to::<LoopError>()?;
-            Ok(Some(outcome))
-        }
+        Some(ControllerMessage::Certificate(payload)) => cert_handler
+            .handle_certificate(identity, &payload)
+            .await
+            .context_to::<LoopError>(),
         Some(ControllerMessage::ServiceSettings(settings)) => {
             process_service_settings(&settings, handler, conn, loop_state, identity, ctx).await;
             Ok(None)
@@ -538,6 +561,7 @@ fn dispatch_close_reason(reason: Option<&CloseReason>) -> LoopOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cert_resolver::AgentClientCertResolver;
     use crate::error::{EnrollmentError, ProtocolError, TlsError};
     use async_trait::async_trait;
     use futures_util::Stream;
@@ -553,6 +577,33 @@ mod tests {
         tokio_tungstenite::tungstenite::Message,
         tokio_tungstenite::tungstenite::Error,
     >;
+
+    /// Install the aws-lc-rs crypto provider (idempotent).
+    fn install_crypto_provider() {
+        // Deliberately discarded: install_default() returns Err when a provider
+        // is already set (idempotent call across tests), which is expected.
+        drop(rustls::crypto::aws_lc_rs::default_provider().install_default());
+    }
+
+    /// Create a minimal dummy [`AgentClientCertResolver`] for tests that need
+    /// to call `run_event_loop_connected` but do not exercise certificate logic.
+    fn make_test_cert_resolver() -> Arc<AgentClientCertResolver> {
+        install_crypto_provider();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("keygen must succeed");
+        let params = rcgen::CertificateParams::new(vec!["test.local".to_string()])
+            .expect("params must be valid");
+        let cert = params.self_signed(&key).expect("self-sign must succeed");
+
+        let cert_der = rustls::pki_types::CertificateDer::from(cert.der().to_vec());
+        let key_der = rustls::pki_types::PrivateKeyDer::Pkcs8(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()),
+        );
+        let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key_der)
+            .expect("signing key must load");
+        let ck = Arc::new(rustls::sign::CertifiedKey::new(vec![cert_der], signing_key));
+        Arc::new(AgentClientCertResolver::new(ck))
+    }
 
     #[derive(Clone, Copy)]
     enum ReadPhase {
@@ -715,9 +766,17 @@ mod tests {
         }
         drop(event_tx);
 
+        let cert_resolver = make_test_cert_resolver();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            run_event_loop_connected(&mut handler, &mut conn, &mut identity, &ctx, &mut signals),
+            run_event_loop_connected(
+                &mut handler,
+                &mut conn,
+                cert_resolver,
+                &mut identity,
+                &ctx,
+                &mut signals,
+            ),
         )
         .await;
 
