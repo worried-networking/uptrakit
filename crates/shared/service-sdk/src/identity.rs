@@ -686,6 +686,27 @@ pub async fn save_identity(state_dir: &Path, service_json: &str, key_pem: &str) 
     Ok(())
 }
 
+/// Remove any `.tmp`-prefixed files left in `base` by a prior crashed write.
+///
+/// `tempfile::NamedTempFile::new_in` creates files with a `.tmp` prefix.
+/// On process restart, any surviving temp files are partial writes and must
+/// be removed before loading identity state.
+pub fn sweep_tmp_siblings(base: &Path) -> Result<()> {
+    let entries = std::fs::read_dir(base).map_err(|e| report!(EnrollmentError::Io(e)))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| report!(EnrollmentError::Io(e)))?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with(".tmp") {
+            tracing::warn!(
+                file = %name.to_string_lossy(),
+                "removing orphan tempfile in identity dir (crashed mid-write)"
+            );
+            std::fs::remove_file(entry.path()).map_err(|e| report!(EnrollmentError::Io(e)))?;
+        }
+    }
+    Ok(())
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /// Decode the first PEM block into DER bytes.
