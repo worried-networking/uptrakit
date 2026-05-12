@@ -117,6 +117,7 @@ device_authorization = "full-state"
 [routes."oauth/helpers.rs"]
 
 [routes."oauth/authorize.rs"]
+authorize = "full-state"
 
 [routes."oauth/clients_api.rs"]
 
