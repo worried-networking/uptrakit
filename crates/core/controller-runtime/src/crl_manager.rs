@@ -687,4 +687,29 @@ mod tests {
         // parsed as a hex byte, so the result should be `None`.
         assert_eq!(parse_serial_string(""), None);
     }
+
+    #[test]
+    fn trusted_issuer_holds_arc_issuer_with_pointer_stability() {
+        use std::sync::Arc;
+        let (ca_pem, ca_key_pem) = test_ca_pair();
+        let key_pair = rcgen::KeyPair::from_pem(&ca_key_pem).expect("key parses");
+        let trusted = TrustedIssuer::from_pem(&ca_pem, key_pair).expect("constructs");
+        let issuer_arc_first: Arc<rcgen::Issuer<'static, rcgen::KeyPair>> =
+            Arc::clone(&trusted.issuer);
+        for _ in 0..5 {
+            let cloned = Arc::clone(&trusted.issuer);
+            assert!(
+                Arc::ptr_eq(&cloned, &issuer_arc_first),
+                "cache reuses same Arc<Issuer> allocation across reads"
+            );
+        }
+    }
+
+    fn test_ca_pair() -> (String, String) {
+        let mut params = rcgen::CertificateParams::new(vec!["test-ca".into()]).expect("params");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+        let key = rcgen::KeyPair::generate().expect("key");
+        let cert = params.self_signed(&key).expect("cert");
+        (cert.pem(), key.serialize_pem())
+    }
 }
