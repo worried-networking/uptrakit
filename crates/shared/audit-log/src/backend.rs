@@ -284,7 +284,7 @@ mod journald_tests {
     use tracing::field::{Field, Visit};
     use tracing::span::{Attributes, Id, Record};
     use tracing::subscriber::Interest;
-    use tracing::{Event, Metadata, Subscriber};
+    use tracing::{Event as TracingEvent, Metadata, Subscriber};
 
     use crate::AuditActionType;
 
@@ -338,7 +338,7 @@ mod journald_tests {
 
         fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 
-        fn event(&self, event: &Event<'_>) {
+        fn event(&self, event: &TracingEvent<'_>) {
             let mut visitor = FieldValueVisitor::default();
             event.record(&mut visitor);
             self.observed

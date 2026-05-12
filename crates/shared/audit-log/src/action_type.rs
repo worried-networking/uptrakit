@@ -598,6 +598,144 @@ fn validate_action_type(value: &str) -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Per-action AuditEntry constructor methods
+// ---------------------------------------------------------------------------
+
+uptrakit_audit_log_derive::audit_actions! {
+    // auth — Event
+    auth_login => AUTH_LOGIN, Event;
+    auth_logout => AUTH_LOGOUT, Event;
+    auth_api_token_authenticate => AUTH_API_TOKEN_AUTHENTICATE, Event;
+    auth_jwt_authenticate => AUTH_JWT_AUTHENTICATE, Event;
+    auth_service_authenticate => AUTH_SERVICE_AUTHENTICATE, Event;
+    auth_token_refresh => AUTH_TOKEN_REFRESH, Event;
+    auth_device_start => AUTH_DEVICE_START, Event;
+    auth_device_poll => AUTH_DEVICE_POLL, Event;
+    auth_device_approve => AUTH_DEVICE_APPROVE, Event;
+    auth_device_deny => AUTH_DEVICE_DENY, Event;
+    auth_oidc_authorize => AUTH_OIDC_AUTHORIZE, Event;
+    auth_oidc_callback => AUTH_OIDC_CALLBACK, Event;
+    auth_oidc_exchange => AUTH_OIDC_EXCHANGE, Event;
+    auth_oidc_link => AUTH_OIDC_LINK, Event;
+
+    // tokens — Stateful
+    api_token_create => API_TOKEN_CREATE, Stateful;
+    api_token_revoke => API_TOKEN_REVOKE, Stateful;
+    enrollment_token_create => ENROLLMENT_TOKEN_CREATE, Stateful;
+    enrollment_token_revoke => ENROLLMENT_TOKEN_REVOKE, Stateful;
+
+    // users — Stateful
+    user_create => USER_CREATE, Stateful;
+    user_update => USER_UPDATE, Stateful;
+    user_delete => USER_DELETE, Stateful;
+
+    // oidc providers — Stateful
+    oidc_provider_create => OIDC_PROVIDER_CREATE, Stateful;
+    oidc_provider_update => OIDC_PROVIDER_UPDATE, Stateful;
+    oidc_provider_delete => OIDC_PROVIDER_DELETE, Stateful;
+
+    // plugin config — Stateful
+    plugin_config_create => PLUGIN_CONFIG_CREATE, Stateful;
+    plugin_config_update => PLUGIN_CONFIG_UPDATE, Stateful;
+    plugin_config_delete => PLUGIN_CONFIG_DELETE, Stateful;
+    plugin_type_settings_upsert => PLUGIN_TYPE_SETTINGS_UPSERT, Stateful;
+    plugin_type_settings_delete => PLUGIN_TYPE_SETTINGS_DELETE, Stateful;
+    instance_plugin_toggled => INSTANCE_PLUGIN_TOGGLED, Stateful;
+    instance_plugin_config_upserted => INSTANCE_PLUGIN_CONFIG_UPSERTED, Stateful;
+
+    // notifications
+    notification_channel_create => NOTIFICATION_CHANNEL_CREATE, Stateful;
+    notification_channel_update => NOTIFICATION_CHANNEL_UPDATE, Stateful;
+    notification_channel_delete => NOTIFICATION_CHANNEL_DELETE, Stateful;
+    notification_channel_test => NOTIFICATION_CHANNEL_TEST, Event;
+    notification_rule_create => NOTIFICATION_RULE_CREATE, Stateful;
+    notification_rule_update => NOTIFICATION_RULE_UPDATE, Stateful;
+    notification_rule_delete => NOTIFICATION_RULE_DELETE, Stateful;
+    notification_rule_test => NOTIFICATION_RULE_TEST, Event;
+    notification_callback => NOTIFICATION_CALLBACK, Event;
+
+    // settings
+    global_setting_update => GLOBAL_SETTING_UPDATE, Stateful;
+    tenant_setting_update => TENANT_SETTING_UPDATE, Stateful;
+    tenant_data_reset => TENANT_DATA_RESET, Event;
+
+    // CA + server certificate
+    system_ca_rotate => SYSTEM_CA_ROTATE, Event;
+    system_server_certificate_renew => SYSTEM_SERVER_CERTIFICATE_RENEW, Event;
+
+    // scheduled tasks
+    scheduled_task_update => SCHEDULED_TASK_UPDATE, Stateful;
+    scheduled_task_trigger => SCHEDULED_TASK_TRIGGER, Event;
+
+    // hosts + tags
+    host_tag_create => HOST_TAG_CREATE, Stateful;
+    host_tag_update => HOST_TAG_UPDATE, Stateful;
+    host_tag_delete => HOST_TAG_DELETE, Stateful;
+    host_tag_assign => HOST_TAG_ASSIGN, Event;
+    host_update => HOST_UPDATE, Stateful;
+    host_deactivate => HOST_DEACTIVATE, Stateful;
+    host_discover => HOST_DISCOVER, Event;
+
+    // services
+    service_update => SERVICE_UPDATE, Stateful;
+    service_approve => SERVICE_APPROVE, Stateful;
+    service_reject => SERVICE_REJECT, Stateful;
+    service_merge => SERVICE_MERGE, Event;
+    service_update_freeze_enable => SERVICE_UPDATE_FREEZE_ENABLE, Stateful;
+    service_update_freeze_disable => SERVICE_UPDATE_FREEZE_DISABLE, Stateful;
+    service_deactivate => SERVICE_DEACTIVATE, Stateful;
+    service_config_store => SERVICE_CONFIG_STORE, Stateful;
+    service_config_delete => SERVICE_CONFIG_DELETE, Stateful;
+    service_config_deliver => SERVICE_CONFIG_DELIVER, Event;
+    service_certificate_issue => SERVICE_CERTIFICATE_ISSUE, Event;
+    service_certificate_renew => SERVICE_CERTIFICATE_RENEW, Event;
+    service_enrollment_completed => SERVICE_ENROLLMENT_COMPLETED, Event;
+    service_credentials_deliver => SERVICE_CREDENTIALS_DELIVER, Event;
+    service_workload_claim => SERVICE_WORKLOAD_CLAIM, Event;
+    service_workload_release => SERVICE_WORKLOAD_RELEASE, Event;
+
+    // surfaces
+    surface_provider_register => SURFACE_PROVIDER_REGISTER, Event;
+    surface_action_invoke => SURFACE_ACTION_INVOKE, Event;
+
+    // software item registry
+    software_item_create => SOFTWARE_ITEM_CREATE, Stateful;
+    software_item_update => SOFTWARE_ITEM_UPDATE, Stateful;
+    software_item_delete => SOFTWARE_ITEM_DELETE, Stateful;
+    software_item_approve => SOFTWARE_ITEM_APPROVE, Stateful;
+    software_item_assign_hosts => SOFTWARE_ITEM_ASSIGN_HOSTS, Stateful;
+    software_item_unassign_host => SOFTWARE_ITEM_UNASSIGN_HOST, Stateful;
+    software_item_update_host_assignment => SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT, Stateful;
+    software_item_delete_plugin_assignment => SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT, Stateful;
+    software_item_merge => SOFTWARE_ITEM_MERGE, Event;
+    software_item_batch => SOFTWARE_ITEM_BATCH, Event;
+    software_item_enrich => SOFTWARE_ITEM_ENRICH, Event;
+
+    software_ignore_create => SOFTWARE_IGNORE_CREATE, Stateful;
+    software_ignore_delete => SOFTWARE_IGNORE_DELETE, Stateful;
+    discovery_allowlist_create => DISCOVERY_ALLOWLIST_CREATE, Stateful;
+    discovery_allowlist_delete => DISCOVERY_ALLOWLIST_DELETE, Stateful;
+
+    // software workflow
+    software_version_check_triggered => SOFTWARE_VERSION_CHECK_TRIGGERED, Event;
+    software_version_check_completed => SOFTWARE_VERSION_CHECK_COMPLETED, Event;
+    software_update_triggered => SOFTWARE_UPDATE_TRIGGERED, Event;
+    software_batch_update_triggered => SOFTWARE_BATCH_UPDATE_TRIGGERED, Event;
+    software_update_started => SOFTWARE_UPDATE_STARTED, Event;
+    software_batch_update_started => SOFTWARE_BATCH_UPDATE_STARTED, Event;
+    software_update_finalized => SOFTWARE_UPDATE_FINALIZED, Event;
+    software_batch_update_finalized => SOFTWARE_BATCH_UPDATE_FINALIZED, Event;
+    software_update_stdin_attention => SOFTWARE_UPDATE_STDIN_ATTENTION, Event;
+    software_update_interactive_control => SOFTWARE_UPDATE_INTERACTIVE_CONTROL, Event;
+
+    // system service runtime
+    system_service_update_gate => SYSTEM_SERVICE_UPDATE_GATE, Event;
+    system_service_machine_id_validate => SYSTEM_SERVICE_MACHINE_ID_VALIDATE, Event;
+    system_service_update_freeze_apply => SYSTEM_SERVICE_UPDATE_FREEZE_APPLY, Event;
+    system_scheduler_audit_log_cleanup => SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP, Event
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(

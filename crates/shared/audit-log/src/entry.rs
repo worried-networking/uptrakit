@@ -843,4 +843,12 @@ mod tests {
         assert!(entry.before_snapshot.is_none());
         assert!(entry.after_snapshot.is_none());
     }
+
+    #[test]
+    fn audit_actions_macro_generates_event_constructor() {
+        let b = AuditEntry::auth_login();
+        let entry = b.actor_system().build().expect("event builds");
+        assert_eq!(entry.action_type.as_str(), "auth.login");
+        assert!(entry.before_snapshot.is_none());
+    }
 }
