@@ -69,6 +69,7 @@ mod m20260430_000001_awaiting_restart_timeout;
 mod m20260430_000002_awaiting_restart_since;
 mod m20260430_000003_update_history_host_active_index;
 mod m20260510_000001_instance_plugin_setting;
+mod m20260512_000001_device_flow_rfc8628;
 
 pub struct Migrator;
 
@@ -142,6 +143,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260430_000002_awaiting_restart_since::Migration),
             Box::new(m20260430_000003_update_history_host_active_index::Migration),
             Box::new(m20260510_000001_instance_plugin_setting::Migration),
+            Box::new(m20260512_000001_device_flow_rfc8628::Migration),
         ]
     }
 }
