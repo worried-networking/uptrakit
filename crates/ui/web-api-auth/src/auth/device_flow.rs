@@ -405,7 +405,7 @@ impl DeviceFlowStore {
 
     /// Test helper: backdate a flow's expiry to make it expired.
     #[cfg(test)]
-    #[expect(dead_code, reason = "used by poll-based tests added in task 7")]
+    #[expect(dead_code, reason = "available for future expiry-path tests")]
     async fn expire_flow(&self, device_code: &str) {
         use sea_orm::ActiveValue::Unchanged;
         let hash = hash_token(device_code);
@@ -560,13 +560,194 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_status_pending() {}
+    /// A second test_db variant that also creates the `api_tokens` table so
+    /// that `issue_access_token` (called inside `poll` on the Authorized path)
+    /// can insert its row without a missing-table error.
+    ///
+    /// FK enforcement is disabled for this in-memory DB: we have no `users`
+    /// parent rows and do not need them for the double-consume test. This is
+    /// deliberately a unit test — no tenant, user, or session plumbing needed.
+    async fn test_db_full() -> DatabaseConnection {
+        use uptrakit_shared_db::entity::prelude::ApiToken;
+        let db = test_db().await;
+        // Disable FK enforcement so the missing `users` parent table does not
+        // block api_token inserts during this unit test.
+        db.execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("disable fk");
+        let schema = Schema::new(db.get_database_backend());
+        let stmt = schema.create_table_from_entity(ApiToken);
+        db.execute(&stmt).await.expect("create api_tokens table");
+        db
+    }
 
     #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_approve_and_status() {}
+    async fn slow_down_when_polled_too_fast() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None, None).await.unwrap();
+        let t0 = OffsetDateTime::now_utc();
+
+        let first = store.poll(&device_code, t0).await.unwrap();
+        assert!(matches!(first, PollOutcome::Pending));
+
+        let t1 = t0 + time::Duration::seconds(2); // less than POLL_INTERVAL_SECONDS (5)
+        let second = store.poll(&device_code, t1).await.unwrap();
+        assert!(matches!(second, PollOutcome::SlowDown { .. }));
+    }
+
+    #[tokio::test]
+    async fn slow_down_returns_bumped_interval() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None, None).await.unwrap();
+        let t0 = OffsetDateTime::now_utc();
+        let _ = store.poll(&device_code, t0).await.unwrap();
+
+        let t1 = t0 + time::Duration::seconds(1);
+        let outcome = store.poll(&device_code, t1).await.unwrap();
+        assert!(
+            matches!(outcome, PollOutcome::SlowDown { bumped_interval } if bumped_interval == 10),
+            "expected bumped_interval = 10, got {outcome:?}"
+        );
+
+        // Another fast poll — should bump again to 15.
+        let t2 = t1 + time::Duration::seconds(1);
+        let outcome = store.poll(&device_code, t2).await.unwrap();
+        assert!(
+            matches!(outcome, PollOutcome::SlowDown { bumped_interval } if bumped_interval == 15),
+            "expected bumped_interval = 15, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn last_polled_at_updates_on_each_poll() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db.clone());
+        let (device_code, _) = store.create(None, None).await.unwrap();
+        let t0 = OffsetDateTime::now_utc();
+        store.poll(&device_code, t0).await.unwrap();
+        let t1 = t0 + time::Duration::seconds(60);
+        store.poll(&device_code, t1).await.unwrap();
+
+        // Inspect via a direct entity read.
+        let hash = crate::auth::token::hash_token(&device_code);
+        let flow = uptrakit_shared_db::entity::pending_device_flow::Entity::find()
+            .filter(
+                uptrakit_shared_db::entity::pending_device_flow::Column::DeviceCodeHash.eq(&hash),
+            )
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        // poll stores `last_polled_at = now` where `now` is the injected parameter.
+        assert_eq!(flow.last_polled_at, Some(t1));
+    }
+
+    #[tokio::test]
+    async fn unknown_device_code_returns_unknown() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let outcome = store
+            .poll("not-a-known-code", OffsetDateTime::now_utc())
+            .await
+            .unwrap();
+        assert!(matches!(outcome, PollOutcome::Unknown));
+    }
+
+    #[tokio::test]
+    async fn malformed_device_code_returns_invalid_grant() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let outcome = store.poll("", OffsetDateTime::now_utc()).await.unwrap();
+        assert!(matches!(outcome, PollOutcome::MalformedDeviceCode));
+    }
+
+    #[tokio::test]
+    async fn deny_marks_flow_denied_and_sets_denied_by() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db.clone());
+        let (_device_code, user_code) = store.create(None, None).await.unwrap();
+        let denier = Uuid::now_v7();
+
+        store.deny(&user_code, denier).await.unwrap();
+
+        let normalized = user_code.replace('-', "").to_uppercase();
+        let flow = uptrakit_shared_db::entity::pending_device_flow::Entity::find()
+            .filter(
+                uptrakit_shared_db::entity::pending_device_flow::Column::UserCode.eq(&normalized),
+            )
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(flow.status, DeviceAuthStatus::Denied);
+        assert_eq!(flow.denied_by, Some(denier));
+        assert_eq!(flow.user_id, None);
+    }
+
+    #[tokio::test]
+    async fn poll_after_deny_returns_access_denied() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, user_code) = store.create(None, None).await.unwrap();
+        let denier = Uuid::now_v7();
+        store.deny(&user_code, denier).await.unwrap();
+
+        let outcome = store
+            .poll(&device_code, OffsetDateTime::now_utc())
+            .await
+            .unwrap();
+        assert!(matches!(outcome, PollOutcome::Denied));
+    }
+
+    #[tokio::test]
+    async fn concurrent_poll_does_not_double_consume() {
+        let db = test_db_full().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, user_code) = store.create(None, None).await.unwrap();
+        let user_id = Uuid::now_v7();
+        store.approve(&user_code, user_id).await.unwrap();
+        let now = OffsetDateTime::now_utc();
+
+        let store2 = store.clone();
+        let dc2 = device_code.clone();
+        let (a, b) = tokio::join!(store.poll(&device_code, now), store2.poll(&dc2, now),);
+
+        let outcomes = [a.unwrap(), b.unwrap()];
+        let authorized_count = outcomes
+            .iter()
+            .filter(|o| matches!(o, PollOutcome::Authorized { .. }))
+            .count();
+        let unknown_count = outcomes
+            .iter()
+            .filter(|o| matches!(o, PollOutcome::Unknown))
+            .count();
+        assert_eq!(authorized_count, 1, "exactly one authorized: {outcomes:?}");
+        assert_eq!(unknown_count, 1, "exactly one unknown: {outcomes:?}");
+    }
+
+    #[tokio::test]
+    async fn concurrent_approve_and_deny_resolves_atomically() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (_device_code, user_code) = store.create(None, None).await.unwrap();
+        let approver = Uuid::now_v7();
+        let denier = Uuid::now_v7();
+
+        let s1 = store.clone();
+        let s2 = store.clone();
+        let uc1 = user_code.clone();
+        let uc2 = user_code.clone();
+        let (a, b) = tokio::join!(s1.approve(&uc1, approver), s2.deny(&uc2, denier),);
+
+        let winners = [a.is_ok(), b.is_ok()];
+        assert_eq!(
+            winners.iter().filter(|x| **x).count(),
+            1,
+            "exactly one wins"
+        );
+    }
 
     #[tokio::test]
     async fn test_approve_normalizes_code() {
@@ -595,26 +776,6 @@ mod tests {
             DeviceFlowError::AlreadyAuthorized
         ));
     }
-
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_consume_one_time_use() {}
-
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_consume_pending_fails() {}
-
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_not_found() {}
-
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_cleanup_expired() {}
-
-    #[tokio::test]
-    #[ignore = "replaced by poll-based tests in task 7"]
-    async fn test_expired_flow_returns_expired_status() {}
 
     #[test]
     fn test_user_code_format() {
