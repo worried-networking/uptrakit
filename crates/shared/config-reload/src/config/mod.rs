@@ -1,10 +1,26 @@
+pub mod audit;
 pub mod db;
+pub mod embedded;
+pub mod log;
+pub mod master_key;
+pub mod nats;
+pub mod network;
 pub mod scope;
+pub mod tls;
+pub mod zeroconf;
 
+pub use audit::AuditConfig;
 pub use db::DbConfig;
+pub use embedded::EmbeddedServicesConfig;
+pub use log::LogConfig;
+pub use master_key::MasterKeyConfig;
+pub use nats::NatsConfig;
+pub use network::{HttpsConfig, NetworkConfig, PkiConfig};
 pub use scope::Scope;
+pub use tls::TlsConfig;
+pub use zeroconf::ZeroconfConfig;
 
-// Remaining section modules and RuntimeConfig added in Tasks 5-6.
+// RuntimeConfig and cross-section validation added in Task 6.
 /// Placeholder — expanded in Task 6.
 pub struct RuntimeConfig;
 
