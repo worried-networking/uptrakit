@@ -56,7 +56,8 @@ mod tests {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
         let v = PkceVerifier::new(challenge.to_string());
-        assert!(v.verify(verifier).is_ok());
+        v.verify(verifier)
+            .expect("RFC 7636 §4.6 example must verify");
     }
 
     #[test]
