@@ -308,6 +308,21 @@ pub(crate) struct Args {
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
 
+    /// Path to TOML config file.
+    #[arg(
+        long,
+        env = "UPTRAKIT_CONFIG",
+        default_value = "/etc/uptrakit/controller.toml"
+    )]
+    pub config: std::path::PathBuf,
+
+    /// Validate config file and exit.
+    ///
+    /// Reads the file at `--config`, validates it, and exits with code 0 on
+    /// success or 1 on failure. Does not start the server.
+    #[arg(long)]
+    pub check_config: bool,
+
     /// Optional subcommand.
     #[command(subcommand)]
     pub command: Option<ControllerCommand>,
