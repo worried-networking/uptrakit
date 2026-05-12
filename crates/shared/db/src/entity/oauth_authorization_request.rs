@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 /// `oauth_authorization_requests` row.
 ///
 /// In-flight server-side state for the MCP OAuth Authorization Server
-/// consent flow. See `m20260512_000003_oauth_authorization_requests`
+/// consent flow. See `m20260513_000003_oauth_authorization_requests`
 /// for the full schema rationale.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "oauth_authorization_requests")]

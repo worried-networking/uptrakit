@@ -230,7 +230,7 @@ mod tests {
     fn migration_index() -> u32 {
         Migrator::migrations()
             .iter()
-            .position(|m| m.name() == "m20260512_000005_oauth_refresh_tokens")
+            .position(|m| m.name() == "m20260513_000005_oauth_refresh_tokens")
             .expect("oauth_refresh_tokens migration must be registered") as u32
     }
 

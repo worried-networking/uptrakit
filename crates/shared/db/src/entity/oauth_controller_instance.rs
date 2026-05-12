@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 /// `oauth_controller_instances` row.
 ///
 /// Per-process record used by the multi-controller boot guard. See
-/// `m20260512_000006_oauth_controller_instances` for the full rationale.
+/// `m20260513_000006_oauth_controller_instances` for the full rationale.
 /// No foreign keys: rows are self-contained.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "oauth_controller_instances")]

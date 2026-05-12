@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 /// `id` is `String` (TEXT in the DB) because Client Identifier Metadata
 /// Document (CIMD) client_ids are HTTPS URLs, while Dynamic Client
 /// Registration (DCR) client_ids are UUID-as-text. See
-/// `m20260512_000001_oauth_clients` for the full rationale and column
+/// `m20260513_000001_oauth_clients` for the full rationale and column
 /// semantics.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "oauth_clients")]

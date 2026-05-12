@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 /// `oauth_consents` row.
 ///
 /// Represents a user's grant of a specific scope set to an OAuth Client.
-/// See `m20260512_000002_oauth_consents` for the full schema rationale,
+/// See `m20260513_000002_oauth_consents` for the full schema rationale,
 /// including the partial UNIQUE index on active (non-revoked) consents
 /// per `(user_id, client_id)`.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]

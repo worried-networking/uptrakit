@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 /// `oauth_refresh_tokens` row.
 ///
 /// Opaque, hashed refresh token with family-replay detection. See
-/// `m20260512_000005_oauth_refresh_tokens` for the full schema rationale
+/// `m20260513_000005_oauth_refresh_tokens` for the full schema rationale
 /// (sliding + absolute TTLs, lineage tracking via `parent_id` /
 /// `family_id`, FK semantics).
 ///
