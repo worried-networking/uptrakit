@@ -207,6 +207,9 @@ pub(crate) async fn build_initial_crls(
                 )))
             })?;
         let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
+        // Ephemeral issuer: used only to sign this startup CRL, not stored.
+        // Does not go through TrustedIssuer::from_pem because build_initial_crls
+        // is a standalone startup function that doesn't retain TrustedIssuer state.
         let issuer = Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
         let revoked = query_revoked_certs_for_ca(db, &ca.fingerprint).await?;
         let crl_num = starting_crl_number;
@@ -343,18 +346,31 @@ impl CrlManager {
         String,
         Vec<(String, String, i64, OffsetDateTime, OffsetDateTime)>,
     )> {
-        let issuers = self.issuers.read().await;
-        let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
+        // Snapshot issuers (non-async) then release lock before DB queries to
+        // avoid holding the read-lock across `.await` points — which would
+        // block `update_ca` (write-lock) for the full duration of every DB
+        // round-trip during CA rotation.
+        let (issuers_snapshot, crl_number) = {
+            let issuers = self.issuers.read().await;
+            let snapshot: Vec<(Arc<Issuer<'static, KeyPair>>, String)> = issuers
+                .trusted
+                .iter()
+                .map(|ti| (Arc::clone(&ti.issuer), ti.fingerprint.clone()))
+                .collect();
+            let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
+            (snapshot, crl_number)
+            // read-lock dropped here
+        };
 
         let mut crls = Vec::new();
         let mut combined_pem = String::new();
         let mut persist_entries = Vec::new();
-        for issuer in &issuers.trusted {
-            let revoked = query_revoked_certs_for_ca(&self.config.db, &issuer.fingerprint).await?;
+        for (issuer, fingerprint) in &issuers_snapshot {
+            let revoked = query_revoked_certs_for_ca(&self.config.db, fingerprint).await?;
             let (crl, pem, this_update, next_update) =
-                sign_crl_with_times(&issuer.issuer, revoked, crl_number)?;
+                sign_crl_with_times(issuer, revoked, crl_number)?;
             persist_entries.push((
-                issuer.fingerprint.clone(),
+                fingerprint.clone(),
                 pem.clone(),
                 crl_number as i64,
                 this_update,
