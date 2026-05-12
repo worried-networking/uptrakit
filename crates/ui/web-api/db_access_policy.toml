@@ -48,9 +48,9 @@ confirm_email_change = "full-state"
 
 [routes."autodiscovery.rs"]
 list_autodiscovery_ignores = "tenant-scoped"
-create_autodiscovery_ignore = "tenant-scoped"
-delete_autodiscovery_ignore = "tenant-scoped"
-batch_autodiscovery_ignores = "tenant-scoped"
+create_autodiscovery_ignore = "full-state"
+delete_autodiscovery_ignore = "full-state"
+batch_autodiscovery_ignores = "full-state"
 
 [routes."ca.rs"]
 ca_cert = "no-db"

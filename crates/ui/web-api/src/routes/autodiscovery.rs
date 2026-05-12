@@ -5,13 +5,13 @@
 //! - `POST /api/v1/autodiscovery/ignores`    — create rule
 //! - `DELETE /api/v1/autodiscovery/ignores/{id}` — remove rule
 
-use crate::app_state::AuditEmitterState;
+use std::sync::Arc;
+
+use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{CanManageIgnores, CanViewSoftware};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -20,6 +20,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
@@ -29,61 +31,6 @@ pub use uptrakit_web_api_types::batch_actions::{
     BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
 };
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
-
-struct AuditContext<'a> {
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_software_ignore_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_rule_id: Uuid,
-    target_display: Option<String>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-
-    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target(
-            "software_ignore",
-            target_rule_id.to_string(),
-            target_display,
-        )
-        .outcome(outcome)
-        .details(details)
-        .build();
-
-    if let Ok(entry) = entry {
-        audit_emitter.emit_best_effort(entry);
-    }
-}
-
-fn emit_software_ignore_batch_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-
-    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details)
-        .build();
-
-    if let Ok(entry) = entry {
-        audit_emitter.emit_best_effort(entry);
-    }
-}
 
 /// List autodiscovery ignore rules.
 #[utoipa::path(
@@ -144,125 +91,141 @@ pub async fn list_autodiscovery_ignores(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_autodiscovery_ignore(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageIgnores(user): CanManageIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateSoftwareIgnoreRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use uptrakit_shared_db::entity::{prelude::*, software_ignore};
-
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
     let name = req.name.trim().to_string();
 
-    // Create the rule (idempotent). Returns true if newly inserted, false if already existed.
-    let was_created = match autodiscovery_queries::create_or_ignore_ignore_rule(
-        tenant_db.db(),
-        tenant_db.tenant_id(),
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for software ignore create");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let (was_created, rule) = match autodiscovery_queries::create_or_ignore_ignore_rule_in_tx(
+        &tx,
+        tenant_id,
         &name,
         req.host_id,
     )
     .await
     {
-        Ok(created) => created,
+        Ok(result) => result,
         Err(e) => {
+            drop(tx);
             tracing::error!(error = %e, "Failed to create autodiscovery ignore rule");
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
-                Uuid::nil(),
-                Some(name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_ignore_create_failed",
-                    "name": name,
-                    "host_id": req.host_id,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "reason_code": "software_ignore_create_failed",
+                "name": name,
+                "host_id": req.host_id,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    // Fetch the current rule to get the correct ID and created_at.
-    let mut query = SoftwareIgnore::find()
-        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(software_ignore::Column::Name.eq(&name));
-    if let Some(host_id) = req.host_id {
-        query = query.filter(software_ignore::Column::HostId.eq(host_id));
-    } else {
-        query = query.filter(software_ignore::Column::HostId.is_null());
-    }
-    let rule = match query.one(tenant_db.db()).await {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
-                Uuid::nil(),
-                Some(name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_ignore_lookup_failed",
-                    "name": name,
-                    "host_id": req.host_id,
-                }),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to load autodiscovery ignore rule after create");
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
-                Uuid::nil(),
-                Some(name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_ignore_lookup_failed",
-                    "name": name,
-                    "host_id": req.host_id,
-                }),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let status = if was_created {
-        StatusCode::CREATED
-    } else {
-        StatusCode::OK
-    };
-
-    let outcome = if was_created {
-        uptrakit_audit_log::AuditOutcome::Success
-    } else {
-        uptrakit_audit_log::AuditOutcome::Partial
-    };
-    emit_software_ignore_audit(
-        &audit.0,
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
-        rule.id,
-        Some(rule.name.clone()),
-        outcome,
-        serde_json::json!({
+    if !was_created {
+        // Rule already existed — no state change, emit an Event-class entry.
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(
+            "software_ignore",
+            rule.id.to_string(),
+            Some(rule.name.clone()),
+        )
+        .outcome(AuditOutcome::Partial)
+        .details(serde_json::json!({
             "name": rule.name,
             "host_id": rule.host_id,
-            "was_created": was_created,
-        }),
-    );
+            "was_created": false,
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return (
+            StatusCode::OK,
+            Json(SoftwareIgnoreResponse {
+                id: rule.id,
+                name: rule.name,
+                host_id: rule.host_id,
+                created_at: rule.created_at,
+            }),
+        )
+            .into_response();
+    }
+
+    // New rule — emit_stateful so the snapshot is persisted atomically with the row.
+    let view = autodiscovery_queries::SoftwareIgnoreView::from(&rule);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_ignore_create(
+        &AbsentView(&view),
+        &view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "name": rule.name,
+        "host_id": rule.host_id,
+        "was_created": true,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for software ignore create");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for software ignore create");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software ignore create");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
 
     (
-        status,
+        StatusCode::CREATED,
         Json(SoftwareIgnoreResponse {
             id: rule.id,
             name: rule.name,
@@ -288,94 +251,109 @@ pub async fn create_autodiscovery_ignore(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_autodiscovery_ignore(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageIgnores(user): CanManageIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use uptrakit_shared_db::entity::{prelude::*, software_ignore};
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
-    let existing_rule = match SoftwareIgnore::find_by_id(rule_id)
-        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id()))
-        .one(tenant_db.db())
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(rule) => rule,
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, "Failed to load autodiscovery ignore rule before delete");
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                rule_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_ignore_lookup_failed",
-                }),
-            );
+            tracing::error!(error = %e, "Failed to begin transaction for software ignore delete");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    match autodiscovery_queries::delete_ignore_rule(tenant_db.db(), tenant_db.tenant_id(), rule_id)
+    let before_model =
+        match autodiscovery_queries::delete_ignore_rule_in_tx(&tx, tenant_id, rule_id).await {
+            Ok(Some(model)) => model,
+            Ok(None) => {
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("software_ignore", rule_id.to_string(), None)
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({ "reason_code": "software_ignore_not_found" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::NOT_FOUND, "Ignore rule not found");
+            }
+            Err(e) => {
+                drop(tx);
+                tracing::error!(error = %e, "Failed to delete autodiscovery ignore rule");
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("software_ignore", rule_id.to_string(), None)
+                .outcome(AuditOutcome::Failed)
+                .details(serde_json::json!({ "reason_code": "software_ignore_delete_failed" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    let before_view = autodiscovery_queries::SoftwareIgnoreView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_ignore_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "name": before_model.name,
+        "host_id": before_model.host_id,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for software ignore delete");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
         .await
     {
-        Ok(true) => {
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                rule_id,
-                existing_rule.as_ref().map(|rule| rule.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "name": existing_rule.as_ref().map(|rule| rule.name.clone()),
-                    "host_id": existing_rule.as_ref().and_then(|rule| rule.host_id),
-                }),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                rule_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "software_ignore_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Ignore rule not found")
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to delete autodiscovery ignore rule");
-            emit_software_ignore_audit(
-                &audit.0,
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                rule_id,
-                existing_rule.as_ref().map(|rule| rule.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_ignore_delete_failed",
-                    "name": existing_rule.as_ref().map(|rule| rule.name.clone()),
-                    "host_id": existing_rule.as_ref().and_then(|rule| rule.host_id),
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        tracing::error!(error = %e, "Failed to emit audit entry for software ignore delete");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software ignore delete");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Perform a batch action on multiple autodiscovery ignore rules.
@@ -398,23 +376,21 @@ pub async fn delete_autodiscovery_ignore(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_autodiscovery_ignores(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageIgnores(user): CanManageIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => {
             match autodiscovery_queries::batch_delete_ignore_rules(
                 tenant_db.db(),
-                tenant_db.tenant_id(),
+                tenant_id,
                 &body.ids,
             )
             .await
@@ -422,17 +398,21 @@ pub async fn batch_autodiscovery_ignores(
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!(error = %e, "batch delete failed");
-                    emit_software_ignore_batch_audit(
-                        &audit.0,
-                        &audit_ctx,
+                    if let Ok(entry) = AuditEntry::<Event>::builder_event(
                         uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                        uptrakit_audit_log::AuditOutcome::Failed,
-                        serde_json::json!({
-                            "batch": true,
-                            "reason_code": "batch_delete_failed",
-                            "requested_count": body.ids.len(),
-                        }),
-                    );
+                    )
+                    .tenant_scope(tenant_id)
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Failed)
+                    .details(serde_json::json!({
+                        "batch": true,
+                        "reason_code": "batch_delete_failed",
+                        "requested_count": body.ids.len(),
+                    }))
+                    .build()
+                    {
+                        state.audit_emitter.emit_event(entry);
+                    }
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -441,18 +421,22 @@ pub async fn batch_autodiscovery_ignores(
             }
         }
         unknown => {
-            emit_software_ignore_batch_audit(
-                &audit.0,
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                serde_json::json!({
-                    "batch": true,
-                    "reason_code": "unknown_action",
-                    "action": unknown,
-                    "requested_count": body.ids.len(),
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "batch": true,
+                "reason_code": "unknown_action",
+                "action": unknown,
+                "requested_count": body.ids.len(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown action: {unknown}. Supported: delete"),
@@ -460,24 +444,28 @@ pub async fn batch_autodiscovery_ignores(
         }
     };
 
-    emit_software_ignore_batch_audit(
-        &audit.0,
-        &audit_ctx,
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
-        if failed.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Success
-        } else if succeeded_ids.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Denied
-        } else {
-            uptrakit_audit_log::AuditOutcome::Partial
-        },
-        serde_json::json!({
-            "batch": true,
-            "requested_count": body.ids.len(),
-            "succeeded_count": succeeded_ids.len(),
-            "failed_count": failed.len(),
-        }),
-    );
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(if failed.is_empty() {
+        AuditOutcome::Success
+    } else if succeeded_ids.is_empty() {
+        AuditOutcome::Denied
+    } else {
+        AuditOutcome::Partial
+    })
+    .details(serde_json::json!({
+        "batch": true,
+        "requested_count": body.ids.len(),
+        "succeeded_count": succeeded_ids.len(),
+        "failed_count": failed.len(),
+    }))
+    .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -693,7 +681,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_ignore_lookup_db_failure_writes_failed_audit_event() {
+    async fn delete_ignore_db_failure_writes_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
         seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
@@ -726,7 +714,7 @@ mod tests {
         let details = row.details_json.expect("details");
         assert_eq!(
             details["reason_code"],
-            serde_json::json!("software_ignore_lookup_failed")
+            serde_json::json!("software_ignore_delete_failed")
         );
     }
 
