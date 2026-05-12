@@ -70,8 +70,8 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
     for a in list.0 {
         let m = &a.method;
         let c = &a.action_const;
-        let item = match a.kind.to_string().as_str() {
-            "Event" => quote! {
+        let item = if a.kind == "Event" {
+            quote! {
                 impl crate::entry::AuditEntry<crate::entry::Event> {
                     /// Returns a builder pre-configured with the
                     #[doc = concat!("`", stringify!(#c), "`")]
@@ -85,8 +85,9 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
                         )
                     }
                 }
-            },
-            "Stateful" => quote! {
+            }
+        } else if a.kind == "Stateful" {
+            quote! {
                 impl crate::entry::AuditEntry<crate::entry::Stateful> {
                     /// Returns a builder pre-configured with the
                     #[doc = concat!("`", stringify!(#c), "`")]
@@ -112,13 +113,13 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
                         .after(after)
                     }
                 }
-            },
-            other => {
-                let msg = format!(
-                    "audit_actions!: unknown kind `{other}`; expected `Event` or `Stateful`"
-                );
-                quote! { ::std::compile_error!(#msg); }
             }
+        } else {
+            let msg = format!(
+                "audit_actions!: unknown kind `{}`; expected `Event` or `Stateful`",
+                a.kind
+            );
+            quote! { ::std::compile_error!(#msg); }
         };
         items.push(item);
     }

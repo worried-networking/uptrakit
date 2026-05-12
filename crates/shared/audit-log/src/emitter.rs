@@ -323,3 +323,161 @@ mod tests {
         drop(hook);
     }
 }
+
+#[cfg(all(test, feature = "db"))]
+mod db_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helpers — expect is used in setup functions; panic is acceptable in test context"
+    )]
+
+    use std::sync::Arc;
+
+    use sea_orm::{
+        ConnectOptions, ConnectionTrait as _, Database, DatabaseConnection, EntityTrait as _,
+        TransactionTrait as _,
+    };
+
+    use super::AuditEmitter;
+    use crate::AuditActionType;
+    use crate::backend::{AuditLogBackend, DatabaseBackend, NoopBackend};
+    use crate::dispatcher::AuditLogDispatcher;
+    use crate::entry::{AuditEntry, AuditView, Stateful};
+
+    struct Demo {
+        id: uuid::Uuid,
+        name: String,
+    }
+
+    impl AuditView for Demo {
+        const TARGET_TYPE: &'static str = "demo";
+        fn audit_target_id(&self) -> String {
+            self.id.to_string()
+        }
+        fn audit_target_display(&self) -> Option<String> {
+            Some(self.name.clone())
+        }
+        fn audit_view(&self) -> serde_json::Value {
+            serde_json::json!({ "name": self.name })
+        }
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect(ConnectOptions::new("sqlite::memory:"))
+            .await
+            .expect("test db should open");
+        db.execute_unprepared(
+            "CREATE TABLE audit_logs (
+                id BLOB PRIMARY KEY NOT NULL,
+                tenant_id BLOB NOT NULL,
+                actor_type TEXT NOT NULL,
+                actor_id BLOB NULL,
+                actor_display TEXT NULL,
+                action_type TEXT NOT NULL,
+                action_kind TEXT NOT NULL,
+                target_type TEXT NULL,
+                target_id TEXT NULL,
+                target_display TEXT NULL,
+                outcome TEXT NOT NULL,
+                details_json TEXT NULL,
+                before_snapshot TEXT NULL,
+                after_snapshot TEXT NULL,
+                correlation_id BLOB NULL,
+                request_id TEXT NULL,
+                occurred_at TEXT NOT NULL
+            )",
+        )
+        .await
+        .expect("audit_logs table should be created");
+        db.execute_unprepared(
+            "CREATE TABLE system_audit_logs (
+                id BLOB PRIMARY KEY NOT NULL,
+                actor_type TEXT NOT NULL,
+                actor_id BLOB NULL,
+                actor_display TEXT NULL,
+                action_type TEXT NOT NULL,
+                action_kind TEXT NOT NULL,
+                target_type TEXT NULL,
+                target_id TEXT NULL,
+                target_display TEXT NULL,
+                outcome TEXT NOT NULL,
+                details_json TEXT NULL,
+                before_snapshot TEXT NULL,
+                after_snapshot TEXT NULL,
+                correlation_id BLOB NULL,
+                request_id TEXT NULL,
+                occurred_at TEXT NOT NULL
+            )",
+        )
+        .await
+        .expect("system_audit_logs table should be created");
+        db
+    }
+
+    fn make_emitter(db: &DatabaseConnection) -> AuditEmitter {
+        let db_backend = Arc::new(DatabaseBackend::new(db.clone())) as Arc<dyn AuditLogBackend>;
+        let mirror = Arc::new(NoopBackend) as Arc<dyn AuditLogBackend>;
+        AuditEmitter::with_backends(AuditLogDispatcher::new(mirror.clone()), db_backend, mirror)
+    }
+
+    fn make_stateful_entry(tenant_id: uuid::Uuid) -> AuditEntry<Stateful> {
+        let before = Demo {
+            id: uuid::Uuid::now_v7(),
+            name: "before".into(),
+        };
+        let after = Demo {
+            id: before.id,
+            name: "after".into(),
+        };
+        AuditEntry::<Stateful>::builder_stateful(AuditActionType::PLUGIN_CONFIG_UPDATE)
+            .before(&before)
+            .after(&after)
+            .tenant_scope(tenant_id)
+            .build()
+            .expect("stateful entry should build")
+    }
+
+    #[tokio::test]
+    async fn emit_stateful_round_trip_commits_row() {
+        let db = setup_db().await;
+        let emitter = make_emitter(&db);
+        let entry = make_stateful_entry(uuid::Uuid::now_v7());
+        let hook = emitter.commit_hook();
+        let tx = db.begin().await.expect("txn should start");
+        emitter
+            .emit_stateful(&tx, &hook, entry)
+            .await
+            .expect("emit_stateful should succeed");
+        tx.commit().await.expect("txn should commit");
+        hook.flush_after_commit().await;
+
+        let row = uptrakit_shared_db::entity::audit_log::Entity::find()
+            .one(&db)
+            .await
+            .expect("query should succeed")
+            .expect("row should exist after commit");
+        assert_eq!(row.action_kind, "stateful");
+        assert!(row.before_snapshot.is_some());
+        assert!(row.after_snapshot.is_some());
+    }
+
+    #[tokio::test]
+    async fn emit_stateful_rollback_leaves_no_row() {
+        let db = setup_db().await;
+        let emitter = make_emitter(&db);
+        let entry = make_stateful_entry(uuid::Uuid::now_v7());
+        let hook = emitter.commit_hook();
+        let tx = db.begin().await.expect("txn should start");
+        emitter
+            .emit_stateful(&tx, &hook, entry)
+            .await
+            .expect("emit_stateful should succeed");
+        tx.rollback().await.expect("rollback should succeed");
+
+        let row = uptrakit_shared_db::entity::audit_log::Entity::find()
+            .one(&db)
+            .await
+            .expect("query should succeed");
+        assert!(row.is_none(), "rollback should leave no audit row");
+    }
+}

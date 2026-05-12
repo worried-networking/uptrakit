@@ -41,6 +41,7 @@ pub enum AuditActorType {
 
 impl AuditActorType {
     /// Returns the canonical lowercase string representation.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -71,6 +72,7 @@ pub enum AuditOutcome {
 
 impl AuditOutcome {
     /// Returns the canonical lowercase string representation.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Success => "success",
@@ -110,6 +112,7 @@ impl TryFrom<&str> for AuditOutcome {
 /// [`AuditEntry::builder_event`] or [`AuditEntry::builder_stateful`] to
 /// construct entries; the builder enforces that all required snapshots are
 /// supplied at compile time before `.build()` is callable.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct AuditEntry<K> {
     pub id: Uuid,
@@ -138,6 +141,7 @@ pub struct AuditEntry<K> {
 /// carrying the `K` type parameter into trait objects.
 ///
 /// Obtain via `AuditEntry<Event>::into()` or `AuditEntry<Stateful>::into()`.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct AuditEntryErased {
     pub id: Uuid,
