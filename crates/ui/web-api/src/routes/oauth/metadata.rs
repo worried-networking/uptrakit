@@ -54,6 +54,11 @@ pub async fn get_as_metadata(State(state): State<Arc<AppState>>) -> Response {
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helper functions are not covered by allow-expect-in-tests"
+    )]
+
     use super::*;
     use http::StatusCode;
     use uptrakit_web_api_types::oauth::AuthorizationServerMetadata;

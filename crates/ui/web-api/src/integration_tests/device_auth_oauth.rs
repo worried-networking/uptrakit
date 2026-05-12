@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test helper functions are not covered by allow-expect-in-tests"
+)]
+
 use http::StatusCode;
 use uptrakit_web_api_types::{
     oauth::{
