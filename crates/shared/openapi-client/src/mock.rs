@@ -346,16 +346,6 @@ impl<'a> MockAuth<'a> {
         MockEndpoint::new(self.server, "GET", paths::auth::METHODS)
     }
 
-    /// Mock `POST /api/v1/auth/device`.
-    pub fn on_device_auth_start(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "POST", paths::auth::DEVICE)
-    }
-
-    /// Mock `POST /api/v1/auth/device/poll`.
-    pub fn on_device_auth_poll(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "POST", paths::auth::DEVICE_POLL)
-    }
-
     /// Mock `POST /api/v1/auth/device/approve`.
     pub fn on_device_auth_approve(&self) -> MockEndpoint<'_> {
         MockEndpoint::new(self.server, "POST", paths::auth::DEVICE_APPROVE)

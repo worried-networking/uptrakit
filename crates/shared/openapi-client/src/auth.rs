@@ -4,10 +4,7 @@ use crate::types_impl::auth::{
     AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,
     UserResponse,
 };
-use crate::types_impl::device_auth::{
-    DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
-    DeviceAuthPollResponse, DeviceAuthStartRequest, DeviceAuthStartResponse,
-};
+use crate::types_impl::device_auth::{DeviceAuthApproveRequest, DeviceAuthApproveResponse};
 use crate::types_impl::oidc_auth::AuthMethodsResponse;
 
 impl UptrakitClient {
@@ -47,29 +44,6 @@ impl UptrakitClient {
         self.get_unauth(crate::paths::auth::METHODS).await
     }
 
-    /// Start a device authorization flow (RFC 8628-style).
-    ///
-    /// This endpoint does not require authentication.
-    pub async fn device_auth_start(
-        &self,
-        req: &DeviceAuthStartRequest,
-    ) -> Result<DeviceAuthStartResponse> {
-        self.post_json_unauth(crate::paths::auth::DEVICE, req).await
-    }
-
-    /// Poll for device authorization completion.
-    ///
-    /// Returns `Err(ClientError::RateLimited)` on HTTP 429 and
-    /// `Err(ClientError::NotFound(...))` on HTTP 404. This endpoint does
-    /// not require authentication.
-    pub async fn device_auth_poll(
-        &self,
-        req: &DeviceAuthPollRequest,
-    ) -> Result<DeviceAuthPollResponse> {
-        self.post_json_unauth(crate::paths::auth::DEVICE_POLL, req)
-            .await
-    }
-
     /// Approve a pending device authorization request.
     pub async fn device_auth_approve(
         &self,
@@ -89,9 +63,7 @@ impl UptrakitClient {
 mod tests {
     use crate::types_impl::SecretString;
     use crate::types_impl::auth::{LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest};
-    use crate::types_impl::device_auth::{
-        DeviceAuthApproveRequest, DeviceAuthPollRequest, DeviceAuthStartRequest,
-    };
+    use crate::types_impl::device_auth::DeviceAuthApproveRequest;
 
     #[test]
     fn register_request_serialization() {
@@ -149,24 +121,6 @@ mod tests {
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["refresh_token"], "refresh-tok-xyz");
-    }
-
-    #[test]
-    fn device_auth_start_request_serialization() {
-        let req = DeviceAuthStartRequest {
-            client_name: Some("cli-host-2026-02-16".to_string()),
-        };
-        let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["client_name"], "cli-host-2026-02-16");
-    }
-
-    #[test]
-    fn device_auth_poll_request_serialization() {
-        let req = DeviceAuthPollRequest {
-            device_code: "abc-123".to_string(),
-        };
-        let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["device_code"], "abc-123");
     }
 
     #[test]

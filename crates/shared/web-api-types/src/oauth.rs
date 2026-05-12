@@ -57,13 +57,11 @@ impl Validate for DeviceAuthorizationRequest {
                 message: "client_id is required".to_string(),
             });
         }
-        if let Some(scope) = &self.scope {
-            if scope.trim().is_empty() {
-                return Err(ValidationError {
-                    field: "scope",
-                    message: "scope must be non-empty when present".to_string(),
-                });
-            }
+        if self.scope.as_deref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(ValidationError {
+                field: "scope",
+                message: "scope must be non-empty when present".to_string(),
+            });
         }
         Ok(())
     }
@@ -222,11 +220,6 @@ pub struct DeviceAuthLookupResponse {
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::assertions_on_result_states,
-        reason = "test assertions — is_ok/is_err provides readable failure messages"
-    )]
-
     use super::*;
 
     const KNOWN_VARIANTS: &[&str] = &[
@@ -272,7 +265,7 @@ mod tests {
             scope: None,
             client_name: None,
         };
-        assert!(req.validate().is_err());
+        req.validate().unwrap_err();
     }
 
     #[test]
@@ -282,7 +275,7 @@ mod tests {
             device_code: None,
             client_id: None,
         };
-        assert!(req.validate().is_err());
+        req.validate().unwrap_err();
     }
 
     #[test]
