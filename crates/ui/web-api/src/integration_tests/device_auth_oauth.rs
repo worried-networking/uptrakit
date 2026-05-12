@@ -1,5 +1,3 @@
-#![cfg(all(test, feature = "db-sqlite"))]
-
 use http::StatusCode;
 use uptrakit_web_api_types::oauth::{
     DeviceAuthDenyResponse, DeviceAuthLookupResponse, DeviceAuthorizationResponse,
