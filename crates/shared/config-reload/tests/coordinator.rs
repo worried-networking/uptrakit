@@ -259,3 +259,18 @@ async fn coordinator_refuses_reloads_in_degraded() {
     coord.enqueue_and_drain(test_delta()).await;
     assert!(matches!(coord.state(), CoordinatorState::Degraded(_)));
 }
+
+// ── Task 15 ────────────────────────────────────────────────────────────────
+
+use uptrakit_config_reload::SettingsVersionCache;
+
+#[test]
+fn settings_version_cache_loads_and_swaps() {
+    let cache = SettingsVersionCache::new();
+    cache.update(Scope::Global, 1);
+    cache.update(Scope::Global, 2);
+    assert_eq!(cache.get(Scope::Global), Some(2));
+    let tid = uuid::Uuid::new_v4();
+    cache.update(Scope::Tenant(tid), 7);
+    assert_eq!(cache.get(Scope::Tenant(tid)), Some(7));
+}
