@@ -136,6 +136,7 @@ get_as_metadata = "full-state"
 token = "full-state"
 device_code_grant = "ignore"
 mcp_token = "full-state"
+refresh_token_grant = "ignore"
 authorization_code_grant = "ignore"
 
 [routes."notifications.rs"]
