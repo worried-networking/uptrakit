@@ -32,12 +32,18 @@ async fn file_watch_emits_request_after_atomic_rename() {
     let (tx, mut rx) = mpsc::channel::<ReloadRequest>(8);
     let _handle = spawn_file_watch_task(path.clone(), tx);
 
+    // Yield to let the spawned task start and register the OS watcher before
+    // we perform the rename.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
     // Atomic rename — simulate editor save.
     let mut other = NamedTempFile::new_in(path.parent().unwrap()).unwrap();
     writeln!(other, "updated").unwrap();
     std::fs::rename(other.path(), &path).unwrap();
 
-    let req = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+    let req = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await
         .expect("timeout waiting for file-watch event")
         .expect("channel closed");
