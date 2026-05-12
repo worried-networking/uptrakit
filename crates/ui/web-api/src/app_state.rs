@@ -164,10 +164,18 @@ pub struct ServerState {
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Optional hot-swap handle for server cert renewal.
+    ///
+    /// When set, certificate renewal swaps the resolver atomically instead of
+    /// reloading the full TLS config.  `None` when the controller was started
+    /// without the dynamic-resolver path (e.g. in tests).
+    pub server_cert_resolver: Option<Arc<dyn crate::server_cert_swap::ServerCertSwap>>,
 }
 
 impl ServerState {
-    /// Creates a new [`ServerState`].
+    /// Creates a new [`ServerState`] without a hot-swap resolver.
+    ///
+    /// Used by tests and callers that do not need zero-downtime cert swaps.
     #[must_use]
     pub fn new(
         pki_path: std::path::PathBuf,
@@ -176,6 +184,24 @@ impl ServerState {
         Self {
             pki_path,
             rustls_config,
+            server_cert_resolver: None,
+        }
+    }
+
+    /// Creates a new [`ServerState`] with a hot-swap resolver handle.
+    ///
+    /// The resolver is called during server certificate renewal to atomically
+    /// replace the [`CertifiedKey`] without rebuilding the full TLS config.
+    #[must_use]
+    pub fn with_cert_resolver(
+        pki_path: std::path::PathBuf,
+        rustls_config: axum_server::tls_rustls::RustlsConfig,
+        resolver: Arc<dyn crate::server_cert_swap::ServerCertSwap>,
+    ) -> Self {
+        Self {
+            pki_path,
+            rustls_config,
+            server_cert_resolver: Some(resolver),
         }
     }
 }
@@ -362,6 +388,7 @@ pub struct AppStateBuilder {
     rate_limit_store: Option<RateLimitStore>,
     pki_path: Option<std::path::PathBuf>,
     rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
+    server_cert_resolver: Option<Arc<dyn crate::server_cert_swap::ServerCertSwap>>,
     crl_pem_cache: Option<Arc<parking_lot::RwLock<String>>>,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
     default_tenant_id: Option<uuid::Uuid>,
@@ -421,6 +448,7 @@ impl AppStateBuilder {
             rate_limit_store: None,
             pki_path: None,
             rustls_config: None,
+            server_cert_resolver: None,
             crl_pem_cache: None,
             ca_rotation_trigger: None,
             default_tenant_id: None,
@@ -534,6 +562,19 @@ impl AppStateBuilder {
 
     pub fn rustls_config(mut self, v: axum_server::tls_rustls::RustlsConfig) -> Self {
         self.rustls_config = Some(v);
+        self
+    }
+
+    /// Set the hot-swap server certificate resolver.
+    ///
+    /// Optional — defaults to `None`.  When set, the server certificate renewal
+    /// handler calls [`ServerCertSwap::swap_cert`] instead of reloading the
+    /// full TLS config from disk.
+    pub fn server_cert_resolver(
+        mut self,
+        v: Arc<dyn crate::server_cert_swap::ServerCertSwap>,
+    ) -> Self {
+        self.server_cert_resolver = Some(v);
         self
     }
 
@@ -932,11 +973,18 @@ impl AppStateBuilder {
             config_test_proxy: self
                 .config_test_proxy
                 .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
-            server: ServerState::new(
-                self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
-                self.rustls_config
-                    .ok_or(AppStateBuildError("rustls_config"))?,
-            ),
+            server: {
+                let pki_path = self.pki_path.ok_or(AppStateBuildError("pki_path"))?;
+                let rustls_config = self
+                    .rustls_config
+                    .ok_or(AppStateBuildError("rustls_config"))?;
+                match self.server_cert_resolver {
+                    Some(resolver) => {
+                        ServerState::with_cert_resolver(pki_path, rustls_config, resolver)
+                    }
+                    None => ServerState::new(pki_path, rustls_config),
+                }
+            },
             default_tenant_id: self
                 .default_tenant_id
                 .ok_or_else(|| report!(AppStateBuildError("default_tenant_id")))?,

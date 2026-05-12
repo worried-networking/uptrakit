@@ -258,6 +258,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         ca_rx,
         ca_key_store,
         rustls_config,
+        server_cert_resolver,
         revocation_notify,
         ca_rotation_trigger,
         crl_pem_cache,
@@ -522,6 +523,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .rate_limit_store(rate_limit_store)
         .pki_path(pki_path)
         .rustls_config(rustls_config.clone())
+        .server_cert_resolver(std::sync::Arc::clone(&server_cert_resolver)
+            as std::sync::Arc<dyn uptrakit_web_api::server_cert_swap::ServerCertSwap>)
         .crl_pem_cache(crl_pem_cache)
         .ca_rotation_trigger(ca_rotation_trigger)
         .default_tenant_id(default_tenant_id)

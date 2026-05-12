@@ -132,6 +132,10 @@ pub(crate) struct PkiRuntime {
     pub ca_rx: tokio::sync::watch::Receiver<crate::pki::CaSnapshot>,
     pub ca_key_store: uptrakit_web_api::CaKeyStoreRef,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Hot-swap handle for atomically replacing the server certificate without
+    /// rebuilding [`rustls::ServerConfig`].
+    pub server_cert_resolver:
+        std::sync::Arc<crate::server_cert_resolver::ControllerServerCertResolver>,
     pub revocation_notify: Arc<tokio::sync::Notify>,
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
     pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,

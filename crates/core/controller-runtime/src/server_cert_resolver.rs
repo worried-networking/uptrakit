@@ -4,26 +4,24 @@ use arc_swap::ArcSwap;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 
+/// A [`ResolvesServerCert`] whose certificate can be atomically replaced at
+/// runtime without stopping the server.
+///
+/// Also implements [`uptrakit_web_api::server_cert_swap::ServerCertSwap`] so
+/// that the `web-api` layer (which doesn't depend on `controller-runtime`) can
+/// call into it through a trait object.
 #[derive(Debug)]
 pub(crate) struct ControllerServerCertResolver {
     current: ArcSwap<CertifiedKey>,
 }
 
 impl ControllerServerCertResolver {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired up in a subsequent mTLS hot-swap task")
-    )]
     pub(crate) fn new(initial: Arc<CertifiedKey>) -> Self {
         Self {
             current: ArcSwap::new(initial),
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired up in a subsequent mTLS hot-swap task")
-    )]
     pub(crate) fn swap(&self, next: Arc<CertifiedKey>) {
         self.current.store(next);
     }
@@ -35,8 +33,19 @@ impl ResolvesServerCert for ControllerServerCertResolver {
     }
 }
 
+impl uptrakit_web_api::server_cert_swap::ServerCertSwap for ControllerServerCertResolver {
+    fn swap_cert(&self, cert: Arc<CertifiedKey>) {
+        self.swap(cert);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: idiomatic test patterns — discarding crypto provider init results"
+    )]
+
     use super::*;
 
     fn test_certified_key(name: &str) -> Arc<CertifiedKey> {

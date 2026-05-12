@@ -128,8 +128,8 @@ pub(crate) async fn init_pki_runtime(
     };
     *crl_pem_cache.write() = initial_crl_pem;
 
-    // Build initial server config with CRLs
-    let initial_server_config = pki::build_rustls_config_with_client_auth_and_crls(
+    // Build initial TLS config with dynamic hot-swap resolvers.
+    let built = pki::build_rustls_server_config(
         &server_cert.cert_pem,
         &server_cert.key_pem,
         &ca_snapshot.bundle_pem,
@@ -138,7 +138,9 @@ pub(crate) async fn init_pki_runtime(
     .context(AppError::Pki)?;
 
     let rustls_config =
-        axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(initial_server_config));
+        axum_server::tls_rustls::RustlsConfig::from_config(Arc::clone(&built.server_config));
+    let server_cert_resolver = built.server_cert_resolver;
+    let client_verifier = built.client_verifier;
 
     // Create CRL manager
     let crl_manager = Arc::new({
@@ -148,7 +150,7 @@ pub(crate) async fn init_pki_runtime(
                 server_cert_pem: server_cert.cert_pem.clone(),
                 server_key_pem: server_cert.key_pem.clone(),
                 db: db.clone(),
-                rustls_config: rustls_config.clone(),
+                client_verifier: Arc::clone(&client_verifier),
                 revocation_notify: Arc::clone(&revocation_notify),
                 crl_pem_cache: Arc::clone(&crl_pem_cache),
             },
@@ -172,6 +174,7 @@ pub(crate) async fn init_pki_runtime(
         ca_rx,
         ca_key_store,
         rustls_config,
+        server_cert_resolver,
         revocation_notify,
         ca_rotation_trigger,
         crl_pem_cache,

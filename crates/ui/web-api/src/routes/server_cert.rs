@@ -218,19 +218,51 @@ pub(crate) async fn renew_server_certificate_inner(
     std::fs::rename(&key_tmp, &key_path).context_to::<RenewCertError>()?;
     std::fs::rename(&cert_tmp, &cert_path).context_to::<RenewCertError>()?;
 
-    // Hot-reload TLS config
-    let server_config =
-        build_server_tls_config(&cert_pem, &key_pem, &snapshot.bundle_pem).context_to()?;
-    state
-        .server
-        .rustls_config
-        .reload_from_config(Arc::new(server_config));
+    // Prefer hot-swap via the cert resolver; fall back to full TLS config reload.
+    if let Some(ref resolver) = state.server.server_cert_resolver {
+        let ck = build_certified_key_for_swap(&cert_pem, &key_pem).context_to()?;
+        resolver.swap_cert(Arc::new(ck));
+    } else {
+        let server_config =
+            build_server_tls_config(&cert_pem, &key_pem, &snapshot.bundle_pem).context_to()?;
+        state
+            .server
+            .rustls_config
+            .reload_from_config(Arc::new(server_config));
+    }
 
     tracing::info!("server certificate manually renewed via API");
 
     Ok(RenewServerCertResponse {
         message: "Server certificate renewed successfully".to_string(),
     })
+}
+
+/// Build a [`rustls::sign::CertifiedKey`] from PEM-encoded cert and key.
+///
+/// Used by the hot-swap path when a [`ServerCertSwap`] resolver is present,
+/// avoiding a full TLS config rebuild.
+fn build_certified_key_for_swap(
+    cert_pem: &str,
+    key_pem: &str,
+) -> TlsConfigResult<rustls::sign::CertifiedKey> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(TlsConfigError::CertParse(e.to_string())))?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .map_err(|e| report!(TlsConfigError::KeyParse(e.to_string())))?;
+
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| report!(TlsConfigError::ServerConfig("no crypto provider".into())))?;
+    let signing_key = provider
+        .key_provider
+        .load_private_key(key)
+        .map_err(|e| report!(TlsConfigError::ServerConfig(e.to_string())))?;
+
+    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
 }
 
 /// Minimal TLS config rebuild for hot-reload after cert renewal.
