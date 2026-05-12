@@ -26,6 +26,7 @@ pub use uptrakit_web_api_queries::notifier::ServiceNotifier;
 pub use uptrakit_web_api_queries::queries;
 pub mod router;
 pub mod routes;
+pub mod server_cert_swap;
 pub mod service_connections;
 pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;

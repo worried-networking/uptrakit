@@ -367,8 +367,8 @@ pub(crate) fn spawn_ca_reload(
             )]
             let _ = ca_tx.send(snapshot);
 
-            if let Err(e) = crl_manager.reload_tls_config().await {
-                tracing::error!(error = ?e, "failed to reload TLS after CA reload");
+            if let Err(e) = crl_manager.swap_verifier().await {
+                tracing::error!(error = ?e, "failed to swap verifier after CA reload");
             }
 
             cached_version = db_version;
@@ -458,10 +458,10 @@ pub(crate) fn spawn_ca_rotation(
                             )]
                             let _ = ca_tx.send(new_snapshot);
 
-                            if let Err(e) = crl_manager.reload_tls_config().await {
+                            if let Err(e) = crl_manager.swap_verifier().await {
                                 tracing::error!(
                                     error = ?e,
-                                    "failed to reload TLS after CA rotation"
+                                    "failed to swap verifier after CA rotation"
                                 );
                             }
 
@@ -559,10 +559,22 @@ pub(crate) fn spawn_server_cert_renewal(
                         .update_server_cert(new_cert.cert_pem.clone(), new_cert.key_pem.clone())
                         .await;
 
-                    if let Err(e) = crl_manager.reload_tls_config().await {
+                    // Swap the server cert resolver if available (hot-swap path).
+                    if let Some(ref resolver) = app_state.server.server_cert_resolver {
+                        match crate::pki::build_certified_key(&new_cert.cert_pem, &new_cert.key_pem)
+                        {
+                            Ok(ck) => resolver.swap_cert(std::sync::Arc::new(ck)),
+                            Err(e) => tracing::error!(
+                                error = ?e,
+                                "failed to build CertifiedKey for server cert swap"
+                            ),
+                        }
+                    }
+
+                    if let Err(e) = crl_manager.swap_verifier().await {
                         tracing::error!(
                             error = ?e,
-                            "failed to reload TLS after server cert renewal"
+                            "failed to swap verifier after server cert renewal"
                         );
                     }
 
