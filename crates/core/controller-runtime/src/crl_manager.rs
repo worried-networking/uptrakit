@@ -24,8 +24,23 @@ pub(crate) struct CrlManagerConfig {
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
 struct TrustedIssuer {
-    issuer: Issuer<'static, KeyPair>,
+    issuer: Arc<Issuer<'static, KeyPair>>,
     fingerprint: String,
+}
+
+impl TrustedIssuer {
+    fn from_pem(
+        ca_pem: &str,
+        key_pair: rcgen::KeyPair,
+    ) -> Result<Self, rootcause::Report<crate::pki::PkiError>> {
+        let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, key_pair)
+            .context_to::<crate::pki::PkiError>()?;
+        let fingerprint = crate::pki::ca_fingerprint(ca_pem)?;
+        Ok(Self {
+            issuer: Arc::new(issuer),
+            fingerprint,
+        })
+    }
 }
 
 struct CaIssuers {
@@ -248,12 +263,7 @@ impl CrlManager {
                     )))
                 })?;
             let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
-            let issuer =
-                Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
-            trusted.push(TrustedIssuer {
-                issuer,
-                fingerprint: ca.fingerprint.clone(),
-            });
+            trusted.push(TrustedIssuer::from_pem(&ca.cert_pem, key)?);
         }
 
         let server_cert_pem = config.server_cert_pem.clone();
@@ -295,12 +305,7 @@ impl CrlManager {
                     )))
                 })?;
             let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
-            let issuer =
-                Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
-            trusted.push(TrustedIssuer {
-                issuer,
-                fingerprint: ca.fingerprint.clone(),
-            });
+            trusted.push(TrustedIssuer::from_pem(&ca.cert_pem, key)?);
         }
 
         let mut issuers = self.issuers.write().await;
@@ -314,6 +319,20 @@ impl CrlManager {
     pub(crate) async fn update_server_cert(&self, cert_pem: String, key_pem: String) {
         let mut cert = self.server_cert.write().await;
         *cert = (cert_pem, key_pem);
+    }
+
+    /// Return a clone of the `Arc<Issuer>` for the CA matching `fingerprint`.
+    #[expect(dead_code, reason = "consumed by cert_signer once Task 4 lands")]
+    pub(crate) async fn issuer_for(
+        &self,
+        fingerprint: &str,
+    ) -> Option<Arc<Issuer<'static, KeyPair>>> {
+        let issuers = self.issuers.read().await;
+        issuers
+            .trusted
+            .iter()
+            .find(|ti| ti.fingerprint == fingerprint)
+            .map(|ti| Arc::clone(&ti.issuer))
     }
 
     /// Build DER-encoded CRLs and combined PEM from revoked certificates in the database.
