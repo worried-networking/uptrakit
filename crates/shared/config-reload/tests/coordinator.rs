@@ -274,3 +274,62 @@ fn settings_version_cache_loads_and_swaps() {
     cache.update(Scope::Tenant(tid), 7);
     assert_eq!(cache.get(Scope::Tenant(tid)), Some(7));
 }
+
+// ── Task 16 ────────────────────────────────────────────────────────────────
+
+use uptrakit_config_reload::{RuntimeConfig, RuntimeConfigChannels};
+
+#[test]
+fn channels_boot_seeded_receiver_has_correct_value() {
+    let runtime: RuntimeConfig = toml::from_str(MINIMAL_RUNTIME_CONFIG_TOML).unwrap();
+    let (_channels, receivers) = RuntimeConfigChannels::from_runtime(&runtime);
+    let db = receivers.db.borrow().clone();
+    assert_eq!(db.url, runtime.db.url);
+}
+
+const MINIMAL_RUNTIME_CONFIG_TOML: &str = r#"
+[db]
+url = "sqlite://test.db"
+pool_size = 16
+acquire_timeout_ms = 5000
+
+[master_key]
+path = "/etc/uptrakit/master.key"
+
+[network.https]
+addr = "0.0.0.0:8443"
+trusted_proxies = []
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header = "x-fcc-pem"
+
+[network.pki]
+addr = "0.0.0.0:8444"
+
+[tls]
+cert_path = "/etc/uptrakit/cert.pem"
+key_path = "/etc/uptrakit/key.pem"
+sans = []
+
+[nats]
+url = "nats://localhost:4222"
+
+[audit]
+filter = "all"
+retention_days = 90
+
+[log]
+path = "/var/log/uptrakit/controller.log"
+level = "info"
+
+[zeroconf]
+enabled = false
+url = ""
+pki_addr = ""
+
+[embedded_services]
+agent = false
+agent_ssh = false
+mqtt = false
+scheduler = false
+"#;
