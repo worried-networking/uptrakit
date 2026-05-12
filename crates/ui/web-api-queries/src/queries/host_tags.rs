@@ -13,6 +13,28 @@ use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "host_tag")]
+pub struct HostTagView {
+    id: Uuid,
+    name: String,
+    color: String,
+    description: Option<String>,
+}
+
+impl From<&host_tag::Model> for HostTagView {
+    fn from(m: &host_tag::Model) -> Self {
+        Self {
+            id: m.id,
+            name: m.name.clone(),
+            color: m.color.clone(),
+            description: m.description.clone(),
+        }
+    }
+}
+
 /// Curated palette of visually distinct, accessible colors.
 const COLOR_PALETTE: &[&str] = &[
     "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316",
@@ -21,7 +43,7 @@ const COLOR_PALETTE: &[&str] = &[
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn model_to_response(m: host_tag::Model, host_count: u64) -> HostTagResponse {
+pub fn model_to_response(m: host_tag::Model, host_count: u64) -> HostTagResponse {
     HostTagResponse {
         id: m.id,
         name: m.name,
@@ -46,7 +68,7 @@ fn model_to_summary(m: &host_tag::Model) -> HostTagSummary {
     clippy::indexing_slicing,
     reason = "index is computed as count % palette.len() so it is always in bounds"
 )]
-async fn auto_color(tenant_db: &TenantDb) -> String {
+pub async fn auto_color(tenant_db: &TenantDb) -> String {
     let count = tenant_db
         .find::<host_tag::Entity>()
         .filter(host_tag::Column::DeactivatedAt.is_null())
@@ -57,7 +79,7 @@ async fn auto_color(tenant_db: &TenantDb) -> String {
 }
 
 /// Count hosts assigned to a tag (only active hosts).
-async fn count_hosts_for_tag(db: &impl sea_orm::ConnectionTrait, tag_id: Uuid) -> u64 {
+pub async fn count_hosts_for_tag(db: &impl sea_orm::ConnectionTrait, tag_id: Uuid) -> u64 {
     host_tag_assignment::Entity::find()
         .filter(host_tag_assignment::Column::HostTagId.eq(tag_id))
         .count(db)
@@ -451,6 +473,105 @@ pub async fn batch_delete_host_tags(
 
     txn.commit().await?;
     Ok((succeeded, failed))
+}
+
+// ── Transaction-aware variants (for emit_stateful callers) ───────────────────
+
+/// Insert a new host tag inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns the inserted [`host_tag::Model`]. The `color` argument must already
+/// be resolved (call [`auto_color`] before opening the transaction).
+pub async fn create_host_tag_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    req: &CreateHostTagRequest,
+    color: String,
+) -> Result<host_tag::Model, sea_orm::DbErr> {
+    let now = OffsetDateTime::now_utc();
+    let model = host_tag::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        tenant_id: Set(tenant_id),
+        name: Set(req.name.clone()),
+        color: Set(color),
+        description: Set(req.description.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    };
+    host_tag::Entity::insert(model)
+        .exec_with_returning(tx)
+        .await
+}
+
+/// Read, apply patch, and return `(before, after)` within a caller-managed transaction.
+///
+/// Returns `None` when the tag does not exist or is deactivated.
+pub async fn update_host_tag_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    req: &UpdateHostTagRequest,
+) -> Result<Option<(host_tag::Model, host_tag::Model)>, sea_orm::DbErr> {
+    let Some(before) = host_tag::Entity::find_by_id(id)
+        .filter(host_tag::Column::TenantId.eq(tenant_id))
+        .filter(host_tag::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let mut active: host_tag::ActiveModel = before.clone().into();
+    if let Some(ref name) = req.name {
+        active.name = Set(name.clone());
+    }
+    if let Some(ref color) = req.color {
+        active.color = Set(color.clone());
+    }
+    if let Some(ref desc_val) = req.description {
+        if desc_val.is_null() {
+            active.description = Set(None);
+        } else if let Some(s) = desc_val.as_str() {
+            active.description = Set(Some(s.to_string()));
+        }
+    }
+    active.updated_at = Set(OffsetDateTime::now_utc());
+    let after = active.update(tx).await?;
+    Ok(Some((before, after)))
+}
+
+/// Read before snapshot, hard-delete assignments, soft-delete tag — all within
+/// a caller-managed transaction.
+///
+/// Returns the `before` [`host_tag::Model`], or `None` if not found.
+pub async fn delete_host_tag_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<host_tag::Model>, sea_orm::DbErr> {
+    let Some(before) = host_tag::Entity::find_by_id(id)
+        .filter(host_tag::Column::TenantId.eq(tenant_id))
+        .filter(host_tag::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    // Hard-delete all assignments for this tag.
+    host_tag_assignment::Entity::delete_many()
+        .filter(host_tag_assignment::Column::HostTagId.eq(id))
+        .exec(tx)
+        .await?;
+
+    // Soft-delete the tag.
+    let now = OffsetDateTime::now_utc();
+    let mut active: host_tag::ActiveModel = before.clone().into();
+    active.deactivated_at = Set(Some(now));
+    active.updated_at = Set(now);
+    active.update(tx).await?;
+
+    Ok(Some(before))
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]

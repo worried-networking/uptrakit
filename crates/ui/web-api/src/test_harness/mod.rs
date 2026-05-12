@@ -214,10 +214,13 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         crate::event_broadcaster::EventBroadcaster::new(),
     );
 
-    let audit_emitter =
-        uptrakit_audit_log::AuditEmitter::new(uptrakit_audit_log::AuditLogDispatcher::new(
-            Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone())),
-        ));
+    let audit_db_backend: Arc<dyn uptrakit_audit_log::AuditLogBackend> =
+        Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone()));
+    let audit_emitter = uptrakit_audit_log::AuditEmitter::with_backends(
+        uptrakit_audit_log::AuditLogDispatcher::new(Arc::clone(&audit_db_backend)),
+        Arc::clone(&audit_db_backend),
+        Arc::new(uptrakit_audit_log::NoopBackend),
+    );
 
     let update_output_broadcaster =
         crate::update_output_broadcaster::UpdateOutputBroadcaster::new();
