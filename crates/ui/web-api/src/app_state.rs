@@ -106,8 +106,6 @@ pub use uptrakit_controller_core::auth::{
 #[non_exhaustive]
 #[derive(Clone)]
 pub struct BroadcastState {
-    /// Per-device-flow broadcast channels for real-time device auth SSE delivery.
-    pub device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster,
     /// Per-update broadcast channels for real-time output streaming via SSE.
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
@@ -375,7 +373,6 @@ pub struct AppStateBuilder {
     global_providers: Option<Arc<crate::global_providers::GlobalProviders>>,
     credential_sources: Option<ServiceCredentialSources>,
     event_broadcaster: Option<crate::event_broadcaster::EventBroadcaster>,
-    device_flow_broadcaster: Option<crate::device_flow_broadcaster::DeviceFlowBroadcaster>,
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
     batch_progress_broadcaster: Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
@@ -435,7 +432,6 @@ impl AppStateBuilder {
             global_providers: None,
             credential_sources: None,
             event_broadcaster: None,
-            device_flow_broadcaster: None,
             update_output_broadcaster: None,
             batch_progress_broadcaster: None,
             shutdown_token: None,
@@ -890,7 +886,6 @@ impl AppStateBuilder {
             ),
             notification,
             broadcast: BroadcastState {
-                device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
                 update_output_broadcaster,
                 batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
             },

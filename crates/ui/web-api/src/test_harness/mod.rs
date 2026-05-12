@@ -254,7 +254,6 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         ),
         notification,
         broadcast: crate::app_state::BroadcastState {
-            device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
             update_output_broadcaster,
             batch_progress_broadcaster:
                 crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),

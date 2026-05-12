@@ -261,8 +261,6 @@ mod tests {
                 crate::event_broadcaster::EventBroadcaster::new(),
             ),
             broadcast: crate::app_state::BroadcastState {
-                device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
-                ),
                 update_output_broadcaster:
                     crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
                 batch_progress_broadcaster:

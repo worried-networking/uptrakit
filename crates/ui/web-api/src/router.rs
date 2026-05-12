@@ -73,8 +73,6 @@ use crate::AppState;
         crate::routes::api_tokens::create_api_token,
         crate::routes::api_tokens::list_api_tokens,
         crate::routes::api_tokens::revoke_api_token,
-        crate::routes::device_auth::device_auth_start,
-        crate::routes::device_auth::device_auth_poll,
         crate::routes::device_auth::device_auth_approve,
         crate::routes::settings_global_combined::get_global_combined_settings,
         crate::routes::settings_provider_github::get_github_provider_settings,
@@ -222,10 +220,6 @@ use crate::AppState;
             crate::routes::api_tokens::CreateApiTokenResponse,
             crate::routes::api_tokens::ApiTokenResponse,
             crate::routes::api_tokens::ApiTokenListResponse,
-            crate::routes::device_auth::DeviceAuthStartRequest,
-            crate::routes::device_auth::DeviceAuthStartResponse,
-            crate::routes::device_auth::DeviceAuthPollRequest,
-            crate::routes::device_auth::DeviceAuthPollResponse,
             crate::routes::device_auth::DeviceAuthApproveRequest,
             crate::routes::device_auth::DeviceAuthApproveResponse,
             crate::routes::settings_network::NetworkSettingsResponse,
@@ -833,13 +827,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/auth/email-change/confirm",
             axum::routing::get(crate::routes::auth::confirm_email_change),
         )
-        .routes(routes!(crate::routes::device_auth::device_auth_start))
-        .routes(routes!(crate::routes::device_auth::device_auth_poll))
-        .merge(auth_routes)
-        .route(
-            "/api/v1/auth/device/stream",
-            get(crate::routes::device_auth::device_auth_stream),
-        );
+        .merge(auth_routes);
 
     #[cfg(feature = "oidc")]
     let base_router = base_router
