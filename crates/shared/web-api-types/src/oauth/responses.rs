@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::oauth::grant_type::{OAuthGrantType, ResponseType, TokenEndpointAuthMethod};
 use crate::validation::{Validate, ValidationError};
 
 /// Successful token endpoint response (RFC 6749 §5.1).
@@ -40,9 +41,15 @@ pub struct DcrRegistrationRequest {
     pub scope: Option<String>,
 }
 
-const ALLOWED_GRANT_TYPES: &[&str] = &["authorization_code", "refresh_token"];
-const ALLOWED_RESPONSE_TYPES: &[&str] = &["code"];
-const ALLOWED_TOKEN_ENDPOINT_AUTH_METHODS: &[&str] = &["none", "client_secret_basic"];
+const ALLOWED_GRANT_TYPES: &[&str] = &[
+    OAuthGrantType::AuthorizationCode.as_str(),
+    OAuthGrantType::RefreshToken.as_str(),
+];
+const ALLOWED_RESPONSE_TYPES: &[&str] = &[ResponseType::Code.as_str()];
+const ALLOWED_TOKEN_ENDPOINT_AUTH_METHODS: &[&str] = &[
+    TokenEndpointAuthMethod::None.as_str(),
+    TokenEndpointAuthMethod::ClientSecretBasic.as_str(),
+];
 
 impl Validate for DcrRegistrationRequest {
     fn validate(&self) -> Result<(), ValidationError> {
