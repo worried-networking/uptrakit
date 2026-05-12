@@ -87,9 +87,10 @@ pub fn update_renewal_schedule(
 /// [`initiate_renewal`](Self::initiate_renewal) call and the subsequent
 /// `Certificate` response).
 pub struct CertificateRenewalHandler {
-    /// Private key for a pending renewal CSR, held in memory until the signed
-    /// certificate arrives from the controller.
-    pending_renewal_key: Option<String>,
+    /// Private key for an in-flight CSR. Held only between
+    /// `initiate_renewal` and the matching `Certificate` response.
+    /// Wrapped in `Zeroizing` so the buffer is wiped on drop.
+    pending_renewal_key: Option<zeroize::Zeroizing<String>>,
 }
 
 impl CertificateRenewalHandler {
@@ -195,8 +196,15 @@ impl CertificateRenewalHandler {
         let service_id = identity
             .service_id()
             .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?;
-        let (key_pem, csr_pem) = generate_keypair_and_csr(&service_id.to_string())?;
-        self.pending_renewal_key = Some(key_pem);
+        let (mut key_pem, csr_pem) = generate_keypair_and_csr(&service_id.to_string())?;
+        // Shrink to exact length so `Zeroizing` wipes the full allocation on drop.
+        key_pem.shrink_to_fit();
+        debug_assert_eq!(
+            key_pem.len(),
+            key_pem.capacity(),
+            "renewal key PEM must have len == capacity so Zeroize wipes the full allocation"
+        );
+        self.pending_renewal_key = Some(zeroize::Zeroizing::new(key_pem));
         Ok(csr_pem)
     }
 
