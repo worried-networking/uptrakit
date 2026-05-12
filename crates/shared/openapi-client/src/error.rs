@@ -1,5 +1,6 @@
 use rootcause::prelude::*;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_web_api_types::oauth::OAuthErrorResponse;
 
 /// Errors that can occur when communicating with the Uptrakit API.
 #[derive(Debug, thiserror::Error)]
@@ -9,6 +10,10 @@ pub enum ClientError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// RFC 6749 §5.2 / RFC 8628 §3.5 error response from an OAuth endpoint.
+    #[error("OAuth error: {0:?}")]
+    OAuthError(OAuthErrorResponse),
 
     #[error("API error ({status}): {message}")]
     Api {
