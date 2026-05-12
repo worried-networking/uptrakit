@@ -1172,4 +1172,51 @@ mod tests {
             "uncompressed P-256 public key must start with 0x04"
         );
     }
+
+    // ── Atomic save_identity helpers (cfg(test) only) ─────────────────
+
+    /// Controls where the simulated crash occurs in [`save_identity_split_for_test`].
+    pub(crate) enum DropAt {
+        /// Return immediately after persisting `service.json`, before writing `service.key`.
+        AfterCertPersist,
+        #[allow(dead_code)]
+        AfterKeyTmp,
+    }
+
+    /// Outcome returned by [`save_identity_split_for_test`].
+    pub(crate) enum SaveOutcome {
+        Success,
+        CrashAfterCert,
+    }
+
+    #[tokio::test]
+    async fn save_identity_is_atomic_under_simulated_crash() {
+        use std::fs;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path();
+
+        fs::write(base.join(STATE_FILE), b"OLD_JSON").expect("seed cert");
+        fs::write(base.join(SERVICE_KEY_FILE), b"OLD_KEY").expect("seed key");
+
+        let outcome =
+            save_identity_split_for_test(base, "NEW_JSON", "NEW_KEY", DropAt::AfterCertPersist)
+                .await;
+
+        let json = fs::read_to_string(base.join(STATE_FILE)).expect("read cert");
+        let key = fs::read_to_string(base.join(SERVICE_KEY_FILE)).expect("read key");
+        assert_eq!(json, "NEW_JSON", "cert persist landed");
+        assert_eq!(key, "OLD_KEY", "key persist never happened");
+
+        let stragglers: Vec<_> = fs::read_dir(base)
+            .expect("readdir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            stragglers.len() <= 1,
+            "at most one straggler tmp from key path"
+        );
+
+        assert!(matches!(outcome, SaveOutcome::CrashAfterCert));
+    }
 }
