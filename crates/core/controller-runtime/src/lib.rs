@@ -92,6 +92,14 @@ async fn async_main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
+    if args.check_config {
+        if let Err(e) = uptrakit_config_reload::TomlConfigLoader::validate_only(&args.config) {
+            eprintln!("Config validation failed: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
+
     #[expect(
         clippy::allow_attributes,
         clippy::allow_attributes_without_reason,
@@ -475,13 +483,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
     let builtin_host = service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
 
-    // Load TOML config at boot. `UPTRAKIT_CONFIG` env-var / hard-coded default;
-    // Task 18 will wire the actual --config CLI flag here.
-    let config_path = std::path::PathBuf::from(
-        std::env::var("UPTRAKIT_CONFIG")
-            .unwrap_or_else(|_| "/etc/uptrakit/controller.toml".to_string()),
-    );
-    let booted = match startup::boot_config(config_path).await {
+    // Load TOML config at boot. `args.config` carries the value from
+    // `--config` / `UPTRAKIT_CONFIG` env-var / default path.
+    let booted = match startup::boot_config(args.config.clone()).await {
         Ok(b) => Some(b),
         Err(e) => {
             tracing::warn!(
