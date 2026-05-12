@@ -285,10 +285,7 @@ impl AuditActionType {
     pub const SYSTEM_SERVICE_MACHINE_ID_VALIDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("system.service.machine_id.validate", AuditActionKind::Event);
     pub const SYSTEM_SERVICE_UPDATE_FREEZE_APPLY: RegisteredAuditAction =
-        RegisteredAuditAction::new(
-            "system.service.update_freeze.apply",
-            AuditActionKind::Event,
-        );
+        RegisteredAuditAction::new("system.service.update_freeze.apply", AuditActionKind::Event);
     pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: RegisteredAuditAction =
         RegisteredAuditAction::new(
             "system.scheduler.audit_log_cleanup",
@@ -310,16 +307,20 @@ impl AuditActionType {
         RegisteredAuditAction::new("oauth.client_first_use", AuditActionKind::Event);
     pub const OAUTH_CLIENT_METADATA_REFRESHED: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.client_metadata_refreshed", AuditActionKind::Event);
-    pub const OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY: RegisteredAuditAction = RegisteredAuditAction::new(
-        "oauth.client_metadata_changed_materially",
-        AuditActionKind::Event,
-    );
+    pub const OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY: RegisteredAuditAction =
+        RegisteredAuditAction::new(
+            "oauth.client_metadata_changed_materially",
+            AuditActionKind::Event,
+        );
     pub const OAUTH_CLIENT_TRUSTED: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.client_trusted", AuditActionKind::Event);
     pub const OAUTH_CLIENT_REVOKED: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.client_revoked", AuditActionKind::Event);
     pub const OAUTH_CLIENT_REGISTRATION_RATE_LIMITED: RegisteredAuditAction =
-        RegisteredAuditAction::new("oauth.client_registration_rate_limited", AuditActionKind::Event);
+        RegisteredAuditAction::new(
+            "oauth.client_registration_rate_limited",
+            AuditActionKind::Event,
+        );
     pub const OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED: RegisteredAuditAction =
         RegisteredAuditAction::new("oauth.config_audience_hosts_changed", AuditActionKind::Event);
     pub const OAUTH_CIMD_PARSE_FAILED: RegisteredAuditAction =
