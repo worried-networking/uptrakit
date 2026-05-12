@@ -216,6 +216,44 @@ impl AuditActionType {
         RegisteredAuditAction::new("system.service.update_freeze.apply");
     pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: RegisteredAuditAction =
         RegisteredAuditAction::new("system.scheduler.audit_log_cleanup");
+    pub const OAUTH_AUTHORIZE_REQUEST: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.authorize_request");
+    pub const OAUTH_TOKEN_ISSUED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.token_issued");
+    pub const OAUTH_TOKEN_REJECTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.token_rejected");
+    pub const OAUTH_REFRESH_ROTATED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.refresh_rotated");
+    pub const OAUTH_REFRESH_REPLAY_DETECTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.refresh_replay_detected");
+    pub const OAUTH_CLIENT_REGISTERED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_registered");
+    pub const OAUTH_CLIENT_FIRST_USE: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_first_use");
+    pub const OAUTH_CLIENT_METADATA_REFRESHED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_metadata_refreshed");
+    pub const OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_metadata_changed_materially");
+    pub const OAUTH_CLIENT_TRUSTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_trusted");
+    pub const OAUTH_CLIENT_REVOKED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_revoked");
+    pub const OAUTH_CLIENT_REGISTRATION_RATE_LIMITED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.client_registration_rate_limited");
+    pub const OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.config_audience_hosts_changed");
+    pub const OAUTH_CIMD_PARSE_FAILED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.cimd_parse_failed");
+    pub const OAUTH_CONSENT_GRANT: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.consent_grant");
+    pub const OAUTH_CONSENT_DENY: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.consent_deny");
+    pub const OAUTH_CONSENT_REVOKE: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.consent_revoke");
+    pub const OAUTH_RATE_LIMITED: RegisteredAuditAction =
+        RegisteredAuditAction::new("oauth.rate_limited");
+    pub const MCP_OAUTH_AUTHENTICATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("mcp.oauth_authenticate");
 
     fn parse_any(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
