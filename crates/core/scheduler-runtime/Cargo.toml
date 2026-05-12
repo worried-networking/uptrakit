@@ -41,7 +41,9 @@ uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-wire = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
-x509-parser = { workspace = true }
+x509-cert = { workspace = true }
+der = { workspace = true }
+const-oid = { workspace = true }
 uptrakit-crypto = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-service-sdk = { workspace = true, optional = true }

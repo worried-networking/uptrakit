@@ -254,6 +254,79 @@ mod tests {
         csr.pem().unwrap()
     }
 
+    /// Extract the Common Name from a PEM-encoded certificate (test helper).
+    fn extract_cn_from_cert_pem(cert_pem: &str) -> Option<String> {
+        use const_oid::db::rfc4519::COMMON_NAME;
+        use der::{
+            DecodePem,
+            asn1::{PrintableStringRef, Utf8StringRef},
+        };
+        use x509_cert::Certificate;
+        let cert = Certificate::from_pem(cert_pem.as_bytes()).ok()?;
+        cert.tbs_certificate
+            .subject
+            .0
+            .iter()
+            .flat_map(|rdn| rdn.0.iter())
+            .filter(|atv| atv.oid == COMMON_NAME)
+            .find_map(|atv| {
+                atv.value
+                    .decode_as::<Utf8StringRef<'_>>()
+                    .map(|s| s.as_str().to_owned())
+                    .ok()
+                    .or_else(|| {
+                        atv.value
+                            .decode_as::<PrintableStringRef<'_>>()
+                            .map(|s| s.as_str().to_owned())
+                            .ok()
+                    })
+            })
+    }
+
+    /// Check if the certificate has the ClientAuth EKU (test helper).
+    fn cert_has_client_auth_eku(cert_pem: &str) -> bool {
+        use const_oid::db::rfc5280::{ID_CE_EXT_KEY_USAGE, ID_KP_CLIENT_AUTH};
+        use der::{Decode, DecodePem};
+        use x509_cert::Certificate;
+        use x509_cert::ext::pkix::ExtendedKeyUsage;
+        let Ok(cert) = Certificate::from_pem(cert_pem.as_bytes()) else {
+            return false;
+        };
+        let Some(exts) = cert.tbs_certificate.extensions.as_deref() else {
+            return false;
+        };
+        for ext in exts {
+            if ext.extn_id == ID_CE_EXT_KEY_USAGE {
+                if let Ok(eku) = ExtendedKeyUsage::from_der(ext.extn_value.as_bytes()) {
+                    return eku.0.iter().any(|oid| *oid == ID_KP_CLIENT_AUTH);
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if the certificate has the CA basic constraint set (test helper).
+    fn cert_is_ca(cert_pem: &str) -> bool {
+        use const_oid::db::rfc5280::ID_CE_BASIC_CONSTRAINTS;
+        use der::{Decode, DecodePem};
+        use x509_cert::Certificate;
+        use x509_cert::ext::pkix::constraints::BasicConstraints;
+        let Ok(cert) = Certificate::from_pem(cert_pem.as_bytes()) else {
+            return false;
+        };
+        let Some(exts) = cert.tbs_certificate.extensions.as_deref() else {
+            return false;
+        };
+        for ext in exts {
+            if ext.extn_id == ID_CE_BASIC_CONSTRAINTS {
+                if let Ok(bc) = BasicConstraints::from_der(ext.extn_value.as_bytes()) {
+                    return bc.ca;
+                }
+            }
+        }
+        false
+    }
+
     #[tokio::test]
     async fn agent_csr_signed_by_ca() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -274,26 +347,17 @@ mod tests {
         assert!(bundle.not_after < now + time::Duration::hours(170));
 
         // Verify CN contains the agent UUID
-        let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
-        let cert = pem_block.parse_x509().unwrap();
-        let cn = cert
-            .subject()
-            .iter_common_name()
-            .next()
-            .unwrap()
-            .as_str()
-            .unwrap();
+        let cn = extract_cn_from_cert_pem(&bundle.cert_pem).expect("parse CN");
         assert_eq!(cn, agent_id.to_string());
 
         // Verify EKU includes ClientAuth
-        let eku = cert
-            .extended_key_usage()
-            .expect("EKU extension present")
-            .expect("EKU parsed");
-        assert!(eku.value.client_auth);
+        assert!(
+            cert_has_client_auth_eku(&bundle.cert_pem),
+            "EKU must include clientAuth"
+        );
 
         // Verify it's not a CA
-        assert!(!cert.is_ca());
+        assert!(!cert_is_ca(&bundle.cert_pem), "cert must not be a CA");
     }
 
     #[tokio::test]
@@ -327,16 +391,8 @@ mod tests {
             .await
             .unwrap();
 
-        let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
-        let cert = pem_block.parse_x509().unwrap();
-        let cn = cert
-            .subject()
-            .iter_common_name()
-            .next()
-            .unwrap()
-            .as_str()
-            .unwrap();
-        let parsed = Uuid::parse_str(cn).unwrap();
+        let cn = extract_cn_from_cert_pem(&bundle.cert_pem).expect("parse CN");
+        let parsed = Uuid::parse_str(&cn).unwrap();
         assert_eq!(parsed, agent_id);
     }
 

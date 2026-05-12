@@ -115,7 +115,14 @@ pub async fn get_system_alerts(
 
 /// Extract not_after timestamp from a PEM cert.
 fn cert_not_after_from_pem(pem: &str) -> Result<time::OffsetDateTime, ()> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).map_err(|_| ())?;
-    let cert = pem_block.parse_x509().map_err(|_| ())?;
-    time::OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp()).map_err(|_| ())
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert = Certificate::from_pem(pem.as_bytes()).map_err(|_| ())?;
+    let secs = cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs();
+    time::OffsetDateTime::from_unix_timestamp(secs as i64).map_err(|_| ())
 }

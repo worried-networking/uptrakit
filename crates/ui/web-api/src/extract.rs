@@ -48,10 +48,34 @@ pub struct ExternalBaseUrl(pub String);
 
 /// Parse [`ServiceIdentity`] from DER-encoded X.509 certificate bytes.
 pub fn service_identity_from_der(der: &[u8]) -> Option<ServiceIdentity> {
-    let (_, cert) = x509_parser::parse_x509_certificate(der).ok()?;
-    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
-    let service_id = uuid::Uuid::parse_str(cn).ok()?;
-    let cert_serial = cert.raw_serial_as_string();
+    use const_oid::db::rfc4519::COMMON_NAME;
+    use der::{
+        Decode,
+        asn1::{PrintableStringRef, Utf8StringRef},
+    };
+    use x509_cert::Certificate;
+    let cert = Certificate::from_der(der).ok()?;
+    let tbs = &cert.tbs_certificate;
+    let cn = tbs
+        .subject
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .filter(|atv| atv.oid == COMMON_NAME)
+        .find_map(|atv| {
+            atv.value
+                .decode_as::<Utf8StringRef<'_>>()
+                .map(|s| s.as_str().to_owned())
+                .ok()
+                .or_else(|| {
+                    atv.value
+                        .decode_as::<PrintableStringRef<'_>>()
+                        .map(|s| s.as_str().to_owned())
+                        .ok()
+                })
+        })?;
+    let service_id = uuid::Uuid::parse_str(&cn).ok()?;
+    let cert_serial = tbs.serial_number.to_string().to_lowercase();
     Some(ServiceIdentity {
         service_id,
         cert_serial,

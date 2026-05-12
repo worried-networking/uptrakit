@@ -98,13 +98,15 @@ pub(crate) async fn try_load_crl_from_db(
 
     // Re-derive DER from PEM so we don't store duplicate bytes.
     let der = {
-        let (_, pem_block) =
-            x509_parser::pem::parse_x509_pem(entry.crl_pem.as_bytes()).map_err(|e| {
+        use rustls::pki_types::CertificateRevocationListDer;
+        use rustls::pki_types::pem::PemObject;
+        CertificateRevocationListDer::from_pem_slice(entry.crl_pem.as_bytes())
+            .map(|c| c.as_ref().to_vec())
+            .map_err(|e| {
                 report!(pki::PkiError::CaValidation(format!(
                     "failed to parse cached CRL PEM for CA {ca_fingerprint}: {e}"
                 )))
-            })?;
-        pem_block.contents
+            })?
     };
 
     Ok(Some(LoadedCrl {

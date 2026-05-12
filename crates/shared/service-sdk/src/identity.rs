@@ -15,10 +15,12 @@
 
 use std::path::{Path, PathBuf};
 
+use der::DecodePem;
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use uuid::Uuid;
+use x509_cert::Certificate;
 
 use crate::error::{EnrollmentError, IdentityError, Result};
 use crate::shared_types_api::SecretString;
@@ -239,10 +241,14 @@ impl ServiceIdentityState {
     /// Returns `None` if no certificate is loaded or parsing fails.
     pub fn cert_not_after(&self) -> Option<time::OffsetDateTime> {
         let pem = self.certificate_pem.as_deref()?;
-        let der = pem_to_der(pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
-        let asn1_time = cert.validity().not_after;
-        asn1_time.to_datetime().into()
+        let cert = Certificate::from_pem(pem.as_bytes()).ok()?;
+        let secs = cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs();
+        time::OffsetDateTime::from_unix_timestamp(secs as i64).ok()
     }
 
     /// Certificate expiry as milliseconds since the Unix epoch.
@@ -710,9 +716,13 @@ pub fn sweep_tmp_siblings(base: &Path) -> Result<()> {
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /// Decode the first PEM block into DER bytes.
+#[cfg(test)]
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
-    let (_, pem) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
-    Some(pem.contents)
+    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::pem::PemObject;
+    CertificateDer::from_pem_slice(pem.as_bytes())
+        .ok()
+        .map(|c| c.into_owned().to_vec())
 }
 
 #[cfg(test)]
@@ -975,8 +985,28 @@ mod tests {
 
         let der = pem_to_der(&pem).expect("decode");
         // The DER bytes should parse as a valid X.509 certificate.
-        let (_, parsed) = x509_parser::parse_x509_certificate(&der).expect("parse x509");
-        assert!(parsed.validity().is_valid());
+        use der::Decode;
+        let parsed = x509_cert::Certificate::from_der(&der).expect("parse x509");
+        let not_before = parsed
+            .tbs_certificate
+            .validity
+            .not_before
+            .to_unix_duration()
+            .as_secs();
+        let not_after = parsed
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_secs();
+        assert!(
+            not_before <= now && now <= not_after,
+            "certificate must be valid"
+        );
     }
 
     #[tokio::test]

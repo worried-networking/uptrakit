@@ -1,6 +1,6 @@
 #![expect(
     clippy::map_err_ignore,
-    reason = "x509-parser/PEM errors carry only parser internals; the public `PkiError::PemParse` variant communicates the failure mode to callers without leaking internal details"
+    reason = "x509-cert/DER parse errors carry only parser internals; the public `PkiError::PemParse` variant communicates the failure mode to callers without leaking internal details"
 )]
 
 use std::fs;
@@ -749,9 +749,11 @@ fn generate_server_cert(ca: &CaBundle, sans: &[String]) -> Result<ServerCertBund
 
 /// Compute SHA-256 hex fingerprint of a PEM-encoded certificate.
 pub(crate) fn ca_fingerprint(cert_pem: &str) -> Result<String> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::pem::PemObject;
+    let der = CertificateDer::from_pem_slice(cert_pem.as_bytes())
         .map_err(|_| report!(PkiError::PemParse))?;
-    Ok(sha256_hex(&pem_block.contents))
+    Ok(sha256_hex(der.as_ref()))
 }
 
 /// SHA-256 hex digest of arbitrary bytes.
@@ -766,42 +768,77 @@ pub(crate) fn sha256_hex(data: &[u8]) -> String {
 /// Check if a PEM-encoded certificate is expired.
 /// Returns `true` if the certificate is expired or unparseable.
 pub(crate) fn is_cert_expired(pem: &str) -> bool {
-    let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(pem.as_bytes()) else {
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let Ok(cert) = Certificate::from_pem(pem.as_bytes()) else {
         return true;
     };
-    let Ok(cert) = pem_block.parse_x509() else {
-        return true;
-    };
-    !cert.validity().is_valid()
+    let not_after = cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs() as i64;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    now > not_after
 }
 
 /// Extract the `not_after` timestamp from a PEM-encoded certificate.
 pub(crate) fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
-        .map_err(|_| report!(PkiError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(PkiError::PemParse))?;
-    OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp())
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert = Certificate::from_pem(pem.as_bytes()).map_err(|_| report!(PkiError::PemParse))?;
+    let secs = cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs();
+    OffsetDateTime::from_unix_timestamp(secs as i64)
         .map_err(|e| report!(PkiError::Timestamp(e.to_string())))
 }
 
 /// Extract the `not_before` timestamp from a PEM-encoded certificate.
 pub(crate) fn cert_not_before(pem: &str) -> Result<OffsetDateTime> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
-        .map_err(|_| report!(PkiError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(PkiError::PemParse))?;
-    OffsetDateTime::from_unix_timestamp(cert.validity().not_before.timestamp())
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert = Certificate::from_pem(pem.as_bytes()).map_err(|_| report!(PkiError::PemParse))?;
+    let secs = cert
+        .tbs_certificate
+        .validity
+        .not_before
+        .to_unix_duration()
+        .as_secs();
+    OffsetDateTime::from_unix_timestamp(secs as i64)
         .map_err(|e| report!(PkiError::Timestamp(e.to_string())))
 }
 
 fn cert_common_name(pem: &str) -> Option<String> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
-    let cert = pem_block.parse_x509().ok()?;
-    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
-    Some(cn.to_string())
+    use const_oid::db::rfc4519::COMMON_NAME;
+    use der::{
+        DecodePem,
+        asn1::{PrintableStringRef, Utf8StringRef},
+    };
+    use x509_cert::Certificate;
+    let cert = Certificate::from_pem(pem.as_bytes()).ok()?;
+    cert.tbs_certificate
+        .subject
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .filter(|atv| atv.oid == COMMON_NAME)
+        .find_map(|atv| {
+            atv.value
+                .decode_as::<Utf8StringRef<'_>>()
+                .map(|s| s.as_str().to_owned())
+                .ok()
+                .or_else(|| {
+                    atv.value
+                        .decode_as::<PrintableStringRef<'_>>()
+                        .map(|s| s.as_str().to_owned())
+                        .ok()
+                })
+        })
 }
 
 // --- Rotation helpers ---
@@ -854,39 +891,52 @@ pub(crate) async fn renew_server_cert(
 /// Returns a `SanCollection` with the DNS names and IP addresses found in
 /// the certificate's SAN extension.
 pub(crate) fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
-    use x509_parser::extensions::GeneralName;
+    use const_oid::db::rfc5280::ID_CE_SUBJECT_ALT_NAME;
+    use der::{Decode, DecodePem};
+    use x509_cert::Certificate;
+    use x509_cert::ext::pkix::SubjectAltName;
+    use x509_cert::ext::pkix::name::GeneralName;
 
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
-        .map_err(|_| report!(PkiError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(PkiError::PemParse))?;
+    let cert =
+        Certificate::from_pem(cert_pem.as_bytes()).map_err(|_| report!(PkiError::PemParse))?;
 
     let mut dns_names = Vec::new();
     let mut ip_addrs = Vec::new();
 
-    if let Ok(Some(san_ext)) = cert.tbs_certificate.subject_alternative_name() {
-        for name in &san_ext.value.general_names {
-            match name {
-                GeneralName::DNSName(dns) => {
-                    dns_names.push((*dns).to_string());
-                }
-                GeneralName::IPAddress(ip_bytes) => {
-                    match ip_bytes.len() {
-                        4 => {
-                            if let Ok(octets) = <[u8; 4]>::try_from(*ip_bytes) {
-                                ip_addrs.push(IpAddr::V4(std::net::Ipv4Addr::from(octets)));
+    if let Some(exts) = cert.tbs_certificate.extensions.as_deref() {
+        for ext in exts {
+            if ext.extn_id == ID_CE_SUBJECT_ALT_NAME {
+                if let Ok(san) = SubjectAltName::from_der(ext.extn_value.as_bytes()) {
+                    for name in &san.0 {
+                        match name {
+                            GeneralName::DnsName(dns) => {
+                                dns_names.push(dns.as_str().to_string());
                             }
-                        }
-                        16 => {
-                            if let Ok(octets) = <[u8; 16]>::try_from(*ip_bytes) {
-                                ip_addrs.push(IpAddr::V6(std::net::Ipv6Addr::from(octets)));
+                            GeneralName::IpAddress(ip_bytes) => {
+                                match ip_bytes.as_bytes().len() {
+                                    4 => {
+                                        if let Ok(octets) = <[u8; 4]>::try_from(ip_bytes.as_bytes())
+                                        {
+                                            ip_addrs
+                                                .push(IpAddr::V4(std::net::Ipv4Addr::from(octets)));
+                                        }
+                                    }
+                                    16 => {
+                                        if let Ok(octets) =
+                                            <[u8; 16]>::try_from(ip_bytes.as_bytes())
+                                        {
+                                            ip_addrs
+                                                .push(IpAddr::V6(std::net::Ipv6Addr::from(octets)));
+                                        }
+                                    }
+                                    _ => {} // skip malformed IP entries
+                                }
                             }
+                            _ => {}
                         }
-                        _ => {} // skip malformed IP entries
                     }
                 }
-                _ => {}
+                break;
             }
         }
     }
@@ -951,49 +1001,52 @@ impl CertPkiUrls {
 
 /// Extract AIA and CDP URLs from a PEM-encoded certificate.
 pub(crate) fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
-    use x509_parser::extensions::ParsedExtension;
+    use const_oid::db::rfc5280::{
+        ID_AD_CA_ISSUERS, ID_AD_OCSP, ID_CE_CRL_DISTRIBUTION_POINTS, ID_PE_AUTHORITY_INFO_ACCESS,
+    };
+    use der::{Decode, DecodePem};
+    use x509_cert::Certificate;
+    use x509_cert::ext::pkix::name::{DistributionPointName, GeneralName};
+    use x509_cert::ext::pkix::{AuthorityInfoAccessSyntax, CrlDistributionPoints};
 
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
-        .map_err(|_| report!(PkiError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(PkiError::PemParse))?;
+    let cert =
+        Certificate::from_pem(cert_pem.as_bytes()).map_err(|_| report!(PkiError::PemParse))?;
 
     let mut urls = CertPkiUrls::default();
 
-    for ext in cert.extensions() {
-        match ext.parsed_extension() {
-            ParsedExtension::AuthorityInfoAccess(aia) => {
-                for desc in &aia.accessdescs {
-                    // id-ad-ocsp = 1.3.6.1.5.5.7.48.1
-                    if desc.access_method.to_id_string() == "1.3.6.1.5.5.7.48.1"
-                        && let x509_parser::extensions::GeneralName::URI(uri) = desc.access_location
-                    {
-                        urls.ocsp_url = Some(uri.to_string());
-                    }
-                    // id-ad-caIssuers = 1.3.6.1.5.5.7.48.2
-                    if desc.access_method.to_id_string() == "1.3.6.1.5.5.7.48.2"
-                        && let x509_parser::extensions::GeneralName::URI(uri) = desc.access_location
-                    {
-                        urls.ca_issuers_url = Some(uri.to_string());
+    if let Some(exts) = cert.tbs_certificate.extensions.as_deref() {
+        for ext in exts {
+            if ext.extn_id == ID_PE_AUTHORITY_INFO_ACCESS {
+                if let Ok(aia) = AuthorityInfoAccessSyntax::from_der(ext.extn_value.as_bytes()) {
+                    for desc in &aia.0 {
+                        if desc.access_method == ID_AD_OCSP
+                            && let GeneralName::UniformResourceIdentifier(uri) =
+                                &desc.access_location
+                        {
+                            urls.ocsp_url = Some(uri.as_str().to_string());
+                        }
+                        if desc.access_method == ID_AD_CA_ISSUERS
+                            && let GeneralName::UniformResourceIdentifier(uri) =
+                                &desc.access_location
+                        {
+                            urls.ca_issuers_url = Some(uri.as_str().to_string());
+                        }
                     }
                 }
-            }
-            ParsedExtension::CRLDistributionPoints(cdp) => {
-                for point in cdp.iter() {
-                    if let Some(name) = &point.distribution_point
-                        && let x509_parser::extensions::DistributionPointName::FullName(names) =
-                            name
+            } else if ext.extn_id == ID_CE_CRL_DISTRIBUTION_POINTS
+                && let Ok(cdp) = CrlDistributionPoints::from_der(ext.extn_value.as_bytes())
+            {
+                for point in &cdp.0 {
+                    if let Some(DistributionPointName::FullName(names)) = &point.distribution_point
                     {
                         for general_name in names {
-                            if let x509_parser::extensions::GeneralName::URI(uri) = general_name {
-                                urls.crl_url = Some(uri.to_string());
+                            if let GeneralName::UniformResourceIdentifier(uri) = general_name {
+                                urls.crl_url = Some(uri.as_str().to_string());
                             }
                         }
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -1558,23 +1611,28 @@ mod tests {
 
     #[test]
     fn ca_basic_constraints_path_len_is_zero() {
-        use x509_parser::extensions::ParsedExtension;
+        use const_oid::db::rfc5280::ID_CE_BASIC_CONSTRAINTS;
+        use der::{Decode, DecodePem};
+        use x509_cert::Certificate;
+        use x509_cert::ext::pkix::constraints::BasicConstraints;
 
         let ca = generate_ca(None).unwrap();
-        let (_, pem_block) =
-            x509_parser::pem::parse_x509_pem(ca.cert_pem.as_bytes()).expect("parse PEM");
-        let cert = pem_block.parse_x509().expect("parse X.509");
+        let cert = Certificate::from_pem(ca.cert_pem.as_bytes()).expect("parse PEM");
 
         let mut found = false;
-        for ext in cert.extensions() {
-            if let ParsedExtension::BasicConstraints(bc) = ext.parsed_extension() {
-                assert!(bc.ca, "CA flag must be set");
-                assert_eq!(
-                    bc.path_len_constraint,
-                    Some(0),
-                    "path_len must be 0 to prevent subordinate CA issuance"
-                );
-                found = true;
+        if let Some(exts) = cert.tbs_certificate.extensions.as_deref() {
+            for ext in exts {
+                if ext.extn_id == ID_CE_BASIC_CONSTRAINTS {
+                    let bc = BasicConstraints::from_der(ext.extn_value.as_bytes())
+                        .expect("parse BasicConstraints");
+                    assert!(bc.ca, "CA flag must be set");
+                    assert_eq!(
+                        bc.path_len_constraint,
+                        Some(0),
+                        "path_len must be 0 to prevent subordinate CA issuance"
+                    );
+                    found = true;
+                }
             }
         }
         assert!(found, "BasicConstraints extension not present");

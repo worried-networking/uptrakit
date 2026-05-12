@@ -3,7 +3,9 @@
 //! Extracted from `crates/core/controller/src/pki.rs` so both the embedded
 //! scheduler and external scheduler can use the same logic.
 
+use der::DecodePem;
 use time::OffsetDateTime;
+use x509_cert::Certificate;
 
 /// CA rotation window: rotate when the CA certificate expires within this many days.
 pub const CA_ROTATION_WINDOW_DAYS: i64 = 183;
@@ -11,9 +13,14 @@ pub const CA_ROTATION_WINDOW_DAYS: i64 = 183;
 /// Extract the `not_after` timestamp from a PEM-encoded certificate.
 #[must_use]
 pub fn cert_not_after(pem: &str) -> Option<OffsetDateTime> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
-    let cert = pem_block.parse_x509().ok()?;
-    OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp()).ok()
+    let cert = Certificate::from_pem(pem.as_bytes()).ok()?;
+    let secs = cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs();
+    OffsetDateTime::from_unix_timestamp(secs as i64).ok()
 }
 
 /// Returns `true` if the CA certificate expires within 183 days (6 months).

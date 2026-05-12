@@ -406,9 +406,6 @@ pub(crate) enum CertRecordError {
     #[error("failed to parse PEM data")]
     PemParse,
 
-    #[error("failed to parse X.509 certificate")]
-    X509Parse,
-
     #[error("invalid certificate timestamp: {0}")]
     Timestamp(#[from] time::error::ComponentRange),
 
@@ -474,18 +471,20 @@ pub(crate) async fn revoke_certificate(
 pub(crate) fn parse_cert_metadata(
     pem: &str,
 ) -> Result<(String, OffsetDateTime, OffsetDateTime), Report<CertRecordError>> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
-        .map_err(|_| report!(CertRecordError::PemParse))?;
-    let cert = pem_block
-        .parse_x509()
-        .map_err(|_| report!(CertRecordError::X509Parse))?;
-
-    let serial = cert.raw_serial_as_string();
-    let validity = cert.validity();
-    let not_before = OffsetDateTime::from_unix_timestamp(validity.not_before.timestamp())
-        .context_to::<CertRecordError>()?;
-    let not_after = OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
-        .context_to::<CertRecordError>()?;
+    use der::DecodePem;
+    use x509_cert::Certificate;
+    let cert =
+        Certificate::from_pem(pem.as_bytes()).map_err(|_| report!(CertRecordError::PemParse))?;
+    let tbs = &cert.tbs_certificate;
+    let serial = tbs.serial_number.to_string().to_lowercase();
+    let not_before = OffsetDateTime::from_unix_timestamp(
+        tbs.validity.not_before.to_unix_duration().as_secs() as i64,
+    )
+    .context_to::<CertRecordError>()?;
+    let not_after = OffsetDateTime::from_unix_timestamp(
+        tbs.validity.not_after.to_unix_duration().as_secs() as i64,
+    )
+    .context_to::<CertRecordError>()?;
 
     Ok((serial, not_before, not_after))
 }
