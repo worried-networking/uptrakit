@@ -21,7 +21,7 @@ fn db_config_rejects_zero_timeout() {
 #[test]
 fn db_config_accepts_valid_values() {
     let good = DbConfig::with_all("sqlite://x", 16, 5000);
-    assert!(good.validate().is_ok());
+    good.validate().unwrap();
 }
 
 #[test]
@@ -55,7 +55,7 @@ addr = "0.0.0.0:8444"
     let parsed: NetworkConfig = toml::from_str(raw).unwrap();
     assert_eq!(parsed.https.addr, "0.0.0.0:8443");
     assert_eq!(parsed.pki.addr, "0.0.0.0:8444");
-    assert!(parsed.validate().is_ok());
+    parsed.validate().unwrap();
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn audit_accepts_known_filters() {
 #[test]
 fn nats_validates_url() {
     let good = NatsConfig::new("nats://localhost:4222");
-    assert!(good.validate().is_ok());
+    good.validate().unwrap();
     let bad = NatsConfig::new("");
     assert!(bad.validate().is_err());
 }
@@ -141,7 +141,7 @@ scheduler = false
 #[test]
 fn zeroconf_disabled_does_not_require_url() {
     let cfg: ZeroconfConfig = toml::from_str("enabled = false\n").unwrap();
-    assert!(cfg.validate().is_ok());
+    cfg.validate().unwrap();
 }
 
 #[test]
@@ -231,7 +231,7 @@ use uptrakit_config_reload::TomlConfigLoader;
 fn loader_validate_only_passes_for_minimal_valid_toml() {
     let mut f = NamedTempFile::new().unwrap();
     writeln!(f, "{}", minimal_toml()).unwrap();
-    assert!(TomlConfigLoader::validate_only(f.path()).is_ok());
+    TomlConfigLoader::validate_only(f.path()).unwrap();
 }
 
 #[test]
