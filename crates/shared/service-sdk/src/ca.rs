@@ -499,4 +499,45 @@ mod tests {
         let hash = compute_local_ca_hash(dir.path()).await;
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
+
+    // ── save_ca_cert atomic write ───────────────────────────────────────
+
+    /// Verify that `save_ca_cert` replaces the CA bundle atomically:
+    /// the write goes through `dirs::write_with_mode` which creates a
+    /// `.ca.pem.tmp` sibling file and then renames it into place, so a reader
+    /// never sees a partially-written `ca.pem`.  After a successful write no
+    /// straggler `.tmp` file should remain in the directory.
+    #[tokio::test]
+    async fn save_ca_cert_is_atomic_via_tmp_rename() {
+        let config_dir = tempfile::tempdir().expect("tmpdir");
+        let state_dir = tempfile::tempdir().expect("tmpdir");
+        let ca_path = config_dir.path().join("ca.pem");
+
+        // Seed an old CA so we can confirm the content is replaced.
+        tokio::fs::write(&ca_path, b"OLD_CA").await.expect("seed");
+
+        // save_ca_cert delegates to dirs::write_secure_file_str which calls
+        // write_with_mode: write to `.ca.pem.tmp` then rename atomically.
+        let mut identity = crate::identity::ServiceIdentityState::new(
+            config_dir.path().to_path_buf(),
+            state_dir.path().to_path_buf(),
+        );
+        identity.save_ca_cert("NEW_CA").await.expect("save ok");
+
+        let content = tokio::fs::read_to_string(&ca_path)
+            .await
+            .expect("read ca.pem");
+        assert_eq!(content, "NEW_CA", "ca.pem must contain the new content");
+
+        // After a successful atomic write the temp file must be gone.
+        let stragglers: Vec<_> = std::fs::read_dir(config_dir.path())
+            .expect("readdir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            stragglers.is_empty(),
+            "no straggler .tmp files after successful atomic write, found: {stragglers:?}"
+        );
+    }
 }
