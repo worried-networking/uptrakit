@@ -51,6 +51,82 @@ pub enum SettingKey {
     ///
     /// DB key: `zeroconf.pki_addr`
     ZeroconfPkiAddr,
+    /// Whether the MCP OAuth server is enabled.
+    ///
+    /// DB key: `oauth.mcp_enabled`
+    OauthMcpEnabled,
+    /// Whether Dynamic Client Registration (DCR) is enabled.
+    ///
+    /// DB key: `oauth.dcr_enabled`
+    OauthDcrEnabled,
+    /// Whether Client-Initiated Metadata Discovery (CIMD) is enabled.
+    ///
+    /// DB key: `oauth.cimd_enabled`
+    OauthCimdEnabled,
+    /// Canonical host used as OAuth issuer and redirect base.
+    ///
+    /// DB key: `oauth.canonical_host`
+    OauthCanonicalHost,
+    /// Additional audience host strings accepted in bearer token validation.
+    ///
+    /// DB key: `oauth.accepted_audience_hosts`
+    OauthAcceptedAudienceHosts,
+    /// Allow multiple controller instances to share an OAuth domain (unsafe).
+    ///
+    /// DB key: `oauth.allow_multi_controller_unsafe`
+    OauthAllowMultiControllerUnsafe,
+    /// HMAC-SHA256 secret used to sign OAuth JWTs.
+    ///
+    /// DB key: `oauth.jwt_signing_secret`
+    OauthJwtSigningSecret,
+    /// Lifetime of OAuth access tokens in seconds.
+    ///
+    /// DB key: `oauth.access_token_ttl_secs`
+    OauthAccessTokenTtlSecs,
+    /// Lifetime of OAuth refresh tokens in seconds.
+    ///
+    /// DB key: `oauth.refresh_token_ttl_secs`
+    OauthRefreshTokenTtlSecs,
+    /// Maximum lifetime of an OAuth refresh token family in seconds.
+    ///
+    /// DB key: `oauth.refresh_family_max_ttl_secs`
+    OauthRefreshFamilyMaxTtlSecs,
+    /// Lifetime of OAuth authorization codes in seconds.
+    ///
+    /// DB key: `oauth.authorization_code_ttl_secs`
+    OauthAuthorizationCodeTtlSecs,
+    /// Lifetime of OAuth authorization requests (PAR) in seconds.
+    ///
+    /// DB key: `oauth.authorization_request_ttl_secs`
+    OauthAuthorizationRequestTtlSecs,
+    /// Rate limit: maximum DCR registrations per hour.
+    ///
+    /// DB key: `oauth.rate.dcr_per_hour`
+    OauthRateDcrPerHour,
+    /// Rate limit: maximum CIMD requests per minute.
+    ///
+    /// DB key: `oauth.rate.cimd_per_min`
+    OauthRateCimdPerMin,
+    /// Rate limit: maximum authorization endpoint requests per minute.
+    ///
+    /// DB key: `oauth.rate.authorize_per_min`
+    OauthRateAuthorizePerMin,
+    /// Rate limit: maximum token endpoint requests per minute.
+    ///
+    /// DB key: `oauth.rate.token_per_min`
+    OauthRateTokenPerMin,
+    /// Rate limit: maximum consent endpoint requests per minute.
+    ///
+    /// DB key: `oauth.rate.consent_per_min`
+    OauthRateConsentPerMin,
+    /// Rate limit: maximum MCP authentication failures per minute before lockout.
+    ///
+    /// DB key: `oauth.rate.mcp_auth_fail_per_min`
+    OauthRateMcpAuthFailPerMin,
+    /// Allowlist of cosmetic CIMD fields that clients may supply during registration.
+    ///
+    /// DB key: `oauth.cimd_cosmetic_field_allowlist`
+    OauthCimdCosmeticFieldAllowlist,
 }
 
 impl SettingKey {
@@ -81,6 +157,25 @@ impl SettingKey {
             Self::ZeroconfEnabled => "zeroconf.enabled",
             Self::ZeroconfUrl => "zeroconf.url",
             Self::ZeroconfPkiAddr => "zeroconf.pki_addr",
+            Self::OauthMcpEnabled => "oauth.mcp_enabled",
+            Self::OauthDcrEnabled => "oauth.dcr_enabled",
+            Self::OauthCimdEnabled => "oauth.cimd_enabled",
+            Self::OauthCanonicalHost => "oauth.canonical_host",
+            Self::OauthAcceptedAudienceHosts => "oauth.accepted_audience_hosts",
+            Self::OauthAllowMultiControllerUnsafe => "oauth.allow_multi_controller_unsafe",
+            Self::OauthJwtSigningSecret => "oauth.jwt_signing_secret",
+            Self::OauthAccessTokenTtlSecs => "oauth.access_token_ttl_secs",
+            Self::OauthRefreshTokenTtlSecs => "oauth.refresh_token_ttl_secs",
+            Self::OauthRefreshFamilyMaxTtlSecs => "oauth.refresh_family_max_ttl_secs",
+            Self::OauthAuthorizationCodeTtlSecs => "oauth.authorization_code_ttl_secs",
+            Self::OauthAuthorizationRequestTtlSecs => "oauth.authorization_request_ttl_secs",
+            Self::OauthRateDcrPerHour => "oauth.rate.dcr_per_hour",
+            Self::OauthRateCimdPerMin => "oauth.rate.cimd_per_min",
+            Self::OauthRateAuthorizePerMin => "oauth.rate.authorize_per_min",
+            Self::OauthRateTokenPerMin => "oauth.rate.token_per_min",
+            Self::OauthRateConsentPerMin => "oauth.rate.consent_per_min",
+            Self::OauthRateMcpAuthFailPerMin => "oauth.rate.mcp_auth_fail_per_min",
+            Self::OauthCimdCosmeticFieldAllowlist => "oauth.cimd_cosmetic_field_allowlist",
         }
     }
 
@@ -113,6 +208,25 @@ impl SettingKey {
             "zeroconf.enabled" => Some(Self::ZeroconfEnabled),
             "zeroconf.url" => Some(Self::ZeroconfUrl),
             "zeroconf.pki_addr" => Some(Self::ZeroconfPkiAddr),
+            "oauth.mcp_enabled" => Some(Self::OauthMcpEnabled),
+            "oauth.dcr_enabled" => Some(Self::OauthDcrEnabled),
+            "oauth.cimd_enabled" => Some(Self::OauthCimdEnabled),
+            "oauth.canonical_host" => Some(Self::OauthCanonicalHost),
+            "oauth.accepted_audience_hosts" => Some(Self::OauthAcceptedAudienceHosts),
+            "oauth.allow_multi_controller_unsafe" => Some(Self::OauthAllowMultiControllerUnsafe),
+            "oauth.jwt_signing_secret" => Some(Self::OauthJwtSigningSecret),
+            "oauth.access_token_ttl_secs" => Some(Self::OauthAccessTokenTtlSecs),
+            "oauth.refresh_token_ttl_secs" => Some(Self::OauthRefreshTokenTtlSecs),
+            "oauth.refresh_family_max_ttl_secs" => Some(Self::OauthRefreshFamilyMaxTtlSecs),
+            "oauth.authorization_code_ttl_secs" => Some(Self::OauthAuthorizationCodeTtlSecs),
+            "oauth.authorization_request_ttl_secs" => Some(Self::OauthAuthorizationRequestTtlSecs),
+            "oauth.rate.dcr_per_hour" => Some(Self::OauthRateDcrPerHour),
+            "oauth.rate.cimd_per_min" => Some(Self::OauthRateCimdPerMin),
+            "oauth.rate.authorize_per_min" => Some(Self::OauthRateAuthorizePerMin),
+            "oauth.rate.token_per_min" => Some(Self::OauthRateTokenPerMin),
+            "oauth.rate.consent_per_min" => Some(Self::OauthRateConsentPerMin),
+            "oauth.rate.mcp_auth_fail_per_min" => Some(Self::OauthRateMcpAuthFailPerMin),
+            "oauth.cimd_cosmetic_field_allowlist" => Some(Self::OauthCimdCosmeticFieldAllowlist),
             _ => None,
         }
     }
@@ -137,6 +251,25 @@ impl SettingKey {
                 | Self::ZeroconfEnabled
                 | Self::ZeroconfUrl
                 | Self::ZeroconfPkiAddr
+                | Self::OauthMcpEnabled
+                | Self::OauthDcrEnabled
+                | Self::OauthCimdEnabled
+                | Self::OauthCanonicalHost
+                | Self::OauthAcceptedAudienceHosts
+                | Self::OauthAllowMultiControllerUnsafe
+                | Self::OauthJwtSigningSecret
+                | Self::OauthAccessTokenTtlSecs
+                | Self::OauthRefreshTokenTtlSecs
+                | Self::OauthRefreshFamilyMaxTtlSecs
+                | Self::OauthAuthorizationCodeTtlSecs
+                | Self::OauthAuthorizationRequestTtlSecs
+                | Self::OauthRateDcrPerHour
+                | Self::OauthRateCimdPerMin
+                | Self::OauthRateAuthorizePerMin
+                | Self::OauthRateTokenPerMin
+                | Self::OauthRateConsentPerMin
+                | Self::OauthRateMcpAuthFailPerMin
+                | Self::OauthCimdCosmeticFieldAllowlist
         )
     }
 }
