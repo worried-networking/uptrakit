@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use crate::backend::AuditLogBackend;
 use crate::enricher::ActorEnricher;
-use crate::entry::{AuditEntry, Event};
+use crate::entry::{AuditEntry, AuditEntryErased, Event};
 
 /// Fire-and-forget audit log dispatcher.
 ///
@@ -71,9 +71,10 @@ async fn dispatch_loop(
         {
             entry.actor_display = enricher.display_name(entry.actor_type, actor_id).await;
         }
-        if let Err(e) = backend.write(&entry).await {
+        let erased: AuditEntryErased = entry.into();
+        if let Err(e) = backend.write(&erased).await {
             tracing::warn!(
-                audit_id = %entry.id,
+                audit_id = %erased.id,
                 error = %e,
                 "failed to write audit log entry"
             );

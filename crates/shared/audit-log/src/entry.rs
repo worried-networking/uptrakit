@@ -5,7 +5,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::action_type::AuditActionType;
+use crate::action_type::{AuditActionKind, AuditActionType};
 use crate::error::{AuditLogError, Result};
 
 /// Marker: this entry records a discrete event (no before/after snapshots).
@@ -127,6 +127,82 @@ pub struct AuditEntry<K> {
     pub correlation_id: Option<Uuid>,
     pub request_id: Option<String>,
     _kind: PhantomData<K>,
+}
+
+/// Type-erased audit entry used at backend boundaries.
+///
+/// Carries `action_kind` so that DB backends can persist the `action_kind`
+/// column and the journald backend can emit the correct field set without
+/// carrying the `K` type parameter into trait objects.
+///
+/// Obtain via `AuditEntry<Event>::into()` or `AuditEntry<Stateful>::into()`.
+#[derive(Clone, Debug)]
+pub struct AuditEntryErased {
+    pub id: Uuid,
+    pub tenant_id: Option<Uuid>,
+    pub occurred_at: OffsetDateTime,
+    pub actor_type: AuditActorType,
+    pub actor_id: Option<Uuid>,
+    pub actor_display: Option<String>,
+    pub action_type: AuditActionType,
+    pub action_kind: AuditActionKind,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub target_display: Option<String>,
+    pub outcome: AuditOutcome,
+    pub details_json: Option<Value>,
+    pub before_snapshot: Option<Value>,
+    pub after_snapshot: Option<Value>,
+    pub correlation_id: Option<Uuid>,
+    pub request_id: Option<String>,
+}
+
+impl From<AuditEntry<Event>> for AuditEntryErased {
+    fn from(e: AuditEntry<Event>) -> Self {
+        Self {
+            id: e.id,
+            tenant_id: e.tenant_id,
+            occurred_at: e.occurred_at,
+            actor_type: e.actor_type,
+            actor_id: e.actor_id,
+            actor_display: e.actor_display,
+            action_type: e.action_type,
+            action_kind: AuditActionKind::Event,
+            target_type: e.target_type,
+            target_id: e.target_id,
+            target_display: e.target_display,
+            outcome: e.outcome,
+            details_json: e.details_json,
+            before_snapshot: e.before_snapshot,
+            after_snapshot: e.after_snapshot,
+            correlation_id: e.correlation_id,
+            request_id: e.request_id,
+        }
+    }
+}
+
+impl From<AuditEntry<Stateful>> for AuditEntryErased {
+    fn from(e: AuditEntry<Stateful>) -> Self {
+        Self {
+            id: e.id,
+            tenant_id: e.tenant_id,
+            occurred_at: e.occurred_at,
+            actor_type: e.actor_type,
+            actor_id: e.actor_id,
+            actor_display: e.actor_display,
+            action_type: e.action_type,
+            action_kind: AuditActionKind::Stateful,
+            target_type: e.target_type,
+            target_id: e.target_id,
+            target_display: e.target_display,
+            outcome: e.outcome,
+            details_json: e.details_json,
+            before_snapshot: e.before_snapshot,
+            after_snapshot: e.after_snapshot,
+            correlation_id: e.correlation_id,
+            request_id: e.request_id,
+        }
+    }
 }
 
 /// A builder for [`AuditEntry<Event>`] entries.
@@ -591,6 +667,121 @@ pub fn validate<K>(e: &AuditEntry<K>) -> Result<()> {
     Ok(())
 }
 
+/// Validates all field constraints on a built [`AuditEntryErased`].
+///
+/// Mirrors [`validate`] but operates on the type-erased representation used
+/// at backend boundaries.
+///
+/// # Errors
+///
+/// Returns [`AuditLogError::Validation`] when a constraint is violated, or
+/// [`AuditLogError::Serialization`] when a JSON field cannot be measured.
+pub fn validate_erased(e: &AuditEntryErased) -> Result<()> {
+    const MAX_ACTION_TYPE_BYTES: usize = 128;
+    const MAX_DETAILS_JSON_BYTES: usize = 4 * 1024;
+    const MAX_ACTOR_DISPLAY_BYTES: usize = 255;
+    const MAX_TARGET_TYPE_BYTES: usize = 128;
+    const MAX_TARGET_DISPLAY_BYTES: usize = 255;
+    const MAX_TARGET_ID_BYTES: usize = 255;
+    const MAX_REQUEST_ID_BYTES: usize = 255;
+    const MAX_SNAPSHOT_BYTES_LOCAL: usize = 16 * 1024;
+
+    if e.occurred_at.offset() != time::UtcOffset::UTC {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "timestamps must be UTC".into()
+        )));
+    }
+    if matches!(e.actor_type, AuditActorType::System) && e.actor_id.is_some() {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "system actors must not include actor_id".into()
+        )));
+    }
+    if e.action_type.as_str().len() > MAX_ACTION_TYPE_BYTES {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "action_type exceeds 128 bytes".into()
+        )));
+    }
+    if e.target_id.is_some() && e.target_type.is_none() {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "target_id requires target_type".into()
+        )));
+    }
+    if e.target_display.is_some() && e.target_type.is_none() {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "target_display requires target_type".into()
+        )));
+    }
+    if e.actor_display
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_ACTOR_DISPLAY_BYTES)
+    {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "actor_display exceeds 255 bytes".into()
+        )));
+    }
+    if e.target_type
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_TARGET_TYPE_BYTES)
+    {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "target_type exceeds 128 bytes".into()
+        )));
+    }
+    if e.target_display
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_TARGET_DISPLAY_BYTES)
+    {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "target_display exceeds 255 bytes".into()
+        )));
+    }
+    if e.target_id
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_TARGET_ID_BYTES)
+    {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "target_id exceeds 255 bytes".into()
+        )));
+    }
+    if e.request_id
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_REQUEST_ID_BYTES)
+    {
+        return Err(rootcause::report!(AuditLogError::Validation(
+            "request_id exceeds 255 bytes".into()
+        )));
+    }
+    if let Some(details) = &e.details_json {
+        let bytes = serde_json::to_vec(details)
+            .map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
+        if bytes.len() > MAX_DETAILS_JSON_BYTES {
+            return Err(rootcause::report!(AuditLogError::Validation(
+                "details_json exceeds 4096 bytes".into()
+            )));
+        }
+    }
+    if let Some(s) = &e.before_snapshot {
+        let bytes = serde_json::to_vec(s)
+            .map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
+        if bytes.len() > MAX_SNAPSHOT_BYTES_LOCAL {
+            return Err(rootcause::report!(AuditLogError::Validation(
+                "before_snapshot exceeds 16 KB".into()
+            )));
+        }
+    }
+    if let Some(s) = &e.after_snapshot {
+        let bytes = serde_json::to_vec(s)
+            .map_err(|err| rootcause::report!(AuditLogError::Serialization(err)))?;
+        if bytes.len() > MAX_SNAPSHOT_BYTES_LOCAL {
+            return Err(rootcause::report!(AuditLogError::Validation(
+                "after_snapshot exceeds 16 KB".into()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // AuditView trait
 // ---------------------------------------------------------------------------
@@ -663,10 +854,6 @@ mod tests {
 
     #[test]
     fn audit_entry_requires_utc_timestamp() {
-        #[expect(
-            clippy::expect_used,
-            reason = "test helper — both parse and build are infallible for well-formed inputs; panic is acceptable in test setup"
-        )]
         let mut entry = AuditEntry::<Event>::builder_event(AuditActionType::SERVICE_MERGE)
             .build()
             .expect("valid test audit entry");
