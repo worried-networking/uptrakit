@@ -20,6 +20,8 @@ pub enum DeviceAuthStatus {
     Authorized,
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "expired"))]
     Expired,
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "denied"))]
+    Denied,
 }
 
 impl DeviceAuthStatus {
@@ -29,6 +31,7 @@ impl DeviceAuthStatus {
             Self::Pending => "pending",
             Self::Authorized => "authorized",
             Self::Expired => "expired",
+            Self::Denied => "denied",
         }
     }
 }
@@ -59,6 +62,7 @@ impl FromStr for DeviceAuthStatus {
             "pending" => Ok(Self::Pending),
             "authorized" => Ok(Self::Authorized),
             "expired" => Ok(Self::Expired),
+            "denied" => Ok(Self::Denied),
             _ => Err(ParseDeviceAuthStatusError),
         }
     }
@@ -78,6 +82,7 @@ mod tests {
             DeviceAuthStatus::Pending,
             DeviceAuthStatus::Authorized,
             DeviceAuthStatus::Expired,
+            DeviceAuthStatus::Denied,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: DeviceAuthStatus = serde_json::from_str(&json).unwrap();
@@ -91,6 +96,7 @@ mod tests {
             DeviceAuthStatus::Pending,
             DeviceAuthStatus::Authorized,
             DeviceAuthStatus::Expired,
+            DeviceAuthStatus::Denied,
         ] {
             assert_eq!(format!("{variant}"), variant.as_str());
         }
@@ -102,6 +108,7 @@ mod tests {
             DeviceAuthStatus::Pending,
             DeviceAuthStatus::Authorized,
             DeviceAuthStatus::Expired,
+            DeviceAuthStatus::Denied,
         ] {
             let s = variant.as_str();
             let parsed: DeviceAuthStatus = s.parse().unwrap();
@@ -128,6 +135,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&DeviceAuthStatus::Expired).unwrap(),
             r#""expired""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DeviceAuthStatus::Denied).unwrap(),
+            r#""denied""#
+        );
+    }
+
+    #[test]
+    fn denied_variant_string_value_is_denied() {
+        assert_eq!(DeviceAuthStatus::Denied.as_str(), "denied");
+        assert_eq!(format!("{}", DeviceAuthStatus::Denied), "denied");
+        assert_eq!(
+            "denied".parse::<DeviceAuthStatus>().unwrap(),
+            DeviceAuthStatus::Denied
         );
     }
 }
