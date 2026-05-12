@@ -93,15 +93,15 @@ pub async fn device_authorization(
     let verification_uri_complete = format!("{base}/device?user_code={user_code}");
 
     let interval = uptrakit_web_api_auth::auth::device_flow::POLL_INTERVAL_SECONDS;
-    let body = DeviceAuthorizationResponse {
+    let body = DeviceAuthorizationResponse::new(
         device_code,
         user_code,
         verification_uri,
         verification_uri_complete,
         // 10-minute TTL matching the device_flow_store's DEVICE_CODE_TTL_SECONDS.
-        expires_in: 600,
+        600,
         interval,
-    };
+    );
     (StatusCode::OK, axum::Json(body)).into_response()
 }
 

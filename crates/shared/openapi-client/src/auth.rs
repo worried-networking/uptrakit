@@ -72,7 +72,7 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthorizationRequest,
     ) -> Result<DeviceAuthorizationResponse> {
-        self.post_form_unauth(crate::paths::auth::OAUTH_DEVICE_AUTHORIZATION, req)
+        self.post_form_unauth(crate::paths::oauth::DEVICE_AUTHORIZATION, req)
             .await
     }
 
@@ -83,8 +83,7 @@ impl UptrakitClient {
     /// the typed `OAuthErrorCode`. This endpoint does not require
     /// authentication.
     pub async fn oauth_token(&self, req: &OAuthTokenRequest) -> Result<OAuthTokenResponse> {
-        self.post_form_unauth(crate::paths::auth::OAUTH_TOKEN, req)
-            .await
+        self.post_form_unauth(crate::paths::oauth::TOKEN, req).await
     }
 
     /// Fetch the RFC 8414 §3 authorization server metadata document.
@@ -93,7 +92,7 @@ impl UptrakitClient {
     pub async fn oauth_authorization_server_metadata(
         &self,
     ) -> Result<OAuthAuthorizationServerMetadata> {
-        self.get_unauth(crate::paths::auth::OAUTH_METADATA).await
+        self.get_unauth(crate::paths::oauth::METADATA).await
     }
 
     /// Deny a pending device authorization request (UI-internal).
@@ -113,14 +112,8 @@ impl UptrakitClient {
         &self,
         query: &DeviceAuthLookupQuery,
     ) -> Result<DeviceAuthLookupResponse> {
-        let url = format!("{}{}", self.base_url, crate::paths::auth::DEVICE_LOOKUP);
-        let req = self
-            .http
-            .get(&url)
-            .bearer_auth(self.token_or_err()?)
-            .query(query);
-        let resp = self.send_with_retry(req).await?;
-        self.handle_response(resp).await
+        self.get_with_query(crate::paths::auth::DEVICE_LOOKUP, query)
+            .await
     }
 }
 
@@ -203,11 +196,11 @@ mod tests {
     #[test]
     fn device_authorization_request_form_serialization() {
         use serde_urlencoded;
-        let req = DeviceAuthorizationRequest {
-            client_id: "uptrakit-cli".into(),
-            scope: None,
-            client_name: Some("cli-host-2026-05-12".into()),
-        };
+        let req = DeviceAuthorizationRequest::new(
+            "uptrakit-cli".into(),
+            None,
+            Some("cli-host-2026-05-12".into()),
+        );
         let encoded = serde_urlencoded::to_string(&req).expect("encode");
         assert!(encoded.contains("client_id=uptrakit-cli"));
         assert!(encoded.contains("client_name=cli-host-2026-05-12"));
@@ -217,14 +210,15 @@ mod tests {
     #[test]
     fn oauth_token_request_form_serialization() {
         use serde_urlencoded;
-        let req = OAuthTokenRequest {
-            grant_type: "urn:ietf:params:oauth:grant-type:device_code".into(),
-            device_code: Some("abc-123".into()),
-            client_id: Some("uptrakit-cli".into()),
-        };
+        let req = OAuthTokenRequest::new(
+            "urn:ietf:params:oauth:grant-type:device_code".into(),
+            Some("abc-123".into()),
+            Some("uptrakit-cli".into()),
+        );
         let encoded = serde_urlencoded::to_string(&req).expect("encode");
         assert!(
-            encoded.contains("grant_type=urn"),
+            encoded.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code")
+                || encoded.contains("grant_type=urn:ietf:params:oauth:grant-type:device_code"),
             "grant_type URI preserved verbatim"
         );
         assert!(encoded.contains("device_code=abc-123"));
@@ -233,9 +227,7 @@ mod tests {
 
     #[test]
     fn device_auth_deny_request_serialization() {
-        let req = DeviceAuthDenyRequest {
-            user_code: "ABCD-EFGH".into(),
-        };
+        let req = DeviceAuthDenyRequest::new("ABCD-EFGH".into());
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["user_code"], "ABCD-EFGH");
     }

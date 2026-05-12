@@ -29,12 +29,6 @@ pub(crate) mod auth {
     pub(crate) const DEVICE_DENY: &str = "/api/v1/auth/device/deny";
     /// `GET /api/v1/auth/device/lookup`
     pub(crate) const DEVICE_LOOKUP: &str = "/api/v1/auth/device/lookup";
-    /// `POST /api/v1/oauth/device_authorization` — RFC 8628 §3.1
-    pub(crate) const OAUTH_DEVICE_AUTHORIZATION: &str = "/api/v1/oauth/device_authorization";
-    /// `POST /api/v1/oauth/token` — RFC 6749 §3.2 / RFC 8628 §3.4
-    pub(crate) const OAUTH_TOKEN: &str = "/api/v1/oauth/token";
-    /// `GET /.well-known/oauth-authorization-server` — RFC 8414 §3
-    pub(crate) const OAUTH_METADATA: &str = "/.well-known/oauth-authorization-server";
 }
 
 pub(crate) mod api_tokens {
@@ -479,4 +473,13 @@ pub(crate) mod update_history {
     pub(crate) fn output_stream(id: &Uuid) -> String {
         format!("/api/v1/update-history/{id}/output/stream")
     }
+}
+
+pub(crate) mod oauth {
+    /// `POST /api/v1/oauth/device_authorization` — RFC 8628 §3.1
+    pub(crate) const DEVICE_AUTHORIZATION: &str = "/api/v1/oauth/device_authorization";
+    /// `POST /api/v1/oauth/token` — RFC 6749 §3.2 / RFC 8628 §3.4
+    pub(crate) const TOKEN: &str = "/api/v1/oauth/token";
+    /// `GET /.well-known/oauth-authorization-server` — RFC 8414 §3
+    pub(crate) const METADATA: &str = "/.well-known/oauth-authorization-server";
 }

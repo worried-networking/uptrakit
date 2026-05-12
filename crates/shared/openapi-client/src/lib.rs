@@ -142,7 +142,7 @@ impl UptrakitClient {
     const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
     /// Create a new client. Pass `token: None` for unauthenticated endpoints
-    /// (e.g. device auth start/poll).
+    /// (e.g. the device authorization flow).
     ///
     /// `request_timeout` overrides [`DEFAULT_REQUEST_TIMEOUT`] when `Some`.
     ///

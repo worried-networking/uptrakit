@@ -96,13 +96,7 @@ async fn device_code_grant(state: Arc<AppState>, req: OAuthTokenRequest) -> Resp
 
     match outcome {
         PollOutcome::Authorized { token, .. } => {
-            let body = OAuthTokenResponse {
-                access_token: token.expose_secret().to_string(),
-                token_type: "Bearer".into(),
-                expires_in: None,
-                refresh_token: None,
-                scope: None,
-            };
+            let body = OAuthTokenResponse::new(token.expose_secret().to_string(), "Bearer".into());
             (StatusCode::OK, Json(body)).into_response()
         }
         PollOutcome::Pending => oauth_error_response(

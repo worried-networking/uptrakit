@@ -30,14 +30,14 @@ pub async fn metadata(
     headers: HeaderMap,
 ) -> Response {
     let base = resolve_external_base_url(external_base_url, &headers);
-    let body = OAuthAuthorizationServerMetadata {
-        issuer: base.clone(),
-        device_authorization_endpoint: format!("{base}/api/v1/oauth/device_authorization"),
-        token_endpoint: format!("{base}/api/v1/oauth/token"),
-        grant_types_supported: vec![DEVICE_CODE_GRANT.to_string()],
-        response_types_supported: vec![],
-        token_endpoint_auth_methods_supported: vec!["none".into()],
-        code_challenge_methods_supported: vec![],
-    };
+    let body = OAuthAuthorizationServerMetadata::new(
+        base.clone(),
+        format!("{base}/api/v1/oauth/device_authorization"),
+        format!("{base}/api/v1/oauth/token"),
+        vec![DEVICE_CODE_GRANT.to_string()],
+        vec![],
+        vec!["none".into()],
+        vec![],
+    );
     (StatusCode::OK, Json(body)).into_response()
 }

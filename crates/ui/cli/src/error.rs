@@ -57,5 +57,9 @@ impl_report_conversion!(uptrakit_openapi_client::ClientError => CliError, |e| {
         uptrakit_openapi_client::ClientError::NotFound(msg) => CliError::Api { status: uptrakit_openapi_client::StatusCode::NOT_FOUND, message: msg },
         uptrakit_openapi_client::ClientError::NotAuthenticated => CliError::NotLoggedIn,
         uptrakit_openapi_client::ClientError::InvalidMethod(msg) => CliError::Other(format!("Invalid HTTP method: {msg}")),
+        uptrakit_openapi_client::ClientError::OAuthError(err) => CliError::Api {
+            status: uptrakit_openapi_client::StatusCode::BAD_REQUEST,
+            message: format!("OAuth error: {:?}", err.error),
+        },
     }
 });
