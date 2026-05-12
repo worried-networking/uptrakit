@@ -374,7 +374,27 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 5 — trust sets trusted_at and returns 204
+    // Test 5 — revoke unknown client returns 404
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn revoke_unknown_client_returns_404() {
+        let (router, _db) = app_with_oauth(enabled_oauth_state()).await;
+        let client = crate::test_harness::http_client::TestClient::new(router.clone());
+        let token = register_and_get_token(&client).await;
+
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/api/oauth/clients/nonexistent-client-id-xyz")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request");
+        let resp = router.oneshot(req).await.expect("oneshot");
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 6 — trust sets trusted_at and returns 204
     // -----------------------------------------------------------------------
 
     #[tokio::test]

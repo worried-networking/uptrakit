@@ -116,7 +116,7 @@ impl OAuthClientService {
 
         let txn = self.db.begin().await.context_to()?;
 
-        oauth_client::Entity::update_many()
+        let result = oauth_client::Entity::update_many()
             .col_expr(
                 oauth_client::Column::RevokedAt,
                 sea_orm::sea_query::Expr::value(Some(now)),
@@ -126,6 +126,10 @@ impl OAuthClientService {
             .exec(&txn)
             .await
             .context_to()?;
+
+        if result.rows_affected == 0 {
+            bail!(OAuthClientError::NotFound);
+        }
 
         oauth_consent::Entity::update_many()
             .col_expr(
