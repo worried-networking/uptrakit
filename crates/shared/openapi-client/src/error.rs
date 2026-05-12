@@ -12,7 +12,7 @@ pub enum ClientError {
     Json(#[from] serde_json::Error),
 
     /// RFC 6749 §5.2 / RFC 8628 §3.5 error response from an OAuth endpoint.
-    #[error("OAuth error: {0:?}")]
+    #[error("oauth error: {0:?}")]
     OAuthError(OAuthErrorResponse),
 
     #[error("API error ({status}): {message}")]
