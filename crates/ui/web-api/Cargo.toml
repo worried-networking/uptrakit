@@ -52,7 +52,6 @@ uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notif
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
 client-ip = { workspace = true, features = ["forwarded-header"] }
-x509-parser = { workspace = true }
 base64 = { workspace = true }
 uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }

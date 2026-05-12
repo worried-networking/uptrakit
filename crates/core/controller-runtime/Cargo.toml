@@ -60,7 +60,6 @@ tracing-subscriber = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 rcgen = { workspace = true }
-x509-parser = { workspace = true }
 x509-cert = { workspace = true }
 der = { workspace = true }
 const-oid = { workspace = true }
