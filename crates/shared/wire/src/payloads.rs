@@ -1342,6 +1342,9 @@ pub struct AuditEventPayload {
     /// Optional correlation identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// Optional correlation identifier linking events in a workflow chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<uuid::Uuid>,
 }
 
 // =============================================================================
