@@ -12,7 +12,7 @@ use uptrakit_controller_core::auth::api_token::{
 };
 use uptrakit_controller_core::auth::{AuthFailure, Permission};
 
-use crate::context::{McpAuthError, McpRequestContext};
+use crate::context::{McpAuthError, McpAuthMethod, McpRequestContext};
 use crate::state::McpState;
 
 // ---------------------------------------------------------------------------
@@ -247,6 +247,7 @@ pub async fn validate_api_token_for_mcp(
         token_id,
         state.default_tenant_id,
         auth_user.permissions,
+        McpAuthMethod::ApiToken,
     ))
 }
 
