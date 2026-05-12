@@ -72,9 +72,7 @@ pub enum OAuthBootError {
     )]
     PeerWithSameFingerprintNotPermitted,
     #[error("database error")]
-    Database(#[from] sea_orm::DbErr),
-    #[error("invalid configuration: {0}")]
-    Config(String),
+    Database(sea_orm::DbErr),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthBootError>>;
