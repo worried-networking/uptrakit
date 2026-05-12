@@ -7305,6 +7305,7 @@ dependencies = [
  "parking_lot",
  "rootcause",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "time",
