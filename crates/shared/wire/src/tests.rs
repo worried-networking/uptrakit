@@ -238,11 +238,39 @@ fn audit_event_serialization_roundtrip() {
             .to_string(),
         ),
         request_id: Some(TEST_UUID_3.to_string()),
+        correlation_id: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"audit_event""#));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn audit_event_payload_round_trips_correlation_id() {
+    let id = uuid::Uuid::new_v4();
+    let payload = AuditEventPayload {
+        action_type: "software.update.finalized".to_string(),
+        tenant_id: None,
+        target_type: None,
+        target_id: None,
+        target_display: None,
+        outcome: "success".to_string(),
+        details_json: None,
+        request_id: None,
+        correlation_id: Some(id),
+    };
+    let bytes = serde_json::to_vec(&payload).expect("serialize");
+    let back: AuditEventPayload = serde_json::from_slice(&bytes).expect("deserialize");
+    assert_eq!(back.correlation_id, Some(id));
+}
+
+#[test]
+fn audit_event_payload_omits_correlation_id_for_v1_services() {
+    // V1 services serialise the payload without the field; controller must accept it.
+    let bytes = b"{\"action_type\":\"auth.login\",\"outcome\":\"success\"}";
+    let p: AuditEventPayload = serde_json::from_slice(bytes).expect("compat");
+    assert_eq!(p.correlation_id, None);
 }
 
 #[test]
