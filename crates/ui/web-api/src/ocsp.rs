@@ -14,10 +14,11 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_macros::impl_report_conversion;
+use x509_cert::ext::Extension;
 use x509_cert::ext::pkix::CrlReason;
 use x509_ocsp::{
     BasicOcspResponse, CertId, CertStatus, OcspGeneralizedTime, OcspRequest, OcspResponse,
-    OcspResponseStatus, ResponderId, ResponseData, SingleResponse, Version,
+    OcspResponseStatus, ResponderId, ResponseData, SingleResponse, Version, ext::Nonce,
 };
 
 use crate::ca_snapshot::{CaKeyStoreRef, CaPublicSnapshot};
@@ -178,12 +179,20 @@ pub async fn build_ocsp_response(
         Err(_) => return build_error_response(OcspResponseStatus::InternalError),
     };
 
+    // Echo the nonce per RFC 6960 §4.4.1: if the request carries a nonce,
+    // the response MUST contain the same nonce in responseExtensions.
+    let nonce = ocsp_request.nonce();
+    let response_extensions = match build_nonce_extension(nonce) {
+        Ok(v) => v,
+        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+    };
+
     let response_data = ResponseData {
         version: Version::V1,
         responder_id,
         produced_at: now,
         responses: single_responses,
-        response_extensions: None,
+        response_extensions,
     };
 
     // Look up the signing key from the key store by fingerprint
@@ -199,8 +208,16 @@ pub async fn build_ocsp_response(
         return build_error_response(OcspResponseStatus::InternalError);
     };
 
+    // Include the signer cert in the response so clients can verify the
+    // OCSP signature without a separate CA fetch (RFC 6960 §4.2.2.3).
+    let signer_cert_pem = &ca_public.trusted_cas[signer_index].cert_pem;
+    let signer_cert = match parse_cert_pem(signer_cert_pem) {
+        Ok(c) => c,
+        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+    };
+
     // Sign the response
-    match sign_response(&response_data, signing_key_pem) {
+    match sign_response(&response_data, signing_key_pem, Some(vec![signer_cert])) {
         Ok(response_bytes) => response_bytes,
         Err(_) => build_error_response(OcspResponseStatus::InternalError),
     }
@@ -347,8 +364,38 @@ async fn lookup_cert_status(
     Ok(CertStatus::good())
 }
 
+/// Build nonce response extension from a request nonce (RFC 6960 §4.4.1).
+fn build_nonce_extension(nonce: Option<Nonce>) -> OcspResult<Option<x509_cert::ext::Extensions>> {
+    let Some(nonce) = nonce else {
+        return Ok(None);
+    };
+    use const_oid::AssociatedOid;
+    use der::Encode;
+    let nonce_der = nonce
+        .to_der()
+        .map_err(|e| report!(OcspError::Construction(format!("nonce encode: {e}"))))?;
+    let extn_value = OctetString::new(nonce_der)
+        .map_err(|e| report!(OcspError::Construction(format!("nonce OctetString: {e}"))))?;
+    let ext = Extension {
+        extn_id: Nonce::OID,
+        critical: false,
+        extn_value,
+    };
+    Ok(Some(vec![ext]))
+}
+
+/// Parse a PEM-encoded certificate into an `x509_cert::Certificate`.
+fn parse_cert_pem(pem: &str) -> OcspResult<x509_cert::Certificate> {
+    use der::DecodePem;
+    x509_cert::Certificate::from_pem(pem.as_bytes()).map_err(|_| report!(OcspError::PemParse))
+}
+
 /// Sign the response data and produce a DER-encoded OcspResponse.
-fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<u8>> {
+fn sign_response(
+    response_data: &ResponseData,
+    key_pem: &str,
+    certs: Option<Vec<x509_cert::Certificate>>,
+) -> OcspResult<Vec<u8>> {
     // Encode the response data to DER for signing
     let tbs_der = response_data
         .to_der()
@@ -387,7 +434,7 @@ fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<
         tbs_response_data: response_data.clone(),
         signature_algorithm: algorithm,
         signature,
-        certs: None,
+        certs,
     };
 
     // Wrap in OcspResponse
@@ -569,5 +616,89 @@ mod tests {
         let response = OcspResponse::from_der(fallback_der).unwrap();
         assert_eq!(response.response_status, OcspResponseStatus::InternalError);
         assert!(response.response_bytes.is_none());
+    }
+
+    #[test]
+    fn nonce_extension_roundtrips() {
+        use der::{Decode, asn1::OctetString as DerOctetString};
+        use x509_ocsp::ext::Nonce;
+
+        let nonce_bytes = b"random-nonce-16b";
+        let inner = DerOctetString::new(nonce_bytes).unwrap();
+        let nonce = Nonce(inner);
+
+        let exts = build_nonce_extension(Some(nonce.clone()))
+            .unwrap()
+            .expect("should produce extensions");
+        assert_eq!(exts.len(), 1);
+
+        // Extension extn_value contains DER-encoded Nonce (OctetString)
+        let echoed = Nonce::from_der(exts[0].extn_value.as_bytes()).unwrap();
+        assert_eq!(echoed.0.as_bytes(), nonce_bytes);
+    }
+
+    #[test]
+    fn no_nonce_produces_no_extensions() {
+        let exts = build_nonce_extension(None).unwrap();
+        assert!(exts.is_none());
+    }
+
+    #[test]
+    fn parse_cert_pem_round_trips() {
+        use der::Encode;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).unwrap();
+        let pem = cert.pem();
+
+        let parsed = parse_cert_pem(&pem).unwrap();
+        // Round-trip: DER encode should succeed and be non-empty
+        let der = parsed.to_der().unwrap();
+        assert!(!der.is_empty());
+    }
+
+    #[test]
+    fn sign_response_includes_signer_cert() {
+        use der::Decode;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).unwrap();
+        let cert_pem = cert.pem();
+        let key_pem = key_pair.serialize_pem();
+
+        let signer_cert = parse_cert_pem(&cert_pem).unwrap();
+
+        let pub_key = extract_ca_public_key_bytes(&cert_pem).unwrap();
+        let responder_id = build_responder_id(&pub_key).unwrap();
+        let now = make_ocsp_time(OffsetDateTime::now_utc()).unwrap();
+        let response_data = ResponseData {
+            version: Version::V1,
+            responder_id,
+            produced_at: now,
+            responses: vec![],
+            response_extensions: None,
+        };
+
+        let der = sign_response(&response_data, &key_pem, Some(vec![signer_cert])).unwrap();
+        let response = OcspResponse::from_der(&der).unwrap();
+        let bytes = response.response_bytes.unwrap();
+        let basic = BasicOcspResponse::from_der(bytes.response.as_bytes()).unwrap();
+        assert!(
+            basic.certs.is_some(),
+            "signer cert must be present in response"
+        );
+        assert_eq!(basic.certs.unwrap().len(), 1);
     }
 }
