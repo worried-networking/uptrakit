@@ -20,8 +20,8 @@ pub use dispatcher::AuditLogDispatcher;
 pub use emitter::AuditEmitter;
 pub use enricher::ActorEnricher;
 pub use entry::{
-    AuditActorType, AuditEntry, AuditEntryBuilder, AuditOutcome, AuditView, Event, HasAfter,
-    HasBefore, NeedsAfter, NeedsBefore, Stateful,
+    AuditActorType, AuditEntry, AuditEntryBuilder, AuditEntryErased, AuditOutcome, AuditView,
+    Event, HasAfter, HasBefore, NeedsAfter, NeedsBefore, Stateful,
 };
 pub use error::{AuditLogError, Result};
 pub use filter::{AuditFilter, FilterMode};
