@@ -35,10 +35,10 @@ pub(crate) async fn optional_oauth_auth(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::to_owned);
 
-    if let Some(token) = token {
-        if let Ok(user) = authenticate_jwt(&state, &token).await {
-            req.extensions_mut().insert(user);
-        }
+    if let Some(token) = token
+        && let Ok(user) = authenticate_jwt(&state, &token).await
+    {
+        req.extensions_mut().insert(user);
     }
 
     next.run(req).await

@@ -216,11 +216,6 @@ pub fn spawn_heartbeat(db: DatabaseConnection, instance_id: Uuid) {
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
-    #![expect(
-        clippy::expect_used,
-        reason = "test assertions — panics on setup failure are acceptable in tests"
-    )]
-
     use super::*;
     use crate::test_harness::{insert_default_tenant, setup_migrated_db};
 
