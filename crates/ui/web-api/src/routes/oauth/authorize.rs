@@ -96,8 +96,13 @@ pub async fn authorize(
     };
 
     // Step 4 — validate redirect_uri against registered list.
-    let registered_uris: Vec<String> =
-        serde_json::from_str(&client.redirect_uris).unwrap_or_default();
+    let registered_uris: Vec<String> = match serde_json::from_str(&client.redirect_uris) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(client_id = %client.id, error = %e, "malformed redirect_uris JSON in oauth_client row");
+            return oauth_400("invalid_client", "malformed client registration");
+        }
+    };
     if !registered_uris.contains(&req.redirect_uri) {
         return oauth_400(
             "invalid_redirect_uri",
@@ -139,67 +144,7 @@ pub async fn authorize(
         }
     };
 
-    if skip_prompt {
-        // Mint an authorization code directly and redirect back to the client.
-        let ar_svc = OAuthAuthorizationRequestService::new(
-            state.db.db().clone(),
-            Arc::clone(&state.oauth.clock),
-        );
-        let request_id = match ar_svc
-            .create(CreateAuthorizationRequest {
-                client_id: req.client_id.clone(),
-                user_id: user.user_id,
-                redirect_uri: req.redirect_uri.clone(),
-                scope: req.scope.clone(),
-                state: req.state.clone(),
-                code_challenge: req.code_challenge.clone(),
-                code_challenge_method: req.code_challenge_method.clone(),
-                resource: req.resource.clone(),
-            })
-            .await
-        {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to create authorization request");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
-
-        let code_svc = OAuthAuthorizationCodeService::new(
-            state.db.db().clone(),
-            Arc::clone(&state.oauth.clock),
-        );
-        let code = match code_svc
-            .mint(MintAuthorizationCode {
-                request_id,
-                client_id: req.client_id.clone(),
-                user_id: user.user_id,
-                redirect_uri: req.redirect_uri.clone(),
-                scope: req.scope.clone(),
-                code_challenge: req.code_challenge.clone(),
-                code_challenge_method: req.code_challenge_method.clone(),
-                resource: req.resource.clone(),
-            })
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to mint authorization code");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
-
-        let location = format!(
-            "{}?code={}&state={}",
-            req.redirect_uri,
-            percent_encode(code.as_str()),
-            percent_encode(&req.state),
-        );
-        return redirect_302(&location);
-    }
-
-    // Consent required — create the authorization request row and redirect to
-    // the consent UI.
+    // Step 8 — create the authorization request row (used in both paths).
     let ar_svc = OAuthAuthorizationRequestService::new(
         state.db.db().clone(),
         Arc::clone(&state.oauth.clock),
@@ -224,6 +169,48 @@ pub async fn authorize(
         }
     };
 
+    if skip_prompt {
+        // Mint an authorization code directly and redirect back to the client.
+        let code_svc = OAuthAuthorizationCodeService::new(
+            state.db.db().clone(),
+            Arc::clone(&state.oauth.clock),
+        );
+        let code = match code_svc
+            .mint(MintAuthorizationCode {
+                request_id,
+                client_id: req.client_id.clone(),
+                user_id: user.user_id,
+                redirect_uri: req.redirect_uri.clone(),
+                scope: req.scope.clone(),
+                code_challenge: req.code_challenge.clone(),
+                code_challenge_method: req.code_challenge_method.clone(),
+                resource: req.resource.clone(),
+            })
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to mint authorization code");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+        let sep = if req.redirect_uri.contains('?') {
+            '&'
+        } else {
+            '?'
+        };
+        let location = format!(
+            "{}{}code={}&state={}",
+            req.redirect_uri,
+            sep,
+            percent_encode(code.as_str()),
+            percent_encode(&req.state),
+        );
+        return redirect_302(&location);
+    }
+
+    // Consent required — redirect to the consent UI.
     let location = format!("/oauth/consent/{request_id}");
     redirect_302(&location)
 }
@@ -294,13 +281,56 @@ mod tests {
 
     use sea_orm::{ActiveModelTrait, Set};
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::oauth_client;
+    use uptrakit_shared_db::entity::{oauth_client, oauth_consent, user};
+    use uptrakit_shared_types::MaskedEmail;
 
     use crate::oauth::OAuthState;
     use crate::oauth::canonical_url::CanonicalUrlConfig;
     use crate::oauth::jwt::{McpOAuthJwtSigner, McpOAuthJwtVerifier};
     use crate::router::build_router;
     use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
+
+    // -----------------------------------------------------------------------
+    // Shared constants
+    // -----------------------------------------------------------------------
+
+    const TEST_CODE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    const TEST_REDIRECT_URI: &str = "https://example.com/callback";
+
+    // -----------------------------------------------------------------------
+    // Optional auth middleware (test-only)
+    //
+    // The production router wires require_auth only for authenticated routes.
+    // The `/oauth/authorize` handler uses `Option<Extension<AuthenticatedUser>>`
+    // and needs an optional-auth layer that injects the user when a valid Bearer
+    // token is present but lets unauthenticated requests through.  Rather than
+    // adding a new middleware file (which would require a separate commit), this
+    // module includes a minimal inline version used only by the test router.
+    // -----------------------------------------------------------------------
+
+    async fn optional_auth_middleware(
+        axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
+        mut req: axum::extract::Request,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        use crate::middleware::require_auth::authenticate_jwt;
+
+        // Extract Bearer token — if absent, pass through unauthenticated.
+        let token = req
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(str::to_owned);
+
+        if let Some(token) = token {
+            if let Ok(user) = authenticate_jwt(&state, &token).await {
+                req.extensions_mut().insert(user);
+            }
+        }
+
+        next.run(req).await
+    }
 
     // -----------------------------------------------------------------------
     // Shared helpers
@@ -332,7 +362,13 @@ mod tests {
         let mut patched = (*state).clone();
         patched.oauth = enabled_oauth_state();
         let state = Arc::new(patched);
-        let router = build_router(Arc::clone(&state));
+        // Wrap the router with the optional-auth middleware so that test
+        // requests carrying a valid Bearer token have `AuthenticatedUser`
+        // injected into request extensions (mirroring the production intent).
+        let router = build_router(Arc::clone(&state)).layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            optional_auth_middleware,
+        ));
         let app = crate::test_harness::TestApp {
             state,
             router: router.clone(),
@@ -341,6 +377,30 @@ mod tests {
             tenant_id,
         };
         (app, router)
+    }
+
+    /// Insert a minimal `users` row and return the UUID.
+    ///
+    /// Required when the test inserts rows that have a FK on `users.id` (e.g.
+    /// `oauth_consents.user_id`).
+    async fn insert_test_user(db: &sea_orm::DatabaseConnection) -> uuid::Uuid {
+        let id = uuid::Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(id),
+            email: Set(MaskedEmail::new(format!("test-oauth-{id}@example.com"))),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert test user");
+        id
     }
 
     /// Insert a minimal `oauth_clients` row with a known redirect URI and
@@ -391,10 +451,57 @@ mod tests {
              &redirect_uri={redirect_uri}\
              &scope=mcp%3Aread\
              &state=test-state-1234\
-             &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\
+             &code_challenge={TEST_CODE_CHALLENGE}\
              &code_challenge_method=S256\
              &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp"
         )
+    }
+
+    /// Percent-encode a plain redirect URI for use in the query string.
+    fn encode_redirect_uri(uri: &str) -> String {
+        use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+        utf8_percent_encode(uri, NON_ALPHANUMERIC).to_string()
+    }
+
+    /// Insert a `trusted` oauth_client row (with `trusted_at` set) and return
+    /// the client_id. Used for tests that exercise the skip-consent path.
+    async fn insert_trusted_oauth_client(
+        db: &sea_orm::DatabaseConnection,
+        redirect_uri: &str,
+    ) -> String {
+        let now = OffsetDateTime::now_utc();
+        let client_id = format!("test-trusted-client-{}", uuid::Uuid::now_v7());
+        let redirect_uris_json = serde_json::to_string(&vec![redirect_uri]).expect("serialize");
+
+        oauth_client::ActiveModel {
+            id: Set(client_id.clone()),
+            client_name: Set("Trusted Test Client".to_string()),
+            client_uri: Set(None),
+            logo_uri: Set(None),
+            redirect_uris: Set(redirect_uris_json),
+            default_scope: Set("mcp:read".to_string()),
+            grant_types: Set("authorization_code".to_string()),
+            response_types: Set("code".to_string()),
+            token_endpoint_auth_method: Set("none".to_string()),
+            client_secret_hash: Set(None),
+            registration_access_token_hash: Set(None),
+            created_via: Set("test".to_string()),
+            created_at: Set(now),
+            last_used_at: Set(None),
+            revoked_at: Set(None),
+            metadata_cached_at: Set(None),
+            metadata_etag: Set(None),
+            metadata_content_hash: Set(None),
+            metadata_raw: Set(None),
+            metadata_parse_error: Set(None),
+            metadata_parse_error_at: Set(None),
+            trusted_at: Set(Some(now)),
+        }
+        .insert(db)
+        .await
+        .expect("insert trusted oauth_client");
+
+        client_id
     }
 
     // -----------------------------------------------------------------------
@@ -408,9 +515,9 @@ mod tests {
         use tower::ServiceExt;
 
         let (app, router) = app_with_oauth().await;
-        let client_id = insert_oauth_client(&app.db, "https://example.com/callback").await;
+        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI).await;
 
-        let uri = valid_query(&client_id, "https%3A%2F%2Fexample.com%2Fcallback");
+        let uri = valid_query(&client_id, &encode_redirect_uri(TEST_REDIRECT_URI));
 
         let req = Request::builder()
             .method("GET")
@@ -457,15 +564,18 @@ mod tests {
             .create_access_token(user_id, &[], "password", None)
             .expect("create_access_token");
 
-        let uri = "/oauth/authorize\
+        let uri = format!(
+            "/oauth/authorize\
                    ?response_type=code\
                    &client_id=does-not-exist\
-                   &redirect_uri=https%3A%2F%2Fexample.com%2Fcallback\
+                   &redirect_uri={}\
                    &scope=mcp%3Aread\
                    &state=s\
-                   &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\
+                   &code_challenge={TEST_CODE_CHALLENGE}\
                    &code_challenge_method=S256\
-                   &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp";
+                   &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp",
+            encode_redirect_uri(TEST_REDIRECT_URI)
+        );
 
         let req = Request::builder()
             .method("GET")
@@ -496,7 +606,7 @@ mod tests {
         let (app, router) = app_with_oauth().await;
 
         // Insert a client registered with one URI, but request a different one.
-        let client_id = insert_oauth_client(&app.db, "https://example.com/callback").await;
+        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI).await;
 
         let user_id = uuid::Uuid::now_v7();
         let jwt_token = app
@@ -511,7 +621,7 @@ mod tests {
              &redirect_uri=https%3A%2F%2Fevil.example.com%2Fcallback\
              &scope=mcp%3Aread\
              &state=s\
-             &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\
+             &code_challenge={TEST_CODE_CHALLENGE}\
              &code_challenge_method=S256\
              &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp"
         );
@@ -544,15 +654,18 @@ mod tests {
 
         let (_app, router) = app_with_oauth().await;
 
-        let uri = "/oauth/authorize\
+        let uri = format!(
+            "/oauth/authorize\
                    ?response_type=code\
                    &client_id=any-client\
-                   &redirect_uri=https%3A%2F%2Fexample.com%2Fcallback\
+                   &redirect_uri={}\
                    &scope=mcp%3Aread\
                    &state=s\
-                   &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\
+                   &code_challenge={TEST_CODE_CHALLENGE}\
                    &code_challenge_method=plain\
-                   &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp";
+                   &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp",
+            encode_redirect_uri(TEST_REDIRECT_URI)
+        );
 
         let req = Request::builder()
             .method("GET")
@@ -582,15 +695,18 @@ mod tests {
         let (_app, router) = app_with_oauth().await;
 
         // `resource` is intentionally an empty string — should fail validate().
-        let uri = "/oauth/authorize\
+        let uri = format!(
+            "/oauth/authorize\
                    ?response_type=code\
                    &client_id=any-client\
-                   &redirect_uri=https%3A%2F%2Fexample.com%2Fcallback\
+                   &redirect_uri={}\
                    &scope=mcp%3Aread\
                    &state=s\
-                   &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\
+                   &code_challenge={TEST_CODE_CHALLENGE}\
                    &code_challenge_method=S256\
-                   &resource=";
+                   &resource=",
+            encode_redirect_uri(TEST_REDIRECT_URI)
+        );
 
         let req = Request::builder()
             .method("GET")
@@ -604,5 +720,179 @@ mod tests {
         let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
         assert_eq!(body["error"], "invalid_request");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 6 — OAuth disabled returns 404
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn authorize_oauth_disabled_returns_404() {
+        use axum::body::Body;
+        use http::Request;
+        use tower::ServiceExt;
+
+        // Build an app with OAuth disabled (default from build_test_state).
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db, tenant_id).await;
+        // State has oauth.enabled = false by default.
+        assert!(
+            !state.oauth.enabled,
+            "expected oauth disabled in default test state"
+        );
+        let router = crate::router::build_router(Arc::clone(&state));
+
+        let uri = format!(
+            "/oauth/authorize\
+             ?response_type=code\
+             &client_id=any-client\
+             &redirect_uri={}\
+             &scope=mcp%3Aread\
+             &state=s\
+             &code_challenge={TEST_CODE_CHALLENGE}\
+             &code_challenge_method=S256\
+             &resource=https%3A%2F%2Fcontroller.example.com%2Fmcp",
+            encode_redirect_uri(TEST_REDIRECT_URI)
+        );
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(&uri)
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 7 — active consent skips prompt and returns code
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn authorize_skip_consent_returns_code() {
+        use axum::body::Body;
+        use http::Request;
+        use tower::ServiceExt;
+
+        let (app, router) = app_with_oauth().await;
+
+        // Insert a real user row (required by oauth_consents FK constraint).
+        let user_id = insert_test_user(&app.db).await;
+
+        // Insert trusted client.
+        let client_id = insert_trusted_oauth_client(&app.db, TEST_REDIRECT_URI).await;
+
+        // Issue JWT for the inserted user.
+        let jwt_token = app
+            .jwt
+            .create_access_token(user_id, &[], "password", None)
+            .expect("create_access_token");
+
+        // Insert an active consent covering the requested scope.
+        let now = OffsetDateTime::now_utc();
+        oauth_consent::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user_id),
+            client_id: Set(client_id.clone()),
+            scopes: Set("mcp:read".to_string()),
+            cimd_content_hash_at_grant: Set(None),
+            revalidation_required_at: Set(None),
+            granted_at: Set(now),
+            revoked_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert oauth_consent");
+
+        let uri = valid_query(&client_id, &encode_redirect_uri(TEST_REDIRECT_URI));
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(&uri)
+            .header("authorization", format!("Bearer {jwt_token}"))
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::FOUND,
+            "expected 302 redirect with authorization code"
+        );
+        let location = resp
+            .headers()
+            .get("location")
+            .expect("location header")
+            .to_str()
+            .expect("location is utf8");
+        assert!(
+            location.starts_with(TEST_REDIRECT_URI),
+            "redirect must point to the registered redirect_uri, got: {location}"
+        );
+        assert!(
+            location.contains("code="),
+            "redirect must contain authorization code, got: {location}"
+        );
+        // The state value is percent-encoded in the redirect URI; check for
+        // the encoded form of "test-state-1234" (hyphens → %2D).
+        assert!(
+            location.contains("state=test%2Dstate%2D1234")
+                || location.contains("state=test-state-1234"),
+            "redirect must echo the state parameter, got: {location}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8 — no consent yet redirects to consent page
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn authorize_needs_consent_redirects_to_consent_page() {
+        use axum::body::Body;
+        use http::Request;
+        use tower::ServiceExt;
+
+        let (app, router) = app_with_oauth().await;
+
+        // Insert a real user row (required by oauth_authorization_requests FK).
+        let user_id = insert_test_user(&app.db).await;
+
+        // Insert client (no consent row).
+        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI).await;
+
+        let jwt_token = app
+            .jwt
+            .create_access_token(user_id, &[], "password", None)
+            .expect("create_access_token");
+
+        let uri = valid_query(&client_id, &encode_redirect_uri(TEST_REDIRECT_URI));
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(&uri)
+            .header("authorization", format!("Bearer {jwt_token}"))
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(
+            resp.status(),
+            http::StatusCode::FOUND,
+            "expected 302 redirect to consent page"
+        );
+        let location = resp
+            .headers()
+            .get("location")
+            .expect("location header")
+            .to_str()
+            .expect("location is utf8");
+        assert!(
+            location.starts_with("/oauth/consent/"),
+            "expected /oauth/consent/<uuid> redirect, got: {location}"
+        );
     }
 }
