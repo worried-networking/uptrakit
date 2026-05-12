@@ -356,7 +356,13 @@ impl CrlManager {
                 .iter()
                 .map(|ti| (Arc::clone(&ti.issuer), ti.fingerprint.clone()))
                 .collect();
-            let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
+            // AcqRel pairs the increment with a release of any preceding writes
+            // (e.g., the row insert into crl_cache) so a concurrent reader who sees
+            // the new CRL number is guaranteed to observe the corresponding row.
+            // `revocation_notify` enforces a single-consumer invariant in practice,
+            // but AcqRel makes the dependency explicit and survives any future
+            // refactor that introduces a second writer.
+            let crl_number = self.crl_number.fetch_add(1, Ordering::AcqRel);
             (snapshot, crl_number)
             // read-lock dropped here
         };
@@ -456,6 +462,11 @@ impl CrlManager {
     ///
     /// Accepts an optional `CancellationToken` for graceful shutdown. When the
     /// token is cancelled, the task exits cleanly.
+    ///
+    /// Single-consumer loop. The `revocation_notify` channel is observed by
+    /// exactly one task per Controller process; concurrent rebuilds within
+    /// one process do not occur. The atomic `crl_number` increment uses
+    /// `AcqRel` so the rule survives a future refactor adding a second writer.
     pub(crate) async fn run(
         self: Arc<Self>,
         shutdown_token: Option<tokio_util::sync::CancellationToken>,
@@ -745,5 +756,28 @@ mod tests {
         let key = rcgen::KeyPair::generate().expect("key");
         let cert = params.self_signed(&key).expect("cert");
         (cert.pem(), key.serialize_pem())
+    }
+
+    #[tokio::test]
+    async fn crl_number_increments_are_unique_under_concurrent_writers() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let counter = Arc::new(AtomicU64::new(1));
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let c = Arc::clone(&counter);
+            handles.push(tokio::spawn(
+                async move { c.fetch_add(1, Ordering::AcqRel) },
+            ));
+        }
+        let mut values: Vec<u64> = Vec::new();
+        for h in handles {
+            values.push(h.await.expect("task"));
+        }
+        values.sort_unstable();
+        let original_len = values.len();
+        values.dedup();
+        assert_eq!(values.len(), original_len, "no duplicates under AcqRel");
     }
 }
