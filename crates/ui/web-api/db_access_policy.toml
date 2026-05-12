@@ -57,13 +57,9 @@ ca_cert = "no-db"
 ca_crl = "no-db"
 
 [routes."device_auth.rs"]
-device_auth_start = "full-state"
-device_auth_poll = "full-state"
 device_auth_approve = "full-state"
 device_auth_deny = "full-state"
 device_auth_lookup = "full-state"
-device_auth_stream = "full-state"
-consume_and_yield = "ignore"
 
 [routes."discovery_allowlist.rs"]
 list_tenant_discovery_allowlist = "tenant-scoped"

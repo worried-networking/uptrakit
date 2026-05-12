@@ -8,7 +8,6 @@ pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
 pub mod cert_signer;
 pub mod config_test_proxy;
-pub mod device_flow_broadcaster;
 pub mod error_response;
 pub mod event_broadcaster;
 pub mod event_delivery;
@@ -229,8 +228,6 @@ mod tests {
                 crate::event_broadcaster::EventBroadcaster::new(),
             ),
             broadcast: crate::app_state::BroadcastState {
-                device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
-                ),
                 update_output_broadcaster:
                     crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
                 batch_progress_broadcaster:
