@@ -291,6 +291,40 @@ pub struct AppState {
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot,
         >,
     >,
+    /// Reload coordinator handle for state introspection (Plan 3 endpoint reads this).
+    pub coordinator_handle: uptrakit_config_reload::ReloadCoordinatorHandle,
+    /// Settings-version counter cache — read by the IfMatch extractor in Plan 3.
+    pub settings_version_cache: uptrakit_config_reload::SettingsVersionCache,
+    /// Per-section watch receivers seeded at boot from TOML. Plan 2 Reloadables publish updates.
+    pub db_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::DbConfig>>,
+    /// Network config watch receiver.
+    pub network_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::NetworkConfig>>,
+    /// NATS config watch receiver.
+    pub nats_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::NatsConfig>>,
+    /// TLS config watch receiver.
+    pub tls_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::TlsConfig>>,
+    /// Audit config watch receiver.
+    pub audit_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::AuditConfig>>,
+    /// Log config watch receiver.
+    pub log_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::LogConfig>>,
+    /// Master key config watch receiver.
+    pub master_key_config_rx: tokio::sync::watch::Receiver<
+        std::sync::Arc<uptrakit_config_reload::config::MasterKeyConfig>,
+    >,
+    /// Embedded services config watch receiver.
+    pub embedded_services_config_rx: tokio::sync::watch::Receiver<
+        std::sync::Arc<uptrakit_config_reload::config::EmbeddedServicesConfig>,
+    >,
+    /// Zeroconf config watch receiver.
+    pub zeroconf_config_rx: tokio::sync::watch::Receiver<
+        std::sync::Arc<uptrakit_config_reload::config::ZeroconfConfig>,
+    >,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -362,6 +396,9 @@ pub struct AppStateBuilder {
             >,
         >,
     >,
+    coordinator_handle: Option<uptrakit_config_reload::ReloadCoordinatorHandle>,
+    settings_version_cache: Option<uptrakit_config_reload::SettingsVersionCache>,
+    config_receivers: Option<uptrakit_config_reload::RuntimeConfigReceivers>,
 }
 
 impl AppStateBuilder {
@@ -413,6 +450,9 @@ impl AppStateBuilder {
             reject_dangerous_commands: false,
             update_dispatcher: None,
             instance_plugin_snapshot: None,
+            coordinator_handle: None,
+            settings_version_cache: None,
+            config_receivers: None,
         }
     }
 
@@ -707,6 +747,38 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the reload coordinator handle.
+    ///
+    /// Optional — defaults to a no-op coordinator with an empty Reloadable list
+    /// and default-seeded config channels. Override to inject the real coordinator
+    /// started by [`crate::startup::boot_config`].
+    pub fn coordinator_handle(
+        mut self,
+        v: uptrakit_config_reload::ReloadCoordinatorHandle,
+    ) -> Self {
+        self.coordinator_handle = Some(v);
+        self
+    }
+
+    /// Set the settings-version counter cache.
+    ///
+    /// Optional — defaults to an empty cache.
+    pub fn settings_version_cache(
+        mut self,
+        v: uptrakit_config_reload::SettingsVersionCache,
+    ) -> Self {
+        self.settings_version_cache = Some(v);
+        self
+    }
+
+    /// Set the per-section config watch receivers seeded at boot from TOML.
+    ///
+    /// Optional — defaults to receivers seeded with `RuntimeConfig::default()`.
+    pub fn config_receivers(mut self, v: uptrakit_config_reload::RuntimeConfigReceivers) -> Self {
+        self.config_receivers = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -768,6 +840,26 @@ impl AppStateBuilder {
                     ),
                 )
             });
+        // Config-reload foundation: coordinator + per-section watch receivers.
+        // If not set (e.g. in tests that don't load a TOML file), create a no-op
+        // coordinator with an empty Reloadable list and default-seeded channels.
+        let (coordinator_handle, settings_version_cache, config_receivers) = match (
+            self.coordinator_handle,
+            self.settings_version_cache,
+            self.config_receivers,
+        ) {
+            (Some(h), Some(c), Some(r)) => (h, c, r),
+            _ => {
+                let default_runtime = uptrakit_config_reload::RuntimeConfig::default();
+                let (_, receivers) =
+                    uptrakit_config_reload::RuntimeConfigChannels::from_runtime(&default_runtime);
+                let (audit_tx, _) = tokio::sync::mpsc::unbounded_channel();
+                let (_, handle) = uptrakit_config_reload::ReloadCoordinator::new(vec![], audit_tx);
+                let cache = uptrakit_config_reload::SettingsVersionCache::new();
+                (handle, cache, receivers)
+            }
+        };
+
         Ok(AppState {
             db: DbState::new(db),
             cert: CertState {
@@ -868,6 +960,17 @@ impl AppStateBuilder {
                     uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
                 ))
             }),
+            coordinator_handle,
+            settings_version_cache,
+            db_config_rx: config_receivers.db,
+            network_config_rx: config_receivers.network,
+            nats_config_rx: config_receivers.nats,
+            tls_config_rx: config_receivers.tls,
+            audit_config_rx: config_receivers.audit,
+            log_config_rx: config_receivers.log,
+            master_key_config_rx: config_receivers.master_key,
+            embedded_services_config_rx: config_receivers.embedded_services,
+            zeroconf_config_rx: config_receivers.zeroconf,
         })
     }
 }

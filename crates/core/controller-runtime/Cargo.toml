@@ -77,6 +77,7 @@ zeroize = { workspace = true }
 arc-swap = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
+uptrakit-config-reload = { workspace = true }
 uptrakit-scheduler-runtime = { workspace = true, optional = true }
 uptrakit-agent-core = { workspace = true, optional = true }
 uptrakit-agent-runtime = { workspace = true, optional = true }

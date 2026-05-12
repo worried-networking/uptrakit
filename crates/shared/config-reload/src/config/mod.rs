@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// Top-level runtime configuration for the uptrakit Controller.
 ///
 /// Parsed from a TOML file via [`crate::loader::TomlConfigLoader`].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[non_exhaustive]
 pub struct RuntimeConfig {
     /// Database connection and pool settings.

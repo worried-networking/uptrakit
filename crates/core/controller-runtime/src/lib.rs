@@ -147,7 +147,7 @@ async fn async_main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    if let Err(report) = run_server(args).await {
+    if let Err(report) = Box::pin(run_server(args)).await {
         eprintln!("Error:\n{report}");
         std::process::ExitCode::FAILURE
     } else {
@@ -475,6 +475,24 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
     let builtin_host = service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
 
+    // Load TOML config at boot. `UPTRAKIT_CONFIG` env-var / hard-coded default;
+    // Task 18 will wire the actual --config CLI flag here.
+    let config_path = std::path::PathBuf::from(
+        std::env::var("UPTRAKIT_CONFIG")
+            .unwrap_or_else(|_| "/etc/uptrakit/controller.toml".to_string()),
+    );
+    let booted = match startup::boot_config(config_path).await {
+        Ok(b) => Some(b),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "TOML config not loaded (file may not exist yet); \
+                 using defaults for config-reload channels"
+            );
+            None
+        }
+    };
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -512,6 +530,16 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .workload_claim_registry(workload_claim_registry)
         .instance_plugin_snapshot(std::sync::Arc::clone(&instance_plugin_snapshot_handle))
         .reject_dangerous_commands(!args.allow_dangerous_commands);
+
+    // Wire config-reload coordinator and receivers when boot_config succeeded.
+    let builder = if let Some(b) = booted {
+        builder
+            .coordinator_handle(b.coordinator_handle)
+            .settings_version_cache(b.settings_version_cache)
+            .config_receivers(b.receivers)
+    } else {
+        builder
+    };
 
     #[cfg(feature = "oidc")]
     let builder = builder
