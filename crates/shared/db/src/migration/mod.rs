@@ -71,6 +71,7 @@ mod m20260430_000003_update_history_host_active_index;
 mod m20260510_000001_instance_plugin_setting;
 mod m20260512_000001_device_flow_rfc8628;
 mod m20260512_000001_oauth_clients;
+mod m20260512_000002_oauth_consents;
 
 pub struct Migrator;
 
@@ -146,6 +147,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260510_000001_instance_plugin_setting::Migration),
             Box::new(m20260512_000001_device_flow_rfc8628::Migration),
             Box::new(m20260512_000001_oauth_clients::Migration),
+            Box::new(m20260512_000002_oauth_consents::Migration),
         ]
     }
 }
