@@ -8406,6 +8406,7 @@ dependencies = [
 name = "uptrakit-service-sdk"
 version = "0.0.2"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "aws-lc-rs",
  "base64 0.22.1",
