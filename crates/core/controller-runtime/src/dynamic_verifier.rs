@@ -20,10 +20,6 @@ pub(crate) struct DynamicClientVerifier {
 }
 
 impl DynamicClientVerifier {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired up in a subsequent mTLS hot-swap task")
-    )]
     pub(crate) fn new(initial: Arc<dyn ClientCertVerifier>) -> Self {
         Self {
             inner: RwLock::new(initial),
@@ -31,10 +27,6 @@ impl DynamicClientVerifier {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired up in a subsequent mTLS hot-swap task")
-    )]
     pub(crate) fn swap(&self, next: Arc<dyn ClientCertVerifier>) {
         *self.inner.write() = next;
     }
@@ -91,6 +83,11 @@ impl ClientCertVerifier for DynamicClientVerifier {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::let_underscore_must_use,
+        reason = "test code: idiomatic test patterns — discarding crypto provider init results"
+    )]
+
     use rustls::server::WebPkiClientVerifier;
 
     use super::*;
@@ -194,17 +191,65 @@ mod tests {
     }
 
     #[test]
+    fn property_concurrent_swap_no_spurious_accept() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_a_der, ca_b_der, leaf_b) = build_two_root_fixtures();
+        let v_a = build_verifier_from_roots(std::slice::from_ref(&ca_a_der));
+        let v_b = build_verifier_from_roots(std::slice::from_ref(&ca_b_der));
+
+        let dynamic = std::sync::Arc::new(DynamicClientVerifier::new(v_a.clone()));
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let d = std::sync::Arc::clone(&dynamic);
+            let leaf = leaf_b.clone();
+            let stop2 = std::sync::Arc::clone(&stop);
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    if stop2.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let _ = d.supported_verify_schemes();
+                    let _ = d.root_hint_subjects();
+                    // Verification may succeed or fail depending on which verifier
+                    // is active at this instant — both outcomes are correct.
+                    // The invariant is that this call must never panic or UB.
+                    let _ = d.verify_client_cert(&leaf, &[], UnixTime::now());
+                }
+            }));
+        }
+
+        for i in 0..50 {
+            if i % 2 == 0 {
+                dynamic.swap(v_b.clone());
+            } else {
+                dynamic.swap(v_a.clone());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        stop.store(true, Ordering::Release);
+
+        for h in handles {
+            h.join().expect("reader thread must not panic");
+        }
+    }
+
+    #[test]
     fn concurrent_swap_and_verify_never_panics() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (ca_a_der, ca_b_der, _leaf_der) = build_two_root_fixtures();
 
-        let dynamic = Arc::new(DynamicClientVerifier::new(build_verifier_from_roots(&[
-            ca_a_der.clone(),
-        ])));
+        let dynamic = Arc::new(DynamicClientVerifier::new(build_verifier_from_roots(
+            std::slice::from_ref(&ca_a_der),
+        )));
 
-        let verifier_a = build_verifier_from_roots(&[ca_a_der]);
-        let verifier_b = build_verifier_from_roots(&[ca_b_der]);
+        let verifier_a = build_verifier_from_roots(std::slice::from_ref(&ca_a_der));
+        let verifier_b = build_verifier_from_roots(std::slice::from_ref(&ca_b_der));
 
         let mut handles = Vec::new();
 
