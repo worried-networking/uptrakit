@@ -47,7 +47,31 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             },
         ),
         (
-            "/api/v1/auth/device",
+            "/api/v1/auth/device/approve",
+            EndpointRateLimit {
+                max_requests: 5,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/device/deny",
+            EndpointRateLimit {
+                max_requests: 5,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/device/lookup",
+            EndpointRateLimit {
+                max_requests: 60,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/oauth/device_authorization",
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
@@ -55,17 +79,9 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             },
         ),
         (
-            "/api/v1/auth/device/poll",
+            "/api/v1/oauth/token",
             EndpointRateLimit {
-                max_requests: 12,
-                window_secs: 60,
-                fail_closed: true,
-            },
-        ),
-        (
-            "/api/v1/auth/device/approve",
-            EndpointRateLimit {
-                max_requests: 5,
+                max_requests: 60,
                 window_secs: 60,
                 fail_closed: true,
             },
@@ -233,9 +249,11 @@ mod tests {
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/refresh",
-            "/api/v1/auth/device",
-            "/api/v1/auth/device/poll",
             "/api/v1/auth/device/approve",
+            "/api/v1/auth/device/deny",
+            "/api/v1/auth/device/lookup",
+            "/api/v1/oauth/device_authorization",
+            "/api/v1/oauth/token",
         ];
         if cfg!(feature = "oidc") {
             expected.extend_from_slice(&[
@@ -277,15 +295,15 @@ mod tests {
     }
 
     #[test]
-    fn device_poll_has_higher_limit() {
-        let poll_limit = RATE_LIMITS
-            .get("/api/v1/auth/device/poll")
-            .expect("poll limit");
+    fn oauth_token_has_higher_limit() {
+        let token_limit = RATE_LIMITS
+            .get("/api/v1/oauth/token")
+            .expect("oauth/token limit");
         let login_limit = RATE_LIMITS.get("/api/v1/auth/login").expect("login limit");
 
         assert!(
-            poll_limit.max_requests > login_limit.max_requests,
-            "device/poll should have a higher limit than login"
+            token_limit.max_requests > login_limit.max_requests,
+            "oauth/token should have a higher limit than login"
         );
     }
 
