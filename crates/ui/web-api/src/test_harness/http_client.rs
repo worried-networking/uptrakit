@@ -53,6 +53,11 @@ impl TestClient {
     pub(crate) fn post_empty(&self, uri: &str) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::POST, uri)
     }
+
+    /// Start building a `POST` request with a `application/x-www-form-urlencoded` body.
+    pub(crate) fn post_form(&self, uri: &str, body: &str) -> RequestBuilder {
+        RequestBuilder::new(self.router.clone(), http::Method::POST, uri).form_body(body)
+    }
 }
 
 /// Builder for a single HTTP request.
@@ -81,6 +86,15 @@ impl RequestBuilder {
         self.headers.push((
             http::header::CONTENT_TYPE.to_string(),
             "application/json".to_string(),
+        ));
+        self
+    }
+
+    fn form_body(mut self, body: &str) -> Self {
+        self.body = Some(body.as_bytes().to_vec());
+        self.headers.push((
+            http::header::CONTENT_TYPE.to_string(),
+            "application/x-www-form-urlencoded".to_string(),
         ));
         self
     }

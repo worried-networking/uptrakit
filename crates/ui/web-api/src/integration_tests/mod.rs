@@ -1,4 +1,5 @@
 mod auth_flow;
+mod device_auth_oauth;
 mod enrollment_tokens;
 mod error_cases;
 mod hosts;
