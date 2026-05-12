@@ -390,6 +390,26 @@ impl DeviceFlowStore {
         Ok(())
     }
 
+    /// Look up a pending device flow by user code.
+    ///
+    /// Returns the flow model if found, `None` if no matching flow exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeviceFlowError::Database`] on a DB error.
+    pub async fn lookup_by_user_code(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<pending_device_flow::Model>> {
+        let normalized = user_code.replace('-', "").to_uppercase();
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::UserCode.eq(&normalized))
+            .one(&self.db)
+            .await
+            .context_to()?;
+        Ok(flow)
+    }
+
     /// Remove expired device flows.
     pub async fn cleanup_expired(&self) {
         let now = OffsetDateTime::now_utc();
