@@ -308,12 +308,10 @@ async fn poll_for_token(
             Ok(resp) => {
                 save_config(&Config {
                     server: Some(server.to_string()),
-                    ..Config::default()
                 })
                 .await?;
                 save_credentials(&Credentials {
                     token: Some(resp.access_token),
-                    ..Credentials::default()
                 })
                 .await?;
                 eprintln!();
