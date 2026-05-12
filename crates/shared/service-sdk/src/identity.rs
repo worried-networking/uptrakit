@@ -630,6 +630,62 @@ pub fn generate_p256_keypair_for_ecies() -> Result<(Vec<u8>, String)> {
     Ok((private_der, public_b64))
 }
 
+/// Atomically persist both the enrollment-state JSON and the private-key PEM
+/// to `state_dir`.
+///
+/// Both files are written to temporary files in `state_dir` (same filesystem)
+/// and `sync_all`-ed before being renamed into place. The cert JSON is renamed
+/// first, then the key PEM. A crash between the two renames leaves the old key
+/// on disk while the new JSON is already live; callers that load the identity
+/// must tolerate a stale key file alongside a fresh state file and re-generate
+/// a keypair if the two are inconsistent.
+///
+/// # Errors
+///
+/// Returns [`EnrollmentError::Io`] if creating, writing, syncing, or persisting
+/// either temporary file fails.
+pub async fn save_identity(state_dir: &Path, service_json: &str, key_pem: &str) -> Result<()> {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    let cert_path = state_dir.join(STATE_FILE);
+    let key_path = state_dir.join(SERVICE_KEY_FILE);
+
+    // Write both temporary files before persisting either, so that a write
+    // failure cannot leave a partial rename already in place.
+    let mut cert_tmp =
+        NamedTempFile::new_in(state_dir).map_err(|e| report!(EnrollmentError::Io(e)))?;
+    cert_tmp
+        .write_all(service_json.as_bytes())
+        .map_err(|e| report!(EnrollmentError::Io(e)))?;
+    cert_tmp
+        .as_file()
+        .sync_all()
+        .map_err(|e| report!(EnrollmentError::Io(e)))?;
+
+    let mut key_tmp =
+        NamedTempFile::new_in(state_dir).map_err(|e| report!(EnrollmentError::Io(e)))?;
+    key_tmp
+        .write_all(key_pem.as_bytes())
+        .map_err(|e| report!(EnrollmentError::Io(e)))?;
+    key_tmp
+        .as_file()
+        .sync_all()
+        .map_err(|e| report!(EnrollmentError::Io(e)))?;
+
+    // Persist cert first, then key. A crash between these two renames leaves
+    // the old key intact (new JSON, old key) — the identity remains bootable
+    // from the previous key.
+    cert_tmp
+        .persist(&cert_path)
+        .map_err(|e| report!(EnrollmentError::Io(e.error)))?;
+    key_tmp
+        .persist(&key_path)
+        .map_err(|e| report!(EnrollmentError::Io(e.error)))?;
+
+    Ok(())
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /// Decode the first PEM block into DER bytes.
@@ -1179,7 +1235,10 @@ mod tests {
     pub(crate) enum DropAt {
         /// Return immediately after persisting `service.json`, before writing `service.key`.
         AfterCertPersist,
-        #[allow(dead_code)]
+        #[expect(
+            dead_code,
+            reason = "reserved for future crash-point tests at the key-tmp stage"
+        )]
         AfterKeyTmp,
     }
 
@@ -1187,6 +1246,40 @@ mod tests {
     pub(crate) enum SaveOutcome {
         Success,
         CrashAfterCert,
+    }
+
+    /// Split-step test helper that simulates a crash at `drop_at` between the
+    /// two atomic persists performed by [`save_identity`].
+    ///
+    /// `base` must be an already-existing directory. The files written are
+    /// `service.json` (state JSON) and `service.key` (private key PEM),
+    /// matching the names used by [`save_identity`].
+    pub(crate) async fn save_identity_split_for_test(
+        base: &std::path::Path,
+        service_json: &str,
+        key_pem: &str,
+        drop_at: DropAt,
+    ) -> SaveOutcome {
+        use std::io::Write as _;
+        let cert_path = base.join(STATE_FILE);
+        let key_path = base.join(SERVICE_KEY_FILE);
+
+        let mut cert_tmp = tempfile::NamedTempFile::new_in(base).expect("cert tmp");
+        cert_tmp
+            .write_all(service_json.as_bytes())
+            .expect("write cert");
+        cert_tmp.as_file().sync_all().expect("sync cert");
+        cert_tmp.persist(&cert_path).expect("persist cert");
+
+        if matches!(drop_at, DropAt::AfterCertPersist) {
+            return SaveOutcome::CrashAfterCert;
+        }
+
+        let mut key_tmp = tempfile::NamedTempFile::new_in(base).expect("key tmp");
+        key_tmp.write_all(key_pem.as_bytes()).expect("write key");
+        key_tmp.as_file().sync_all().expect("sync key");
+        key_tmp.persist(&key_path).expect("persist key");
+        SaveOutcome::Success
     }
 
     #[tokio::test]
