@@ -43,17 +43,14 @@ enum OcspError {
     #[error("DER encoding error: {0}")]
     DerEncode(String),
 
+    #[error("key decode: {0}")]
+    KeyDecode(String),
+
     #[error("key parse error: {0}")]
     KeyParse(String),
 
     #[error("signing error: {0}")]
     Signing(String),
-
-    #[error("base64 decode error: {0}")]
-    Base64Decode(String),
-
-    #[error("empty PEM data")]
-    EmptyPemData,
 
     #[error("date conversion error: {0}")]
     DateConversion(String),
@@ -362,7 +359,12 @@ fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<
         .map_err(|e| report!(OcspError::DerEncode(e.to_string())))?;
 
     // Parse the CA private key
-    let key_der = pem_to_der_key(key_pem)?;
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use rustls::pki_types::pem::PemObject;
+    let key_der: Vec<u8> = PrivatePkcs8KeyDer::from_pem_slice(key_pem.as_bytes())
+        .map_err(|e| report!(OcspError::KeyDecode(e.to_string())))?
+        .secret_pkcs8_der()
+        .to_vec();
 
     // Sign with ECDSA P-256 SHA-256 using aws-lc-rs
     let signing_key = aws_lc_rs::signature::EcdsaKeyPair::from_pkcs8(
@@ -401,36 +403,6 @@ fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<
         .map_err(|e| report!(OcspError::DerEncode(e.to_string())))
 }
 
-/// Extract a PKCS#8 DER private key from PEM.
-fn pem_to_der_key(pem: &str) -> OcspResult<Vec<u8>> {
-    let mut der_data = Vec::new();
-    let mut in_block = false;
-
-    for line in pem.lines() {
-        if line.starts_with("-----BEGIN") {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("-----END") {
-            break;
-        }
-        if in_block {
-            use base64::Engine;
-            der_data.extend_from_slice(
-                &base64::engine::general_purpose::STANDARD
-                    .decode(line.trim())
-                    .map_err(|e| report!(OcspError::Base64Decode(e.to_string())))?,
-            );
-        }
-    }
-
-    if der_data.is_empty() {
-        bail!(OcspError::EmptyPemData);
-    }
-
-    Ok(der_data)
-}
-
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -461,10 +433,16 @@ mod tests {
     }
 
     #[test]
-    fn pem_to_der_key_works() {
+    fn pkcs8_pem_key_parses_via_pem_object() {
+        use rustls::pki_types::PrivatePkcs8KeyDer;
+        use rustls::pki_types::pem::PemObject;
+
         let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
         let pem = key_pair.serialize_pem();
-        let der = pem_to_der_key(&pem).unwrap();
+        let der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())
+            .unwrap()
+            .secret_pkcs8_der()
+            .to_vec();
         assert!(!der.is_empty());
     }
 
