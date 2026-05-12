@@ -80,7 +80,7 @@ use crate::AppState;
         // OAuth 2.0 (RFC 8628 + RFC 8414)
         crate::routes::oauth::device_authorization::device_authorization,
         crate::routes::oauth::token::token,
-        crate::routes::oauth::metadata::metadata,
+        crate::routes::oauth::metadata::get_as_metadata,
         crate::routes::settings_global_combined::get_global_combined_settings,
         crate::routes::settings_provider_github::get_github_provider_settings,
         crate::routes::settings_provider_github::update_github_provider_settings,
@@ -237,6 +237,7 @@ use crate::AppState;
             uptrakit_web_api_types::oauth::OAuthErrorResponse,
             uptrakit_web_api_types::oauth::OAuthErrorCode,
             uptrakit_web_api_types::oauth::OAuthAuthorizationServerMetadata,
+            uptrakit_web_api_types::oauth::AuthorizationServerMetadata,
             uptrakit_web_api_types::oauth::DeviceAuthDenyRequest,
             uptrakit_web_api_types::oauth::DeviceAuthDenyResponse,
             uptrakit_web_api_types::oauth::DeviceAuthLookupResponse,
@@ -871,7 +872,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // RFC 8615 / RFC 8414 §3 — must be at the root, outside any /api/v1 prefix.
         .route(
             "/.well-known/oauth-authorization-server",
-            get(crate::routes::oauth::metadata::metadata),
+            get(crate::routes::oauth::metadata::get_as_metadata),
         )
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",

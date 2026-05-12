@@ -116,10 +116,20 @@ device_authorization = "full-state"
 
 [routes."oauth/helpers.rs"]
 
+[routes."oauth/authorize.rs"]
+
+[routes."oauth/clients_api.rs"]
+
+[routes."oauth/consent.rs"]
+
+[routes."oauth/consents_api.rs"]
+
 [routes."oauth/metadata.rs"]
-metadata = "full-state"
+get_as_metadata = "full-state"
 
 [routes."oauth/mod.rs"]
+
+[routes."oauth/register.rs"]
 
 [routes."oauth/token.rs"]
 token = "full-state"
