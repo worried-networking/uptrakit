@@ -505,15 +505,17 @@ mod tests {
     use std::task::{Context, Poll};
 
     use tokio::time::{Duration, Instant};
-    use uptrakit_audit_log::{AuditActorType, AuditLogBackend, AuditLogDispatcher, AuditLogError};
+    use uptrakit_audit_log::{
+        AuditActorType, AuditEntryErased, AuditLogBackend, AuditLogDispatcher, AuditLogError,
+    };
 
     #[derive(Default)]
     struct RecordingAuditBackend {
-        entries: parking_lot::Mutex<Vec<AuditEntry>>,
+        entries: parking_lot::Mutex<Vec<AuditEntryErased>>,
     }
 
     impl RecordingAuditBackend {
-        fn snapshot(&self) -> Vec<AuditEntry> {
+        fn snapshot(&self) -> Vec<AuditEntryErased> {
             self.entries.lock().clone()
         }
     }
@@ -580,7 +582,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AuditLogBackend for RecordingAuditBackend {
-        async fn write(&self, entry: &AuditEntry) -> std::result::Result<(), AuditLogError> {
+        async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
             self.entries.lock().push(entry.clone());
             Ok(())
         }
@@ -602,7 +604,7 @@ mod tests {
         )
     }
 
-    async fn wait_for_first_audit_entry(backend: &RecordingAuditBackend) -> AuditEntry {
+    async fn wait_for_first_audit_entry(backend: &RecordingAuditBackend) -> AuditEntryErased {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             let entries = backend.snapshot();

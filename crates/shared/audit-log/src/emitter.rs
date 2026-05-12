@@ -162,11 +162,6 @@ impl AuditEmitter {
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::expect_used,
-        reason = "test helpers — expect is used in assertions; panic is acceptable in test context"
-    )]
-
     use std::sync::Arc;
 
     use parking_lot::Mutex;
