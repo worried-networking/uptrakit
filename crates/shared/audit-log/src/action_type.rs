@@ -342,18 +342,31 @@ impl AuditActionType {
         Ok(Self(value))
     }
 
+    /// Creates a new `AuditActionType` from a string, validating its format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuditLogError::Validation`] if the value is empty, exceeds 128
+    /// bytes, has fewer than two dot-separated segments, contains a reserved
+    /// result suffix, or contains characters outside `[a-z0-9_]`.
+    #[must_use = "the validated AuditActionType must be used"]
     pub fn new(value: impl Into<String>) -> Result<Self> {
         Self::parse_any(value)
     }
 
+    #[must_use]
     pub const fn from_static(value: RegisteredAuditAction) -> RegisteredAuditAction {
         value
     }
 
+    /// Returns the canonical dot-separated string key for this action type.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// Returns `true` if the given string matches a registered V1 audit action.
+    #[must_use]
     pub fn is_registered(value: &str) -> bool {
         const V1_ACTIONS: &[RegisteredAuditAction] = &[
             AuditActionType::AUTH_LOGIN,

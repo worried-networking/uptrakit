@@ -69,7 +69,7 @@ impl AuditLogBackend for MultiplexBackend {
                 let entry = entry.clone();
                 async move {
                     if let Err(e) = backend.write(&entry).await {
-                        tracing::warn!(error = %e, "audit log backend write failed");
+                        tracing::error!(error = %e, "audit log backend write failed");
                     }
                 }
             })
@@ -96,7 +96,7 @@ impl AuditLogBackend for MultiplexBackend {
         }
         for backend in iter {
             if let Err(e) = backend.write(entry).await {
-                tracing::warn!(error = %e, "audit log backend write failed");
+                tracing::error!(error = %e, "audit log backend write failed");
             }
         }
         Ok(())
@@ -144,9 +144,7 @@ async fn db_insert(
 
     use crate::entry::validate_erased;
 
-    if let Err(err) = validate_erased(entry) {
-        return Err(AuditLogError::Validation(err.to_string()));
-    }
+    validate_erased(entry).map_err(|e| e.into_current_context())?;
 
     if let Some(tenant_id) = entry.tenant_id {
         let model = uptrakit_shared_db::entity::audit_log::ActiveModel {
@@ -214,9 +212,7 @@ impl AuditLogBackend for JournaldBackend {
     async fn write(&self, entry: &AuditEntryErased) -> std::result::Result<(), AuditLogError> {
         use crate::entry::validate_erased;
 
-        if let Err(err) = validate_erased(entry) {
-            return Err(AuditLogError::Validation(err.to_string()));
-        }
+        validate_erased(entry).map_err(|e| e.into_current_context())?;
 
         tracing::info!(
             target: "uptrakit_audit",
@@ -415,6 +411,33 @@ mod db_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "db-sqlite")]
+    async fn write_in_tx_rollback_leaves_no_row() {
+        use sea_orm::TransactionTrait as _;
+
+        let db = setup_db().await;
+        let entry: AuditEntryErased =
+            AuditEntry::<Event>::builder_event(AuditActionType::AUTH_LOGOUT)
+                .tenant_scope(Uuid::now_v7())
+                .build()
+                .expect("stub entry should validate")
+                .into();
+
+        let tx = db.begin().await.expect("txn should start");
+        DatabaseBackend::new(db.clone())
+            .write_in_tx(&entry, &tx)
+            .await
+            .expect("write_in_tx should succeed");
+        tx.rollback().await.expect("rollback should succeed");
+
+        let row = uptrakit_shared_db::entity::audit_log::Entity::find()
+            .one(&db)
+            .await
+            .expect("query should succeed");
+        assert!(row.is_none(), "rollback should leave no audit row");
+    }
+
+    #[tokio::test]
     async fn noop_backend_accepts_erased_entries() {
         let entry: AuditEntryErased =
             AuditEntry::<Event>::builder_event(AuditActionType::AUTH_LOGIN)
@@ -431,13 +454,10 @@ mod db_tests {
 
 #[cfg(all(test, feature = "journald"))]
 mod journald_tests {
-    #![expect(
-        clippy::expect_used,
-        reason = "test helper — Mutex lock is expected to succeed; panic on poisoned lock is acceptable in test context"
-    )]
-
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
 
     use super::*;
     use tracing::field::{Field, Visit};
@@ -501,10 +521,7 @@ mod journald_tests {
         fn event(&self, event: &TracingEvent<'_>) {
             let mut visitor = FieldValueVisitor::default();
             event.record(&mut visitor);
-            self.observed
-                .lock()
-                .expect("capture lock should not be poisoned")
-                .push(visitor.values);
+            self.observed.lock().push(visitor.values);
         }
 
         fn enter(&self, _span: &Id) {}
@@ -542,9 +559,7 @@ mod journald_tests {
                 .into();
         backend.write(&entry).await.expect("write should succeed");
 
-        let events = observed
-            .lock()
-            .expect("capture lock should not be poisoned");
+        let events = observed.lock();
         let record = events.last().expect("expected one tracing event");
 
         assert!(record.contains_key("audit_id"));
