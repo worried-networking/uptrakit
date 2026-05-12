@@ -879,6 +879,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/oauth/authorize",
             get(crate::routes::oauth::authorize::authorize),
         )
+        // RFC 7591 DCR + RFC 7592 management endpoints.
+        .route(
+            "/oauth/register",
+            axum::routing::post(crate::routes::oauth::register::register),
+        )
+        .route(
+            "/oauth/register/{client_id}",
+            get(crate::routes::oauth::register::get_client_registration)
+                .put(crate::routes::oauth::register::update_client_registration)
+                .delete(crate::routes::oauth::register::delete_client_registration),
+        )
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",
             axum::routing::post(crate::routes::notifications::notification_callback),
