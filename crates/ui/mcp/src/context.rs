@@ -4,6 +4,27 @@ use uuid::Uuid;
 
 use uptrakit_controller_core::auth::Permission;
 use uptrakit_controller_core::update::UpdateDispatchError;
+use uptrakit_web_api_types::oauth::McpScope;
+
+/// Authentication method used for an MCP request.
+///
+/// `#[non_exhaustive]`: future auth schemes (e.g. mTLS) may add variants.
+/// External match sites must include a wildcard arm.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum McpAuthMethod {
+    /// Legacy `upk_`-prefixed API token; the default path today.
+    ApiToken,
+    /// OAuth 2.1 access token issued by the MCP authorization server.
+    OAuth {
+        /// `client_id` of the OAuth client that obtained the token.
+        client_id: String,
+        /// JWT ID (`jti`) of the access token, used for revocation lookups.
+        jti: Uuid,
+        /// Scopes granted on the access token.
+        scopes: Vec<McpScope>,
+    },
+}
 
 /// Per-request auth context injected into MCP request extensions by `McpAuthLayer`.
 ///
@@ -16,6 +37,7 @@ pub struct McpRequestContext {
     pub token_id: Uuid,
     pub tenant_id: Uuid,
     pub permissions: Vec<Permission>,
+    pub auth_method: McpAuthMethod,
 }
 
 impl McpRequestContext {
@@ -26,12 +48,14 @@ impl McpRequestContext {
         token_id: Uuid,
         tenant_id: Uuid,
         permissions: Vec<Permission>,
+        auth_method: McpAuthMethod,
     ) -> Self {
         Self {
             user_id,
             token_id,
             tenant_id,
             permissions,
+            auth_method,
         }
     }
 
