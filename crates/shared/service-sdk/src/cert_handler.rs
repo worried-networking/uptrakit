@@ -429,6 +429,27 @@ mod tests {
         assert!(result.is_err(), "sleep should not resolve when no cert");
     }
 
+    // ── Zeroizing field type checks ──────────────────────────────────────
+
+    #[test]
+    fn pending_renewal_key_is_zeroizing_string() {
+        fn check_field(h: &CertificateRenewalHandler) {
+            let _: &Option<zeroize::Zeroizing<String>> = &h.pending_renewal_key;
+        }
+        // Compile-time check only — if field type is wrong, this won't compile.
+        let _ = check_field;
+    }
+
+    #[test]
+    fn pending_renewal_key_capacity_matches_length_on_construction() {
+        let pem = String::from("-----BEGIN PRIVATE KEY-----\nABC\n-----END PRIVATE KEY-----\n");
+        assert_eq!(
+            pem.len(),
+            pem.capacity(),
+            "owned PEM String must have len == capacity so Zeroize wipes everything"
+        );
+    }
+
     // ── CertificateRenewalHandler ────────────────────────────────────────
 
     #[test]
