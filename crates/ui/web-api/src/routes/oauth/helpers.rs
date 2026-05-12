@@ -1,7 +1,8 @@
 //! Shared helpers for OAuth route handlers.
 
 use axum::Extension;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 
 use crate::extract::ExternalBaseUrl;
 
@@ -26,4 +27,28 @@ pub(super) fn resolve_external_base_url(
         return format!("https://{host}");
     }
     String::new()
+}
+
+/// Build a 400 RFC 6749 §5.2 OAuth error response.
+pub(super) fn oauth_400(error: &str, description: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        axum::Json(serde_json::json!({
+            "error": error,
+            "error_description": description,
+        })),
+    )
+        .into_response()
+}
+
+/// Build a generic 500 response for unexpected server-side errors.
+pub(super) fn oauth_500() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        axum::Json(serde_json::json!({
+            "error": "server_error",
+            "error_description": "internal server error",
+        })),
+    )
+        .into_response()
 }

@@ -25,6 +25,7 @@ use crate::oauth::services::authorization_request::{
 };
 use crate::oauth::services::client::OAuthClientService;
 use crate::oauth::services::consent::OAuthConsentService;
+use crate::routes::oauth::helpers::oauth_400;
 use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 
 /// OAuth 2.1 §12.1 authorization endpoint.
@@ -248,20 +249,6 @@ fn redirect_302(location: &str) -> Response {
     (
         StatusCode::FOUND,
         [(axum::http::header::LOCATION, location)],
-    )
-        .into_response()
-}
-
-/// Return a 400 JSON OAuth error response.
-///
-/// Body: `{"error":"<code>","error_description":"<desc>"}`.
-fn oauth_400(error: &str, description: &str) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        axum::Json(serde_json::json!({
-            "error": error,
-            "error_description": description,
-        })),
     )
         .into_response()
 }
