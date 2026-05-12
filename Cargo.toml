@@ -48,6 +48,7 @@ tower = { version = "0.5", features = ["util"] }
 vt100 = { version = "0.16" }
 http = "1"
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde-well-known"] }
+futures = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio", "macros", "with-time", "with-uuid", "with-json"] }
 sea-orm-migration = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio"] }
@@ -78,6 +79,7 @@ regex = "1"
 semver = "1"
 tokio-stream = "0.1"
 tokio-util = "0.7"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 async-stream = "0.3"
 async-trait = "0.1"
 bollard = { version = "0.20", default-features = false, features = ["http", "pipe"] }
@@ -126,6 +128,7 @@ uptrakit-notification-delivery = { path = "crates/plugins/notifications/delivery
 uptrakit-service-connections = { path = "crates/ui/service-connections", version = "0.0.1" }
 uptrakit-surface-proxy = { path = "crates/ui/surface-proxy", version = "0.0.1", default-features = false }
 uptrakit-config-merge = { path = "crates/shared/update-hooks", version = "0.0.1" }
+uptrakit-config-reload = { path = "crates/shared/config-reload", version = "0.1.0" }
 uptrakit-wire = { path = "crates/shared/wire", version = "0.0.2" }
 uptrakit-surfaces = { path = "crates/shared/surfaces", version = "0.0.2" }
 uptrakit-tenant-db = { path = "crates/shared/tenant-db", version = "0.0.1" }
@@ -166,6 +169,7 @@ ssh-key = { version = "0.6", default-features = false }
 ssh2-config = "0.7"
 tower-http = { version = "0.6", default-features = false }
 nix = { version = "0.31", default-features = false }
+notify-debouncer-full = "0.5"
 rust-embed = { version = "8", default-features = false }
 mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.6", default-features = false }
