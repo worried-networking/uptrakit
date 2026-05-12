@@ -1,0 +1,9 @@
+error[E0599]: no method named `build` found for struct `AuditEntryBuilder<uptrakit_audit_log::Stateful, HasBefore>` in the current scope
+  --> tests/typestate_compile_fail/missing_after.rs:25:21
+   |
+25 |     let _ = partial.build();
+   |                     ^^^^^ method not found in `AuditEntryBuilder<uptrakit_audit_log::Stateful, HasBefore>`
+   |
+   = note: the method was found for
+           - `AuditEntryBuilder<uptrakit_audit_log::Event>`
+           - `AuditEntryBuilder<uptrakit_audit_log::Stateful, HasBefore, HasAfter>`

@@ -1,0 +1,8 @@
+error[E0599]: no method named `before` found for struct `AuditEntryBuilder<uptrakit_audit_log::Event>` in the current scope
+  --> tests/typestate_compile_fail/event_with_before.rs:20:21
+   |
+20 |     let _ = builder.before(&Demo);
+   |                     ^^^^^^ method not found in `AuditEntryBuilder<uptrakit_audit_log::Event>`
+   |
+   = note: the method was found for
+           - `AuditEntryBuilder<uptrakit_audit_log::Stateful, NeedsBefore, A>`
