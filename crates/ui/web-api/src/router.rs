@@ -823,6 +823,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::post(crate::routes::oauth::clients_api::trust_client),
         );
 
+    // End-user Authorized Apps API (spec §12.5) — authenticated, no special permission required.
+    let auth_routes = auth_routes
+        .route(
+            "/api/oauth/consents",
+            get(crate::routes::oauth::consents_api::list_consents),
+        )
+        .route(
+            "/api/oauth/consents/{id}",
+            axum::routing::delete(crate::routes::oauth::consents_api::revoke_consent),
+        );
+
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),
         crate::middleware::require_auth::require_auth,
@@ -885,40 +896,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let (api_router, api) = base_router.split_for_parts();
 
     let mut router = api_router
-        // RFC 8615 / RFC 8414 §3 — must be at the root, outside any /api/v1 prefix.
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(crate::routes::oauth::metadata::get_as_metadata),
-        )
-        // OAuth 2.1 §12.1 authorization endpoint — outside /api/v1 per MCP spec.
-        .route(
-            "/oauth/authorize",
-            get(crate::routes::oauth::authorize::authorize),
-        )
-        // OAuth 2.1 §12 consent endpoints.
-        .route(
-            "/oauth/consent/{request_id}",
-            get(crate::routes::oauth::consent::consent_details),
-        )
-        .route(
-            "/oauth/consent/{request_id}/approve",
-            axum::routing::post(crate::routes::oauth::consent::approve_consent),
-        )
-        .route(
-            "/oauth/consent/{request_id}/deny",
-            axum::routing::post(crate::routes::oauth::consent::deny_consent),
-        )
-        // RFC 7591 DCR + RFC 7592 management endpoints.
-        .route(
-            "/oauth/register",
-            axum::routing::post(crate::routes::oauth::register::register),
-        )
-        .route(
-            "/oauth/register/{client_id}",
-            get(crate::routes::oauth::register::get_client_registration)
-                .put(crate::routes::oauth::register::update_client_registration)
-                .delete(crate::routes::oauth::register::delete_client_registration),
-        )
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",
             axum::routing::post(crate::routes::notifications::notification_callback),
@@ -978,7 +955,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             Arc::clone(&state),
             crate::middleware::resolve_ip::resolve_ip,
         ))
-        .with_state(state)
+        .with_state(Arc::clone(&state))
+        // OAuth public + optional-auth routes (metadata, token, register, authorize, consent).
+        // Merged after with_state so the Router type is Router<()> on both sides.
+        .merge(crate::routes::oauth::build_oauth_router(state))
 }
 
 /// Build a minimal router serving only PKI endpoints over plain HTTP.
