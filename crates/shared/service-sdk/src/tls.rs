@@ -207,6 +207,51 @@ pub fn build_client_config_with_resolver(
     Ok(Arc::new(config))
 }
 
+/// Build a [`rustls::sign::CertifiedKey`] from PEM-encoded certificate and
+/// private key strings.
+///
+/// Used by [`lifecycle`](crate::lifecycle) to build the initial
+/// [`crate::cert_resolver::AgentClientCertResolver`] before the reconnect
+/// loop, and by the tls hot-swap helpers.
+pub fn build_certified_key(cert_pem: &str, key_pem: &str) -> Result<rustls::sign::CertifiedKey> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_to::<EnrollmentError>()?;
+
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<EnrollmentError>()?;
+
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| report!(EnrollmentError::Tls(TlsError::NoCertificates)))?;
+
+    let signing_key = provider
+        .key_provider
+        .load_private_key(key)
+        .context_to::<EnrollmentError>()?;
+
+    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
+}
+
+/// Build an `Arc<ClientConfig>` for mTLS with a hot-swappable client
+/// certificate using system/webpki root certificates.
+///
+/// Session resumption is enabled with a 256-entry in-memory cache.
+pub fn build_system_trust_client_config_with_resolver(
+    resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
+) -> Result<Arc<rustls::ClientConfig>> {
+    let root_store = build_webpki_root_store();
+
+    let mut config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_cert_resolver(resolver);
+
+    config.resumption = rustls::client::Resumption::in_memory_sessions(256);
+
+    Ok(Arc::new(config))
+}
+
 /// Convenience wrapper: wrap a `ClientConfig` into a `TlsConnector`.
 pub fn tls_connector(config: rustls::ClientConfig) -> TlsConnector {
     TlsConnector::from(Arc::new(config))

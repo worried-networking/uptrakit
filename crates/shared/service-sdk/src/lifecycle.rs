@@ -391,7 +391,31 @@ struct AuthLoopParams<'a> {
     initial_ca_pem: Option<&'a [u8]>,
 }
 
+/// Build an mTLS `TlsConnector` backed by the hot-swap resolver.
+///
+/// When `ca_pem` is `Some`, a pinned-CA `ClientConfig` is built; otherwise
+/// the system/webpki root store is used.
+fn build_mtls_connector_with_resolver(
+    ca_pem: Option<&[u8]>,
+    resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
+) -> Result<tokio_rustls::TlsConnector> {
+    let config = match ca_pem {
+        Some(pem) => crate::tls::build_client_config_with_resolver(pem, resolver)?,
+        None => crate::tls::build_system_trust_client_config_with_resolver(resolver)?,
+    };
+    Ok(tokio_rustls::TlsConnector::from(config))
+}
+
 /// Enter the mTLS authenticated loop with automatic reconnection.
+///
+/// The certificate resolver is built once before entering the loop.  When
+/// a `Certificate` message is received while the loop is running,
+/// [`CertificateRenewalHandler::handle_certificate`] swaps the resolver
+/// in-place — no reconnect is needed unless the cert is close to expiry.
+///
+/// The `ClientConfig` (and therefore the `TlsConnector`) is rebuilt only
+/// when the CA bundle changes, which is detected at the top of each
+/// reconnect iteration by comparing the in-memory CA cache.
 async fn run_authenticated_with_reconnect(
     params: &AuthLoopParams<'_>,
     identity: &mut ServiceIdentityState,
@@ -406,28 +430,43 @@ async fn run_authenticated_with_reconnect(
     // picked up without a restart.
     let mut current_ca: Option<Vec<u8>> = params.initial_ca_pem.map(<[u8]>::to_vec);
 
+    // Build the cert resolver once for the process lifetime.  The resolver
+    // holds an `ArcSwap<CertifiedKey>` that `handle_certificate` can update
+    // without tearing down the TLS session.
+    let cert_pem = identity
+        .cert_pem()
+        .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
+    let key_pem_str = identity
+        .key_pem()
+        .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
+    let initial_ck = crate::tls::build_certified_key(cert_pem, &key_pem_str)?;
+    let cert_resolver = std::sync::Arc::new(crate::cert_resolver::AgentClientCertResolver::new(
+        std::sync::Arc::new(initial_ck),
+    ));
+
+    // Build the initial TlsConnector (backed by the resolver).
+    let mut mtls_connector = build_mtls_connector_with_resolver(
+        current_ca.as_deref(),
+        std::sync::Arc::clone(&cert_resolver),
+    )?;
+
     loop {
         // Refresh the CA from the in-memory identity cache.
         // `save_ca_cert` (called by `CaBundleUpdated` and `check_ca_staleness`)
         // keeps `identity.ca_cert_pem()` current between reconnects.
         if let Some(s) = identity.ca_cert_pem() {
-            current_ca = Some(s.as_bytes().to_vec());
-        }
-
-        // Rebuild the mTLS connector each iteration (certificates may have rotated).
-        let cert_pem = identity
-            .cert_pem()
-            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
-        let key_pem = identity
-            .key_pem()
-            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
-
-        let mtls_connector = match current_ca.as_deref() {
-            Some(pem) => crate::tls::build_tls_connector_with_client_cert(pem, cert_pem, &key_pem)?,
-            None => {
-                crate::tls::build_system_trust_tls_connector_with_client_cert(cert_pem, &key_pem)?
+            let new_ca = s.as_bytes().to_vec();
+            if current_ca.as_deref() != Some(&new_ca) {
+                // CA bundle changed — rebuild the connector with the new CA
+                // (resolver stays the same; it carries the current client cert).
+                tracing::info!("CA bundle changed, rebuilding TLS connector");
+                current_ca = Some(new_ca);
+                mtls_connector = build_mtls_connector_with_resolver(
+                    current_ca.as_deref(),
+                    std::sync::Arc::clone(&cert_resolver),
+                )?;
             }
-        };
+        }
 
         let ctx = EventLoopContext {
             base_url: params.base_url,
@@ -435,11 +474,16 @@ async fn run_authenticated_with_reconnect(
             ca_pem: current_ca.as_deref(),
         };
 
+        let conn_params = crate::event_loop::ConnectParams {
+            host: params.host,
+            port: params.port,
+            tls_connector: &mtls_connector,
+            cert_resolver: std::sync::Arc::clone(&cert_resolver),
+        };
+
         let outcome = match crate::event_loop::run_event_loop(
             handler,
-            params.host,
-            params.port,
-            &mtls_connector,
+            &conn_params,
             identity,
             &ctx,
             signals,
