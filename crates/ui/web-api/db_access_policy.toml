@@ -139,6 +139,7 @@ revoke_consent = "full-state"
 get_as_metadata = "full-state"
 
 [routes."oauth/mod.rs"]
+optional_oauth_auth = "ignore"
 
 [routes."oauth/register.rs"]
 register = "full-state"

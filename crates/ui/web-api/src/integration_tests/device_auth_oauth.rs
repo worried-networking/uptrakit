@@ -1,8 +1,8 @@
 use http::StatusCode;
 use uptrakit_web_api_types::{
     oauth::{
-        DeviceAuthDenyResponse, DeviceAuthLookupResponse, DeviceAuthorizationResponse,
-        OAuthAuthorizationServerMetadata, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
+        AuthorizationServerMetadata, DeviceAuthDenyResponse, DeviceAuthLookupResponse,
+        DeviceAuthorizationResponse, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
     },
     permissions::Permission,
 };
@@ -318,11 +318,10 @@ async fn malformed_device_code_returns_invalid_grant() {
 // ── /.well-known/oauth-authorization-server ──────────────────────────────────
 
 #[tokio::test]
-async fn discovery_doc_lists_device_grant_endpoints() {
-    let app = TestApp::new().await;
-    let client = app.client();
+async fn discovery_doc_lists_mcp_grant_endpoints() {
+    let client = oauth_enabled_client().await;
 
-    let (status, metadata): (_, OAuthAuthorizationServerMetadata) = client
+    let (status, metadata): (_, AuthorizationServerMetadata) = client
         .get("/.well-known/oauth-authorization-server")
         .send_json()
         .await;
@@ -332,11 +331,11 @@ async fn discovery_doc_lists_device_grant_endpoints() {
         metadata
             .grant_types_supported
             .iter()
-            .any(|g| g == DEVICE_CODE_GRANT),
-        "grant_types_supported must contain device_code URN"
+            .any(|g| g == "authorization_code"),
+        "grant_types_supported must contain authorization_code"
     );
-    assert!(!metadata.device_authorization_endpoint.is_empty());
     assert!(!metadata.token_endpoint.is_empty());
+    assert!(!metadata.authorization_endpoint.is_empty());
 }
 
 // ── device_auth deny ─────────────────────────────────────────────────────────
@@ -528,11 +527,10 @@ async fn deny_requires_permission() {
 }
 
 /// `GET /.well-known/oauth-authorization-server` must return 200 without any
-/// authentication headers.
+/// authentication headers when OAuth is enabled.
 #[tokio::test]
 async fn discovery_doc_no_auth_required() {
-    let app = TestApp::new().await;
-    let client = app.client();
+    let client = oauth_enabled_client().await;
 
     // Deliberately omit the bearer token.
     let status = client
@@ -544,6 +542,47 @@ async fn discovery_doc_no_auth_required() {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+/// Build a [`TestClient`] backed by a router with MCP OAuth enabled.
+///
+/// Used for tests that exercise the `/.well-known/oauth-authorization-server`
+/// endpoint, which returns 404 when OAuth is disabled (the default in
+/// `TestApp::new()`).
+async fn oauth_enabled_client() -> crate::test_harness::http_client::TestClient {
+    use std::sync::Arc;
+
+    use crate::oauth::OAuthState;
+    use crate::oauth::canonical_url::CanonicalUrlConfig;
+    use crate::oauth::jwt::{McpOAuthJwtSigner, McpOAuthJwtVerifier};
+    use crate::router::build_router;
+    use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
+
+    let db = setup_migrated_db().await;
+    let tenant_id = insert_default_tenant(&db).await;
+    let (state, _jwt) = build_test_state(db, tenant_id).await;
+
+    let canonical = CanonicalUrlConfig::new("controller.example.com".to_string(), vec![])
+        .expect("test canonical url");
+    let oauth = OAuthState {
+        enabled: true,
+        canonical,
+        signer: Arc::new(McpOAuthJwtSigner::new(b"test-secret-not-used")),
+        verifier: Arc::new(McpOAuthJwtVerifier::new(
+            b"test-secret-not-used",
+            "https://controller.example.com".into(),
+            vec![],
+        )),
+        clock: Arc::new(time::OffsetDateTime::now_utc),
+        instance_id: uuid::Uuid::nil(),
+        dcr_enabled: false,
+        cimd_enabled: false,
+    };
+
+    let mut patched = (*state).clone();
+    patched.oauth = oauth;
+    let router = build_router(Arc::new(patched));
+    crate::test_harness::http_client::TestClient::new(router)
+}
 
 /// Percent-encode a string for inclusion in an `application/x-www-form-urlencoded` body.
 fn urlencoded(s: &str) -> String {
