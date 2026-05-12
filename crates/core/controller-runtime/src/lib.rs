@@ -7,6 +7,7 @@ mod crl_manager;
 mod db;
 mod db_migrate;
 mod durations;
+mod dynamic_verifier;
 #[cfg_attr(
     not(any(
         feature = "embedded-scheduler",
@@ -32,6 +33,7 @@ mod reencrypt;
 #[cfg(feature = "embedded-scheduler")]
 mod scheduler;
 mod server;
+mod server_cert_resolver;
 mod service_host;
 #[cfg(feature = "embedded-ssh-agent")]
 mod ssh_agent;
