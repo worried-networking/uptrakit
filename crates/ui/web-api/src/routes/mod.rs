@@ -17,6 +17,7 @@ pub mod instance_plugins;
 #[cfg(feature = "interactive")]
 pub mod interactive_ws;
 pub mod notifications;
+pub mod oauth;
 pub mod ocsp;
 #[cfg(feature = "oidc")]
 pub mod oidc_auth;

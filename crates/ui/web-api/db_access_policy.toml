@@ -113,6 +113,20 @@ handle_interactive_session = "ignore"
 handle_client_message = "ignore"
 forward_interactive_stdin = "ignore"
 
+[routes."oauth/device_authorization.rs"]
+device_authorization = "full-state"
+
+[routes."oauth/helpers.rs"]
+
+[routes."oauth/metadata.rs"]
+metadata = "full-state"
+
+[routes."oauth/mod.rs"]
+
+[routes."oauth/token.rs"]
+token = "full-state"
+device_code_grant = "ignore"
+
 [routes."notifications.rs"]
 create_channel = "full-state"
 list_channels = "full-state"
