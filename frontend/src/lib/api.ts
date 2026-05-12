@@ -560,6 +560,23 @@ export function approveDeviceAuth(userCode: string): Promise<{ message: string }
 	});
 }
 
+export interface DeviceLookup {
+	client_name: string | null;
+	expires_at: string; // RFC 3339
+}
+
+export async function denyDeviceAuth(userCode: string): Promise<{ message: string }> {
+	return request('/auth/device/deny', {
+		method: 'POST',
+		body: JSON.stringify({ user_code: userCode })
+	});
+}
+
+export async function lookupDeviceAuth(userCode: string): Promise<DeviceLookup> {
+	const qs = new URLSearchParams({ user_code: userCode });
+	return request(`/auth/device/lookup?${qs.toString()}`);
+}
+
 // --- System Alerts ---
 
 export function getSystemAlerts(): Promise<SystemAlertsResponse> {

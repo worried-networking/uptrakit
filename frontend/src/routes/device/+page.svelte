@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { approveDeviceAuth } from '$lib/api';
+	import { approveDeviceAuth, denyDeviceAuth, lookupDeviceAuth, type DeviceLookup } from '$lib/api';
 	import { getLoading, getUser } from '$lib/auth.svelte';
 	import { Callout } from '$lib/components/ui';
 	import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
@@ -8,25 +8,51 @@
 
 	let error = $state('');
 	let success = $state(false);
-	let approving = $state(false);
+	let denied = $state(false);
+	let processing = $state(false);
+	let lookup = $state<DeviceLookup | null>(null);
 
 	const DEVICE_CODE_PATTERN = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
-	let rawCode = $derived(page.url.searchParams.get('code') || '');
+	let rawCode = $derived(page.url.searchParams.get('user_code') || '');
 	let code = $derived(DEVICE_CODE_PATTERN.test(rawCode) ? rawCode : '');
 	let invalidCode = $derived(rawCode !== '' && code === '');
 	let isLoggedIn = $derived(!!getUser());
 
+	$effect(() => {
+		if (code && isLoggedIn && !lookup && !error) {
+			lookupDeviceAuth(code)
+				.then((r) => (lookup = r))
+				.catch((err) => {
+					error = err instanceof Error ? err.message : 'Lookup failed';
+				});
+		}
+	});
+
 	async function onApprove() {
 		if (!code) return;
 		error = '';
-		approving = true;
+		processing = true;
 		try {
 			await approveDeviceAuth(code);
 			success = true;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to authorize device';
 		} finally {
-			approving = false;
+			processing = false;
+		}
+	}
+
+	async function onDeny() {
+		if (!code) return;
+		error = '';
+		processing = true;
+		try {
+			await denyDeviceAuth(code);
+			denied = true;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to deny device';
+		} finally {
+			processing = false;
 		}
 	}
 </script>
@@ -40,6 +66,8 @@
 		<Callout tone="info" message="Loading your session..." />
 	{:else if success}
 		<Callout tone="success" title="Device approved" message="CLI session approved. You can close this tab." />
+	{:else if denied}
+		<Callout tone="warning" title="Device denied" message="CLI authorization denied. You can close this tab." />
 	{:else if invalidCode}
 		<Callout
 			tone="danger"
@@ -56,20 +84,28 @@
 		<Callout tone="info" message="You need to log in before you can authorize this device." />
 		<Button
 			variant="primary"
-			href="/login?redirect=/device?code={encodeURIComponent(code)}"
+			href="/login?redirect=/device?user_code={encodeURIComponent(code)}"
 			class="w-full justify-center"
 		>
 			Log in
 		</Button>
 	{:else}
 		{#if error}
-			<Callout tone="danger" title="Unable to authorize device" message={error} />
+			<Callout tone="danger" title="Unable to process device request" message={error} />
 		{/if}
 
-		<Callout
-			tone="info"
-			message="Your CLI is requesting access. Confirm the code below matches what is shown in your terminal."
-		/>
+		{#if lookup?.client_name}
+			<Callout
+				tone="info"
+				title="Approve sign-in"
+				message="Approve sign-in from {lookup.client_name}? Confirm the code below matches what is shown in your terminal."
+			/>
+		{:else}
+			<Callout
+				tone="info"
+				message="Your CLI is requesting access. Confirm the code below matches what is shown in your terminal."
+			/>
+		{/if}
 
 		<div
 			class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-5 text-center"
@@ -80,15 +116,27 @@
 			>
 		</div>
 
-		<Button
-			variant="primary"
-			type="button"
-			class="w-full justify-center"
-			disabled={approving}
-			loading={approving}
-			onclick={onApprove}
-		>
-			Approve
-		</Button>
+		<div class="flex gap-3">
+			<Button
+				variant="primary"
+				type="button"
+				class="flex-1 justify-center"
+				disabled={processing}
+				loading={processing}
+				onclick={onApprove}
+			>
+				Approve
+			</Button>
+			<Button
+				variant="secondary"
+				type="button"
+				class="flex-1 justify-center"
+				disabled={processing}
+				loading={processing}
+				onclick={onDeny}
+			>
+				Deny
+			</Button>
+		</div>
 	{/if}
 </PublicEntryShell>
