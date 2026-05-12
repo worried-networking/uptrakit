@@ -10,8 +10,14 @@
 //! [`docs/development/error-handling.md`](../../../../../docs/development/error-handling.md);
 //! callers use `.context_to()?` instead of `?`.
 
+use rootcause::Report;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
+
+/// Module-boundary `Result` alias per the snapshot rule
+/// "Define `Result<T>` alias per module boundary via
+/// `Result<T> = std::result::Result<T, Report<MyError>>`".
+pub type Result<T> = std::result::Result<T, Report<OAuthError>>;
 
 /// OAuth 2.1 + RFC 8707 error envelope returned by the authorization server.
 ///
