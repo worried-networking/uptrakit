@@ -23,14 +23,8 @@ pub(crate) mod auth {
     pub(crate) const ME: &str = "/api/v1/auth/me";
     /// `GET /api/v1/auth/methods`
     pub(crate) const METHODS: &str = "/api/v1/auth/methods";
-    /// `POST /api/v1/auth/device`
-    pub(crate) const DEVICE: &str = "/api/v1/auth/device";
-    /// `POST /api/v1/auth/device/poll`
-    pub(crate) const DEVICE_POLL: &str = "/api/v1/auth/device/poll";
     /// `POST /api/v1/auth/device/approve`
     pub(crate) const DEVICE_APPROVE: &str = "/api/v1/auth/device/approve";
-    /// `GET /api/v1/auth/device/stream`
-    pub(crate) const DEVICE_STREAM: &str = "/api/v1/auth/device/stream";
 }
 
 pub(crate) mod api_tokens {

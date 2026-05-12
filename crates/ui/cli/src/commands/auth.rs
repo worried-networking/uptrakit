@@ -1,18 +1,15 @@
 use crate::client::{UptrakitClient, resolve_server_and_token};
 use crate::commands::CliContext;
-use crate::config::{Config, Credentials, load_config, save_config, save_credentials};
+use crate::config::load_config;
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
 use clap::Subcommand;
-use futures_util::StreamExt;
 use rootcause::prelude::*;
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::device_auth_stream::DeviceAuthSseEvent;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
-use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommands {
@@ -209,15 +206,16 @@ impl HumanOutput for TokenRevokeOutput {
     }
 }
 
-/// Interactive login flow using device authorization.
+/// Interactive login flow using device authorization (RFC 8628).
 ///
 /// 1. Prompt for server URL (if not stored/provided)
-/// 2. POST /api/v1/auth/device -> get device_code, user_code, verification_url
-/// 3. Open verification URL in user's browser
-/// 4. Poll /api/v1/auth/device/poll until authorized/expired
+/// 2. POST /api/v1/oauth/device_authorization — get device_code, user_code, verification_uri
+/// 3. Open verification_uri_complete in browser; print user_code + plain verification_uri
+/// 4. Poll /api/v1/oauth/token with RFC error-code parsing until authorized/denied/expired
 /// 5. Store server URL + API token locally
-pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> {
-    // Determine server URL
+///
+/// Full implementation lands in Plan 2 (openapi-client + CLI rewrite).
+pub async fn login(server_override: Option<&str>, _insecure: bool) -> Result<()> {
     let config = load_config()?;
     let server = if let Some(s) = server_override {
         s.to_string()
@@ -232,188 +230,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         bail!(CliError::Other("Server URL is required".into()));
     }
 
-    // Build client name for the token
-    let host = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    let date = chrono_date();
-    let client_name = format!("cli-{host}-{date}");
-
-    // Start device authorization flow
-    let client = UptrakitClient::new(&server, None, insecure, None).context_to()?;
-    let start_resp = client
-        .device_auth_start(&DeviceAuthStartRequest {
-            client_name: Some(client_name.clone()),
-        })
-        .await
-        .context_to()?;
-
-    // Display the code and URL
-    eprintln!();
-    eprintln!("  Open this URL in your browser:");
-    eprintln!("  {}", start_resp.verification_url);
-    eprintln!();
-    eprintln!("  And enter this code: {}", start_resp.user_code);
-    eprintln!();
-
-    // Validate URL scheme before opening in browser (prevents malicious schemes
-    // like file:// or javascript:// from a compromised server).
-    if let Err(e) = validate_url_scheme(&start_resp.verification_url, insecure) {
-        eprintln!("  (URL validation failed: {})", e);
-        eprintln!("  Please verify and open the URL above manually.");
-        eprintln!();
-    } else if let Err(e) = open_url(&start_resp.verification_url) {
-        eprintln!("  (Could not open browser automatically: {})", e);
-        eprintln!("  Please open the URL above manually.");
-        eprintln!();
-    }
-
-    eprintln!("  Waiting for authorization...");
-
-    // Try SSE first for instant notification, fall back to polling
-    match try_sse_login(&server, &start_resp.device_code, &client_name, insecure).await {
-        Ok(()) => return Ok(()),
-        Err(e) => {
-            tracing::debug!("SSE unavailable, falling back to polling: {e}");
-        }
-    }
-
-    // Fall back to polling
-    poll_for_authorization(&server, &start_resp, &client_name, insecure).await
-}
-
-/// Try to login via SSE stream. Returns `Ok(())` on success, `Err` if SSE is
-/// unavailable or fails (caller should fall back to polling).
-async fn try_sse_login(
-    server: &str,
-    device_code: &str,
-    client_name: &str,
-    insecure: bool,
-) -> Result<()> {
-    let sse_client = UptrakitClient::new(server, None, insecure, None).context_to()?;
-    let stream = sse_client
-        .stream_device_auth(device_code)
-        .await
-        .context_to()?;
-    tokio::pin!(stream);
-
-    // The stream's filter_map only yields terminal events (authorized/expired),
-    // so we only need the first event.
-    match stream.next().await {
-        Some(Ok(DeviceAuthSseEvent::Authorized { token, token_name })) => {
-            let name = if token_name.is_empty() {
-                client_name.to_string()
-            } else {
-                token_name
-            };
-
-            save_config(&Config {
-                server: Some(server.to_string()),
-            })
-            .await?;
-            save_credentials(&Credentials { token: Some(token) }).await?;
-
-            eprintln!();
-            println!("Logged in to {} successfully.", server);
-            println!("API token stored locally (name: {}).", name);
-
-            Ok(())
-        }
-        Some(Ok(DeviceAuthSseEvent::Expired)) => {
-            bail!(CliError::Other("Device authorization expired".into()));
-        }
-        Some(Err(e)) => {
-            // Stream error — return Err to trigger poll fallback
-            bail!(CliError::Other(format!("SSE stream error: {e}")));
-        }
-        None => {
-            // Stream ended without a terminal event
-            bail!(CliError::Other(
-                "SSE stream closed without authorization".into(),
-            ))
-        }
-    }
-}
-
-/// Poll-based device authorization (fallback when SSE is unavailable).
-async fn poll_for_authorization(
-    server: &str,
-    start_resp: &uptrakit_openapi_client::types::device_auth::DeviceAuthStartResponse,
-    client_name: &str,
-    insecure: bool,
-) -> Result<()> {
-    let poll_client = UptrakitClient::new(server, None, insecure, None).context_to()?;
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(start_resp.expires_in);
-    let interval = start_resp.interval;
-
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-
-        if start.elapsed() > timeout {
-            bail!(CliError::Other("Device authorization timed out".into()));
-        }
-
-        let poll_result = poll_client
-            .device_auth_poll(&DeviceAuthPollRequest {
-                device_code: start_resp.device_code.clone(),
-            })
-            .await;
-
-        let poll_resp = match poll_result {
-            Ok(resp) => resp,
-            Err(e) => {
-                if let uptrakit_openapi_client::ClientError::RateLimited {
-                    retry_after_seconds,
-                } = e.current_context()
-                {
-                    let delay = retry_after_seconds.unwrap_or(interval);
-                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                    continue;
-                }
-                if matches!(
-                    e.current_context(),
-                    uptrakit_openapi_client::ClientError::NotFound(_)
-                ) {
-                    bail!(CliError::Other(
-                        "Device authorization session not found or expired".into(),
-                    ));
-                }
-                return Err(e.context_to());
-            }
-        };
-
-        let flow_status = poll_resp.status;
-
-        match flow_status {
-            uptrakit_openapi_client::DeviceAuthStatus::Pending => continue,
-            uptrakit_openapi_client::DeviceAuthStatus::Expired => {
-                bail!(CliError::Other("Device authorization expired".into()));
-            }
-            uptrakit_openapi_client::DeviceAuthStatus::Authorized => {
-                let api_token = poll_resp
-                    .token
-                    .ok_or_else(|| report!(CliError::Other("No token in response".into())))?;
-                let token_name = poll_resp.token_name.as_deref().unwrap_or(client_name);
-
-                save_config(&Config {
-                    server: Some(server.to_string()),
-                })
-                .await?;
-                save_credentials(&Credentials {
-                    token: Some(api_token.expose_secret().to_string()),
-                })
-                .await?;
-
-                eprintln!();
-                println!("Logged in to {} successfully.", server);
-                println!("API token stored locally (name: {}).", token_name);
-
-                return Ok(());
-            }
-            _ => continue,
-        }
-    }
+    bail!(CliError::Other(
+        "Device authorization login requires the updated CLI client (Plan 2 not yet landed)."
+            .into()
+    ));
 }
 
 /// Show current authentication status.
@@ -530,6 +350,7 @@ fn prompt(msg: &str) -> Result<String> {
     Ok(input.trim().to_string())
 }
 
+#[cfg(test)]
 fn chrono_date() -> String {
     let now = time::OffsetDateTime::now_utc();
     format!(
@@ -545,6 +366,7 @@ fn chrono_date() -> String {
 /// Only `https://` URLs are allowed by default. When `allow_http` is true,
 /// `http://` URLs are also accepted (for `--insecure` mode).
 /// Returns an error for any other scheme (e.g. `file://`, `javascript:`).
+#[cfg(test)]
 fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), CliError> {
     if url.starts_with("https://") {
         return Ok(());
@@ -558,6 +380,7 @@ fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), C
 }
 
 /// Open a URL in the user's default browser.
+#[expect(dead_code, reason = "Plan 2 login rewrite will restore caller")]
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {

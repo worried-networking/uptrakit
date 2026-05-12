@@ -456,7 +456,6 @@ impl DeviceFlowStore {
 ///
 /// Returns [`OAuthErrorCode::InvalidClient`] when `client_id` does not match
 /// the hardcoded [`CLIENT_ID`] constant.
-#[must_use]
 pub fn validate_client_id(client_id: &str) -> std::result::Result<(), OAuthErrorCode> {
     if client_id == CLIENT_ID {
         Ok(())

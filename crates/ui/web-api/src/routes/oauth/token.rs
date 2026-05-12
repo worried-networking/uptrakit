@@ -68,10 +68,10 @@ async fn device_code_grant(state: Arc<AppState>, req: OAuthTokenRequest) -> Resp
         }
     };
 
-    if let Some(client_id) = req.client_id.as_deref() {
-        if let Err(code) = validate_client_id(client_id) {
-            return oauth_error_response(StatusCode::BAD_REQUEST, code, None, None);
-        }
+    if let Some(client_id) = req.client_id.as_deref()
+        && let Err(code) = validate_client_id(client_id)
+    {
+        return oauth_error_response(StatusCode::BAD_REQUEST, code, None, None);
     }
 
     let outcome = match state
