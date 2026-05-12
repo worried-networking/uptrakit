@@ -997,4 +997,26 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[test]
+    fn config_default_path() {
+        let args = super::Args::try_parse_from(["uptrakit-controller"]).unwrap();
+        assert_eq!(
+            args.config,
+            std::path::PathBuf::from("/etc/uptrakit/controller.toml")
+        );
+    }
+
+    #[test]
+    fn config_custom_path() {
+        let args = super::Args::try_parse_from(["uptrakit-controller", "--config", "/tmp/my.toml"])
+            .unwrap();
+        assert_eq!(args.config, std::path::PathBuf::from("/tmp/my.toml"));
+    }
+
+    #[test]
+    fn check_config_default_false() {
+        let args = super::Args::try_parse_from(["uptrakit-controller"]).unwrap();
+        assert!(!args.check_config);
+    }
 }
