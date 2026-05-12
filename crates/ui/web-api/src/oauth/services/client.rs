@@ -235,8 +235,8 @@ impl OAuthClientService {
         let response = DcrRegistrationResponse::new(
             client_id.clone(),
             now.unix_timestamp(),
-            registration_access_token,
-            format!("/oauth/clients/{client_id}"),
+            Some(registration_access_token),
+            format!("/oauth/register/{client_id}"),
             req.client_name,
             req.client_uri,
             req.logo_uri,
@@ -358,7 +358,12 @@ mod tests {
             .expect("register_dcr should succeed");
 
         assert!(!resp.client_id.is_empty());
-        assert!(!resp.registration_access_token.is_empty());
+        assert!(
+            resp.registration_access_token
+                .as_deref()
+                .is_some_and(|t| !t.is_empty()),
+            "registration_access_token must be present and non-empty"
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -385,8 +390,11 @@ mod tests {
         let stored_hash = row
             .registration_access_token_hash
             .expect("hash should be stored");
+        let raw_token = resp
+            .registration_access_token
+            .expect("registration_access_token must be present");
         assert_ne!(
-            stored_hash, resp.registration_access_token,
+            stored_hash, raw_token,
             "stored hash must not equal the raw token"
         );
     }
