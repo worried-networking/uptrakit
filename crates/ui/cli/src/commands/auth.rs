@@ -1,6 +1,6 @@
 use crate::client::{UptrakitClient, resolve_server_and_token};
 use crate::commands::CliContext;
-use crate::config::load_config;
+use crate::config::{Config, Credentials, load_config, save_config, save_credentials};
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
 use clap::Subcommand;
@@ -8,8 +8,15 @@ use rootcause::prelude::*;
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use uptrakit_openapi_client::ClientError;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
+use uptrakit_openapi_client::types::oauth::{
+    DeviceAuthorizationRequest, DeviceAuthorizationResponse, OAuthErrorCode, OAuthTokenRequest,
+};
+
+const CLI_CLIENT_ID: &str = "uptrakit-cli";
+const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommands {
@@ -213,9 +220,7 @@ impl HumanOutput for TokenRevokeOutput {
 /// 3. Open verification_uri_complete in browser; print user_code + plain verification_uri
 /// 4. Poll /api/v1/oauth/token with RFC error-code parsing until authorized/denied/expired
 /// 5. Store server URL + API token locally
-///
-/// Full implementation lands in Plan 2 (openapi-client + CLI rewrite).
-pub async fn login(server_override: Option<&str>, _insecure: bool) -> Result<()> {
+pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> {
     let config = load_config()?;
     let server = if let Some(s) = server_override {
         s.to_string()
@@ -227,13 +232,154 @@ pub async fn login(server_override: Option<&str>, _insecure: bool) -> Result<()>
     };
 
     if server.is_empty() {
-        bail!(CliError::Other("Server URL is required".into()));
+        bail!(CliError::Other("server URL is required".into()));
     }
 
-    bail!(CliError::Other(
-        "Device authorization login requires the updated CLI client (Plan 2 not yet landed)."
-            .into()
-    ));
+    let host = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let date = chrono_date();
+    let client_name = format!("cli-{host}-{date}");
+
+    let client = UptrakitClient::new(&server, None, insecure, None).context_to()?;
+
+    let start_resp = client
+        .oauth_device_authorization(&DeviceAuthorizationRequest::new(
+            CLI_CLIENT_ID.to_string(),
+            None,
+            Some(client_name.clone()),
+        ))
+        .await
+        .context_to()?;
+
+    print_browser_instructions(&start_resp, insecure);
+
+    eprintln!("  Waiting for authorization...");
+
+    poll_for_token(&client, &server, &start_resp, &client_name).await
+}
+
+fn print_browser_instructions(start_resp: &DeviceAuthorizationResponse, insecure: bool) {
+    eprintln!();
+    eprintln!("  Open this URL in your browser:");
+    eprintln!("  {}", start_resp.verification_uri);
+    eprintln!();
+    eprintln!("  And enter this code: {}", start_resp.user_code);
+    eprintln!();
+
+    let url_to_open = &start_resp.verification_uri_complete;
+    if let Err(e) = validate_url_scheme(url_to_open, insecure) {
+        eprintln!("  (URL validation failed: {})", e);
+        eprintln!("  Please verify and open the URL above manually.");
+        eprintln!();
+    } else if let Err(e) = open_url(url_to_open) {
+        eprintln!("  (Could not open browser automatically: {})", e);
+        eprintln!("  Please open the URL above manually.");
+        eprintln!();
+    }
+}
+
+async fn poll_for_token(
+    client: &UptrakitClient,
+    server: &str,
+    start_resp: &DeviceAuthorizationResponse,
+    client_name: &str,
+) -> Result<()> {
+    let started = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(start_resp.expires_in);
+    let mut interval = u64::try_from(start_resp.interval.max(1)).unwrap_or(5);
+
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+
+        if started.elapsed() > timeout {
+            bail!(CliError::Other(
+                "authorization request expired, please run again".into()
+            ));
+        }
+
+        let req = OAuthTokenRequest::new(
+            DEVICE_CODE_GRANT.to_string(),
+            Some(start_resp.device_code.clone()),
+            Some(CLI_CLIENT_ID.to_string()),
+        );
+
+        match client.oauth_token(&req).await {
+            Ok(resp) => {
+                save_config(&Config {
+                    server: Some(server.to_string()),
+                    ..Config::default()
+                })
+                .await?;
+                save_credentials(&Credentials {
+                    token: Some(resp.access_token),
+                    ..Credentials::default()
+                })
+                .await?;
+                eprintln!();
+                println!("Logged in to {} successfully.", server);
+                println!("API token stored locally (name: {}).", client_name);
+                return Ok(());
+            }
+            Err(e) => match e.current_context() {
+                ClientError::OAuthError(err_resp) => match &err_resp.error {
+                    OAuthErrorCode::AuthorizationPending => continue,
+                    OAuthErrorCode::SlowDown => {
+                        let bumped = err_resp
+                            .interval
+                            .and_then(|i| u64::try_from(i).ok())
+                            .unwrap_or_else(|| interval.saturating_add(5));
+                        interval = bumped;
+                        continue;
+                    }
+                    OAuthErrorCode::AccessDenied => {
+                        bail!(CliError::Other("authorization denied by operator".into()));
+                    }
+                    OAuthErrorCode::ExpiredToken => {
+                        bail!(CliError::Other(
+                            "authorization request expired, please run again".into()
+                        ));
+                    }
+                    OAuthErrorCode::InvalidGrant
+                    | OAuthErrorCode::InvalidClient
+                    | OAuthErrorCode::InvalidRequest
+                    | OAuthErrorCode::UnsupportedGrantType => {
+                        bail!(CliError::Other(format!(
+                            "CLI/server version mismatch: {}",
+                            err_resp.error.as_str()
+                        )));
+                    }
+                    OAuthErrorCode::ServerError => {
+                        bail!(CliError::Other(
+                            "server-side error, please try again".into()
+                        ));
+                    }
+                    OAuthErrorCode::Other(s) => {
+                        bail!(CliError::Other(format!("unexpected OAuth error: {s}")));
+                    }
+                    _ => {
+                        tracing::warn!(
+                            error_code = err_resp.error.as_str(),
+                            "received unknown OAuth error code from server"
+                        );
+                        bail!(CliError::Other(format!(
+                            "unexpected OAuth error: {}",
+                            err_resp.error.as_str()
+                        )));
+                    }
+                },
+                ClientError::RateLimited {
+                    retry_after_seconds,
+                } => {
+                    let delay = *retry_after_seconds;
+                    tokio::time::sleep(std::time::Duration::from_secs(delay.unwrap_or(interval)))
+                        .await;
+                    continue;
+                }
+                _ => return Err(e.context_to()),
+            },
+        }
+    }
 }
 
 /// Show current authentication status.
@@ -350,7 +496,6 @@ fn prompt(msg: &str) -> Result<String> {
     Ok(input.trim().to_string())
 }
 
-#[cfg(test)]
 fn chrono_date() -> String {
     let now = time::OffsetDateTime::now_utc();
     format!(
@@ -366,7 +511,6 @@ fn chrono_date() -> String {
 /// Only `https://` URLs are allowed by default. When `allow_http` is true,
 /// `http://` URLs are also accepted (for `--insecure` mode).
 /// Returns an error for any other scheme (e.g. `file://`, `javascript:`).
-#[cfg(test)]
 fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), CliError> {
     if url.starts_with("https://") {
         return Ok(());
@@ -380,7 +524,6 @@ fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), C
 }
 
 /// Open a URL in the user's default browser.
-#[expect(dead_code, reason = "Plan 2 login rewrite will restore caller")]
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
