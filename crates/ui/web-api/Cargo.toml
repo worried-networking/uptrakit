@@ -84,6 +84,7 @@ uptrakit-web-api-queries = { workspace = true }
 hex = { workspace = true }
 metrics = { workspace = true }
 sha2 = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 uptrakit-global-github-provider = { workspace = true }
 uptrakit-github-client = { workspace = true }
 uptrakit-notification-delivery = { workspace = true }
@@ -103,7 +104,6 @@ uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-surface-proxy = { workspace = true, features = ["testing"] }
 uptrakit-controller-core = { workspace = true, features = ["testing"] }
 tokio-tungstenite = { workspace = true }
-jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 
 [lints]
 workspace = true
