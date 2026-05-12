@@ -12,7 +12,9 @@
 //! test matrix where the predicate would return `false` for upsert/delete —
 //! those tests would be vacuous duplicates of the existing permission-gate tests.
 
+#[cfg(feature = "dashboard-icons")]
 use crate::test_harness::TestApp;
+#[cfg(feature = "dashboard-icons")]
 use crate::test_harness::fixtures::register_user;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -20,6 +22,7 @@ use crate::test_harness::fixtures::register_user;
 /// Register the admin (first user), re-open registration, then register a
 /// second user who gets the built-in "user" role (ViewSettings but NOT
 /// ManageGlobalSettings).  Returns `(admin_token, tenant_token)`.
+#[cfg(feature = "dashboard-icons")]
 async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
     let client = app.client();
 

@@ -6,12 +6,17 @@
 )]
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
+#[cfg(feature = "dashboard-icons")]
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+#[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::system_audit_log;
+#[cfg(feature = "dashboard-icons")]
 use uptrakit_web_api_types::permissions::Permission;
 
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::{register_and_get_token, upsert_instance_plugin_setting};
+use crate::test_harness::fixtures::register_and_get_token;
+#[cfg(feature = "dashboard-icons")]
+use crate::test_harness::fixtures::upsert_instance_plugin_setting;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -20,6 +25,7 @@ use crate::test_harness::fixtures::{register_and_get_token, upsert_instance_plug
 ///
 /// Instance-plugin audit entries use `system_scope()` (no tenant_id) and are
 /// therefore routed to `system_audit_logs`, not `audit_logs`.
+#[cfg(feature = "dashboard-icons")]
 async fn poll_system_audit_row(
     db: &sea_orm::DatabaseConnection,
     action_type: uptrakit_audit_log::RegisteredAuditAction,

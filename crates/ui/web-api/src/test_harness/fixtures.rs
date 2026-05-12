@@ -230,6 +230,7 @@ pub(crate) async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &
 /// next request reads the seeded value. The catalog snapshot (frozen at
 /// `TestApp::new()` boot) is intentionally NOT touched; `running_enabled`
 /// reflects boot state and is independent of the ArcSwap snapshot.
+#[cfg(feature = "dashboard-icons")]
 pub(crate) async fn upsert_instance_plugin_setting(
     app: &super::TestApp,
     plugin_type_id: &str,

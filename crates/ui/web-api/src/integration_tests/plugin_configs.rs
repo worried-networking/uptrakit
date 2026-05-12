@@ -9,9 +9,9 @@
 )]
 
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::{
-    insert_host, link_service_host, register_and_get_token, register_user,
-};
+#[cfg(feature = "dashboard-icons")]
+use crate::test_harness::fixtures::register_user;
+use crate::test_harness::fixtures::{insert_host, link_service_host, register_and_get_token};
 #[cfg(feature = "dashboard-icons")]
 use sea_orm::{ActiveModelTrait, Set};
 #[cfg(not(feature = "dashboard-icons"))]
