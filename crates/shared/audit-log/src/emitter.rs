@@ -3,7 +3,10 @@ use std::sync::Arc;
 use crate::backend::{AuditLogBackend, NoopBackend};
 use crate::commit_hook::AuditCommitHook;
 use crate::dispatcher::AuditLogDispatcher;
-use crate::entry::{AuditEntry, Event, Stateful, validate};
+#[cfg(feature = "db")]
+use crate::entry::Stateful;
+use crate::entry::{AuditEntry, Event, validate};
+#[cfg(feature = "db")]
 use crate::error::AuditLogError;
 
 /// Emits audit log entries via fire-and-forget dispatch or transactional write.
@@ -86,6 +89,10 @@ impl AuditEmitter {
     /// The returned hook must be flushed by calling
     /// [`flush_after_commit`][AuditCommitHook::flush_after_commit] immediately
     /// after `tx.commit().await` succeeds.
+    #[expect(
+        clippy::double_must_use,
+        reason = "AuditCommitHook is #[must_use]; retaining #[must_use] here emphasises caller obligation to flush"
+    )]
     #[must_use]
     pub fn commit_hook(&self) -> AuditCommitHook {
         AuditCommitHook::new(Arc::clone(&self.mirror_backend))

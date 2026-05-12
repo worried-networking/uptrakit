@@ -812,6 +812,106 @@ pub trait AuditView {
 }
 
 // ---------------------------------------------------------------------------
+// Test stubs (available to external crates' test suites via `feature = "testing"`)
+// ---------------------------------------------------------------------------
+
+#[cfg(any(test, feature = "testing"))]
+#[expect(
+    clippy::expect_used,
+    reason = "test-only stub helpers — panics are acceptable for invalid test inputs"
+)]
+impl AuditEntry<Event> {
+    /// Builds a minimal [`AuditEntry<Event>`] for use in tests.
+    ///
+    /// The `action` string must be a registered audit action (e.g. `"auth.login"`).
+    /// The entry is emitted by the system actor with no tenant scope.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `action` is not a registered action type or if the builder
+    /// validation fails — neither should occur for valid test inputs.
+    pub fn event_test_stub(action: impl AsRef<str>) -> Self {
+        Self::builder_event(
+            action
+                .as_ref()
+                .parse::<AuditActionType>()
+                .expect("registered action"),
+        )
+        .actor_system()
+        .build()
+        .expect("event stub builds")
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[expect(
+    clippy::expect_used,
+    reason = "test-only stub helpers — panics are acceptable for invalid test inputs"
+)]
+impl AuditEntry<Stateful> {
+    /// Builds a minimal [`AuditEntry<Stateful>`] for use in tests.
+    ///
+    /// `action` must be a registered audit action (e.g. `"plugin_config.update"`).
+    /// `target_type` and `target_id` are stored on the entry as-is; `before` and
+    /// `after` are stored verbatim as the respective snapshots.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `action` is not a registered action type or if the builder
+    /// validation fails — neither should occur for valid test inputs.
+    pub fn stateful_test_stub(
+        action: &str,
+        target_type: &str,
+        target_id: String,
+        before: serde_json::Value,
+        after: serde_json::Value,
+    ) -> Self {
+        struct Stub {
+            target_id: String,
+            value: serde_json::Value,
+        }
+        impl AuditView for Stub {
+            // `TARGET_TYPE` is a `const` so it cannot be dynamic; the correct
+            // target_type is applied via the explicit `.target()` call below.
+            const TARGET_TYPE: &'static str = "";
+
+            fn audit_target_id(&self) -> String {
+                self.target_id.clone()
+            }
+
+            fn audit_target_display(&self) -> Option<String> {
+                None
+            }
+
+            fn audit_view(&self) -> serde_json::Value {
+                self.value.clone()
+            }
+        }
+        let b = Stub {
+            target_id: target_id.clone(),
+            value: before,
+        };
+        let a = Stub {
+            target_id: target_id.clone(),
+            value: after,
+        };
+        // `.before()` unconditionally writes `V::TARGET_TYPE` (`""`) into the
+        // entry's `target_type` field, so `.target()` must come *after*
+        // `.before()` and `.after()` to restore the correct value.
+        Self::builder_stateful(
+            action
+                .parse::<AuditActionType>()
+                .expect("registered action"),
+        )
+        .before(&b)
+        .after(&a)
+        .target(target_type, target_id, None)
+        .build()
+        .expect("stateful stub builds")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1037,5 +1137,27 @@ mod tests {
         let entry = b.actor_system().build().expect("event builds");
         assert_eq!(entry.action_type.as_str(), "auth.login");
         assert!(entry.before_snapshot.is_none());
+    }
+
+    #[test]
+    fn event_test_stub_builds_event_entry() {
+        let e = AuditEntry::event_test_stub("auth.login");
+        assert_eq!(e.action_type.as_str(), "auth.login");
+        assert!(e.before_snapshot.is_none() && e.after_snapshot.is_none());
+    }
+
+    #[test]
+    fn stateful_test_stub_builds_stateful_entry() {
+        let e = AuditEntry::stateful_test_stub(
+            "plugin_config.update",
+            "plugin_config",
+            uuid::Uuid::now_v7().to_string(),
+            serde_json::json!({"enabled": false}),
+            serde_json::json!({"enabled": true}),
+        );
+        assert_eq!(e.action_type.as_str(), "plugin_config.update");
+        assert_eq!(e.target_type.as_deref(), Some("plugin_config"));
+        assert_eq!(e.before_snapshot.as_ref().unwrap()["enabled"], false);
+        assert_eq!(e.after_snapshot.as_ref().unwrap()["enabled"], true);
     }
 }
