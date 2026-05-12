@@ -75,7 +75,7 @@ pub fn service_identity_from_der(der: &[u8]) -> Option<ServiceIdentity> {
                 })
         })?;
     let service_id = uuid::Uuid::parse_str(&cn).ok()?;
-    let cert_serial = tbs.serial_number.to_string().to_lowercase();
+    let cert_serial = tbs.serial_number.to_string();
     Some(ServiceIdentity {
         service_id,
         cert_serial,
@@ -152,19 +152,19 @@ pub fn extract_cn_from_dn(dn: &str) -> Option<&str> {
     None
 }
 
-/// Normalize a hex serial number to colon-separated lowercase format
-/// matching x509-parser's `raw_serial_as_string()` output.
+/// Normalize a hex serial number to colon-separated uppercase format
+/// matching x509-cert's `SerialNumber::Display` output.
 ///
 /// Examples:
-/// - `"01ABCDEF"` → `"01:ab:cd:ef"`
-/// - `"01:AB:CD:EF"` → `"01:ab:cd:ef"`
-/// - `"01:ab:cd:ef"` → `"01:ab:cd:ef"` (passthrough)
+/// - `"01abcdef"` → `"01:AB:CD:EF"`
+/// - `"01:ab:cd:ef"` → `"01:AB:CD:EF"`
+/// - `"01:AB:CD:EF"` → `"01:AB:CD:EF"` (passthrough)
 pub fn normalize_serial(hex: &str) -> String {
-    // Strip colons and lowercase
+    // Strip colons and uppercase
     let clean: String = hex
         .chars()
         .filter(|c| *c != ':')
-        .flat_map(|c| c.to_lowercase())
+        .flat_map(|c| c.to_uppercase())
         .collect();
 
     // Insert colons every 2 chars
@@ -324,36 +324,36 @@ mod tests {
 
     #[test]
     fn normalize_serial_compact_hex() {
-        assert_eq!(normalize_serial("01ABCDEF"), "01:ab:cd:ef");
+        assert_eq!(normalize_serial("01abcdef"), "01:AB:CD:EF");
     }
 
     #[test]
-    fn normalize_serial_already_colon_separated() {
-        assert_eq!(normalize_serial("01:AB:CD:EF"), "01:ab:cd:ef");
+    fn normalize_serial_already_colon_separated_upper() {
+        assert_eq!(normalize_serial("01:AB:CD:EF"), "01:AB:CD:EF");
     }
 
     #[test]
-    fn normalize_serial_passthrough() {
-        assert_eq!(normalize_serial("01:ab:cd:ef"), "01:ab:cd:ef");
+    fn normalize_serial_colon_separated_lower_uppercased() {
+        assert_eq!(normalize_serial("01:ab:cd:ef"), "01:AB:CD:EF");
     }
 
     #[test]
     fn normalize_serial_single_byte() {
-        assert_eq!(normalize_serial("0A"), "0a");
+        assert_eq!(normalize_serial("0a"), "0A");
     }
 
     #[test]
     fn identity_from_info_with_serial() {
         let id = service_identity_from_info(
             "CN=550e8400-e29b-41d4-a716-446655440000,O=Uptrakit",
-            Some("01ABCDEF"),
+            Some("01abcdef"),
         )
         .expect("should parse");
         assert_eq!(
             id.service_id,
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
         );
-        assert_eq!(id.cert_serial, "01:ab:cd:ef");
+        assert_eq!(id.cert_serial, "01:AB:CD:EF");
     }
 
     #[test]
