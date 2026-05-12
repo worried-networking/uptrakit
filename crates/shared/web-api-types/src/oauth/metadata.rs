@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 /// `/.well-known/oauth-authorization-server`.
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AuthorizationServerMetadata {
     pub issuer: String,
     pub authorization_endpoint: String,
@@ -26,10 +27,50 @@ pub struct AuthorizationServerMetadata {
     pub service_documentation: Option<String>,
 }
 
+impl AuthorizationServerMetadata {
+    /// Construct a new [`AuthorizationServerMetadata`].
+    ///
+    /// Required because the struct is `#[non_exhaustive]` and cannot be
+    /// constructed using a struct literal from outside this crate.
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "RFC 8414 metadata has many required fields"
+    )]
+    pub fn new(
+        issuer: String,
+        authorization_endpoint: String,
+        token_endpoint: String,
+        registration_endpoint: Option<String>,
+        scopes_supported: Vec<String>,
+        response_types_supported: Vec<String>,
+        grant_types_supported: Vec<String>,
+        code_challenge_methods_supported: Vec<String>,
+        token_endpoint_auth_methods_supported: Vec<String>,
+        client_id_metadata_document_supported: bool,
+        service_documentation: Option<String>,
+    ) -> Self {
+        Self {
+            issuer,
+            authorization_endpoint,
+            token_endpoint,
+            registration_endpoint,
+            scopes_supported,
+            response_types_supported,
+            grant_types_supported,
+            code_challenge_methods_supported,
+            token_endpoint_auth_methods_supported,
+            client_id_metadata_document_supported,
+            service_documentation,
+        }
+    }
+}
+
 /// OAuth 2.0 Protected Resource Metadata (RFC 9728 §2) returned from
 /// `/.well-known/oauth-protected-resource`.
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProtectedResourceMetadata {
     pub resource: String,
     pub authorization_servers: Vec<String>,

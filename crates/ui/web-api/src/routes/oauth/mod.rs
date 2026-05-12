@@ -2,7 +2,12 @@
 //!
 //! See `docs/superpowers/specs/2026-05-12-rfc8628-device-auth-design.md`.
 
+pub mod authorize;
+pub mod clients_api;
+pub mod consent;
+pub mod consents_api;
 pub mod device_authorization;
 mod helpers;
 pub mod metadata;
+pub mod register;
 pub mod token;
