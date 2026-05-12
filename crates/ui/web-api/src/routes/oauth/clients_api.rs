@@ -15,7 +15,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use uptrakit_shared_db::entity::oauth_client;
-use uptrakit_web_api_types::oauth::responses::DcrRegistrationRequest;
+use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::validation::Validate;
 
@@ -25,6 +25,18 @@ use crate::oauth::services::client::{OAuthClientError, OAuthClientService};
 use crate::routes::oauth::helpers::{oauth_400, oauth_500};
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn build_client_service(state: &AppState) -> OAuthClientService {
+    OAuthClientService::new(
+        state.db().clone(),
+        Arc::clone(&state.oauth.clock),
+        Arc::new(state.audit_emitter.clone()),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/oauth/clients
 // ---------------------------------------------------------------------------
 
@@ -32,6 +44,19 @@ use crate::routes::oauth::helpers::{oauth_400, oauth_500};
 ///
 /// Returns 404 when `oauth.enabled = false`.
 /// Requires `ManageAuthSettings`.
+#[utoipa::path(
+    get,
+    path = "/api/oauth/clients",
+    params(PaginationParams),
+    responses(
+        (status = 200, description = "Paginated client list"),
+        (status = 401, description = "Unauthenticated"),
+        (status = 403, description = "Insufficient permission"),
+        (status = 404, description = "OAuth disabled"),
+    ),
+    tag = "OAuth"
+)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn list_clients(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
@@ -94,6 +119,20 @@ pub(crate) async fn list_clients(
 ///
 /// Returns 404 when `oauth.enabled = false`.
 /// Requires `ManageAuthSettings`.
+#[utoipa::path(
+    post,
+    path = "/api/oauth/clients",
+    request_body = DcrRegistrationRequest,
+    responses(
+        (status = 201, description = "Client registered", body = DcrRegistrationResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthenticated"),
+        (status = 403, description = "Insufficient permission"),
+        (status = 404, description = "OAuth disabled"),
+    ),
+    tag = "OAuth"
+)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn manual_register_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
@@ -107,11 +146,7 @@ pub(crate) async fn manual_register_client(
         return oauth_400("invalid_request", &e.message);
     }
 
-    let svc = OAuthClientService::new(
-        state.db().clone(),
-        Arc::clone(&state.oauth.clock),
-        Arc::new(state.audit_emitter.clone()),
-    );
+    let svc = build_client_service(&state);
 
     match svc.register_manual(body).await {
         Ok(resp) => (StatusCode::CREATED, axum::Json(resp)).into_response(),
@@ -131,6 +166,19 @@ pub(crate) async fn manual_register_client(
 /// Returns 404 when the client does not exist or when `oauth.enabled = false`.
 /// Returns 204 on success.
 /// Requires `ManageAuthSettings`.
+#[utoipa::path(
+    delete,
+    path = "/api/oauth/clients/{client_id}",
+    params(("client_id" = String, Path, description = "OAuth client ID")),
+    responses(
+        (status = 204, description = "Revoked"),
+        (status = 401, description = "Unauthenticated"),
+        (status = 403, description = "Insufficient permission"),
+        (status = 404, description = "Client not found or OAuth disabled"),
+    ),
+    tag = "OAuth"
+)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn revoke_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
@@ -140,11 +188,7 @@ pub(crate) async fn revoke_client(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let svc = OAuthClientService::new(
-        state.db().clone(),
-        Arc::clone(&state.oauth.clock),
-        Arc::new(state.audit_emitter.clone()),
-    );
+    let svc = build_client_service(&state);
 
     match svc.revoke(&client_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -167,6 +211,19 @@ pub(crate) async fn revoke_client(
 /// Returns 404 when the client does not exist or when `oauth.enabled = false`.
 /// Returns 204 on success.
 /// Requires `ManageAuthSettings`.
+#[utoipa::path(
+    post,
+    path = "/api/oauth/clients/{client_id}/trust",
+    params(("client_id" = String, Path, description = "OAuth client ID")),
+    responses(
+        (status = 204, description = "Promoted to trusted"),
+        (status = 401, description = "Unauthenticated"),
+        (status = 403, description = "Insufficient permission"),
+        (status = 404, description = "Client not found or OAuth disabled"),
+    ),
+    tag = "OAuth"
+)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn trust_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
@@ -176,11 +233,7 @@ pub(crate) async fn trust_client(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let svc = OAuthClientService::new(
-        state.db().clone(),
-        Arc::clone(&state.oauth.clock),
-        Arc::new(state.audit_emitter.clone()),
-    );
+    let svc = build_client_service(&state);
 
     match svc.promote_trusted(&client_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
