@@ -64,10 +64,10 @@ device_auth_lookup = "full-state"
 [routes."discovery_allowlist.rs"]
 list_tenant_discovery_allowlist = "tenant-scoped"
 add_tenant_discovery_allowlist_entry = "full-state"
-remove_tenant_discovery_allowlist_entry = "tenant-scoped"
+remove_tenant_discovery_allowlist_entry = "full-state"
 list_host_discovery_allowlist = "tenant-scoped"
 add_host_discovery_allowlist_entry = "full-state"
-remove_host_discovery_allowlist_entry = "tenant-scoped"
+remove_host_discovery_allowlist_entry = "full-state"
 
 [routes."enrollment_tokens.rs"]
 create_enrollment_token = "tenant-scoped"
