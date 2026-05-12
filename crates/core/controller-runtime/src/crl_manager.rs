@@ -325,7 +325,6 @@ impl CrlManager {
     }
 
     /// Return a clone of the `Arc<Issuer>` for the CA matching `fingerprint`.
-    #[expect(dead_code, reason = "consumed by cert_signer once Task 4 lands")]
     pub(crate) async fn issuer_for(
         &self,
         fingerprint: &str,

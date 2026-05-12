@@ -266,7 +266,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // Build shared application state
     let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
         ca_rx.clone(),
-        Arc::clone(&ca_key_store),
+        Arc::clone(&crl_manager) as Arc<dyn cert_signer::IssuerSource>,
     ));
 
     #[cfg(feature = "oidc")]
