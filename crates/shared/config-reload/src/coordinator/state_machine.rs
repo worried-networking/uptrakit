@@ -70,6 +70,8 @@ impl ReloadCoordinator {
     /// dropped.
     pub async fn run(mut self) {
         while let Some(req) = self.rx.recv().await {
+            // Requests arriving while run_cycle executes wait in the 64-entry channel buffer
+            // (back-pressure coalescing). No audit event for queued-but-not-yet-processed requests.
             if let CoordinatorState::Degraded(_) = **self.state.load() {
                 warn!(
                     source = ?req.source,
@@ -201,9 +203,15 @@ impl ReloadCoordinator {
                     return Err((applied, e));
                 }
                 let took = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                per_ms.insert(r.name().to_string(), took);
-                applied.push(r.clone());
+                // Accumulate time across multiple deltas for the same subsystem
+                // rather than overwriting on each iteration.
+                per_ms
+                    .entry(r.name().to_string())
+                    .and_modify(|v| *v += took)
+                    .or_insert(took);
             }
+            // Track each subsystem once regardless of how many deltas were applied.
+            applied.push(r.clone());
         }
         Ok((applied, per_ms))
     }
@@ -279,21 +287,26 @@ impl ReloadCoordinator {
             }
         }
 
-        if still_failing.is_empty() {
-            self.state.store(Arc::new(CoordinatorState::Idle));
-            info!("Degraded state cleared; coordinator returning to Idle");
-            Ok(())
-        } else {
-            self.state
-                .store(Arc::new(CoordinatorState::Degraded(DegradedInfo::new(
-                    OffsetDateTime::now_utc(),
-                    still_failing.clone(),
-                    format!(
-                        "clear-degraded failed: still unhealthy: {}",
-                        still_failing.join(", ")
-                    ),
-                ))));
-            Err(last_err.unwrap_or_else(|| rootcause::report!("subsystems still failing")))
+        // `still_failing` is non-empty iff `last_err` is `Some` — both are
+        // populated together in the same loop body.
+        match last_err {
+            None => {
+                self.state.store(Arc::new(CoordinatorState::Idle));
+                info!("Degraded state cleared; coordinator returning to Idle");
+                Ok(())
+            }
+            Some(err) => {
+                self.state
+                    .store(Arc::new(CoordinatorState::Degraded(DegradedInfo::new(
+                        OffsetDateTime::now_utc(),
+                        still_failing.clone(),
+                        format!(
+                            "clear-degraded failed: still unhealthy: {}",
+                            still_failing.join(", ")
+                        ),
+                    ))));
+                Err(err)
+            }
         }
     }
 }

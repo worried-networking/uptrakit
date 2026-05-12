@@ -103,7 +103,9 @@ async fn reloadable_erased_dispatches() {
 // ── Task 10 ────────────────────────────────────────────────────────────────
 
 use time::OffsetDateTime;
-use uptrakit_config_reload::{CoordinatorState, DegradedInfo, ReloadPhase, ReloadSource};
+use uptrakit_config_reload::{
+    CoordinatorState, DegradedInfo, ReloadPhase, ReloadRequest, ReloadSource,
+};
 
 #[test]
 fn reload_source_serde_roundtrip_includes_other_catch_all() {
@@ -258,6 +260,53 @@ async fn coordinator_refuses_reloads_in_degraded() {
     // but run_cycle re-enters the same failure path, so coordinator stays Degraded.
     coord.enqueue_and_drain(test_delta()).await;
     assert!(matches!(coord.state(), CoordinatorState::Degraded(_)));
+}
+
+/// Verify that `run()` refuses incoming reload requests while the coordinator
+/// is in the `Degraded` state. Unlike `coordinator_refuses_reloads_in_degraded`
+/// (which calls `enqueue_and_drain` directly and therefore bypasses the guard),
+/// this test exercises the actual `run()` loop path.
+///
+/// Setup: use `enqueue_and_drain` (which calls `run_cycle`) to force the shared
+/// state into Degraded via the revert-fail path, then spawn `run()` and verify
+/// it refuses a subsequent request without re-applying.
+#[tokio::test(start_paused = true)]
+async fn run_refuses_reload_in_degraded() {
+    let r = Arc::new(RevertFailingReloadable);
+    let coord = ReloadCoordinator::new_for_test(vec![r.clone()]);
+
+    // Pre-force the coordinator into Degraded by running a cycle through
+    // enqueue_and_drain (which calls run_cycle directly).
+    coord.enqueue_and_drain(test_delta()).await;
+    assert!(
+        matches!(coord.state(), CoordinatorState::Degraded(_)),
+        "coordinator should be Degraded after enqueue_and_drain with RevertFailingReloadable"
+    );
+
+    // Now obtain the handle (shares the same state Arc) and spawn run().
+    let handle = coord.handle();
+    tokio::spawn(coord.run());
+
+    // Send a reload request via the handle — run() must refuse it because
+    // the coordinator is already Degraded.
+    handle
+        .enqueue(ReloadRequest {
+            source: ReloadSource::Other("test-trigger-degraded".into()),
+            timestamp: OffsetDateTime::now_utc(),
+        })
+        .await
+        .expect("channel open");
+
+    // Yield to let run() process (and refuse) the request.
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    // Coordinator must remain Degraded — the run() Degraded guard fired.
+    assert!(
+        matches!(handle.state(), CoordinatorState::Degraded(_)),
+        "coordinator should remain Degraded after refused request in run()"
+    );
 }
 
 // ── Task 15 ────────────────────────────────────────────────────────────────

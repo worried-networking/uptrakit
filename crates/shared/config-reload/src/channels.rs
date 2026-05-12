@@ -29,9 +29,9 @@ pub struct RuntimeConfigChannels {
     pub tls: watch::Sender<Arc<TlsConfig>>,
     /// Audit config sender.
     pub audit: watch::Sender<Arc<AuditConfig>>,
-    /// Log config sender.
+    /// Boot-time only. Log path changes require reexec (Plan 3); no live delta variant.
     pub log: watch::Sender<Arc<LogConfig>>,
-    /// Master key config sender.
+    /// Boot-time only. Master key path changes require reexec (Plan 3); no live delta variant.
     pub master_key: watch::Sender<Arc<MasterKeyConfig>>,
     /// Embedded services config sender.
     pub embedded_services: watch::Sender<Arc<EmbeddedServicesConfig>>,
@@ -55,9 +55,9 @@ pub struct RuntimeConfigReceivers {
     pub tls: watch::Receiver<Arc<TlsConfig>>,
     /// Audit config receiver.
     pub audit: watch::Receiver<Arc<AuditConfig>>,
-    /// Log config receiver.
+    /// Boot-time only. Log path changes require reexec (Plan 3); no live delta variant.
     pub log: watch::Receiver<Arc<LogConfig>>,
-    /// Master key config receiver.
+    /// Boot-time only. Master key path changes require reexec (Plan 3); no live delta variant.
     pub master_key: watch::Receiver<Arc<MasterKeyConfig>>,
     /// Embedded services config receiver.
     pub embedded_services: watch::Receiver<Arc<EmbeddedServicesConfig>>,
