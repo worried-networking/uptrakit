@@ -1,8 +1,10 @@
+pub mod db;
 pub mod scope;
 
+pub use db::DbConfig;
 pub use scope::Scope;
 
-// Section modules and RuntimeConfig added in Tasks 4-6.
+// Remaining section modules and RuntimeConfig added in Tasks 5-6.
 /// Placeholder — expanded in Task 6.
 pub struct RuntimeConfig;
 
