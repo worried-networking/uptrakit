@@ -1181,10 +1181,17 @@ pub(crate) fn build_rustls_config_with_client_auth_and_crls(
     // entirely, because the agent cannot present a certificate it has not yet
     // received.  Application-level handlers guard their endpoints against
     // `None` identities as appropriate.
+    // `.only_check_end_entity_revocation()` is intentionally NOT called.
+    // The managed CA is issued with pathLenConstraint=0 (see
+    // docs/security/pki-certificates.md). No intermediate CAs exist in any
+    // Agent's certificate chain, so end-entity-only revocation checking and
+    // full-chain revocation checking are equivalent. Omitting the flag is
+    // the safer default: if a future change introduces intermediates (e.g.
+    // the Path A root/intermediate split in ADR-0013), the default
+    // (full-chain check) is the correct behaviour without further edits.
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
         .with_crls(crls)
         .allow_unauthenticated()
-        .only_check_end_entity_revocation()
         .build()
         .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
 
