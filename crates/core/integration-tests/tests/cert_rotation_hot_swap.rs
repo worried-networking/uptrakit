@@ -17,15 +17,14 @@
 #[tokio::test]
 #[ignore = "Requires AgentControllerHarness (not yet implemented) + Docker"]
 async fn agent_cert_renewal_via_resolver_keeps_session_alive() {
-    // TODO: implement when AgentControllerHarness is available.
+    // Stub — blocked on AgentControllerHarness (not yet implemented).
     //
-    // Intended sequence:
+    // Intended sequence once harness is available:
     //   1. harness.spawn_agent("agent-1").wait_for_connected()
-    //   2. capture session_id_before = agent.current_tls_session_id()
+    //   2. session_id_before = agent.current_tls_session_id()
     //   3. harness.controller.request_cert_renewal(agent.service_id())
     //   4. agent.wait_for_cert_renewed()
     //   5. assert session_id_before == session_id_after  (no reconnect)
     //   6. agent.force_handshake()
     //   7. assert presented_cert == agent.current_cert_pem()
-    todo!("AgentControllerHarness not yet implemented");
 }
