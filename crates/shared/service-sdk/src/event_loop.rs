@@ -530,7 +530,7 @@ async fn process_service_settings<H: ServiceHandler>(
             trust_domain = %settings.trust_domain,
             "received SPIFFE trust domain from controller"
         );
-        cert_handler.trust_domain.clone_from(&settings.trust_domain);
+        cert_handler.update_trust_domain(&settings.trust_domain);
     }
 
     handle_service_settings(settings, loop_state, identity, ctx).await;
@@ -585,10 +585,11 @@ mod tests {
     use async_trait::async_trait;
     use futures_util::Stream;
     use futures_util::stream;
+    use parking_lot::Mutex;
     use serde_json::Map;
     use std::pin::Pin;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use tokio::sync::mpsc;
 
@@ -868,7 +869,7 @@ mod tests {
             request: crate::wire_api::surfaces::SurfaceActionRequest,
             _conn: &mut dyn ServiceTransport,
         ) -> LoopResult<()> {
-            let mut state = self.state.lock().expect("lock");
+            let mut state = self.state.lock();
             state.surface_request_count += 1;
             state.last_surface_request_tenant_id = Some(request.tenant_id);
             Ok(())
@@ -878,7 +879,7 @@ mod tests {
             &mut self,
             _response: crate::wire_api::surfaces::SurfaceActionResponse,
         ) {
-            let mut state = self.state.lock().expect("lock");
+            let mut state = self.state.lock();
             state.surface_response_count += 1;
         }
 
@@ -960,7 +961,7 @@ mod tests {
         .expect("message handled");
         assert!(outcome.is_none());
 
-        let state = handler.state.lock().expect("lock").clone();
+        let state = handler.state.lock().clone();
         assert_eq!(state.surface_request_count, 1);
         assert_eq!(
             state.last_surface_request_tenant_id.as_deref(),
@@ -1011,7 +1012,7 @@ mod tests {
         .expect("message handled");
         assert!(outcome.is_none());
 
-        let state = handler.state.lock().expect("lock").clone();
+        let state = handler.state.lock().clone();
         assert_eq!(state.surface_response_count, 1);
     }
 

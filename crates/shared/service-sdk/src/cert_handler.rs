@@ -147,17 +147,17 @@ pub struct CertificateRenewalHandler {
     /// Hot-swappable certificate resolver. When set, a renewed certificate
     /// is swapped in-place without forcing a reconnect (unless the cert is
     /// close to expiry).
-    pub cert_resolver: Option<std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>>,
+    pub(crate) cert_resolver: Option<std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>>,
     /// Expected lifetime of issued certificates in hours. Used to compute
     /// the `should_force_reconnect` threshold.
-    pub cert_lifetime_hours: u32,
+    pub(crate) cert_lifetime_hours: u32,
     /// SPIFFE trust domain received from the controller via `ServiceSettings`.
     ///
     /// When non-empty, CSRs generated during renewal embed a SPIFFE URI SAN
     /// of the form `spiffe://<trust_domain>/service/<service_id>`.
     /// Empty string means no URI SAN (backwards-compatible with controllers
     /// that do not advertise a trust domain).
-    pub trust_domain: String,
+    pub(crate) trust_domain: String,
 }
 
 impl CertificateRenewalHandler {
@@ -193,6 +193,15 @@ impl CertificateRenewalHandler {
     pub fn with_cert_lifetime_hours(mut self, hours: u32) -> Self {
         self.cert_lifetime_hours = hours;
         self
+    }
+
+    /// Update the SPIFFE trust domain in place.
+    ///
+    /// Called when `ServiceSettings` arrive over the wire. Subsequent CSRs
+    /// will embed a SPIFFE URI SAN when `domain` is non-empty.
+    pub(crate) fn update_trust_domain(&mut self, domain: &str) {
+        self.trust_domain.clear();
+        self.trust_domain.push_str(domain);
     }
 
     /// Handle a `CaBundleUpdated` message by persisting the new CA bundle.

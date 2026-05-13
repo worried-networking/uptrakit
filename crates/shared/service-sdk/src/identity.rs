@@ -587,15 +587,20 @@ impl ServiceIdentityState {
 /// # Errors
 ///
 /// Returns [`IdentityError::InvalidTrustDomain`] when `trust_domain` is
-/// non-empty but contains whitespace or exceeds 255 characters.
+/// non-empty but violates the SPIFFE trust-domain grammar: only lowercase
+/// ASCII letters, digits, dots, and hyphens are allowed (max 255 chars).
 /// Returns [`IdentityError::CsrGeneration`] on keypair or CSR failures.
 pub fn generate_keypair_and_csr(
     service_id: uuid::Uuid,
     trust_domain: &str,
 ) -> Result<(String, String)> {
-    // Validate trust_domain when provided.
+    // Validate trust_domain when provided: SPIFFE trust-domain grammar
+    // allows only lowercase ASCII letters, digits, dots, and hyphens.
     if !trust_domain.is_empty()
-        && (trust_domain.len() > 255 || trust_domain.chars().any(char::is_whitespace))
+        && (trust_domain.len() > 255
+            || !trust_domain
+                .chars()
+                .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '.' | '-')))
     {
         bail!(EnrollmentError::Identity(
             IdentityError::InvalidTrustDomain {
@@ -1463,26 +1468,27 @@ mod tests {
     fn invalid_trust_domain_rejected() {
         let sid = Uuid::now_v7();
 
-        // Contains whitespace.
-        let err = generate_keypair_and_csr(sid, " bad domain ").expect_err("must fail");
-        assert!(
-            matches!(
-                err.current_context(),
-                EnrollmentError::Identity(crate::error::IdentityError::InvalidTrustDomain { .. })
-            ),
-            "whitespace domain must yield InvalidTrustDomain, got: {err}"
-        );
+        let assert_invalid = |domain: &str| {
+            let err = generate_keypair_and_csr(sid, domain).expect_err("must fail");
+            assert!(
+                matches!(
+                    err.current_context(),
+                    EnrollmentError::Identity(
+                        crate::error::IdentityError::InvalidTrustDomain { .. }
+                    )
+                ),
+                "domain {domain:?} must yield InvalidTrustDomain, got: {err}"
+            );
+        };
+
+        // Whitespace, path separators, uppercase, at-sign all rejected.
+        assert_invalid(" bad domain ");
+        assert_invalid("evil/../../path");
+        assert_invalid("Example.COM");
+        assert_invalid("user@domain");
 
         // Exceeds 255 characters.
-        let long_domain = "a".repeat(256);
-        let err2 = generate_keypair_and_csr(sid, &long_domain).expect_err("must fail");
-        assert!(
-            matches!(
-                err2.current_context(),
-                EnrollmentError::Identity(crate::error::IdentityError::InvalidTrustDomain { .. })
-            ),
-            "256-char domain must yield InvalidTrustDomain, got: {err2}"
-        );
+        assert_invalid(&"a".repeat(256));
     }
 
     #[tokio::test]
