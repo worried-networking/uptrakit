@@ -244,7 +244,7 @@ get_role = "tenant-agnostic"
 [routes."scheduler.rs"]
 list_scheduled_tasks = "tenant-scoped"
 get_scheduled_task = "tenant-scoped"
-update_scheduled_task = "tenant-scoped"
+update_scheduled_task = "full-state"
 trigger_scheduled_task = "tenant-scoped"
 
 [routes."server_cert.rs"]

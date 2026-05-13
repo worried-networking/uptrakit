@@ -11,6 +11,41 @@ use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+/// Audit snapshot for a scheduled task.
+///
+/// Operational fields (`last_run_at`, `next_run_at`, `locked_by`, `locked_at`,
+/// `last_error`, `run_count`) are excluded: they change on every run and would
+/// produce meaningless diff noise in the audit log.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "scheduled_task")]
+pub struct ScheduledTaskView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    /// The SeaORM string value for the task type (e.g. `"fetch_releases"`).
+    pub task_type: String,
+    pub interval_seconds: i32,
+    pub jitter_seconds: i32,
+    pub enabled: bool,
+    pub task_config: Option<serde_json::Value>,
+}
+
+impl From<&scheduled_task::Model> for ScheduledTaskView {
+    fn from(m: &scheduled_task::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            task_type: sea_orm::ActiveEnum::to_value(&m.task_type).to_string(),
+            interval_seconds: m.interval_seconds,
+            jitter_seconds: m.jitter_seconds,
+            enabled: m.enabled,
+            task_config: m.task_config.clone(),
+        }
+    }
+}
+
 /// Error returned by scheduled task query helpers.
 #[derive(Debug, Error)]
 pub enum ScheduledTaskError {
@@ -48,9 +83,10 @@ impl ScheduledTaskError {
     }
 }
 
-// --- Private helpers ---
+// --- Helpers ---
 
-fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
+/// Converts a `scheduled_task::Model` into the API response type.
+pub fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     ScheduledTaskResponse {
         id: m.id,
         task_type: sea_orm::ActiveEnum::to_value(&m.task_type).to_string(),
@@ -108,6 +144,78 @@ pub async fn get_scheduled_task(
         .await
         .context_to()?;
     Ok(task.as_ref().map(model_to_response))
+}
+
+/// Update a scheduled task inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some((before_model, after_model))` on success, or `None` if the task
+/// does not exist for the given tenant.  The caller is responsible for committing or
+/// rolling back the transaction.
+///
+/// # Errors
+///
+/// Returns [`ScheduledTaskError::InvalidInterval`] if the interval or jitter values
+/// are out of range, or [`ScheduledTaskError::Db`] on underlying database errors.
+#[tracing::instrument(skip_all)]
+pub async fn update_scheduled_task_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    task_id: Uuid,
+    req: UpdateScheduledTaskRequest,
+) -> Result<Option<(scheduled_task::Model, scheduled_task::Model)>> {
+    let before = scheduled_task::Entity::find_by_id(task_id)
+        .filter(scheduled_task::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?;
+
+    let Some(before) = before else {
+        return Ok(None);
+    };
+
+    let mut interval = before.interval_seconds;
+    let mut jitter = before.jitter_seconds;
+
+    let mut active: scheduled_task::ActiveModel = before.clone().into();
+    let now = OffsetDateTime::now_utc();
+
+    if let Some(new_interval) = req.interval_seconds {
+        if new_interval <= 0 {
+            bail!(ScheduledTaskError::InvalidInterval);
+        }
+        interval = new_interval;
+        active.interval_seconds = ActiveValue::Set(new_interval);
+    }
+
+    if let Some(new_jitter) = req.jitter_seconds {
+        if new_jitter < 0 {
+            bail!(ScheduledTaskError::InvalidInterval);
+        }
+        jitter = new_jitter;
+        active.jitter_seconds = ActiveValue::Set(new_jitter);
+    }
+
+    if req.interval_seconds.is_some() || req.jitter_seconds.is_some() {
+        active.next_run_at = ActiveValue::Set(compute_next_run_at(now, interval, jitter));
+    }
+
+    if let Some(enabled) = req.enabled {
+        active.enabled = ActiveValue::Set(enabled);
+    }
+
+    if let Some(ref config) = req.task_config {
+        if config.is_null() {
+            active.task_config = ActiveValue::Set(None);
+        } else {
+            active.task_config = ActiveValue::Set(Some(config.clone()));
+        }
+    }
+
+    active.updated_at = ActiveValue::Set(now);
+
+    let after = active.update(tx).await.context_to()?;
+
+    Ok(Some((before, after)))
 }
 
 /// Update a scheduled task.

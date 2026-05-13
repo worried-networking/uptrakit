@@ -2,8 +2,12 @@ use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use std::sync::Arc;
+use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
@@ -11,7 +15,7 @@ use crate::middleware::permission::CanManageScheduler;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
-use crate::queries::scheduled_tasks as sched_queries;
+use crate::queries::scheduled_tasks::{self as sched_queries, ScheduledTaskView};
 use crate::tenant_db::TenantDb;
 use uptrakit_web_api_types::validation::Validate;
 
@@ -126,7 +130,7 @@ pub async fn get_scheduled_task(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageScheduler(caller): CanManageScheduler,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -134,24 +138,22 @@ pub async fn update_scheduled_task(
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if req.validate().is_err() {
-        emit_scheduled_task_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
-            task_id,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("scheduled_task", task_id.to_string(), None)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "invalid_request" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return Err(ApiError::from(rootcause::report!(
             sched_queries::ScheduledTaskError::InvalidInterval
         )));
@@ -162,25 +164,71 @@ pub async fn update_scheduled_task(
     let requested_enabled = req.enabled;
     let requested_config = req.task_config.clone();
 
-    let task = match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
-        Ok(task) => task,
-        Err(error) => {
-            let outcome = error.current_context().audit_outcome();
-            emit_scheduled_task_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
-                task_id,
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": error.current_context().reason_code(),
-                }),
-            );
-            return Err(error.into());
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to begin transaction for scheduled task update");
+            return Err(ApiError::from(rootcause::report!(
+                sched_queries::ScheduledTaskError::Db(e)
+            )));
         }
     };
 
-    let mut changed_fields = Vec::new();
+    let pair = match sched_queries::update_scheduled_task_in_tx(&tx, tenant_id, task_id, req).await
+    {
+        Ok(Some(pair)) => pair,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("scheduled_task", task_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "reason_code": sched_queries::ScheduledTaskError::NotFound.reason_code(),
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return Err(ApiError::from(rootcause::report!(
+                sched_queries::ScheduledTaskError::NotFound
+            )));
+        }
+        Err(e) => {
+            drop(tx);
+            let outcome = e.current_context().audit_outcome();
+            let reason_code = e.current_context().reason_code();
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("scheduled_task", task_id.to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return Err(e.into());
+        }
+    };
+
+    let (before_model, after_model) = pair;
+    let before_view = ScheduledTaskView::from(&before_model);
+    let after_view = ScheduledTaskView::from(&after_model);
+
+    let mut changed_fields: Vec<&str> = Vec::new();
     if requested_interval.is_some() {
         changed_fields.push("interval_seconds");
     }
@@ -194,22 +242,52 @@ pub async fn update_scheduled_task(
         changed_fields.push("task_config");
     }
 
-    emit_scheduled_task_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
-        task.id,
-        Some(task.label.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "task_type": task.task_type,
-            "interval_seconds": task.interval_seconds,
-            "jitter_seconds": task.jitter_seconds,
-            "enabled": task.enabled,
-            "task_config_present": task.task_config.is_some(),
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::scheduled_task_update(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "task_type": after_view.task_type,
+            "interval_seconds": after_model.interval_seconds,
+            "jitter_seconds": after_model.jitter_seconds,
+            "enabled": after_model.enabled,
+            "task_config_present": after_model.task_config.is_some(),
             "changed_fields": changed_fields,
-        }),
-    );
-    Ok(Json(task).into_response())
+        }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to build audit entry for scheduled task update");
+            drop(tx);
+            return Err(ApiError::from(rootcause::report!(
+                sched_queries::ScheduledTaskError::Db(sea_orm::DbErr::Custom(e.to_string()))
+            )));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "failed to emit stateful audit entry for scheduled task update");
+        drop(tx);
+        return Err(ApiError::from(rootcause::report!(
+            sched_queries::ScheduledTaskError::Db(sea_orm::DbErr::Custom(e.to_string()))
+        )));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "failed to commit scheduled task update transaction");
+        return Err(ApiError::from(rootcause::report!(
+            sched_queries::ScheduledTaskError::Db(e)
+        )));
+    }
+    hook.flush_after_commit().await;
+
+    Ok(Json(sched_queries::model_to_response(&after_model)).into_response())
 }
 
 /// Trigger immediate execution of a scheduled task.
