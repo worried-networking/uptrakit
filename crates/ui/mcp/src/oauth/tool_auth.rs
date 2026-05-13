@@ -84,18 +84,16 @@ mod tests {
 
     #[test]
     fn api_token_bypasses_scope_check() {
-        assert!(require_scopes(&ctx_api_token(), &[McpScope::Write]).is_ok());
+        require_scopes(&ctx_api_token(), &[McpScope::Write]).unwrap();
     }
 
     #[test]
     fn oauth_passes_when_scope_present() {
-        assert!(
-            require_scopes(
-                &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
-                &[McpScope::Write]
-            )
-            .is_ok()
-        );
+        require_scopes(
+            &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
+            &[McpScope::Write],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -111,17 +109,15 @@ mod tests {
 
     #[test]
     fn oauth_passes_when_all_required_scopes_present() {
-        assert!(
-            require_scopes(
-                &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
-                &[McpScope::Read, McpScope::Write]
-            )
-            .is_ok()
-        );
+        require_scopes(
+            &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
+            &[McpScope::Read, McpScope::Write],
+        )
+        .unwrap();
     }
 
     #[test]
     fn oauth_empty_required_scopes_always_passes() {
-        assert!(require_scopes(&ctx_oauth(vec![]), &[]).is_ok());
+        require_scopes(&ctx_oauth(vec![]), &[]).unwrap();
     }
 }
