@@ -6,7 +6,6 @@
 	import type { StatusBadgeTone } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import { getConsentDetails, approveConsent, denyConsent, type ConsentDetails } from '$lib/api/oauth';
-	import { htmlEscape } from '$lib/oauth/htmlEscape';
 
 	let details = $state<ConsentDetails | null>(null);
 	let loadError = $state<string | null>(null);
@@ -99,8 +98,7 @@
 				<BadgeCheck size={20} class="text-[var(--text-muted)]" aria-hidden="true" />
 				<div class="flex-1">
 					<div class="text-page-title font-bold text-[var(--text-primary)]">
-						<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-						{@html htmlEscape(details.client_name)}
+						{details.client_name}
 					</div>
 					{#if details.client_uri}
 						<a
@@ -109,8 +107,7 @@
 							rel="noopener noreferrer"
 							class="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)]"
 						>
-							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-							{@html htmlEscape(details.client_uri)}
+							{details.client_uri}
 							<ExternalLink size={14} aria-hidden="true" />
 						</a>
 					{/if}
