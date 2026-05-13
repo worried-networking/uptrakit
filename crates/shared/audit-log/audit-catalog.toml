@@ -1,0 +1,10 @@
+# Audit coverage catalog.
+# Every state-changing site must appear here with either:
+#   action = "<action-key>"   — site is audited via the named registered action
+#   skip   = "<reason>"       — site is intentionally not audited
+#
+# Run `cargo run -p audit-coverage-check` to verify coverage.
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_status::record_heartbeat"
+skip = "heartbeat denormalization; covered by transport access log, no security event"
