@@ -52,17 +52,18 @@ fn emit_service_inventory_audit(
     target: Option<(&str, String, Option<String>)>,
     details: serde_json::Value,
 ) {
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(service_model.tenant_id)
-        .actor_service(service_model.id)
-        .actor_display_opt(service_model.service_app_name.clone())
-        .outcome(outcome)
-        .details(details);
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(service_model.tenant_id)
+            .actor_service(service_model.id)
+            .actor_display_opt(service_model.service_app_name.clone())
+            .outcome(outcome)
+            .details(details);
     if let Some((target_type, target_id, target_display)) = target {
         builder = builder.target(target_type, target_id, target_display);
     }
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => {
             tracing::warn!(
                 service_id = %service_model.id,
@@ -106,7 +107,7 @@ fn emit_report_plugin_config_audit(
         details["reason_code"] = serde_json::Value::String(reason_code.to_string());
     }
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
     )
     .actor_service(ctx.service_id)
@@ -126,7 +127,7 @@ fn emit_report_plugin_config_audit(
     };
 
     match builder.build() {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             error = %error,
             service_id = %ctx.service_id,

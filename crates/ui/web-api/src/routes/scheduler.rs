@@ -40,15 +40,16 @@ fn emit_scheduled_task_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target("scheduled_task", target_task_id.to_string(), target_display)
-        .outcome(outcome)
-        .details(details)
-        .build()
+    if let Ok(entry) =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(ctx.tenant_id)
+            .actor(actor_type, actor_id)
+            .target("scheduled_task", target_task_id.to_string(), target_display)
+            .outcome(outcome)
+            .details(details)
+            .build()
     {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 

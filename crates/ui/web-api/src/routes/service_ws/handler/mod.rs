@@ -276,7 +276,7 @@ fn emit_surface_registration_audit_event(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let builder = uptrakit_audit_log::AuditEntry::builder(
+    let builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_PROVIDER_REGISTER,
     );
     let builder = if is_system {
@@ -300,7 +300,7 @@ fn emit_surface_registration_audit_event(
         .build();
 
     match entry {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             service_id = %ctx.service_id,
             provider_id = %payload.provider.provider_id,
@@ -318,7 +318,7 @@ async fn emit_surface_action_scope_denied_audit_event(
     service_tenant_id: uuid::Uuid,
     payload: &uptrakit_wire::surfaces::SurfaceActionRequest,
 ) {
-    let entry = match uptrakit_audit_log::AuditEntry::builder(
+    let entry = match uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
     .tenant_scope(service_tenant_id)
@@ -357,7 +357,7 @@ async fn emit_surface_action_scope_denied_audit_event(
         }
     };
 
-    state.audit_emitter.emit_best_effort(entry);
+    state.audit_emitter.emit_event(entry);
 }
 
 fn emit_surface_action_invoke_audit_event(
@@ -402,7 +402,7 @@ fn emit_surface_action_invoke_audit_event(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
     .tenant_scope(tenant_id)
@@ -422,7 +422,7 @@ fn emit_surface_action_invoke_audit_event(
     .build();
 
     match entry {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             service_id = %ctx.service_id,
             request_id = %payload.request_id,
@@ -964,16 +964,17 @@ pub(super) async fn ingest_service_audit_event(
         }
     };
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .actor_service(service_id)
-        .actor_display_opt(Some(resolved_service_app_name))
-        .target_opt(
-            payload.target_type.clone(),
-            payload.target_id.clone(),
-            payload.target_display.clone(),
-        )
-        .outcome(outcome)
-        .request_id_opt(payload.request_id.clone());
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .actor_service(service_id)
+            .actor_display_opt(Some(resolved_service_app_name))
+            .target_opt(
+                payload.target_type.clone(),
+                payload.target_id.clone(),
+                payload.target_display.clone(),
+            )
+            .outcome(outcome)
+            .request_id_opt(payload.request_id.clone());
     builder = if let Some(tenant_id) = target_tenant_id {
         builder.tenant_scope(tenant_id)
     } else {
@@ -994,7 +995,7 @@ pub(super) async fn ingest_service_audit_event(
             return false;
         }
     };
-    state.audit_emitter.emit_best_effort(entry);
+    state.audit_emitter.emit_event(entry);
     true
 }
 

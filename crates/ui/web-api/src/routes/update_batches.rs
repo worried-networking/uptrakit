@@ -66,7 +66,7 @@ fn emit_batch_update_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
     )
     .tenant_scope(ctx.tenant_id)
@@ -77,7 +77,7 @@ fn emit_batch_update_audit(
     .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_event(entry);
     }
 }
 

@@ -115,7 +115,7 @@ async fn emit_workload_audit_event(
     details: serde_json::Value,
 ) {
     let (actor_display, target_display) = resolve_workload_audit_identity(state, service_id).await;
-    let mut builder = AuditEntry::builder(action_type)
+    let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
         .actor_service(service_id)
         .actor_display_opt(actor_display)
         .target("service", service_id.to_string(), Some(target_display))
@@ -127,7 +127,7 @@ async fn emit_workload_audit_event(
         builder.system_scope()
     };
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             %service_id,
             action_type = %action_type,

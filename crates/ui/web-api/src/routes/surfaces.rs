@@ -507,7 +507,7 @@ fn emit_surface_action_permission_denied_audit(
     required_permission: &str,
 ) {
     let (actor_type, actor_id) = ctx.auth_user.audit_actor(ctx.api_token_id);
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
     .tenant_scope(ctx.tenant_id)
@@ -530,7 +530,7 @@ fn emit_surface_action_permission_denied_audit(
     .build();
 
     match entry {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             tenant_id = %ctx.tenant_id,
             surface_id = %surface_id,
@@ -587,7 +587,7 @@ fn emit_surface_action_invoke_audit(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
     .tenant_scope(ctx.tenant_id)
@@ -602,7 +602,7 @@ fn emit_surface_action_invoke_audit(
     .build();
 
     match entry {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             tenant_id = %ctx.tenant_id,
             surface_id = %surface_id,

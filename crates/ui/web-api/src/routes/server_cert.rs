@@ -85,7 +85,7 @@ fn emit_server_cert_renew_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SYSTEM_SERVER_CERTIFICATE_RENEW,
     )
     .system_scope()
@@ -99,7 +99,7 @@ fn emit_server_cert_renew_audit(
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

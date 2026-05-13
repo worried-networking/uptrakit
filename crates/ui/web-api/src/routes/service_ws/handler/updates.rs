@@ -177,15 +177,17 @@ async fn emit_service_update_lifecycle_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    match uptrakit_audit_log::AuditEntry::builder(ctx.action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor_service(ctx.service_id)
-        .target(target_type, target_id.to_string(), target_display)
-        .outcome(outcome)
-        .details(details)
-        .build()
+    match uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        ctx.action_type,
+    )
+    .tenant_scope(ctx.tenant_id)
+    .actor_service(ctx.service_id)
+    .target(target_type, target_id.to_string(), target_display)
+    .outcome(outcome)
+    .details(details)
+    .build()
     {
-        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             error = %error,
             service_id = %ctx.service_id,

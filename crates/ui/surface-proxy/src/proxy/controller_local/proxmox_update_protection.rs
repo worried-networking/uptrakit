@@ -270,18 +270,19 @@ pub(crate) fn emit_proxmox_update_protection_audit_event(
         details["reason_code"] = serde_json::json!(reason_code);
     }
 
-    if let Ok(entry) =
-        uptrakit_audit_log::AuditEntry::builder(proxmox_update_protection_action_type(action))
-            .tenant_scope(tenant_id)
-            .actor(
-                uptrakit_audit_log::AuditActorType::User,
-                Some(caller_user_id),
-            )
-            .target_opt(target_type, target_id, None)
-            .outcome(outcome)
-            .details(details)
-            .build()
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        proxmox_update_protection_action_type(action),
+    )
+    .tenant_scope(tenant_id)
+    .actor(
+        uptrakit_audit_log::AuditActorType::User,
+        Some(caller_user_id),
+    )
+    .target_opt(target_type, target_id, None)
+    .outcome(outcome)
+    .details(details)
+    .build()
     {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }

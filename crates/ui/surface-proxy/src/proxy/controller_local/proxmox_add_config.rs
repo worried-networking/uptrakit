@@ -125,7 +125,7 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
         details["error_kind"] = serde_json::json!(error_kind);
     }
 
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
     )
     .tenant_scope(tenant_id)
@@ -138,7 +138,7 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
     .details(details)
     .build()
     {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }
 

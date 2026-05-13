@@ -101,7 +101,7 @@ fn emit_jwt_auth_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: &'static str,
 ) {
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE,
     )
     .tenant_scope(state.default_tenant_id)
@@ -112,7 +112,7 @@ fn emit_jwt_auth_audit(
     .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

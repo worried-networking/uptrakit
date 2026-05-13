@@ -306,16 +306,18 @@ async fn emit_bearer_service_auth_failure_audit(
         details["client_ip"] = serde_json::Value::String(client_ip.to_string());
     }
 
-    let mut builder = AuditEntry::builder(AuditActionType::AUTH_SERVICE_AUTHENTICATE)
-        .actor(AuditActorType::Service, resolved.actor_id)
-        .actor_display_opt(resolved.service_app_name.clone())
-        .target_opt(
-            resolved.target_id.as_ref().map(|_| "service".to_string()),
-            resolved.target_id,
-            resolved.service_app_name.clone(),
-        )
-        .outcome(outcome)
-        .details(details);
+    let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+    )
+    .actor(AuditActorType::Service, resolved.actor_id)
+    .actor_display_opt(resolved.service_app_name.clone())
+    .target_opt(
+        resolved.target_id.as_ref().map(|_| "service".to_string()),
+        resolved.target_id,
+        resolved.service_app_name.clone(),
+    )
+    .outcome(outcome)
+    .details(details);
     builder = if let Some(tenant_id) = resolved.tenant_id {
         builder.tenant_scope(tenant_id)
     } else {
@@ -323,7 +325,7 @@ async fn emit_bearer_service_auth_failure_audit(
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             error = %error,
             service_id_hint = ?service_id_hint,
@@ -651,7 +653,7 @@ mod tests {
             .one(state.db())
             .await
         {
-            uptrakit_audit_log::AuditEntry::builder(
+            uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
             )
             .tenant_scope(service.tenant_id)
@@ -669,7 +671,7 @@ mod tests {
             .one(state.db())
             .await
         {
-            uptrakit_audit_log::AuditEntry::builder(
+            uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
             )
             .system_scope()
@@ -688,7 +690,7 @@ mod tests {
         };
 
         if let Ok(entry) = entry {
-            state.audit_emitter.emit_best_effort(entry);
+            state.audit_emitter.emit_event(entry);
         }
     }
 

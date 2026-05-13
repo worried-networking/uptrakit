@@ -108,11 +108,12 @@ fn emit_oidc_route_audit(
     provider_id: Option<Uuid>,
     details: serde_json::Value,
 ) {
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(state.default_tenant_id)
-        .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
-        .outcome(outcome)
-        .details(details);
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
+            .outcome(outcome)
+            .details(details);
 
     if let Some(target_provider_id) = provider.map(|p| p.id).or(provider_id) {
         builder = builder.target(
@@ -123,7 +124,7 @@ fn emit_oidc_route_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -157,19 +158,20 @@ fn emit_oidc_user_create_audit(
         );
     }
 
-    let mut builder =
-        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_CREATE)
-            .tenant_scope(state.default_tenant_id)
-            .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
-            .outcome(outcome)
-            .details(serde_json::Value::Object(details));
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::USER_CREATE,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details));
 
     if let Some(user_id) = user_id {
         builder = builder.target("user", user_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

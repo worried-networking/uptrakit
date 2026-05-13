@@ -41,16 +41,17 @@ fn emit_user_preset_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
 
-    if let Ok(entry) =
-        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_UPDATE)
-            .tenant_scope(state.default_tenant_id)
-            .actor(actor_type, actor_id)
-            .target("user", target_user_id.to_string(), None)
-            .outcome(outcome)
-            .details(details)
-            .build()
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::USER_UPDATE,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(actor_type, actor_id)
+    .target("user", target_user_id.to_string(), None)
+    .outcome(outcome)
+    .details(details)
+    .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

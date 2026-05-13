@@ -495,16 +495,18 @@ fn emit_update_audit(
     details: serde_json::Value,
 ) {
     let (actor_type, actor_id) = actor_audit_pair(&params.actor.actor_type, &params.actor.actor_id);
-    let entry = AuditEntry::builder(AuditActionType::SOFTWARE_UPDATE_TRIGGERED)
-        .tenant_scope(params.tenant_id)
-        .actor(actor_type, actor_id)
-        .target("software_item", item_id.to_string(), None)
-        .outcome(outcome)
-        .details(details)
-        .build();
+    let entry = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
+    )
+    .tenant_scope(params.tenant_id)
+    .actor(actor_type, actor_id)
+    .target("software_item", item_id.to_string(), None)
+    .outcome(outcome)
+    .details(details)
+    .build();
 
     match entry {
-        Ok(e) => audit_emitter.emit_best_effort(e),
+        Ok(e) => audit_emitter.emit_event(e),
         Err(err) => {
             tracing::warn!(
                 error = %err,

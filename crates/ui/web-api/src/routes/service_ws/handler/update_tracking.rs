@@ -22,7 +22,7 @@ fn emit_software_update_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
     )
     .tenant_scope(payload.tenant_id)
@@ -33,7 +33,7 @@ fn emit_software_update_audit(
     .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => {
             tracing::warn!(
                 error = %error,
@@ -51,7 +51,7 @@ fn emit_host_batch_update_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
     )
     .tenant_scope(payload.tenant_id)
@@ -62,7 +62,7 @@ fn emit_host_batch_update_audit(
     .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => {
             tracing::warn!(
                 error = %error,

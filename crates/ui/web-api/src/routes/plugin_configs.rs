@@ -185,15 +185,16 @@ fn emit_plugin_config_semantic_audit(
     let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let target_type = target_type.map(std::string::ToString::to_string);
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target_opt(target_type, target_id, target_display)
-        .outcome(outcome)
-        .details(details)
-        .build()
+    if let Ok(entry) =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(ctx.tenant_id)
+            .actor(actor_type, actor_id)
+            .target_opt(target_type, target_id, target_display)
+            .outcome(outcome)
+            .details(details)
+            .build()
     {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 

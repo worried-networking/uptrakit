@@ -234,18 +234,20 @@ async fn emit_service_certificate_issue_audit_event(
     reason_code: &'static str,
 ) {
     let identity = resolve_service_certificate_identity(state, service_id, is_system).await;
-    let mut builder = AuditEntry::builder(AuditActionType::SERVICE_CERTIFICATE_ISSUE)
-        .actor_service(service_id)
-        .actor_display_opt(identity.service_app_name.clone())
-        .target(
-            "service",
-            service_id.to_string(),
-            Some(identity.target_display),
-        )
-        .outcome(outcome)
-        .details(serde_json::json!({
-            "reason_code": reason_code,
-        }));
+    let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::SERVICE_CERTIFICATE_ISSUE,
+    )
+    .actor_service(service_id)
+    .actor_display_opt(identity.service_app_name.clone())
+    .target(
+        "service",
+        service_id.to_string(),
+        Some(identity.target_display),
+    )
+    .outcome(outcome)
+    .details(serde_json::json!({
+        "reason_code": reason_code,
+    }));
 
     builder = if is_system {
         builder.system_scope()
@@ -262,7 +264,7 @@ async fn emit_service_certificate_issue_audit_event(
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             %service_id,
             outcome = outcome.as_str(),

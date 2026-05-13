@@ -111,7 +111,7 @@ pub(crate) fn emit_docker_switch_tag_audit_event(
         details["reason_code"] = serde_json::json!(reason_code);
     }
 
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
     )
     .tenant_scope(tenant_id)
@@ -128,6 +128,6 @@ pub(crate) fn emit_docker_switch_tag_audit_event(
     .details(details)
     .build()
     {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }

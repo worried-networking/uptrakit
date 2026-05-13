@@ -194,7 +194,7 @@ fn emit_poll_audit(state: &AppState, device_code: &str, outcome: &PollOutcome) {
         _ => (Outcome::Failed, serde_json::json!({})),
     };
 
-    let builder = uptrakit_audit_log::AuditEntry::builder(
+    let builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
     )
     .tenant_scope(state.default_tenant_id)
@@ -204,7 +204,7 @@ fn emit_poll_audit(state: &AppState, device_code: &str, outcome: &PollOutcome) {
     .details(details);
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
