@@ -5,6 +5,7 @@
 //!
 //! Per spec §11.2 / §11.4 + §10.5 cascade rules.
 
+use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
@@ -22,6 +23,26 @@ use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
 use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
 use uuid::Uuid;
+
+use crate::oauth::http_responses::{oauth_403, oauth_500};
+
+/// Build the RFC 6749 response for a DCR (`POST /oauth/register`) failure.
+///
+/// Sanctioned RFC 6749 exit for the DCR endpoint — keeps the
+/// `match e.current_context()` pattern out of `crates/ui/web-api/src/routes/` per
+/// the `check_legacy_error_matches.sh` gate. See `docs/development/error-handling.md`
+/// Pattern 18.
+pub(crate) fn registration_error_to_response(e: &Report<OAuthClientError>) -> Response {
+    match e.current_context() {
+        OAuthClientError::RegistrationCapExceeded => {
+            oauth_403("registration_not_allowed", "per-IP lifetime cap exceeded")
+        }
+        OAuthClientError::Database(_) | OAuthClientError::NotFound => {
+            tracing::error!(error = %e, "DCR registration failed");
+            oauth_500()
+        }
+    }
+}
 
 /// Errors produced by [`OAuthClientService`].
 #[non_exhaustive]

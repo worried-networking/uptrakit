@@ -34,18 +34,6 @@ pub(super) fn resolve_external_base_url(
     String::new()
 }
 
-/// Build a 400 RFC 6749 §5.2 OAuth error response.
-pub(super) fn oauth_400(error: &str, description: &str) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        axum::Json(serde_json::json!({
-            "error": error,
-            "error_description": description,
-        })),
-    )
-        .into_response()
-}
-
 /// Percent-encode a string for safe use in query string values.
 pub(super) fn percent_encode(s: &str) -> String {
     use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -57,18 +45,6 @@ pub(super) fn redirect_302(location: &str) -> Response {
     (
         StatusCode::FOUND,
         [(axum::http::header::LOCATION, location)],
-    )
-        .into_response()
-}
-
-/// Build a generic 500 response for unexpected server-side errors.
-pub(super) fn oauth_500() -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        axum::Json(serde_json::json!({
-            "error": "server_error",
-            "error_description": "internal server error",
-        })),
     )
         .into_response()
 }

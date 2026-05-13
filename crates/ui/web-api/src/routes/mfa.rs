@@ -17,6 +17,7 @@ use crate::auth::mfa_challenge::{
 };
 use crate::auth::refresh_cookie::set_refresh_token_cookie;
 use crate::auth::totp::verify_totp_code;
+use crate::auth_mfa_response::mfa_challenge_load_error_response;
 use crate::error_response::error_response;
 use crate::extract::{SessionSvc, Validated};
 use crate::middleware::require_auth::get_user_permissions;
@@ -219,20 +220,7 @@ pub async fn mfa_verify(
         Ok(c) => c,
         Err(e) => {
             let _ = txn.rollback().await;
-            use crate::auth::AuthError;
-            let (status, msg) = match e.current_context() {
-                AuthError::MfaChallengeNotFound => {
-                    (StatusCode::UNAUTHORIZED, "Invalid or expired MFA token")
-                }
-                AuthError::MfaChallengeExpired => {
-                    (StatusCode::UNAUTHORIZED, "MFA token has expired")
-                }
-                AuthError::MfaChallengeExhausted => {
-                    (StatusCode::UNAUTHORIZED, "Too many failed attempts")
-                }
-                _ => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-            };
-            return error_response(status, msg);
+            return mfa_challenge_load_error_response(&e);
         }
     };
 
@@ -595,20 +583,7 @@ pub async fn mfa_send_email(
         Ok(c) => c,
         Err(e) => {
             let _ = txn.rollback().await;
-            use crate::auth::AuthError;
-            let (status, msg) = match e.current_context() {
-                AuthError::MfaChallengeNotFound => {
-                    (StatusCode::UNAUTHORIZED, "Invalid or expired MFA token")
-                }
-                AuthError::MfaChallengeExpired => {
-                    (StatusCode::UNAUTHORIZED, "MFA token has expired")
-                }
-                AuthError::MfaChallengeExhausted => {
-                    (StatusCode::UNAUTHORIZED, "Too many failed attempts")
-                }
-                _ => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-            };
-            return error_response(status, msg);
+            return mfa_challenge_load_error_response(&e);
         }
     };
 

@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::extract::ClientIp;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::rate_limit::EndpointKind;
 use crate::oauth::services::authorization_code::{
     MintAuthorizationCode, OAuthAuthorizationCodeService,
@@ -26,9 +27,7 @@ use crate::oauth::services::authorization_code::{
 use crate::oauth::services::authorization_request::OAuthAuthorizationRequestService;
 use crate::oauth::services::client::OAuthClientService;
 use crate::oauth::services::consent::OAuthConsentService;
-use crate::routes::oauth::helpers::{
-    oauth_400, oauth_500, percent_encode, redirect_302, require_auth_and_rate_limit,
-};
+use crate::routes::oauth::helpers::{percent_encode, redirect_302, require_auth_and_rate_limit};
 
 // ---------------------------------------------------------------------------
 // Helper

@@ -36,6 +36,8 @@ use uptrakit_controller_core::update::UpdateDispatchError;
 use crate::auth::{
     device_flow::DeviceFlowError, error::AuthError, registration::RegistrationValidationError,
 };
+use crate::oauth::services::client::OAuthClientError;
+use crate::oauth::services::consent::OAuthConsentError;
 
 use super::{ApiError, format_report_summary};
 
@@ -1007,6 +1009,62 @@ impl From<Report<UpdateDispatchError>> for ApiError {
                     Some(format_report_summary(&report)),
                 )
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OAuthClientError
+// ---------------------------------------------------------------------------
+
+impl From<Report<OAuthClientError>> for ApiError {
+    fn from(report: Report<OAuthClientError>) -> Self {
+        use OAuthClientError::*;
+        let ctx = report.current_context();
+        match ctx {
+            NotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "OAuth client not found.",
+                "oauth.client.not_found",
+                None,
+            ),
+            RegistrationCapExceeded => ApiError::new(
+                StatusCode::FORBIDDEN,
+                "OAuth client registration cap exceeded.",
+                "oauth.client.registration_cap_exceeded",
+                None,
+            ),
+            Database(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "oauth.client.database_error",
+                Some(format_report_summary(&report)),
+            ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OAuthConsentError
+// ---------------------------------------------------------------------------
+
+impl From<Report<OAuthConsentError>> for ApiError {
+    fn from(report: Report<OAuthConsentError>) -> Self {
+        use OAuthConsentError::*;
+        let ctx = report.current_context();
+        match ctx {
+            NotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "OAuth consent not found.",
+                "oauth.consent.not_found",
+                None,
+            ),
+            Database(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "oauth.consent.database_error",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }

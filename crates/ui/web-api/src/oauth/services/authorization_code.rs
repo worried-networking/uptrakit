@@ -2,6 +2,7 @@
 //!
 //! Per spec §16. 30-second TTL, single-use consume with `BEGIN IMMEDIATE`.
 
+use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
@@ -13,13 +14,72 @@ use sea_orm::{
 use std::sync::Arc;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
+use uptrakit_audit_log::{AuditActionType, AuditEmitter, AuditEntry, AuditOutcome};
 use uptrakit_shared_db::entity::oauth_authorization_code;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
 use uptrakit_web_api_types::oauth::AuthorizationCode;
 use uuid::Uuid;
 
+use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::pkce::PkceVerifier;
+
+/// Build the RFC 6749 response for an authorization-code-grant verification
+/// failure, emitting `OAUTH_TOKEN_REJECTED` audit entries on `InvalidGrant`
+/// and `InvalidTarget` (best-effort; failures to build are swallowed).
+///
+/// Sanctioned RFC 6749 exit for the `/oauth/token` endpoint's
+/// authorization-code grant — keeps the `match e.current_context()` pattern
+/// out of `crates/ui/web-api/src/routes/` per the
+/// `check_legacy_error_matches.sh` gate. See `docs/development/error-handling.md`
+/// Pattern 18.
+///
+/// Takes narrow dependencies (not `&AppState`) so the service layer remains
+/// unit-testable without constructing the full router-shaped state struct.
+pub(crate) fn code_error_to_response(
+    e: &Report<OAuthCodeError>,
+    audit_emitter: &AuditEmitter,
+    default_tenant_id: Uuid,
+    client_id: &str,
+) -> Response {
+    match e.current_context() {
+        OAuthCodeError::InvalidGrant(reason) => {
+            let entry = AuditEntry::builder(AuditActionType::OAUTH_TOKEN_REJECTED)
+                .tenant_scope(default_tenant_id)
+                .actor_system()
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({
+                    "reason": "invalid_grant",
+                    "detail": reason,
+                    "client_id": client_id,
+                }))
+                .build();
+            if let Ok(entry) = entry {
+                audit_emitter.emit_best_effort(entry);
+            }
+            oauth_400("invalid_grant", reason)
+        }
+        OAuthCodeError::InvalidTarget => {
+            let entry = AuditEntry::builder(AuditActionType::OAUTH_TOKEN_REJECTED)
+                .tenant_scope(default_tenant_id)
+                .actor_system()
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({
+                    "reason": "invalid_target",
+                    "client_id": client_id,
+                }))
+                .build();
+            if let Ok(entry) = entry {
+                audit_emitter.emit_best_effort(entry);
+            }
+            oauth_400("invalid_target", "resource indicator mismatch")
+        }
+        OAuthCodeError::Database(_) => {
+            tracing::error!(error = %e, "DB error during code verification");
+            oauth_500()
+        }
+    }
+}
 
 const TTL_SECONDS: i64 = 30;
 

@@ -465,6 +465,45 @@ forward (e.g. `AuditLogQueryError::InvalidFilter`). These are listed in `DYNAMIC
 with status codes, message strategies, and intentional behavioural deltas relative to the pre-refactor
 handlers.
 
+#### Gate: `scripts/check_legacy_error_matches.sh`
+
+The legacy `match e.current_context()` pattern is forbidden inside
+`crates/ui/web-api/src/routes/` because `ApiError` propagation via `?` supersedes it.
+The script scans only `routes/`. It runs in `.husky/pre-commit` (gated on staged
+`routes/*.rs` files) and in CI.
+
+#### Sanctioned exits when `ApiError` does not fit
+
+Two narrow cases require a different exit shape; both are sanctioned, not workarounds:
+
+1. **OAuth RFC 6749 endpoints** — `/oauth/token`, `/oauth/register`, `/oauth/authorize`
+   (and any other RFC 6749 §5.2 spec endpoint) must emit
+   `{"error": "...", "error_description": "..."}`. The standard `ApiError` body
+   (`{error, code}`) does not match the spec. These handlers route domain errors
+   through co-located `*_error_to_response(...)` free functions in
+   `crates/ui/web-api/src/oauth/services/` (e.g.
+   `code_error_to_response`, `refresh_error_to_response`,
+   `registration_error_to_response`). Each function takes `&Report<E>` plus the
+   **minimum narrow dependencies** it needs (an `&AuditEmitter` + `Uuid` for audit-emitting
+   variants; never `&AppState`). The function performs the variant match and returns
+   a `Response` built with `oauth_400` / `oauth_500` / `oauth_403` from
+   `crates/ui/web-api/src/oauth/http_responses.rs`. Admin endpoints under
+   `/api/oauth/*` (`clients_api`, `consents_api`) are **not** RFC 6749 spec
+   endpoints and use the standard Pattern 18 `ApiError` route.
+
+2. **MFA challenge load failures** — `MfaChallengeNotFound`, `MfaChallengeExpired`,
+   and `MfaChallengeExhausted` are deliberately collapsed to a single 401
+   `Unauthorized` response (with the same user-facing message style) so the API
+   does not leak whether a challenge exists, has expired, or has been exhausted.
+   Standard `From<Report<AuthError>>` mapping emits 404 / 401 / 429 respectively,
+   which would leak that distinction. The collapse lives in
+   `crate::auth_mfa_response::mfa_challenge_load_error_response`; route handlers
+   in `routes/mfa.rs` call it on the `Err` arm of `load_valid_challenge`.
+
+Do not extend the script's scan scope to `oauth/services/` or `auth_mfa_response.rs`
+without first rewriting the alternative-body construction. The relocated matches in
+these helpers are the **expected** location for the pattern.
+
 ### Pattern 19: Error assertion in tests with `current_context()`
 
 Use `current_context()` with `matches!()` to assert specific error variants in tests without matching on internal
