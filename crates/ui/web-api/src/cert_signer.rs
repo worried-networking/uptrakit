@@ -15,6 +15,21 @@ pub enum CertSignerError {
 
     #[error("certificate signing error: {0}")]
     Signing(String),
+
+    #[error("SPIFFE URI in CSR cannot be parsed: {0}")]
+    CsrSpiffeParse(String),
+
+    #[error("SPIFFE trust-domain mismatch: expected {expected:?}, got {actual:?}")]
+    CsrTrustDomainMismatch { expected: String, actual: String },
+
+    #[error("SPIFFE URI has unexpected path format: {0}")]
+    CsrSpiffePath(String),
+
+    #[error("SPIFFE service-id in CSR cannot be parsed as UUID: {0}")]
+    CsrServiceIdParse(String),
+
+    #[error("SPIFFE service-id mismatch: expected {expected}, got {actual}")]
+    CsrServiceIdMismatch { expected: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, Report<CertSignerError>>;

@@ -30,6 +30,7 @@ impl IssuerSource for crate::crl_manager::CrlManager {
 pub(crate) struct RcgenAgentCertSigner {
     ca_rx: watch::Receiver<CaSnapshot>,
     issuer_source: Arc<dyn IssuerSource>,
+    trust_domain: Option<String>,
 }
 
 /// Maximum certificate lifetime: 2 years (730 days).
@@ -43,7 +44,24 @@ impl RcgenAgentCertSigner {
         Self {
             ca_rx,
             issuer_source,
+            trust_domain: None,
         }
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "builder method — wired from config once the trust_domain setting is plumbed; call site added in a follow-up task"
+        )
+    )]
+    pub(crate) fn with_trust_domain(mut self, domain: String) -> Self {
+        self.trust_domain = if domain.is_empty() {
+            None
+        } else {
+            Some(domain)
+        };
+        self
     }
 }
 
@@ -73,6 +91,7 @@ impl AgentCertSigner for RcgenAgentCertSigner {
             lifetime,
             snapshot.active_not_after,
             snapshot.pki_addr.as_deref(),
+            self.trust_domain.as_deref(),
         )
     }
 
@@ -88,6 +107,7 @@ fn sign_agent_csr(
     lifetime: time::Duration,
     ca_not_after: OffsetDateTime,
     pki_addr: Option<&str>,
+    trust_domain: Option<&str>,
 ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
     // Parse and validate CSR signature
     let csr_params = CertificateSigningRequestParams::from_pem(csr_pem)
@@ -122,6 +142,52 @@ fn sign_agent_csr(
         bail!(CertSignerError::CsrValidation(format!(
             "CSR CN '{csr_cn}' does not match agent_id '{agent_id}'"
         )));
+    }
+
+    // If a trust domain is configured, validate the SPIFFE URI SAN (if present).
+    if let Some(expected_domain) = trust_domain {
+        // Find SPIFFE URI SAN in CSR params.
+        let spiffe_uri = csr_params.params.subject_alt_names.iter().find_map(|san| {
+            if let rcgen::SanType::URI(uri) = san
+                && uri.as_str().starts_with("spiffe://")
+            {
+                return Some(uri.as_str().to_owned());
+            }
+            None
+        });
+
+        if let Some(uri) = spiffe_uri {
+            let parsed = url::Url::parse(&uri)
+                .map_err(|e| report!(CertSignerError::CsrSpiffeParse(e.to_string())))?;
+            let actual_domain = parsed.host_str().unwrap_or("");
+            if actual_domain != expected_domain {
+                bail!(CertSignerError::CsrTrustDomainMismatch {
+                    expected: expected_domain.to_owned(),
+                    actual: actual_domain.to_owned(),
+                });
+            }
+            let segments: Vec<&str> = parsed
+                .path_segments()
+                .map(Iterator::collect)
+                .unwrap_or_default();
+            let (kind, id_str) = match (segments.first(), segments.get(1)) {
+                (Some(k), Some(i)) => (*k, *i),
+                _ => bail!(CertSignerError::CsrSpiffePath(uri)),
+            };
+            if segments.len() != 2 || kind != "service" {
+                bail!(CertSignerError::CsrSpiffePath(uri));
+            }
+            let csr_service_id: uuid::Uuid = id_str.parse().map_err(|e: uuid::Error| {
+                report!(CertSignerError::CsrServiceIdParse(e.to_string()))
+            })?;
+            if csr_service_id != *agent_id {
+                bail!(CertSignerError::CsrServiceIdMismatch {
+                    expected: agent_id.to_string(),
+                    actual: csr_service_id.to_string(),
+                });
+            }
+        }
+        // No SPIFFE SAN: legacy CSR, accepted during migration tail.
     }
 
     // Build new CertificateParams with controller-controlled values
@@ -252,6 +318,28 @@ mod tests {
             .push(DnType::OrganizationName, "Uptrakit Agent");
         let csr = params.serialize_request(&key_pair).unwrap();
         csr.pem().unwrap()
+    }
+
+    /// Generate a test CSR with a SPIFFE URI SAN.
+    fn generate_test_csr_with_spiffe(service_id: uuid::Uuid, trust_domain: &str) -> String {
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = CertificateParams::default();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, service_id.to_string());
+        let spiffe_uri = format!("spiffe://{trust_domain}/service/{service_id}");
+        let ia5: rcgen::SanType = rcgen::SanType::URI(spiffe_uri.as_str().try_into().unwrap());
+        params.subject_alt_names.push(ia5);
+        let csr = params.serialize_request(&key_pair).unwrap();
+        csr.pem().unwrap()
+    }
+
+    /// Create a signer with trust domain validation enabled.
+    fn make_test_signer_with_trust_domain(
+        domain: &str,
+    ) -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
+        let (signer, tx) = make_test_signer();
+        (signer.with_trust_domain(domain.to_owned()), tx)
     }
 
     /// Extract the Common Name from a PEM-encoded certificate (test helper).
@@ -442,5 +530,86 @@ mod tests {
         let (signer, _tx) = make_test_signer();
         let fp = signer.active_ca_fingerprint();
         assert_eq!(fp.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn spiffe_san_matching_trust_domain_accepted() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer_with_trust_domain("example.org");
+        let agent_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr_with_spiffe(agent_id, "example.org");
+
+        let result = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
+            .await;
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn spiffe_san_wrong_trust_domain_rejected() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer_with_trust_domain("example.org");
+        let agent_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr_with_spiffe(agent_id, "evil.com");
+
+        let result = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().current_context().to_string();
+        assert!(
+            msg.contains("trust-domain mismatch"),
+            "expected trust-domain mismatch error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn spiffe_san_wrong_service_id_rejected() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer_with_trust_domain("example.org");
+        let agent_id = Uuid::now_v7();
+        let other_id = Uuid::now_v7();
+        // CSR CN matches agent_id but SPIFFE SAN refers to other_id.
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = CertificateParams::default();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, agent_id.to_string());
+        let other_spiffe = format!("spiffe://example.org/service/{other_id}");
+        params.subject_alt_names.push(rcgen::SanType::URI(
+            other_spiffe.as_str().try_into().unwrap(),
+        ));
+        let csr_pem = params.serialize_request(&key_pair).unwrap().pem().unwrap();
+
+        let result = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().current_context().to_string();
+        assert!(
+            msg.contains("service-id mismatch"),
+            "expected service-id mismatch error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn csr_without_spiffe_san_accepted_when_trust_domain_configured() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer_with_trust_domain("example.org");
+        let agent_id = Uuid::now_v7();
+        // Legacy CSR — no SPIFFE SAN at all.
+        let csr_pem = generate_test_csr(&agent_id.to_string());
+
+        let result = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
+            .await;
+        assert!(
+            result.is_ok(),
+            "legacy CSR without SPIFFE SAN must be accepted, got: {result:?}"
+        );
     }
 }
