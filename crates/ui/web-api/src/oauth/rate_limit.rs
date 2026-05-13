@@ -49,6 +49,8 @@ pub enum EndpointKind {
     Consent,
     /// MCP authentication failure path (used to throttle failed attempts).
     McpAuthFail,
+    /// Client Identifier Metadata Document (CIMD) fetch endpoint.
+    CimdFetch,
 }
 
 impl EndpointKind {
@@ -63,17 +65,19 @@ impl EndpointKind {
             Self::Token => "oauth.rate.token_per_min",
             Self::Consent => "oauth.rate.consent_per_min",
             Self::McpAuthFail => "oauth.rate.mcp_auth_fail_per_min",
+            Self::CimdFetch => "oauth.rate.cimd_per_min",
         }
     }
 
     /// Default maximum requests per window, per spec §14.2.
     pub const fn default_per_window(self) -> u32 {
         match self {
-            Self::Dcr => 20,        // per hour
-            Self::Authorize => 60,  // per minute
-            Self::Token => 60,      // per minute
-            Self::Consent => 60,    // per minute
-            Self::McpAuthFail => 5, // per minute
+            Self::Dcr => 10,         // per hour
+            Self::Authorize => 60,   // per minute
+            Self::Token => 60,       // per minute
+            Self::Consent => 60,     // per minute
+            Self::McpAuthFail => 30, // per minute
+            Self::CimdFetch => 5,    // per minute
         }
     }
 
@@ -93,6 +97,7 @@ impl EndpointKind {
             Self::Token => "oauth:token",
             Self::Consent => "oauth:consent",
             Self::McpAuthFail => "oauth:mcp_auth_fail",
+            Self::CimdFetch => "oauth:cimd_fetch",
         }
     }
 }
@@ -154,7 +159,7 @@ impl OAuthRateLimiter {
 ///
 /// # Response body on 429
 /// ```json
-/// {"error":"too_many_requests","error_description":"Rate limit exceeded"}
+/// {"error":"invalid_request","error_description":"Too many requests"}
 /// ```
 pub async fn check_rate_limit(
     endpoint: EndpointKind,
@@ -167,8 +172,8 @@ pub async fn check_rate_limit(
     match limiter.check(endpoint, client_ip).await {
         Ok(RateLimitOutcome::Limited { retry_after_secs }) => {
             let body = serde_json::json!({
-                "error": "too_many_requests",
-                "error_description": "Rate limit exceeded"
+                "error": "invalid_request",
+                "error_description": "Too many requests"
             });
             Some(
                 (
