@@ -253,26 +253,36 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     }
 
     // CA bootstrap: cached → --ca-cert file → --pki-addr → TOFU → system trust.
-    // When discovery provided a CA fingerprint, implicitly enable TOFU with that fingerprint.
+    // When discovery provided a CA fingerprint, implicitly upgrade to pin-fingerprint mode
+    // (or insecure mode when no fingerprint was provided) if the user did not configure a
+    // TOFU mode explicitly.
     let tofu_config = args.tofu_config().map_err(|e| {
         report!(EnrollmentError::Protocol(ProtocolError::Init(format!(
             "invalid TOFU flags: {e}"
         ))))
     })?;
-    let use_tofu =
-        !matches!(tofu_config.mode, crate::tofu::TofuMode::System) || conn.discovery_tofu;
-    let fp_from_mode = match &tofu_config.mode {
-        crate::tofu::TofuMode::PinFingerprint(h) => Some(h.to_string()),
-        _ => None,
-    };
-    let effective_fingerprint = fp_from_mode
-        .as_deref()
-        .or(conn.discovery_tofu_fingerprint.as_deref());
+    let effective_tofu_config =
+        if matches!(tofu_config.mode, crate::tofu::TofuMode::System) && conn.discovery_tofu {
+            conn.discovery_tofu_fingerprint
+                .as_deref()
+                .and_then(|fp| fp.parse::<crate::tofu::Sha256Hash>().ok())
+                .map(|fp| crate::tofu::TofuConfig {
+                    mode: crate::tofu::TofuMode::PinFingerprint(fp),
+                    skip_hostname: false,
+                    fingerprint_acknowledge: None,
+                })
+                .unwrap_or_else(|| crate::tofu::TofuConfig {
+                    mode: crate::tofu::TofuMode::InsecureTofu,
+                    skip_hostname: true,
+                    fingerprint_acknowledge: None,
+                })
+        } else {
+            tofu_config
+        };
     let ca_pem = crate::ca::bootstrap_ca(
         &mut identity,
         base_url,
-        use_tofu,
-        effective_fingerprint,
+        &effective_tofu_config,
         args.ca_cert.as_deref(),
         pki_addr,
     )
