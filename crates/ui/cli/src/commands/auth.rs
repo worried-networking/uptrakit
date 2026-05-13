@@ -16,8 +16,154 @@ use uptrakit_openapi_client::types::oauth::{
     DeviceAuthorizationRequest, DeviceAuthorizationResponse, OAuthErrorCode, OAuthTokenRequest,
 };
 
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::pem::PemObject;
+use sha2::{Digest, Sha256};
+
 const CLI_CLIENT_ID: &str = "uptrakit-cli";
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// Parse a `--tofu=<value>` fingerprint string into normalized 64-char lowercase hex.
+///
+/// Accepts plain 64-char lowercase hex or a `sha256:` prefix.
+///
+/// # Errors
+///
+/// Returns an error if the algorithm prefix is not `sha256`, the hex part is
+/// not exactly 64 characters, or it contains non-lowercase-hex characters.
+pub fn parse_fingerprint(s: &str) -> Result<String> {
+    let hex_part = if let Some(rest) = s.strip_prefix("sha256:") {
+        rest
+    } else if let Some(colon_pos) = s.find(':') {
+        let prefix = &s[..colon_pos];
+        bail!(CliError::Other(format!(
+            "unsupported fingerprint algorithm '{prefix}'; supported: sha256"
+        )));
+    } else {
+        s
+    };
+
+    if hex_part.len() != 64 || !hex_part.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) {
+        bail!(CliError::Other(
+            "invalid fingerprint: expected 64 lowercase hex characters".into()
+        ));
+    }
+
+    Ok(hex_part.to_string())
+}
+
+/// Fetch the controller CA, optionally verify its fingerprint, prompt for
+/// interactive confirmation, and persist the PEM to config.
+///
+/// Used by both `auth login --tofu` and `auth ca trust`.
+/// `allow_rotation` controls whether a stored-CA mismatch is an error (login)
+/// or a warning (ca trust).
+///
+/// # Errors
+///
+/// Returns an error if the CA cannot be fetched, the PEM cannot be parsed,
+/// the fingerprint does not match, the user declines in interactive mode, or
+/// no fingerprint is provided in non-interactive mode.
+pub async fn establish_ca_trust(
+    server: &str,
+    fingerprint_hint: Option<&str>,
+    allow_rotation: bool,
+    config: &mut Config,
+) -> Result<()> {
+    use std::io::IsTerminal as _;
+
+    // Bootstrap client: insecure because we don't have the CA yet.
+    // SsrfSafeResolver intentionally omitted: CLI tool where operator IS the user.
+    // They chose the server URL; restricting private-range IPs breaks legitimate
+    // self-hosted setups. The workspace SSRF rule applies to server-side paths
+    // processing user-submitted URLs, not CLI-operator-controlled config.
+    let bootstrap_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .tls_danger_accept_invalid_certs(true)
+        .build()
+        .context_to()?;
+
+    let ca_url = format!("{}/api/v1/pki/ca.crt", server.trim_end_matches('/'));
+    let fetched_pem = bootstrap_client
+        .get(&ca_url)
+        .send()
+        .await
+        .context_to()?
+        .text()
+        .await
+        .context_to()?;
+
+    let der = CertificateDer::from_pem_slice(fetched_pem.as_bytes())
+        .map_err(|_| report!(CliError::Other("failed to parse CA certificate PEM".into())))?;
+    let mut hasher = Sha256::new();
+    hasher.update(der.as_ref());
+    let fetched_fp = uptrakit_shared_types::hex::encode(hasher.finalize());
+
+    if let Some(stored_pem) = &config.ca_pem {
+        let stored_der = CertificateDer::from_pem_slice(stored_pem.as_bytes()).map_err(|_| {
+            report!(CliError::Other(
+                "failed to parse stored CA certificate PEM".into()
+            ))
+        })?;
+        let mut h = Sha256::new();
+        h.update(stored_der.as_ref());
+        let stored_fp = uptrakit_shared_types::hex::encode(h.finalize());
+
+        if stored_fp != fetched_fp {
+            if !allow_rotation {
+                bail!(CliError::Other(format!(
+                    "Controller CA has changed (stored: {stored_fp}, fetched: {fetched_fp}). \
+                     Run 'uptrakit auth ca trust --tofu={fetched_fp}' to update."
+                )));
+            }
+            eprintln!(
+                "Warning: CA fingerprint has changed (stored: {stored_fp}). \
+                 Proceeding will update stored trust."
+            );
+        }
+    }
+
+    if let Some(expected) = fingerprint_hint {
+        if fetched_fp != expected {
+            bail!(CliError::Other(format!(
+                "CA fingerprint mismatch: expected {expected}, got {fetched_fp}"
+            )));
+        }
+    } else {
+        if !std::io::stdin().is_terminal() {
+            bail!(CliError::Other(
+                "--tofu requires interactive confirmation when no fingerprint is provided; \
+                 use --tofu=<fingerprint> for non-interactive use"
+                    .into()
+            ));
+        }
+        let rotation_note = if config.ca_pem.is_some() {
+            "\nWARNING: This will REPLACE the currently stored CA trust anchor.\n"
+        } else {
+            ""
+        };
+        eprintln!(
+            "Controller CA fingerprint: {fetched_fp}\n{rotation_note}\
+             WARNING: This cannot detect a man-in-the-middle attack. To verify securely,\n\
+             obtain the fingerprint from the Dashboard (Global Settings) before running\n\
+             this command and compare it to the value above. Use --tofu=<fingerprint> to\n\
+             confirm without this prompt."
+        );
+        let answer = prompt("Trust this CA? [y/N]: ")?;
+        if !matches!(answer.to_ascii_lowercase().as_str(), "y" | "yes") {
+            bail!(CliError::Other(
+                "CA trust establishment aborted by user".into()
+            ));
+        }
+    }
+
+    config.ca_pem = Some(fetched_pem);
+    save_config(config).await?;
+    eprintln!("Controller CA trusted and stored. Future connections will use the pinned CA.");
+
+    Ok(())
+}
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommands {
@@ -765,5 +911,256 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(parsed["id"], id.to_string());
         assert_eq!(parsed["revoked"], true);
+    }
+
+    mod fingerprint_tests {
+        use super::*;
+
+        #[test]
+        fn plain_hex_accepted() {
+            let fp = "a".repeat(64);
+            assert_eq!(parse_fingerprint(&fp).unwrap(), fp);
+        }
+
+        #[test]
+        fn sha256_prefix_stripped() {
+            let hex = "b".repeat(64);
+            let input = format!("sha256:{hex}");
+            assert_eq!(parse_fingerprint(&input).unwrap(), hex);
+        }
+
+        #[test]
+        fn unsupported_prefix_rejected() {
+            let err = parse_fingerprint("sha1:aabbcc").unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("unsupported fingerprint algorithm 'sha1'")
+            );
+        }
+
+        #[test]
+        fn wrong_length_rejected() {
+            let err = parse_fingerprint("aabbcc").unwrap_err();
+            assert!(err.to_string().contains("64 lowercase hex characters"));
+        }
+
+        #[test]
+        fn uppercase_hex_rejected() {
+            let fp = "A".repeat(64);
+            let err = parse_fingerprint(&fp).unwrap_err();
+            assert!(err.to_string().contains("64 lowercase hex characters"));
+        }
+
+        #[test]
+        fn non_hex_chars_rejected() {
+            let fp = format!("{}zzzz", "a".repeat(60));
+            let err = parse_fingerprint(&fp).unwrap_err();
+            assert!(err.to_string().contains("64 lowercase hex characters"));
+        }
+
+        #[test]
+        fn exactly_64_lowercase_hex_passes() {
+            let fp = "0123456789abcdef".repeat(4);
+            assert_eq!(fp.len(), 64);
+            assert_eq!(parse_fingerprint(&fp).unwrap(), fp);
+        }
+    }
+}
+
+#[cfg(test)]
+mod ca_trust_tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use std::sync::Mutex;
+
+    /// Serialize env-mutating async tests so parallel test threads do not race on HOME.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run an async closure with HOME pointing at a unique temp directory.
+    /// Returns the temp dir path so the caller can clean up.
+    async fn with_temp_home<F, Fut>(f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let tmp = {
+            let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+            let tmp = std::env::temp_dir().join(format!(
+                "uptrakit-auth-test-home-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::create_dir_all(&tmp).expect("create temp home");
+            let prev = std::env::var_os("HOME");
+            // SAFETY: ENV_LOCK is held while we set HOME; we restore below.
+            unsafe { std::env::set_var("HOME", &tmp) };
+            (tmp, prev)
+        };
+
+        f().await;
+
+        {
+            let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+            match &tmp.1 {
+                Some(v) => unsafe { std::env::set_var("HOME", v) },
+                None => unsafe { std::env::remove_var("HOME") },
+            }
+        }
+        drop(std::fs::remove_dir_all(&tmp.0));
+    }
+
+    fn make_test_cert_pem() -> String {
+        let key_pair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("key pair");
+        let params = rcgen::CertificateParams::default();
+        params
+            .self_signed(&key_pair)
+            .expect("self-signed cert")
+            .pem()
+    }
+
+    fn fingerprint_of_pem(pem: &str) -> String {
+        let der = CertificateDer::from_pem_slice(pem.as_bytes()).expect("parse pem");
+        let mut h = Sha256::new();
+        h.update(der.as_ref());
+        uptrakit_shared_types::hex::encode(h.finalize())
+    }
+
+    #[tokio::test]
+    async fn fetch_succeeds_with_matching_fingerprint_hint() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let fp = fingerprint_of_pem(&pem);
+
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(pem.as_str());
+            });
+
+            let mut config = Config::default();
+            establish_ca_trust(&server.base_url(), Some(&fp), false, &mut config)
+                .await
+                .expect("should succeed");
+            assert_eq!(config.ca_pem.as_deref(), Some(pem.as_str()));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_with_wrong_fingerprint_hint() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(pem.as_str());
+            });
+
+            let wrong_fp = "0".repeat(64);
+            let mut config = Config::default();
+            let err = establish_ca_trust(&server.base_url(), Some(&wrong_fp), false, &mut config)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("CA fingerprint mismatch"));
+            assert!(config.ca_pem.is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn non_interactive_without_fingerprint_fails() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(pem.as_str());
+            });
+
+            let mut config = Config::default();
+            let err = establish_ca_trust(&server.base_url(), None, false, &mut config)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("non-interactive"));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stored_ca_matches_fetched_proceeds_silently() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let fp = fingerprint_of_pem(&pem);
+
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(pem.as_str());
+            });
+
+            let mut config = Config {
+                ca_pem: Some(pem.clone()),
+                ..Default::default()
+            };
+            establish_ca_trust(&server.base_url(), Some(&fp), false, &mut config)
+                .await
+                .expect("should succeed — fingerprints match");
+            assert_eq!(config.ca_pem.as_deref(), Some(pem.as_str()));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stored_ca_differs_allow_rotation_false_fails() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let new_pem = make_test_cert_pem();
+            let new_fp = fingerprint_of_pem(&new_pem);
+
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(new_pem.as_str());
+            });
+
+            let mut config = Config {
+                ca_pem: Some(pem.clone()),
+                ..Default::default()
+            };
+            let err = establish_ca_trust(&server.base_url(), Some(&new_fp), false, &mut config)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("Controller CA has changed"));
+            assert_eq!(config.ca_pem.as_deref(), Some(pem.as_str()));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stored_ca_differs_allow_rotation_true_updates() {
+        with_temp_home(|| async {
+            let pem = make_test_cert_pem();
+            let new_pem = make_test_cert_pem();
+            let new_fp = fingerprint_of_pem(&new_pem);
+
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(200).body(new_pem.as_str());
+            });
+
+            let mut config = Config {
+                ca_pem: Some(pem.clone()),
+                ..Default::default()
+            };
+            establish_ca_trust(&server.base_url(), Some(&new_fp), true, &mut config)
+                .await
+                .expect("should succeed — rotation allowed");
+            assert_eq!(config.ca_pem.as_deref(), Some(new_pem.as_str()));
+        })
+        .await;
     }
 }
