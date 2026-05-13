@@ -19,7 +19,58 @@ pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, A
 use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
-use crate::error_response::error_response;
+use crate::error_response::{error_response, error_response_with_code};
+
+/// Typed Axum extension indicating the current JWT contains `setup_required: true`.
+///
+/// Inserted into request extensions by the [`require_auth`] middleware for every
+/// authenticated request. Route handlers and extractors that need full-session
+/// access should use [`FullSessionUser`] instead of reading this extension directly.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SetupRequired(pub bool);
+
+/// Axum extractor that succeeds only for full-session JWTs (`setup_required = false`).
+///
+/// Use this extractor on route handlers that must not be accessible from a
+/// setup-only token (i.e. any route outside `/api/v1/auth/me/2fa/`).
+///
+/// # Errors
+///
+/// Returns `403 Forbidden` with `{"error": "...", "code": "2fa_setup_required"}` when
+/// the session was issued with `setup_required = true`.
+/// Returns `401 Unauthorized` when no [`AuthenticatedUser`] extension is present.
+pub struct FullSessionUser(pub AuthenticatedUser);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for FullSessionUser {
+    type Rejection = axum::response::Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        let setup_required = parts
+            .extensions
+            .get::<SetupRequired>()
+            .copied()
+            .unwrap_or_default();
+
+        if setup_required.0 {
+            return Err(error_response_with_code(
+                StatusCode::FORBIDDEN,
+                "Two-factor authentication setup is required before accessing this resource",
+                "2fa_setup_required",
+            ));
+        }
+
+        let user = parts
+            .extensions
+            .get::<AuthenticatedUser>()
+            .cloned()
+            .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Authentication required"))?;
+
+        Ok(FullSessionUser(user))
+    }
+}
 
 pub fn authenticated_user_audit_actor(
     user: &AuthenticatedUser,
@@ -97,10 +148,10 @@ pub async fn require_auth(
         }
     };
 
-    let (auth_user, api_token_id) = if token.starts_with("upk_") {
-        // API token path: DB lookup
+    let (auth_user, api_token_id, setup_required) = if token.starts_with("upk_") {
+        // API token path: DB lookup — no setup_required concept for API tokens
         match authenticate_api_token(&state, &token).await {
-            Ok((user, token_id)) => (user, Some(AuthenticatedApiTokenId(token_id))),
+            Ok((user, token_id)) => (user, Some(AuthenticatedApiTokenId(token_id)), false),
             Err(e) => {
                 let reason_code = e.api_token_reason_code();
                 if let Some(reason_code) = reason_code {
@@ -117,7 +168,7 @@ pub async fn require_auth(
     } else {
         // JWT path: stateless validation + denylist check
         match authenticate_jwt(&state, &token).await {
-            Ok(user) => (user, None),
+            Ok((user, sr)) => (user, None, sr),
             Err(e) => {
                 if let Some((actor_type, outcome, reason_code)) = e.jwt_audit_attributes() {
                     emit_jwt_auth_audit(
@@ -133,12 +184,22 @@ pub async fn require_auth(
         }
     };
 
+    // Gate setup-only tokens: only allow access to the 2FA enrollment namespace.
+    if setup_required && !req.uri().path().starts_with("/api/v1/auth/me/2fa/") {
+        return error_response_with_code(
+            StatusCode::FORBIDDEN,
+            "Two-factor authentication setup is required before accessing this resource",
+            "2fa_setup_required",
+        );
+    }
+
     if let Some(api_token_id) = api_token_id {
         req.extensions_mut().insert(api_token_id);
     }
 
-    // Inject user into request extensions
+    // Inject user and setup_required flag into request extensions
     req.extensions_mut().insert(auth_user);
+    req.extensions_mut().insert(SetupRequired(setup_required));
 
     next.run(req).await
 }
@@ -157,10 +218,14 @@ pub(crate) async fn authenticate_api_token(
 }
 
 /// Authenticate using a JWT access token (stateless validation + denylist check).
+///
+/// Returns the authenticated user and a boolean indicating whether the token
+/// carries `setup_required = true` (i.e. the session was issued during a 2FA
+/// setup flow and must be restricted to enrollment routes only).
 pub(crate) async fn authenticate_jwt(
     state: &AppState,
     token: &str,
-) -> std::result::Result<AuthenticatedUser, AuthFailure> {
+) -> std::result::Result<(AuthenticatedUser, bool), AuthFailure> {
     let claims = state
         .auth
         .jwt
@@ -197,11 +262,16 @@ pub(crate) async fn authenticate_jwt(
         AuthMethod::Password
     };
 
-    Ok(AuthenticatedUser::new(
-        user_id,
-        auth_method,
-        claims.permissions,
-        Some(claims.jti.clone()),
+    let setup_required = claims.setup_required.unwrap_or(false);
+
+    Ok((
+        AuthenticatedUser::new(
+            user_id,
+            auth_method,
+            claims.permissions,
+            Some(claims.jti.clone()),
+        ),
+        setup_required,
     ))
 }
 
@@ -745,6 +815,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn setup_required_jwt_blocked_on_non_enrollment_route() {
+        let db = test_db().await;
+        let state = test_state(db).await;
+        let user_id = generate_uuid();
+        let token = state
+            .auth
+            .jwt
+            .create_access_token(user_id, &[], "password", None, Some(true))
+            .expect("encode");
+
+        let app = Router::new()
+            .route("/api/v1/settings", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                require_auth,
+            ));
+
+        let req = Request::builder()
+            .uri("/api/v1/settings")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn setup_required_jwt_allowed_on_enrollment_route() {
+        let db = test_db().await;
+        let state = test_state(db).await;
+        let user_id = generate_uuid();
+        let token = state
+            .auth
+            .jwt
+            .create_access_token(user_id, &[], "password", None, Some(true))
+            .expect("encode");
+
+        let app = Router::new()
+            .route(
+                "/api/v1/auth/me/2fa/totp/enroll",
+                axum::routing::post(|| async { "ok" }),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                require_auth,
+            ));
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/me/2fa/totp/enroll")
+            .method("POST")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn authenticate_jwt_sets_jti_on_authenticated_user() {
         let db = test_db().await;
         let state = test_state(db).await;
@@ -757,8 +887,12 @@ mod tests {
             .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
-        let auth_user = authenticate_jwt(&state, &jwt_token).await.unwrap();
+        let (auth_user, setup_required) = authenticate_jwt(&state, &jwt_token).await.unwrap();
 
+        assert!(
+            !setup_required,
+            "setup_required must be false for normal tokens"
+        );
         assert!(auth_user.jti.is_some(), "jti must be set for JWT auth");
         assert!(!auth_user.jti.unwrap().is_empty());
     }
