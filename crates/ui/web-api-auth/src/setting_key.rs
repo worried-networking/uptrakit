@@ -39,6 +39,10 @@ pub enum SettingKey {
     ///
     /// DB key: `audit_log.retention_days`
     AuditLogRetentionDays,
+    /// Whether 2FA is required for all password-auth users in this tenant.
+    ///
+    /// DB key: `auth.two_factor_required`
+    TwoFactorRequired,
     /// Whether mDNS/DNS-SD zero-configuration advertising is enabled.
     ///
     /// DB key: `zeroconf.enabled`
@@ -154,6 +158,7 @@ impl SettingKey {
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
+            Self::TwoFactorRequired => "auth.two_factor_required",
             Self::ZeroconfEnabled => "zeroconf.enabled",
             Self::ZeroconfUrl => "zeroconf.url",
             Self::ZeroconfPkiAddr => "zeroconf.pki_addr",
@@ -205,6 +210,7 @@ impl SettingKey {
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
+            "auth.two_factor_required" => Some(Self::TwoFactorRequired),
             "zeroconf.enabled" => Some(Self::ZeroconfEnabled),
             "zeroconf.url" => Some(Self::ZeroconfUrl),
             "zeroconf.pki_addr" => Some(Self::ZeroconfPkiAddr),

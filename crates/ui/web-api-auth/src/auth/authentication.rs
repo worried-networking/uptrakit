@@ -15,17 +15,19 @@ use uptrakit_shared_db::entity::{
 #[cfg(feature = "oidc")]
 use uptrakit_shared_types::MaskedEmail;
 
-/// Global authentication settings (password auth toggle).
+/// Global authentication settings (password auth toggle and 2FA requirement).
 /// OIDC config lives in the `oidc_providers` table.
 #[derive(Clone, Debug)]
 pub struct AuthenticationSettings {
     pub password_auth_enabled: bool,
+    pub two_factor_required: bool,
 }
 
 impl Default for AuthenticationSettings {
     fn default() -> Self {
         Self {
             password_auth_enabled: true,
+            two_factor_required: false,
         }
     }
 }
@@ -37,8 +39,13 @@ impl AuthenticationSettings {
             .get_setting(SettingKey::PasswordAuthEnabled)
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let two_factor_required = raw
+            .get_setting(SettingKey::TwoFactorRequired)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         Self {
             password_auth_enabled,
+            two_factor_required,
         }
     }
 
@@ -48,6 +55,13 @@ impl AuthenticationSettings {
             tenant_id,
             SettingKey::PasswordAuthEnabled,
             serde_json::Value::Bool(self.password_auth_enabled),
+        )
+        .await?;
+        upsert_setting(
+            db,
+            tenant_id,
+            SettingKey::TwoFactorRequired,
+            serde_json::Value::Bool(self.two_factor_required),
         )
         .await
     }
@@ -386,6 +400,10 @@ mod tests {
             settings.password_auth_enabled,
             "default should have password_auth_enabled = true"
         );
+        assert!(
+            !settings.two_factor_required,
+            "default should have two_factor_required = false"
+        );
     }
 
     // ── AuthenticationSettings::from_raw ─────────────────────────────
@@ -439,6 +457,58 @@ mod tests {
         assert!(
             settings.password_auth_enabled,
             "non-bool value should default password_auth_enabled to true"
+        );
+    }
+
+    #[test]
+    fn from_raw_two_factor_required_empty_map_defaults_to_false() {
+        let raw: RawSettings = HashMap::new();
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            !settings.two_factor_required,
+            "empty settings map should default two_factor_required to false"
+        );
+    }
+
+    #[test]
+    fn from_raw_two_factor_required_explicit_true() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::TwoFactorRequired.as_str().to_string(),
+            serde_json::Value::Bool(true),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            settings.two_factor_required,
+            "explicit true should set two_factor_required to true"
+        );
+    }
+
+    #[test]
+    fn from_raw_two_factor_required_explicit_false() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::TwoFactorRequired.as_str().to_string(),
+            serde_json::Value::Bool(false),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            !settings.two_factor_required,
+            "explicit false should set two_factor_required to false"
+        );
+    }
+
+    #[test]
+    fn from_raw_two_factor_required_non_bool_value_defaults_to_false() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::TwoFactorRequired.as_str().to_string(),
+            serde_json::Value::String("not_a_bool".to_string()),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            !settings.two_factor_required,
+            "non-bool value should default two_factor_required to false"
         );
     }
 
