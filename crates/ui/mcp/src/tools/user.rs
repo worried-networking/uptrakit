@@ -3,9 +3,16 @@ use schemars::JsonSchema;
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uptrakit_shared_db::entity::prelude::User;
+use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::McpRequestContext;
+use crate::oauth::tool_auth::{ToolAuth, require_scopes};
 use crate::tools::{McpHandler, mcp_error};
+
+pub(crate) const GET_CURRENT_USER_AUTH: ToolAuth = ToolAuth {
+    required_scopes: &[McpScope::Read],
+    required_permissions: &[],
+};
 
 /// Result returned by the `get_current_user` MCP tool.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -28,6 +35,9 @@ impl McpHandler {
         &self,
         ctx: McpRequestContext,
     ) -> Result<Json<GetCurrentUserResult>, ErrorData> {
+        require_scopes(&ctx, GET_CURRENT_USER_AUTH.required_scopes)
+            .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
+
         let user = User::find_by_id(ctx.user_id)
             .one(self.state.db.db())
             .await
