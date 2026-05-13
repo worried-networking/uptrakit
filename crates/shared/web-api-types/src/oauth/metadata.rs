@@ -80,6 +80,29 @@ pub struct ProtectedResourceMetadata {
     pub resource_documentation: Option<String>,
 }
 
+impl ProtectedResourceMetadata {
+    /// Construct a new [`ProtectedResourceMetadata`].
+    ///
+    /// Required because the struct is `#[non_exhaustive]` and cannot be
+    /// constructed using a struct literal from outside this crate.
+    #[must_use]
+    pub fn new(
+        resource: String,
+        authorization_servers: Vec<String>,
+        scopes_supported: Vec<String>,
+        bearer_methods_supported: Vec<String>,
+        resource_documentation: Option<String>,
+    ) -> Self {
+        Self {
+            resource,
+            authorization_servers,
+            scopes_supported,
+            bearer_methods_supported,
+            resource_documentation,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
