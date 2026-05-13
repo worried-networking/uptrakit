@@ -148,16 +148,6 @@ impl AuditEmitter {
         hook.enqueue(erased);
         Ok(())
     }
-
-    /// Superseded: prefer [`emit_event`][Self::emit_event] for `Event` entries or
-    /// [`emit_stateful`][Self::emit_stateful] for `Stateful` entries.
-    ///
-    /// This method remains to allow incremental migration of existing call sites.
-    /// Once all call sites are updated the `#[deprecated]` attribute will be added
-    /// and then the method removed.
-    pub fn emit_best_effort(&self, entry: AuditEntry<Event>) {
-        self.emit_event(entry);
-    }
 }
 
 #[cfg(test)]
@@ -302,13 +292,6 @@ mod tests {
             1,
             "mirror must receive entry after flush"
         );
-    }
-
-    #[tokio::test]
-    async fn emit_best_effort_delegates_to_emit_event() {
-        let emitter = make_noop_emitter();
-        // Must not panic; invalid entries are dropped with a tracing::warn.
-        emitter.emit_best_effort(make_event_entry());
     }
 
     #[tokio::test]
