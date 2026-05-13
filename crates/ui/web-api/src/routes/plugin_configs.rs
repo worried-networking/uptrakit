@@ -8,7 +8,6 @@
 )]
 
 use crate::AppState;
-use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
 use crate::auth::permissions::Permission;
 use crate::config_test_proxy::ConfigTestProxyError;
@@ -21,6 +20,7 @@ use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
 use crate::queries::plugin_configs as pc_queries;
+use crate::queries::plugin_configs::PluginConfigView;
 use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
@@ -30,8 +30,10 @@ use axum::{
 };
 use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_plugin_infrastructure_registry::{ConfigModel, PluginDescriptor};
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
@@ -354,77 +356,159 @@ pub async fn create_plugin_config(
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreatePluginConfigRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
-    let enabled = req.enabled;
     let config_risk = CommandRiskSummary::from_config(&req.config);
 
-    // Validate plugin-specific config (matches the update path).
+    // Validate plugin-specific config and plugin type support.
     let plugin_type_id = PluginTypeId::new(&plugin_type_str);
     if let Some(rejection) = reject_config_model_none_plugin_type(&state, &plugin_type_id) {
-        return Ok(rejection);
+        return rejection;
     }
     if let Err(e) = state
         .plugin
         .plugin_ops
         .validate_config(&plugin_type_id, &req.config)
     {
-        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands && !config_risk.dangerous_matches.is_empty() {
-        emit_plugin_config_semantic_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
-            Some("plugin_config"),
-            None,
-            Some(config_name.clone()),
-            uptrakit_audit_log::AuditOutcome::Denied,
-            serde_json::json!({
-                "plugin_type": plugin_type_str.clone(),
-                "config_name": config_name.clone(),
-                "contains_command_fields": !config_risk.command_fields.is_empty(),
-                "reason_code": "dangerous_command_patterns_detected",
-                "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
-            }),
-        );
-        return Ok(error_response(
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "plugin_type": plugin_type_str,
+            "config_name": config_name,
+            "contains_command_fields": !config_risk.command_fields.is_empty(),
+            "reason_code": "dangerous_command_patterns_detected",
+            "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
             StatusCode::BAD_REQUEST,
             format_dangerous_pattern_rejection(&config_risk.dangerous_matches),
-        ));
+        );
     }
 
-    let resp =
-        pc_queries::create_plugin_config(state.plugin.plugin_ops.as_ref(), &tenant_db, req).await?;
-    emit_plugin_config_semantic_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
-        Some("plugin_config"),
-        Some(resp.id.to_string()),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "plugin_type": plugin_type_str.clone(),
-            "config_name": resp.name.clone(),
-            "enabled": enabled,
-            "contains_command_fields": !config_risk.command_fields.is_empty(),
-            "command_fields": config_risk.command_fields.clone(),
-            "dangerous_command_match_count": config_risk.dangerous_matches.len(),
-            "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
-        }),
-    );
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for plugin config create: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    Ok((StatusCode::CREATED, Json(resp)).into_response())
+    let model = match pc_queries::create_plugin_config_in_tx(&tx, tenant_id, req).await {
+        Ok(m) => m,
+        Err(err) => {
+            drop(tx);
+            let (outcome, reason_code) = if matches!(
+                err.current_context(),
+                pc_queries::PluginConfigError::DuplicateName
+            ) {
+                (AuditOutcome::Denied, "duplicate_name")
+            } else {
+                tracing::error!("DB error creating plugin config: {err}");
+                (AuditOutcome::Failed, "plugin_config_create_failed")
+            };
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(outcome)
+            .details(serde_json::json!({
+                "plugin_type": plugin_type_str,
+                "config_name": config_name,
+                "reason_code": reason_code,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return if matches!(
+                err.current_context(),
+                pc_queries::PluginConfigError::DuplicateName
+            ) {
+                error_response(
+                    StatusCode::CONFLICT,
+                    "A plugin config with this name already exists",
+                )
+            } else {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            };
+        }
+    };
+
+    let after = PluginConfigView::from(&model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::plugin_config_create(
+        &AbsentView(&after),
+        &after,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "plugin_type": plugin_type_str,
+        "config_name": model.name,
+        "enabled": model.enabled,
+        "contains_command_fields": !config_risk.command_fields.is_empty(),
+        "command_fields": config_risk.command_fields,
+        "dangerous_command_match_count": config_risk.dangerous_matches.len(),
+        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for plugin config create: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for plugin config create: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit plugin config create: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let Some(resp) = pc_queries::plugin_config_to_response(state.plugin.plugin_ops.as_ref(), model)
+    else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    };
+    (StatusCode::CREATED, Json(resp)).into_response()
 }
 
 /// Query parameters for listing plugin configurations.
@@ -544,39 +628,37 @@ pub async fn update_plugin_config(
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdatePluginConfigRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
-    let existing = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(model)) => model,
+    // Pre-tx: load existing to check plugin type and dangerous patterns.
+    let existing = match pc_queries::find_raw_active_config(&tenant_db, config_id).await {
+        Ok(Some(m)) => m,
         Ok(None) => {
-            return Ok(error_response(
-                StatusCode::NOT_FOUND,
-                "Plugin config not found",
-            ));
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("plugin_config", config_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "plugin_config_not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
         }
         Err(e) => {
             tracing::error!("DB error loading plugin config for update: {e}");
-            return Ok(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ));
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-    let existing_plugin_type = PluginTypeId::new(existing.plugin_type);
+    let existing_plugin_type = PluginTypeId::new(&existing.plugin_type);
     if let Some(rejection) = reject_config_model_none_plugin_type(&state, &existing_plugin_type) {
-        return Ok(rejection);
+        return rejection;
     }
 
     let new_config_risk = req.config.as_ref().map(CommandRiskSummary::from_config);
@@ -586,59 +668,160 @@ pub async fn update_plugin_config(
         && let Some(ref risk) = new_config_risk
         && !risk.dangerous_matches.is_empty()
     {
-        emit_plugin_config_semantic_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
-            Some("plugin_config"),
-            Some(config_id.to_string()),
-            req.name.clone(),
-            uptrakit_audit_log::AuditOutcome::Denied,
-            serde_json::json!({
-                "plugin_type": existing_plugin_type.to_string(),
-                "config_name": req.name.clone(),
-                "contains_command_fields": !risk.command_fields.is_empty(),
-                "reason_code": "dangerous_command_patterns_detected",
-                "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
-            }),
-        );
-        return Ok(error_response(
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("plugin_config", config_id.to_string(), req.name.clone())
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "plugin_type": existing_plugin_type.to_string(),
+            "contains_command_fields": !risk.command_fields.is_empty(),
+            "reason_code": "dangerous_command_patterns_detected",
+            "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
             StatusCode::BAD_REQUEST,
             format_dangerous_pattern_rejection(&risk.dangerous_matches),
-        ));
+        );
     }
 
-    let resp = pc_queries::update_plugin_config(
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for plugin config update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let pair = match pc_queries::update_plugin_config_in_tx(
+        &tx,
         state.plugin.plugin_ops.as_ref(),
-        &tenant_db,
+        tenant_id,
         config_id,
         req,
     )
-    .await?;
-    emit_plugin_config_semantic_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
-        Some("plugin_config"),
-        Some(config_id.to_string()),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        {
-            let risk_details = new_config_risk
-                .as_ref()
-                .map(CommandRiskSummary::details_fragment)
-                .unwrap_or_else(|| CommandRiskSummary::default().details_fragment());
-            serde_json::json!({
-            "plugin_type": resp.plugin_type.to_string(),
-            "config_name": resp.name.clone(),
-            "enabled": resp.enabled,
-            "contains_command_fields": risk_details["contains_command_fields"].clone(),
-            "command_fields": risk_details["command_fields"].clone(),
-            "dangerous_command_match_count": risk_details["dangerous_command_match_count"].clone(),
-            "dangerous_matches": risk_details["dangerous_matches"].clone(),
+    .await
+    {
+        Ok(p) => p,
+        Err(err) => {
+            drop(tx);
+            let (status, reason_code) = match err.current_context() {
+                pc_queries::PluginConfigError::EmptyName => (StatusCode::BAD_REQUEST, "empty_name"),
+                pc_queries::PluginConfigError::ConfigValidation(_) => {
+                    (StatusCode::BAD_REQUEST, "config_validation_failed")
+                }
+                _ => {
+                    tracing::error!("DB error updating plugin config: {err}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "plugin_config_update_failed",
+                    )
+                }
+            };
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("plugin_config", config_id.to_string(), None)
+            .outcome(if status == StatusCode::BAD_REQUEST {
+                AuditOutcome::ValidationFailed
+            } else {
+                AuditOutcome::Failed
             })
-        },
-    );
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(status, err.current_context().to_string());
+        }
+    };
 
-    Ok((StatusCode::OK, Json(resp)).into_response())
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("plugin_config", config_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "plugin_config_not_found" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
+    };
+
+    let before_view = PluginConfigView::from(&before_model);
+    let after_view = PluginConfigView::from(&after_model);
+
+    let risk_details = new_config_risk
+        .as_ref()
+        .map(CommandRiskSummary::details_fragment)
+        .unwrap_or_else(|| CommandRiskSummary::default().details_fragment());
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::plugin_config_update(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "plugin_type": after_model.plugin_type,
+            "config_name": after_model.name,
+            "enabled": after_model.enabled,
+            "contains_command_fields": risk_details["contains_command_fields"],
+            "command_fields": risk_details["command_fields"],
+            "dangerous_command_match_count": risk_details["dangerous_command_match_count"],
+            "dangerous_matches": risk_details["dangerous_matches"],
+        }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for plugin config update: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for plugin config update: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit plugin config update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let Some(resp) =
+        pc_queries::plugin_config_to_response(state.plugin.plugin_ops.as_ref(), after_model)
+    else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    };
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Soft-delete a plugin configuration.
@@ -656,112 +839,115 @@ pub async fn update_plugin_config(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
-    let existing = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(model) => model,
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!("DB error loading plugin config for delete: {e}");
-            emit_plugin_config_semantic_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
-                Some("plugin_config"),
-                Some(config_id.to_string()),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "plugin_config_load_failed",
-                }),
-            );
+            tracing::error!("Failed to begin transaction for plugin config delete: {e}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
-        Ok(true) => {
-            let (target_display, details) = if let Some(existing) = existing {
-                let config_risk = CommandRiskSummary::from_config(&existing.config);
-                (
-                    Some(existing.name.clone()),
-                    serde_json::json!({
-                        "plugin_type": existing.plugin_type,
-                        "config_name": existing.name,
-                        "enabled": existing.enabled,
-                        "contains_command_fields": !config_risk.command_fields.is_empty(),
-                        "command_fields": config_risk.command_fields,
-                        "dangerous_command_match_count": config_risk.dangerous_matches.len(),
-                        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
-                    }),
-                )
-            } else {
-                (
-                    None,
-                    serde_json::json!({
-                        "contains_command_fields": false,
-                        "command_fields": [],
-                        "dangerous_command_match_count": 0,
-                        "dangerous_matches": [],
-                    }),
-                )
-            };
-            emit_plugin_config_semantic_audit(
-                &audit_ctx,
+    let before_model = match pc_queries::delete_plugin_config_in_tx(&tx, tenant_id, config_id).await
+    {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
-                Some("plugin_config"),
-                Some(config_id.to_string()),
-                target_display,
-                uptrakit_audit_log::AuditOutcome::Success,
-                details,
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_plugin_config_semantic_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
-                Some("plugin_config"),
-                Some(config_id.to_string()),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "plugin_config_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("plugin_config", config_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "plugin_config_not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!("Failed to delete plugin config: {e}");
-            emit_plugin_config_semantic_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
-                Some("plugin_config"),
-                Some(config_id.to_string()),
-                existing.as_ref().map(|model| model.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "plugin_config_delete_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("plugin_config", config_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "plugin_config_delete_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = PluginConfigView::from(&before_model);
+    let config_risk = CommandRiskSummary::from_config(&before_model.config);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::plugin_config_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "plugin_type": before_model.plugin_type,
+        "config_name": before_model.name,
+        "enabled": before_model.enabled,
+        "contains_command_fields": !config_risk.command_fields.is_empty(),
+        "command_fields": config_risk.command_fields,
+        "dangerous_command_match_count": config_risk.dangerous_matches.len(),
+        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for plugin config delete: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for plugin config delete: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit plugin config delete: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ── Autodiscovery endpoints ───────────────────────────────────────────────────
@@ -1368,7 +1554,6 @@ mod tests {
         Extension, Json,
         extract::{Path, State},
         http::StatusCode,
-        response::IntoResponse,
     };
     #[cfg(feature = "db-sqlite")]
     use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -2010,7 +2195,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let actor_token_id = uuid::Uuid::now_v7();
-        let response = match create_plugin_config(
+        let response = create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2029,11 +2214,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("handler returned ApiError unexpectedly"),
-        };
+        .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
@@ -2061,7 +2242,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
         let actor_user_id = uuid::Uuid::now_v7();
-        let response = match create_plugin_config(
+        let response = create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2080,11 +2261,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("handler returned ApiError unexpectedly"),
-        };
+        .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
 
@@ -2127,7 +2304,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
         let actor_user_id = uuid::Uuid::now_v7();
-        let create_response = match create_plugin_config(
+        let create_response = create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2144,11 +2321,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("create handler returned ApiError unexpectedly"),
-        };
+        .await;
         assert_eq!(create_response.status(), StatusCode::CREATED);
 
         let created = PluginConfig::find()
@@ -2161,7 +2334,7 @@ mod tests {
             .expect("query created plugin config")
             .expect("created plugin config row");
 
-        let update_response = match update_plugin_config(
+        let update_response = update_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
@@ -2180,11 +2353,7 @@ mod tests {
                 enabled: Some(true),
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("update handler returned ApiError unexpectedly"),
-        };
+        .await;
         assert_eq!(update_response.status(), StatusCode::OK);
 
         let row = latest_tenant_audit_row(
@@ -2216,7 +2385,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
         let actor_user_id = uuid::Uuid::now_v7();
-        let create_response = match create_plugin_config(
+        let create_response = create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2235,11 +2404,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("create handler returned ApiError unexpectedly"),
-        };
+        .await;
         assert_eq!(create_response.status(), StatusCode::CREATED);
 
         let created = PluginConfig::find()
@@ -2253,7 +2418,7 @@ mod tests {
             .expect("created plugin config row");
 
         let delete_response = delete_plugin_config(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2298,7 +2463,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let missing_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(missing_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2341,7 +2506,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(uuid::Uuid::now_v7()),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2367,7 +2532,7 @@ mod tests {
         let details = audit_details(&row);
         assert_eq!(
             details["reason_code"],
-            serde_json::json!("plugin_config_load_failed")
+            serde_json::json!("plugin_config_delete_failed")
         );
     }
 
@@ -2379,7 +2544,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
         let actor_user_id = uuid::Uuid::now_v7();
-        let create_response = match create_plugin_config(
+        let create_response = create_plugin_config(
             State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2396,11 +2561,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("create handler returned ApiError unexpectedly"),
-        };
+        .await;
         assert_eq!(create_response.status(), StatusCode::CREATED);
 
         let created = PluginConfig::find()
@@ -2420,7 +2581,7 @@ mod tests {
         .expect("create blocking trigger");
 
         let delete_response = delete_plugin_config(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2545,7 +2706,7 @@ mod tests {
         name: &str,
     ) -> uuid::Uuid {
         let actor_user_id = uuid::Uuid::now_v7();
-        let create_response = match create_plugin_config(
+        let create_response = create_plugin_config(
             State(state),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2562,11 +2723,7 @@ mod tests {
                 enabled: true,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("create handler returned ApiError unexpectedly"),
-        };
+        .await;
         assert_eq!(create_response.status(), StatusCode::CREATED);
 
         PluginConfig::find()
