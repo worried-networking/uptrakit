@@ -7,25 +7,6 @@ use crate::queries::software_items::{self as item_queries, SoftwareItemQueryErro
 use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::software_item;
 use uptrakit_web_api_types::events::AdminEvent;
-use uptrakit_web_api_types::software_items::{SoftwareItemResponse, UpdateSoftwareItemRequest};
-
-pub(crate) async fn update(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    item_id: Uuid,
-    req: UpdateSoftwareItemRequest,
-) -> Result<SoftwareItemResponse, rootcause::Report<SoftwareItemQueryError>> {
-    let resp = item_queries::update_software_item(tenant_db, item_id, req).await?;
-
-    ctx.event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::SoftwareItemUpdated { id: item_id },
-        )
-        .await;
-
-    Ok(resp)
-}
 
 /// Batch "feature" (approve): sets `featured = true` for matching items.
 /// Already-featured items are treated as idempotent success.

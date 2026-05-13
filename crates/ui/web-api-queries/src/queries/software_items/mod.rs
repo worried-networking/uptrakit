@@ -530,14 +530,19 @@ fn map_response_config_override(
 // ---------------------------------------------------------------------------
 
 pub use crud::{
-    apply_software_item_patch, batch_delete_software_items, batch_feature_software_items,
-    create_software_item, delete_software_item, find_active_item, get_software_item,
+    SoftwareItemView, apply_software_item_patch, batch_delete_software_items,
+    batch_feature_software_items, create_software_item, create_software_item_in_tx,
+    delete_software_item, delete_software_item_in_tx, find_active_item, get_software_item,
     list_software_items, load_items_needing_enrichment, update_software_item,
+    update_software_item_in_tx,
 };
 
+pub use crud::approve_software_item_in_tx;
+
 pub use host_assignments::{
-    assign_hosts, load_host_assignment, unassign_host, update_host_assignment,
+    assign_hosts, assign_hosts_in_tx, load_host_assignment, unassign_host, unassign_host_in_tx,
+    update_host_assignment, update_host_assignment_in_tx,
 };
 
 pub use merge::{execute_merge_software_items, preview_merge_software_items};
-pub use plugin_assignments::delete_plugin_assignment;
+pub use plugin_assignments::{delete_plugin_assignment, delete_plugin_assignment_in_tx};

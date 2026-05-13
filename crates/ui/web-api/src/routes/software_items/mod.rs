@@ -31,13 +31,17 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait as _, Set};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter, RelationTrait as _, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
+};
 use std::sync::Arc;
-use time::OffsetDateTime;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, prelude::*, service, service_host, software_item,
 };
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_web_api_queries::queries::software_items::SoftwareItemView;
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
@@ -109,7 +113,7 @@ fn emit_software_item_mutation_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 
@@ -135,7 +139,7 @@ fn emit_software_version_check_audit(
             .build();
 
     if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 
@@ -186,30 +190,105 @@ pub async fn create_software_item(
     CanCreateSoftware(user): CanCreateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateSoftwareItemRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for software item create");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
-    let mut resp = match item_queries::create_software_item(&tenant_db, req).await {
-        Ok(resp) => resp,
+
+    let inserted = match item_queries::create_software_item_in_tx(&tx, tenant_id, &req).await {
+        Ok(m) => m,
         Err(err) => {
             let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
-                "pending".to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return match err.current_context() {
+                item_queries::SoftwareItemQueryError::DuplicateItem => error_response(
+                    StatusCode::CONFLICT,
+                    "A software item with this name already exists",
+                ),
+                _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+            };
         }
+    };
+
+    let after_view = SoftwareItemView::from(&inserted);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::software_item_create(&AbsentView(&after_view), &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "featured": inserted.featured,
+                "has_icon_url": inserted.icon_url.is_some(),
+            }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to build audit entry for software item create");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for software item create");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software item create");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Build the API response from the inserted model.
+    let mut resp = uptrakit_web_api_types::software_items::SoftwareItemResponse {
+        id: inserted.id,
+        name: inserted.name.clone(),
+        plugins: vec![],
+        featured: inserted.featured,
+        last_checked_at: inserted.last_checked_at,
+        host_count: 0,
+        installed_version: None,
+        installed_display_version: None,
+        latest_version: None,
+        latest_release_metadata: None,
+        update_available: false,
+        created_at: inserted.created_at,
+        updated_at: inserted.updated_at,
+        icon_url: inserted.icon_url.clone(),
     };
 
     // Fire software-item lifecycle plugins (e.g. Dashboard Icons enrichment).
@@ -226,25 +305,10 @@ pub async fn create_software_item(
     state
         .notification
         .event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::SoftwareItemCreated { id: resp.id },
-        )
+        .send(tenant_id, AdminEvent::SoftwareItemCreated { id: resp.id })
         .await;
 
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
-        resp.id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "featured": resp.featured,
-            "has_icon_url": resp.icon_url.is_some(),
-        }),
-    );
-
-    Ok((StatusCode::CREATED, Json(resp)).into_response())
+    (StatusCode::CREATED, Json(resp)).into_response()
 }
 
 /// List all active software items (with host count).
@@ -421,52 +485,169 @@ pub async fn update_software_item(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let ctx = state.mutation_context();
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     let name_changed = req.name.is_some();
     let featured_changed = req.featured.is_some();
     let icon_url_changed = !req.icon_url.is_keep();
-    let resp = match item_actions::update(&tenant_db, &ctx, item_id, req).await {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for software item update");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
-        item_id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
+    let (before_model, after_model) =
+        match item_queries::update_software_item_in_tx(&tx, tenant_id, item_id, &req).await {
+            Ok(Some(pair)) => pair,
+            Ok(None) => {
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("software_item", item_id.to_string(), None)
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({ "reason_code": "software_item.not_found" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::NOT_FOUND, "Software item not found");
+            }
+            Err(err) => {
+                let (outcome, reason_code) = err.current_context().audit_classification();
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target("software_item", item_id.to_string(), None)
+                .outcome(outcome)
+                .details(serde_json::json!({ "reason_code": reason_code }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return match err.current_context() {
+                    item_queries::SoftwareItemQueryError::EmptyName => {
+                        error_response(StatusCode::BAD_REQUEST, "name must not be empty")
+                    }
+                    item_queries::SoftwareItemQueryError::DuplicateItem => error_response(
+                        StatusCode::CONFLICT,
+                        "A software item with this name already exists",
+                    ),
+                    _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+                };
+            }
+        };
+
+    let before_view = SoftwareItemView::from(&before_model);
+    let after_view = SoftwareItemView::from(&after_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_item_update(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
             "changed_fields": {
                 "name": name_changed,
                 "featured": featured_changed,
                 "icon_url": icon_url_changed,
             }
-        }),
-    );
+        }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for software item update");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    Ok((StatusCode::OK, Json(resp)).into_response())
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for software item update");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software item update");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Broadcast
+    state
+        .notification
+        .event_broadcaster
+        .send(tenant_id, AdminEvent::SoftwareItemUpdated { id: item_id })
+        .await;
+
+    // Load enriched list-style response after commit (read-only, same as the
+    // original update_software_item path which queries post-update).
+    match item_queries::get_software_item(&tenant_db, item_id).await {
+        Ok(Some(detail)) => {
+            // Convert detail to the list response shape expected by callers.
+            let resp = uptrakit_web_api_types::software_items::SoftwareItemResponse {
+                id: detail.id,
+                name: detail.name,
+                plugins: detail.plugins,
+                featured: detail.featured,
+                last_checked_at: detail.last_checked_at,
+                host_count: detail.host_count,
+                installed_version: None,
+                installed_display_version: None,
+                latest_version: detail.latest_version,
+                latest_release_metadata: None,
+                update_available: detail.update_available,
+                created_at: detail.created_at,
+                updated_at: detail.updated_at,
+                icon_url: detail.icon_url,
+            };
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Ok(None) | Err(_) => {
+            // After a successful commit the item must exist; this should not happen.
+            tracing::warn!(%item_id, "software item not found after successful update commit");
+            let resp = uptrakit_web_api_types::software_items::SoftwareItemResponse {
+                id: after_model.id,
+                name: after_model.name,
+                plugins: vec![],
+                featured: after_model.featured,
+                last_checked_at: after_model.last_checked_at,
+                host_count: 0,
+                installed_version: None,
+                installed_display_version: None,
+                latest_version: None,
+                latest_release_metadata: None,
+                update_available: false,
+                created_at: after_model.created_at,
+                updated_at: after_model.updated_at,
+                icon_url: after_model.icon_url,
+            };
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+    }
 }
 
 /// Soft-delete a software item.
@@ -486,59 +667,102 @@ pub async fn update_software_item(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_software_item(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanDeleteSoftware(user): CanDeleteSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    match item_queries::delete_software_item(&tenant_db, item_id).await {
-        Ok(true) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for software item delete");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        Ok(false) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+    };
+
+    let before_model = match item_queries::delete_software_item_in_tx(&tx, tenant_id, item_id).await
+    {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "software_item.not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Software item not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "software_item.not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
         }
         Err(e) => {
-            tracing::error!("Failed to delete software item: {e}");
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+            tracing::error!(error = %e, "Failed to delete software item");
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_item.database_error",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "software_item.database_error" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = SoftwareItemView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::software_item_delete(&before_view, &AbsentView(&before_view))
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({}))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to build audit entry for software item delete");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for software item delete");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software item delete");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Approve a discovered software item by marking it as featured.
@@ -560,136 +784,164 @@ pub async fn delete_software_item(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_software_item(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let item = match software_item::Entity::find_by_id(item_id)
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    // Read the item before the transaction to check if it is already featured.
+    // This is a read-only pre-check; the actual write happens in the transaction.
+    let existing = match software_item::Entity::find_by_id(item_id)
+        .filter(software_item::Column::TenantId.eq(tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
         Ok(Some(i)) => i,
         Ok(None) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "software_item.not_found",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "software_item.not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::NOT_FOUND, "Software item not found");
         }
         Err(e) => {
-            tracing::error!("Failed to fetch software item: {e}");
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+            tracing::error!(error = %e, "Failed to fetch software item for approve");
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_item.database_error",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "software_item.database_error" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    if item.featured {
-        emit_software_item_mutation_audit(
-            &audit_ctx,
+    if existing.featured {
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
             SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-            item_id.to_string(),
-            Some(item.name.clone()),
-            uptrakit_audit_log::AuditOutcome::Denied,
-            serde_json::json!({
-                "reason_code": "software_item.already_featured",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "software_item.already_featured" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::CONFLICT, "Software item is already featured");
     }
 
-    let now = OffsetDateTime::now_utc();
-    let item_name = item.name.clone();
-    let mut active: software_item::ActiveModel = item.into();
-    active.featured = Set(true);
-    active.updated_at = Set(now);
-
-    let updated = match active.update(tenant_db.db()).await {
-        Ok(m) => m,
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!("Failed to approve software item: {e}");
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                Some(item_name),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_item.database_error",
-                }),
-            );
+            tracing::error!(error = %e, "Failed to begin transaction for software item approve");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    match item_queries::get_software_item(&tenant_db, updated.id).await {
-        Ok(Some(resp)) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                Some(resp.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "featured": true,
-                }),
-            );
-            (StatusCode::OK, Json(resp)).into_response()
+    let (before_model, after_model) =
+        match item_queries::approve_software_item_in_tx(&tx, tenant_id, item_id).await {
+            Ok(Some(pair)) => pair,
+            Ok(None) => {
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({ "reason_code": "software_item.not_found" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::NOT_FOUND, "Software item not found");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to approve software item");
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Failed)
+                .details(serde_json::json!({ "reason_code": "software_item.database_error" }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    let before_view = SoftwareItemView::from(&before_model);
+    let after_view = SoftwareItemView::from(&after_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_item_approve(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({ "featured": true }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for software item approve");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        Ok(None) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_item.post_update_not_found",
-                }),
-            );
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for software item approve");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit software item approve");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    match item_queries::get_software_item(&tenant_db, after_model.id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) | Err(_) => {
+            tracing::warn!(%item_id, "software item not found after successful approve commit");
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Item not found after update",
             )
-        }
-        Err(e) => {
-            tracing::error!("Failed to fetch approved software item: {e}");
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "software_item.database_error",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -720,70 +972,155 @@ pub async fn assign_hosts(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
     Json(req): Json<AssignHostsRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if req.host_assignments.is_empty() {
-        emit_software_item_mutation_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
             SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
-            item_id.to_string(),
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "software_item.host_assignments_empty",
-            }),
-        );
-        return Ok(error_response(
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "software_item.host_assignments_empty" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
             StatusCode::BAD_REQUEST,
             "host_assignments must not be empty",
-        ));
+        );
     }
 
-    let assignment_count = req.host_assignments.len();
-    let resp = match item_queries::assign_hosts(
-        state.plugin.plugin_ops.as_ref(),
-        &tenant_db,
-        item_id,
-        req,
-    )
-    .await
+    // Pre-read the item to build the AuditView (before snapshot).
+    let item_model = match item_queries::find_active_item(tenant_db.db(), tenant_id, item_id).await
     {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+        Some(m) => m,
+        None => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "software_item.not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
         }
     };
 
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
-        item_id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "assigned_hosts_count": assignment_count,
-            "host_count_after": resp.host_count,
-        }),
-    );
+    let item_view = SoftwareItemView::from(&item_model);
+    let assignment_count = req.host_assignments.len();
 
-    Ok((StatusCode::OK, Json(resp)).into_response())
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for assign_hosts");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(err) = item_queries::assign_hosts_in_tx(
+        state.plugin.plugin_ops.as_ref(),
+        &tx,
+        tenant_id,
+        item_id,
+        &req,
+    )
+    .await
+    {
+        let (outcome, reason_code) = err.current_context().audit_classification();
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(serde_json::json!({ "reason_code": reason_code }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return match err.current_context() {
+            item_queries::SoftwareItemQueryError::NotFound => {
+                error_response(StatusCode::NOT_FOUND, "Software item not found")
+            }
+            item_queries::SoftwareItemQueryError::HostNotFound(_) => {
+                error_response(StatusCode::NOT_FOUND, "Host not found")
+            }
+            item_queries::SoftwareItemQueryError::PluginConfigNotFound => {
+                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+            }
+            item_queries::SoftwareItemQueryError::InvalidPackageIdentifier(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::InvalidConfigOverride(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
+                error_response(StatusCode::CONFLICT, "Duplicate host assignment")
+            }
+            _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+        };
+    }
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::software_item_assign_hosts(&item_view, &item_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({ "assigned_hosts_count": assignment_count }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to build audit entry for assign_hosts");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for assign_hosts");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit assign_hosts");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    match item_queries::get_software_item(&tenant_db, item_id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) | Err(_) => {
+            tracing::warn!(%item_id, "software item not found after successful assign_hosts commit");
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Item not found after update",
+            )
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -815,7 +1152,7 @@ pub struct DeleteHostAssignmentParams {
 )]
 #[tracing::instrument(skip_all)]
 pub async fn unassign_host(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -823,119 +1160,164 @@ pub async fn unassign_host(
     Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
     let ignore_requested = params.ignore.unwrap_or(false);
-    // If ignore=true, load the software item name before deleting so we can
-    // create a name-based ignore rule.
-    let ignore_name: Option<String> = if ignore_requested {
-        match SoftwareItem::find_by_id(item_id)
-            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
-            .one(tenant_db.db())
-            .await
-        {
-            Ok(Some(item)) => Some(item.name),
-            Ok(None) => {
-                emit_software_item_mutation_audit(
-                    &audit_ctx,
-                    SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
-                    item_id.to_string(),
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Denied,
-                    serde_json::json!({
-                        "host_id": host_id,
-                        "reason_code": "software_item.not_found",
-                    }),
-                );
-                return error_response(StatusCode::NOT_FOUND, "Software item not found");
+
+    // Pre-read the item to build the AuditView and optionally get the name for
+    // the autodiscovery ignore rule.
+    let item_model = match item_queries::find_active_item(tenant_db.db(), tenant_id, item_id).await
+    {
+        Some(m) => m,
+        None => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "reason_code": "software_item.not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
             }
-            Err(e) => {
-                tracing::error!("Failed to look up software item for ignore: {e}");
-                emit_software_item_mutation_audit(
-                    &audit_ctx,
-                    SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
-                    item_id.to_string(),
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    serde_json::json!({
-                        "host_id": host_id,
-                        "reason_code": "software_item.database_error",
-                    }),
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
         }
+    };
+
+    let item_view = SoftwareItemView::from(&item_model);
+    let ignore_name = if ignore_requested {
+        Some(item_model.name.clone())
     } else {
         None
     };
 
-    match item_queries::unassign_host(&tenant_db, item_id, host_id).await {
-        Ok(true) => {
-            let mut ignore_rule_created = false;
-            if let Some(name) = ignore_name
-                && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
-                    tenant_db.db(),
-                    tenant_db.tenant_id(),
-                    &name,
-                    None,
-                )
-                .await
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for unassign_host");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let found = match item_queries::unassign_host_in_tx(&tx, item_id, host_id).await {
+        Ok(found) => found,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to unassign host from software item");
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "reason_code": "software_item.database_error",
+            }))
+            .build()
             {
-                tracing::warn!("Failed to create autodiscovery ignore rule: {e}");
-            } else if ignore_requested {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if !found {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "host_id": host_id,
+            "reason_code": "software_item.assignment_not_found",
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "Software item or host assignment not found",
+        );
+    }
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_item_unassign_host(
+        &item_view,
+        &AbsentView(&item_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "host_id": host_id,
+        "ignore_requested": ignore_requested,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for unassign_host");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for unassign_host");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit unassign_host");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Optionally create an autodiscovery ignore rule after commit.
+    let mut ignore_rule_created = false;
+    if let Some(name) = ignore_name {
+        match autodiscovery_queries::create_or_ignore_ignore_rule(
+            tenant_db.db(),
+            tenant_id,
+            &name,
+            None,
+        )
+        .await
+        {
+            Ok(_) => {
                 ignore_rule_created = true;
             }
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "ignore_requested": ignore_requested,
-                    "ignore_rule_created": ignore_rule_created,
-                }),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "reason_code": "software_item.assignment_not_found",
-                }),
-            );
-            error_response(
-                StatusCode::NOT_FOUND,
-                "Software item or host assignment not found",
-            )
-        }
-        Err(e) => {
-            tracing::error!("Failed to unassign host from software item: {e}");
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "reason_code": "software_item.database_error",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            Err(e) => {
+                tracing::warn!("Failed to create autodiscovery ignore rule: {e}");
+            }
         }
     }
+
+    if ignore_requested && !ignore_rule_created {
+        tracing::debug!(%item_id, "ignore requested but rule not created (may already exist)");
+    }
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Update the plugin assignment for a specific host–software-item link.
@@ -965,59 +1347,155 @@ pub async fn update_host_assignment(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateHostAssignmentRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
-    let role = req.role.as_str().to_string();
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+    let role_str = req.role.as_str().to_string();
     let ordinal = req.ordinal;
-    let resp = match item_queries::update_host_assignment(
+
+    // Pre-read the item to build the AuditView.
+    let item_model = match item_queries::find_active_item(tenant_db.db(), tenant_id, item_id).await
+    {
+        Some(m) => m,
+        None => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "role": role_str,
+                "ordinal": ordinal,
+                "reason_code": "software_item.not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
+        }
+    };
+
+    let item_view = SoftwareItemView::from(&item_model);
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for update_host_assignment");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(err) = item_queries::update_host_assignment_in_tx(
         state.plugin.plugin_ops.as_ref(),
-        &tenant_db,
+        &tx,
+        tenant_id,
         item_id,
         host_id,
         req,
     )
     .await
     {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "role": role,
-                    "ordinal": ordinal,
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
+        let (outcome, reason_code) = err.current_context().audit_classification();
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(serde_json::json!({
+            "host_id": host_id,
+            "role": role_str,
+            "ordinal": ordinal,
+            "reason_code": reason_code,
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return match err.current_context() {
+            item_queries::SoftwareItemQueryError::NotFound => error_response(
+                StatusCode::NOT_FOUND,
+                "Software item or host assignment not found",
+            ),
+            item_queries::SoftwareItemQueryError::HostNotFound(_) => {
+                error_response(StatusCode::NOT_FOUND, "Host not found")
+            }
+            item_queries::SoftwareItemQueryError::PluginConfigNotFound => {
+                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+            }
+            item_queries::SoftwareItemQueryError::InvalidPackageIdentifier(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::InvalidConfigOverride(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
+                error_response(StatusCode::CONFLICT, "Duplicate host assignment")
+            }
+            _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+        };
+    }
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_item_update_host_assignment(
+        &item_view, &item_view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "host_id": host_id,
+        "role": role_str,
+        "ordinal": ordinal,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for update_host_assignment");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
-        item_id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "host_id": host_id,
-            "role": role,
-            "ordinal": ordinal,
-        }),
-    );
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for update_host_assignment");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
 
-    Ok((StatusCode::OK, Json(resp)).into_response())
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit update_host_assignment");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    match item_queries::get_software_item(&tenant_db, item_id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) | Err(_) => {
+            tracing::warn!(%item_id, "software item not found after successful update_host_assignment commit");
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Item not found after update",
+            )
+        }
+    }
 }
 
 /// Remove a specific plugin assignment identified by role and ordinal.
@@ -1040,79 +1518,185 @@ pub async fn update_host_assignment(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_assignment(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((item_id, host_id, role, ordinal)): Path<(Uuid, Uuid, String, i32)>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
     let requested_role = role.clone();
+
     let role = match role.parse::<PluginRole>() {
         Ok(r) => r,
         Err(_) => {
-            emit_software_item_mutation_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
-                item_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                serde_json::json!({
-                    "host_id": host_id,
-                    "role": requested_role,
-                    "ordinal": ordinal,
-                    "reason_code": "software_item.invalid_role",
-                }),
-            );
-            return Ok(error_response(StatusCode::BAD_REQUEST, "invalid role"));
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "role": requested_role,
+                "ordinal": ordinal,
+                "reason_code": "software_item.invalid_role",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, "invalid role");
         }
     };
 
     let role_str = role.as_str().to_string();
-    let resp =
-        match item_queries::delete_plugin_assignment(&tenant_db, item_id, host_id, role, ordinal)
+
+    // Pre-read the item to build the AuditView.
+    let item_model = match item_queries::find_active_item(tenant_db.db(), tenant_id, item_id).await
+    {
+        Some(m) => m,
+        None => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "role": role_str,
+                "ordinal": ordinal,
+                "reason_code": "software_item.not_found",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Software item not found");
+        }
+    };
+
+    let item_view = SoftwareItemView::from(&item_model);
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for delete_plugin_assignment");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let found =
+        match item_queries::delete_plugin_assignment_in_tx(&tx, item_id, host_id, &role, ordinal)
             .await
         {
-            Ok(resp) => resp,
+            Ok(found) => found,
             Err(err) => {
                 let (outcome, reason_code) = err.current_context().audit_classification();
-                emit_software_item_mutation_audit(
-                    &audit_ctx,
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                     SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
-                    item_id.to_string(),
-                    None,
-                    outcome,
-                    serde_json::json!({
-                        "host_id": host_id,
-                        "role": role_str,
-                        "ordinal": ordinal,
-                        "reason_code": reason_code,
-                    }),
-                );
-                return Err(err.into());
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(outcome)
+                .details(serde_json::json!({
+                    "host_id": host_id,
+                    "role": role_str,
+                    "ordinal": ordinal,
+                    "reason_code": reason_code,
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
-        item_id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
+    if !found {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
             "host_id": host_id,
             "role": role_str,
             "ordinal": ordinal,
-        }),
-    );
+            "reason_code": "software_item.plugin_assignment_not_found",
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "Software item, host, or plugin assignment not found",
+        );
+    }
 
-    Ok((StatusCode::OK, Json(resp)).into_response())
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::software_item_delete_plugin_assignment(
+        &item_view,
+        &AbsentView(&item_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "host_id": host_id,
+        "role": role_str,
+        "ordinal": ordinal,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for delete_plugin_assignment");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for delete_plugin_assignment");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit delete_plugin_assignment");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    match item_queries::get_software_item(&tenant_db, item_id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) | Err(_) => {
+            tracing::warn!(%item_id, "software item not found after successful delete_plugin_assignment commit");
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Item not found after update",
+            )
+        }
+    }
 }
 
 /// Trigger a software update for a specific host.
@@ -2128,6 +2712,7 @@ mod tests {
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
     };
+    use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_registry::{
         CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
         ControllerProtectionDecision, ControllerUpdateHookOps, ControllerUpdateProtection,
@@ -2449,7 +3034,7 @@ mod tests {
         let state = build_test_state_without_real_protection(db.clone(), tenant_id).await;
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
-        let response = match create_software_item(
+        let response = create_software_item(
             State(Arc::clone(&state)),
             tenant_db,
             CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
@@ -2460,14 +3045,7 @@ mod tests {
                 icon_url: None,
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(err) => panic!(
-                "create software item should succeed, got status {}",
-                err.into_response().status()
-            ),
-        };
+        .await;
         assert_eq!(response.status(), StatusCode::CREATED);
 
         let row = tenant_audit_row_for_action(&db, SOFTWARE_ITEM_CREATE_AUDIT_ACTION).await;
@@ -2492,7 +3070,7 @@ mod tests {
             icon_url: None,
         };
 
-        let first = match create_software_item(
+        let first = create_software_item(
             State(Arc::clone(&state)),
             tenant_db,
             CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
@@ -2503,34 +3081,20 @@ mod tests {
                 icon_url: req.icon_url.clone(),
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(err) => panic!(
-                "first create should succeed, got status {}",
-                err.into_response().status()
-            ),
-        };
+        .await;
         assert_eq!(first.status(), StatusCode::CREATED);
 
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
-        let err = match create_software_item(
+        let err = create_software_item(
             State(Arc::clone(&state)),
             tenant_db,
             CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
             None,
             Validated(req),
         )
-        .await
-        {
-            Ok(response) => panic!(
-                "duplicate create must fail, got status {}",
-                response.into_response().status()
-            ),
-            Err(err) => err,
-        };
-        assert_eq!(err.into_response().status(), StatusCode::CONFLICT);
+        .await;
+        assert_eq!(err.status(), StatusCode::CONFLICT);
 
         let row = tenant_audit_row_for_action_and_outcome(
             &db,
@@ -2553,7 +3117,7 @@ mod tests {
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_item_id = Uuid::now_v7();
 
-        let err = match update_software_item(
+        let response = update_software_item(
             State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
@@ -2565,15 +3129,8 @@ mod tests {
                 icon_url: Default::default(),
             }),
         )
-        .await
-        {
-            Ok(response) => panic!(
-                "update should fail, got status {}",
-                response.into_response().status()
-            ),
-            Err(err) => err,
-        };
-        assert_eq!(err.into_response().status(), StatusCode::NOT_FOUND);
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let row = tenant_audit_row_for_action(&db, SOFTWARE_ITEM_UPDATE_AUDIT_ACTION).await;
         assert_eq!(
@@ -2595,7 +3152,7 @@ mod tests {
         let missing_item_id = Uuid::now_v7();
 
         let response = delete_software_item(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             tenant_db,
             CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
             None,
@@ -2626,7 +3183,7 @@ mod tests {
         insert_software_item_row_with_flags(&db, tenant_id, item_id, "Featured App", true).await;
 
         let response = approve_software_item(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
@@ -2656,7 +3213,7 @@ mod tests {
         let item_id = Uuid::now_v7();
         insert_software_item_row(&db, tenant_id, item_id).await;
 
-        let response = match assign_hosts(
+        let response = assign_hosts(
             State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
@@ -2666,14 +3223,7 @@ mod tests {
                 host_assignments: vec![],
             }),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(err) => panic!(
-                "empty payload should return bad-request response, got status {}",
-                err.into_response().status()
-            ),
-        };
+        .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let row = tenant_audit_row_for_action(&db, SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION).await;
@@ -2699,7 +3249,7 @@ mod tests {
         insert_software_item_row(&db, tenant_id, item_id).await;
 
         let response = unassign_host(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
@@ -2732,7 +3282,7 @@ mod tests {
         let item_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
 
-        let err = match update_host_assignment(
+        let response = update_host_assignment(
             State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
@@ -2749,15 +3299,8 @@ mod tests {
                 execution_site: None,
             }),
         )
-        .await
-        {
-            Ok(response) => panic!(
-                "update host assignment should fail, got status {}",
-                response.into_response().status()
-            ),
-            Err(err) => err,
-        };
-        assert_eq!(err.into_response().status(), StatusCode::NOT_FOUND);
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let row =
             tenant_audit_row_for_action(&db, SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION)
@@ -2777,21 +3320,14 @@ mod tests {
         let item_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
 
-        let response = match delete_plugin_assignment(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+        let response = delete_plugin_assignment(
+            State(Arc::clone(&state)),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
             Path((item_id, host_id, "invalid_role".to_string(), 0)),
         )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(err) => panic!(
-                "invalid role should return bad-request response, got status {}",
-                err.into_response().status()
-            ),
-        };
+        .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let row =

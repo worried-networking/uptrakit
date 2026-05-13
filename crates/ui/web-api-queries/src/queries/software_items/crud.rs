@@ -3,7 +3,8 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
+    QueryOrder, QuerySelect, RelationTrait, Set, SqliteTransactionMode, TransactionOptions,
+    TransactionTrait,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -24,6 +25,36 @@ use super::{
     SoftwareItemQueryError, build_detail_response, build_list_response, count_linked_hosts,
     host_update_available, load_item_hosts, load_latest_version_for_item, load_plugins,
 };
+
+// ---------------------------------------------------------------------------
+// Audit snapshot view
+// ---------------------------------------------------------------------------
+
+/// Audit snapshot for a software item.
+///
+/// `tenant_id` is excluded (scope is captured at the entry level).
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "software_item")]
+pub struct SoftwareItemView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub featured: bool,
+    pub icon_url: Option<String>,
+}
+
+impl From<&software_item::Model> for SoftwareItemView {
+    fn from(m: &software_item::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            name: m.name.clone(),
+            featured: m.featured,
+            icon_url: m.icon_url.clone(),
+        }
+    }
+}
 
 // (installed_version, latest_version, installed_display_version, latest_release_metadata)
 type VersionPair = (
@@ -222,13 +253,205 @@ pub async fn find_active_item(
         .flatten()
 }
 
+// ---------------------------------------------------------------------------
+// Transaction-aware _in_tx variants (for emit_stateful callers)
+// ---------------------------------------------------------------------------
+
+/// Insert a new software item inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Checks unique name constraint within the transaction. Returns the inserted model
+/// for audit snapshot construction by the caller.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::DuplicateItem` if a non-deactivated item with
+/// the same name already exists, or `SoftwareItemQueryError::Db` on DB failures.
+pub async fn create_software_item_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    req: &CreateSoftwareItemRequest,
+) -> super::Result<software_item::Model> {
+    let duplicate = SoftwareItem::find()
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::Name.eq(&req.name))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(txn)
+        .await
+        .context_to()?;
+
+    if duplicate.is_some() {
+        bail!(SoftwareItemQueryError::DuplicateItem);
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let model = software_item::ActiveModel {
+        id: Set(generate_uuid()),
+        tenant_id: Set(tenant_id),
+        name: Set(req.name.clone()),
+        featured: Set(req.featured),
+        icon_url: Set(req.icon_url.clone()),
+        last_checked_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+        awaiting_restart_timeout: Set(None),
+    };
+
+    model.insert(txn).await.context_to()
+}
+
+/// Read-then-update a software item inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some((before, after))` on success, or `None` if not found / deactivated.
+/// Returns `Err` on validation failures (empty name, duplicate name) or DB errors.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::NotFound`, `SoftwareItemQueryError::EmptyName`,
+/// `SoftwareItemQueryError::DuplicateItem`, or `SoftwareItemQueryError::Db`.
+pub async fn update_software_item_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    req: &UpdateSoftwareItemRequest,
+) -> super::Result<Option<(software_item::Model, software_item::Model)>> {
+    let existing = match SoftwareItem::find_by_id(id)
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(txn)
+        .await
+        .context_to()?
+    {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    if let Some(ref name) = req.name
+        && name.is_empty()
+    {
+        bail!(SoftwareItemQueryError::EmptyName);
+    }
+
+    if let Some(ref new_name) = req.name
+        && new_name != &existing.name
+    {
+        let duplicate = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::Name.eq(new_name))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .filter(software_item::Column::Id.ne(id))
+            .one(txn)
+            .await
+            .context_to()?;
+
+        if duplicate.is_some() {
+            bail!(SoftwareItemQueryError::DuplicateItem);
+        }
+    }
+
+    let before = existing.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut model: software_item::ActiveModel = existing.into();
+
+    if let Some(name) = req.name.clone() {
+        model.name = Set(name);
+    }
+    if let Some(featured) = req.featured {
+        model.featured = Set(featured);
+    }
+    match &req.icon_url {
+        IconUrlPatch::Keep => {}
+        IconUrlPatch::Clear => model.icon_url = Set(None),
+        IconUrlPatch::Set(icon_url) => model.icon_url = Set(Some(icon_url.clone())),
+    }
+    model.updated_at = Set(now);
+
+    let after = model.update(txn).await.context_to()?;
+    Ok(Some((before, after)))
+}
+
+/// Soft-delete a software item inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some(before)` (the model before deletion) if found and deleted,
+/// or `None` if not found / already deactivated.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::Db` on DB failures.
+pub async fn delete_software_item_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> super::Result<Option<software_item::Model>> {
+    let existing = match SoftwareItem::find_by_id(id)
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(txn)
+        .await
+        .context_to()?
+    {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    let before = existing.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut model: software_item::ActiveModel = existing.into();
+    model.deactivated_at = Set(Some(now));
+    model.updated_at = Set(now);
+    model.update(txn).await.context_to()?;
+    Ok(Some(before))
+}
+
+/// Approve (feature) a software item inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some((before, after))` on success, `None` if not found / deactivated.
+/// Returns `Err` if the item is already featured.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::DuplicateItem` (reused as "already featured"),
+/// `SoftwareItemQueryError::NotFound`, or `SoftwareItemQueryError::Db`.
+pub async fn approve_software_item_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> super::Result<Option<(software_item::Model, software_item::Model)>> {
+    let existing = match SoftwareItem::find_by_id(id)
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(txn)
+        .await
+        .context_to()?
+    {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    let before = existing.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut model: software_item::ActiveModel = existing.into();
+    model.featured = Set(true);
+    model.updated_at = Set(now);
+
+    let after = model.update(txn).await.context_to()?;
+    Ok(Some((before, after)))
+}
+
 /// Create a new software item (catalog entry only). Checks unique name constraint.
 #[tracing::instrument(skip_all)]
 pub async fn create_software_item(
     tenant_db: &TenantDb,
     req: CreateSoftwareItemRequest,
 ) -> super::Result<SoftwareItemResponse> {
-    let txn = tenant_db.db().begin().await.context_to()?;
+    let txn = tenant_db
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .context_to()?;
 
     let duplicate = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))
