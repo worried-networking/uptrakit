@@ -144,6 +144,14 @@ impl UptrakitClient {
     /// Create a new client. Pass `token: None` for unauthenticated endpoints
     /// (e.g. the device authorization flow).
     ///
+    /// When `ca_pem` is `Some`, the provided PEM replaces system root
+    /// certificates entirely (via `tls_certs_only`). This is the correct
+    /// approach for private CA trust — `add_root_certificate` is deprecated
+    /// because it appends to rather than replacing system roots.
+    ///
+    /// `insecure = true` takes precedence over `ca_pem` and disables all TLS
+    /// verification. `ca_pem` is ignored when `insecure` is `true`.
+    ///
     /// `request_timeout` overrides [`DEFAULT_REQUEST_TIMEOUT`] when `Some`.
     ///
     /// [`DEFAULT_REQUEST_TIMEOUT`]: Self::DEFAULT_REQUEST_TIMEOUT
@@ -151,6 +159,7 @@ impl UptrakitClient {
         base_url: &str,
         token: Option<&str>,
         insecure: bool,
+        ca_pem: Option<&str>,
         request_timeout: Option<Duration>,
     ) -> Result<Self> {
         let timeout = request_timeout.unwrap_or(Self::DEFAULT_REQUEST_TIMEOUT);
@@ -159,6 +168,9 @@ impl UptrakitClient {
             .timeout(timeout);
         if insecure {
             builder = builder.tls_danger_accept_invalid_certs(true);
+        } else if let Some(pem) = ca_pem {
+            let cert = reqwest::Certificate::from_pem(pem.as_bytes()).context_to()?;
+            builder = builder.tls_certs_only(std::iter::once(cert));
         }
         let http = builder.build().context_to()?;
 
@@ -171,8 +183,16 @@ impl UptrakitClient {
     }
 
     /// Create a client with a required bearer token.
-    pub fn with_token(base_url: &str, token: &str, insecure: bool) -> Result<Self> {
-        Self::new(base_url, Some(token), insecure, None)
+    ///
+    /// When `ca_pem` is `Some`, the provided PEM replaces system root
+    /// certificates (see [`Self::new`] for details).
+    pub fn with_token(
+        base_url: &str,
+        token: &str,
+        insecure: bool,
+        ca_pem: Option<&str>,
+    ) -> Result<Self> {
+        Self::new(base_url, Some(token), insecure, ca_pem, None)
     }
 
     /// Enable automatic retry on transient failures (429 and 5xx).
@@ -630,43 +650,43 @@ mod tests {
 
     #[test]
     fn base_url_trailing_slash_is_trimmed() {
-        let client = UptrakitClient::new("https://example.com/", None, false, None)
+        let client = UptrakitClient::new("https://example.com/", None, false, None, None)
             .expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
     #[test]
     fn base_url_without_trailing_slash_is_unchanged() {
-        let client =
-            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
+        let client = UptrakitClient::new("https://example.com", None, false, None, None)
+            .expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
     #[test]
     fn with_token_stores_token() {
-        let client = UptrakitClient::with_token("https://example.com", "tok-123", false)
+        let client = UptrakitClient::with_token("https://example.com", "tok-123", false, None)
             .expect("client creation");
         assert_eq!(client.token.as_deref(), Some("tok-123"));
     }
 
     #[test]
     fn new_without_token_stores_none() {
-        let client =
-            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
+        let client = UptrakitClient::new("https://example.com", None, false, None, None)
+            .expect("client creation");
         assert!(client.token.is_none());
     }
 
     #[test]
     fn token_or_err_returns_token_when_present() {
-        let client = UptrakitClient::with_token("https://example.com", "tok", false)
+        let client = UptrakitClient::with_token("https://example.com", "tok", false, None)
             .expect("client creation");
         assert_eq!(client.token_or_err().expect("token"), "tok");
     }
 
     #[test]
     fn token_or_err_returns_error_when_absent() {
-        let client =
-            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
+        let client = UptrakitClient::new("https://example.com", None, false, None, None)
+            .expect("client creation");
         let err = client.token_or_err().unwrap_err();
         assert!(
             matches!(err.current_context(), ClientError::NotAuthenticated),
@@ -720,13 +740,14 @@ mod tests {
 
     #[test]
     fn default_client_has_no_retry() {
-        let client = UptrakitClient::new("https://example.com", None, false, None).expect("client");
+        let client =
+            UptrakitClient::new("https://example.com", None, false, None, None).expect("client");
         assert!(client.retry.is_none());
     }
 
     #[test]
     fn with_retry_sets_config() {
-        let client = UptrakitClient::new("https://example.com", None, false, None)
+        let client = UptrakitClient::new("https://example.com", None, false, None, None)
             .expect("client")
             .with_retry(RetryConfig::default());
         assert!(client.retry.is_some());
@@ -743,7 +764,7 @@ mod tests {
     /// Helper: build a client pointing at the given URL with a short retry config.
     #[cfg(test)]
     fn retrying_client(base_url: &str) -> UptrakitClient {
-        UptrakitClient::with_token(base_url, "test-token", false)
+        UptrakitClient::with_token(base_url, "test-token", false, None)
             .expect("client")
             .with_retry(RetryConfig {
                 max_retries: 2,
@@ -920,7 +941,8 @@ mod tests {
                 .json_body(paginated_hosts_json(vec![h3.clone()], 3, 3, 3));
         });
 
-        let client = UptrakitClient::with_token(&server.base_url(), "tok", false).expect("client");
+        let client =
+            UptrakitClient::with_token(&server.base_url(), "tok", false, None).expect("client");
         let all = client.list_all_hosts().await.expect("list_all_hosts");
         assert_eq!(all.len(), 3);
         assert_eq!(
@@ -948,7 +970,8 @@ mod tests {
                 .json_body(paginated_hosts_json(vec![h1, h2], 2, 1, 1));
         });
 
-        let client = UptrakitClient::with_token(&server.base_url(), "tok", false).expect("client");
+        let client =
+            UptrakitClient::with_token(&server.base_url(), "tok", false, None).expect("client");
         let all = client.list_all_hosts().await.expect("list_all_hosts");
         assert_eq!(all.len(), 2);
     }
@@ -966,7 +989,8 @@ mod tests {
                 .json_body(paginated_hosts_json(vec![], 0, 1, 0));
         });
 
-        let client = UptrakitClient::with_token(&server.base_url(), "tok", false).expect("client");
+        let client =
+            UptrakitClient::with_token(&server.base_url(), "tok", false, None).expect("client");
         let all = client.list_all_hosts().await.expect("list_all_hosts");
         assert!(all.is_empty());
     }
@@ -989,9 +1013,25 @@ mod tests {
                 .json_body(paginated_hosts_json(vec![], 0, 1, 0));
         });
 
-        let client = UptrakitClient::with_token(&server.base_url(), "tok", false).expect("client");
+        let client =
+            UptrakitClient::with_token(&server.base_url(), "tok", false, None).expect("client");
         client.list_all_hosts().await.expect("list_all_hosts");
 
         page_param_mock.assert_calls(1);
+    }
+
+    #[test]
+    fn new_with_ca_pem_none_succeeds() {
+        let client =
+            UptrakitClient::new("https://example.com", None, false, None, None).expect("client");
+        assert!(client.token.is_none());
+    }
+
+    #[test]
+    fn new_with_insecure_ignores_invalid_ca_pem() {
+        // insecure=true skips ca_pem parsing entirely — no error even for garbage PEM
+        let client =
+            UptrakitClient::new("https://example.com", None, true, Some("not-a-pem"), None);
+        assert!(client.is_ok());
     }
 }

@@ -53,7 +53,7 @@ impl MockApiServer {
         reason = "mock helper — client construction failure would be a programming error in test setup; panic is acceptable"
     )]
     pub fn client(&self) -> UptrakitClient {
-        UptrakitClient::with_token(&self.server.base_url(), "test-token", false)
+        UptrakitClient::with_token(&self.server.base_url(), "test-token", false, None)
             .expect("mock client creation")
     }
 
@@ -63,7 +63,7 @@ impl MockApiServer {
         reason = "mock helper — client construction failure would be a programming error in test setup; panic is acceptable"
     )]
     pub fn client_unauth(&self) -> UptrakitClient {
-        UptrakitClient::new(&self.server.base_url(), None, false, None)
+        UptrakitClient::new(&self.server.base_url(), None, false, None, None)
             .expect("mock client creation")
     }
 

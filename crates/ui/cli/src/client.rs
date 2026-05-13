@@ -36,5 +36,5 @@ pub fn authenticated_client(
     request_timeout: Option<std::time::Duration>,
 ) -> Result<UptrakitClient> {
     let (server, token) = resolve_server_and_token(server, token)?;
-    UptrakitClient::new(&server, Some(&token), insecure, request_timeout).context_to()
+    UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()
 }
