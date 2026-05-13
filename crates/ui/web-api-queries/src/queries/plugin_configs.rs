@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseTransaction, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -45,9 +45,42 @@ pub enum PluginConfigError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<PluginConfigError>>;
 impl_report_conversion!(sea_orm::DbErr => PluginConfigError::Db);
 
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+/// Audit snapshot for a `plugin_config` entity.
+///
+/// `config` is excluded: it may contain plugin-specific secrets (API keys,
+/// passwords). `tenant_id` is excluded as redundant with the tenant-scoped
+/// entry.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "plugin_config")]
+pub struct PluginConfigView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub plugin_type: String,
+    #[audit(skip)]
+    pub config: serde_json::Value,
+    pub enabled: bool,
+}
+
+impl From<&plugin_config::Model> for PluginConfigView {
+    fn from(m: &plugin_config::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            name: m.name.clone(),
+            plugin_type: m.plugin_type.clone(),
+            config: m.config.clone(),
+            enabled: m.enabled,
+        }
+    }
+}
+
 // --- Private helpers ---
 
-fn plugin_config_to_response(
+pub fn plugin_config_to_response(
     ops: &dyn PluginConfigOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
@@ -94,7 +127,7 @@ pub async fn find_raw_active_config(
 /// Same as [`find_raw_active_config`] but accepts an arbitrary `ConnectionTrait`
 /// so it can be called inside transactions.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
-pub(crate) async fn find_raw_active_config_txn(
+pub async fn find_raw_active_config_txn(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,
     id: Uuid,
@@ -106,6 +139,116 @@ pub(crate) async fn find_raw_active_config_txn(
         .one(db)
         .await
         .context_to()
+}
+
+// --- Transactional helpers (V2 audit path) ---
+
+/// Insert a new plugin config inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// All validation (plugin type support, config validity, dangerous command patterns)
+/// must be done by the caller before opening the transaction.
+#[tracing::instrument(skip_all)]
+pub async fn create_plugin_config_in_tx(
+    tx: &DatabaseTransaction,
+    tenant_id: Uuid,
+    req: CreatePluginConfigRequest,
+) -> Result<plugin_config::Model> {
+    let now = OffsetDateTime::now_utc();
+    let model = plugin_config::ActiveModel {
+        id: Set(generate_uuid()),
+        tenant_id: Set(tenant_id),
+        name: Set(req.name),
+        plugin_type: Set(req.plugin_type.to_string()),
+        config: Set(req.config),
+        enabled: Set(req.enabled),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    };
+
+    model.insert(tx).await.map_err(|e| {
+        if is_unique_constraint_violation(&e) {
+            report!(PluginConfigError::DuplicateName)
+        } else {
+            report!(PluginConfigError::Db(e))
+        }
+    })
+}
+
+/// Partial-update a plugin config inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some((before, after))` on success, `None` if the config was not found
+/// or is deactivated.
+#[tracing::instrument(skip_all)]
+pub async fn update_plugin_config_in_tx(
+    tx: &DatabaseTransaction,
+    ops: &dyn PluginConfigOps,
+    tenant_id: Uuid,
+    id: Uuid,
+    req: UpdatePluginConfigRequest,
+) -> Result<Option<(plugin_config::Model, plugin_config::Model)>> {
+    let Some(before) = find_raw_active_config_txn(tx, tenant_id, id).await? else {
+        return Ok(None);
+    };
+
+    let plugin_type = before.plugin_type.clone();
+
+    if let Some(ref name) = req.name
+        && name.is_empty()
+    {
+        bail!(PluginConfigError::EmptyName);
+    }
+
+    let type_id = PluginTypeId::new(&plugin_type);
+    if let Some(ref new_config) = req.config {
+        let mut merged = new_config.clone();
+        ops.restore_config_secrets(&type_id, &mut merged, &before.config);
+        if let Err(e) = ops.validate_config(&type_id, &merged) {
+            bail!(PluginConfigError::ConfigValidation(e.to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let mut model: plugin_config::ActiveModel = before.clone().into();
+
+    if let Some(name) = req.name {
+        model.name = Set(name);
+    }
+    if let Some(mut config) = req.config {
+        ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
+        model.config = Set(config);
+    }
+    if let Some(enabled) = req.enabled {
+        model.enabled = Set(enabled);
+    }
+    model.updated_at = Set(now);
+
+    let after = model.update(tx).await.context_to()?;
+    Ok(Some((before, after)))
+}
+
+/// Soft-delete a plugin config inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some(before)` on success, `None` if the config was not found or already
+/// deactivated.
+#[tracing::instrument(skip_all)]
+pub async fn delete_plugin_config_in_tx(
+    tx: &DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<plugin_config::Model>> {
+    let Some(before) = find_raw_active_config_txn(tx, tenant_id, id).await? else {
+        return Ok(None);
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let mut model: plugin_config::ActiveModel = before.clone().into();
+    model.deactivated_at = Set(Some(now));
+    model.enabled = Set(false);
+    model.updated_at = Set(now);
+    model.update(tx).await.context_to()?;
+
+    Ok(Some(before))
 }
 
 // --- Public query functions ---
