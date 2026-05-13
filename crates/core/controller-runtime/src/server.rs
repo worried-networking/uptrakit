@@ -7,7 +7,6 @@ use axum::middleware as axum_mw;
 use axum::response::IntoResponse;
 use rootcause::prelude::*;
 use thiserror::Error;
-use tokio::net::TcpSocket;
 use tower_http::services::ServeDir;
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -31,34 +30,6 @@ pub(crate) struct ServerOptions {
     pub static_dir: Option<PathBuf>,
     /// axum_server Handle for graceful shutdown.
     pub handle: axum_server::Handle<SocketAddr>,
-    /// Enable SO_REUSEPORT for zero-downtime restarts.
-    pub enable_reuseport: bool,
-}
-
-/// Create a TCP listener with optional SO_REUSEPORT.
-///
-/// When `reuseport` is true, enables the `SO_REUSEPORT` socket option which allows
-/// multiple processes to bind to the same address. This is required for HAProxy-style
-/// zero-downtime restarts where the new process starts accepting connections before
-/// the old process finishes draining.
-async fn create_listener(
-    addr: SocketAddr,
-    reuseport: bool,
-) -> std::io::Result<std::net::TcpListener> {
-    let socket = if addr.is_ipv6() {
-        TcpSocket::new_v6()?
-    } else {
-        TcpSocket::new_v4()?
-    };
-
-    if reuseport {
-        socket.set_reuseport(true)?;
-        tracing::info!("SO_REUSEPORT enabled on {addr}");
-    }
-
-    socket.set_reuseaddr(true)?;
-    socket.bind(addr)?;
-    socket.listen(1024)?.into_std()
 }
 
 /// Run the HTTPS server.
@@ -125,9 +96,7 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 
-    let listener = create_listener(cfg.https_addr, cfg.enable_reuseport)
-        .await
-        .context_to::<ServerError>()?;
+    let listener = std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?;
 
     tracing::info!("HTTPS server listening on {}", cfg.https_addr);
     axum_server::from_tcp(listener)

@@ -262,7 +262,6 @@ pub(crate) async fn register_agent(
     bg: &mut BackgroundTasks,
     controller_installation_id: Uuid,
     state_dir: std::path::PathBuf,
-    reuseport_configured: bool,
     pid_file: Option<std::path::PathBuf>,
 ) -> rootcause::Result<()> {
     let agent_caps = crate::agent::agent_capabilities();
@@ -282,7 +281,6 @@ pub(crate) async fn register_agent(
                     transport,
                     tokens.abort,
                     state_dir,
-                    reuseport_configured,
                     pid_file,
                 ))
             },
