@@ -8677,6 +8677,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "parking_lot",
  "rand 0.9.4",
  "rootcause",
  "sea-orm",
@@ -8690,6 +8691,7 @@ dependencies = [
  "uptrakit-audit-log",
  "uptrakit-command",
  "uptrakit-config-merge",
+ "uptrakit-config-reload",
  "uptrakit-crypto",
  "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-infrastructure-registry",
