@@ -2,9 +2,7 @@ use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageAgentCerts, CanViewSettings};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{delete_setting, upsert_setting};
 use axum::{
     Extension, Json,
@@ -12,7 +10,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
+use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::tenant_settings::TenantSettingView;
 
 pub use uptrakit_web_api_types::settings_agent_certs::{
     AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
@@ -20,16 +21,16 @@ pub use uptrakit_web_api_types::settings_agent_certs::{
 
 const MAX_AGENT_CERT_LIFETIME_HOURS: u32 = 17_520;
 
-fn emit_agent_cert_settings_audit(
+/// Emit a validation failure or persistence failure audit event for agent certificate
+/// settings (no DB write — uses the event dispatcher).
+fn emit_agent_cert_settings_event(
     state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    actor_id: Option<uuid::Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
     )
     .tenant_scope(state.default_tenant_id)
@@ -43,7 +44,7 @@ fn emit_agent_cert_settings_audit(
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -99,16 +100,22 @@ pub async fn update_agent_certificate_settings(
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = state.default_tenant_id;
     let mut changed_keys = Vec::new();
     let mut renewal_window_reset_to_auto = false;
 
+    // Snapshot before-state for the combined audit view.
+    let before_lifetime = state.settings.agent_cert_lifetime_hours();
+    let before_renewal_window = state.settings.renewal_window_hours_override();
+
     if let Some(hours) = req.lifetime_hours {
         if hours < 1 {
-            emit_agent_cert_settings_audit(
+            emit_agent_cert_settings_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                actor_type,
+                actor_id,
+                AuditOutcome::ValidationFailed,
                 serde_json::json!({
                     "setting_area": "agent_certificates",
                     "reason_code": "agent_cert_lifetime_below_minimum",
@@ -123,11 +130,11 @@ pub async fn update_agent_certificate_settings(
             );
         }
         if hours > MAX_AGENT_CERT_LIFETIME_HOURS {
-            emit_agent_cert_settings_audit(
+            emit_agent_cert_settings_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                actor_type,
+                actor_id,
+                AuditOutcome::ValidationFailed,
                 serde_json::json!({
                     "setting_area": "agent_certificates",
                     "reason_code": "agent_cert_lifetime_exceeds_maximum",
@@ -141,20 +148,50 @@ pub async fn update_agent_certificate_settings(
                 "Certificate lifetime must not exceed 17520 hours",
             );
         }
+
+        let tx = match state
+            .db()
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!("Failed to begin tx for agent cert lifetime update: {e}");
+                emit_agent_cert_settings_event(
+                    &state,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Failed,
+                    serde_json::json!({
+                        "setting_area": "agent_certificates",
+                        "reason_code": "agent_cert_lifetime_upsert_failed",
+                        "setting_key": SettingKey::AgentCertLifetimeHours.as_str(),
+                        "provided_lifetime_hours": hours,
+                    }),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        let hook = state.audit_emitter.commit_hook();
+
         if let Err(e) = upsert_setting(
-            state.db(),
-            state.default_tenant_id,
+            &tx,
+            tenant_id,
             SettingKey::AgentCertLifetimeHours,
             serde_json::json!(hours),
         )
         .await
         {
             tracing::error!("Failed to save agent cert lifetime: {e:?}");
-            emit_agent_cert_settings_audit(
+            drop(tx);
+            emit_agent_cert_settings_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
+                AuditOutcome::Failed,
                 serde_json::json!({
                     "setting_area": "agent_certificates",
                     "reason_code": "agent_cert_lifetime_upsert_failed",
@@ -164,6 +201,56 @@ pub async fn update_agent_certificate_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+
+        let before_view = TenantSettingView {
+            key: SettingKey::AgentCertLifetimeHours.as_str().to_string(),
+            value: serde_json::json!(before_lifetime),
+        };
+        let after_view = TenantSettingView {
+            key: SettingKey::AgentCertLifetimeHours.as_str().to_string(),
+            value: serde_json::json!(hours),
+        };
+        let audit_entry =
+            match AuditEntry::<Stateful>::tenant_setting_update(&before_view, &after_view)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(serde_json::json!({
+                    "setting_area": "agent_certificates",
+                    "setting_key": SettingKey::AgentCertLifetimeHours.as_str(),
+                    "provided_lifetime_hours": hours,
+                }))
+                .build()
+            {
+                Ok(entry) => entry,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to build audit entry for agent cert lifetime update: {e}"
+                    );
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
+        if let Err(e) = state
+            .audit_emitter
+            .emit_stateful(&tx, &hook, audit_entry)
+            .await
+        {
+            tracing::error!("Failed to emit stateful audit for agent cert lifetime update: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+
+        if let Err(e) = tx.commit().await {
+            tracing::error!("Failed to commit agent cert lifetime update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        hook.flush_after_commit().await;
+
         state.settings.set_agent_cert_lifetime_hours(hours).await;
         changed_keys.push(SettingKey::AgentCertLifetimeHours.as_str());
     }
@@ -171,19 +258,46 @@ pub async fn update_agent_certificate_settings(
     if let Some(hours) = req.renewal_window_hours {
         if hours == 0 {
             // Reset to automatic mode: remove the override from the DB.
-            if let Err(e) = delete_setting(
-                state.db(),
-                state.default_tenant_id,
-                SettingKey::AgentCertRenewalWindowHours,
-            )
-            .await
+            let tx = match state
+                .db()
+                .begin_with_options(TransactionOptions {
+                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(tx) => tx,
+                Err(e) => {
+                    tracing::error!("Failed to begin tx for agent cert renewal window delete: {e}");
+                    emit_agent_cert_settings_event(
+                        &state,
+                        actor_type,
+                        actor_id,
+                        AuditOutcome::Failed,
+                        serde_json::json!({
+                            "setting_area": "agent_certificates",
+                            "reason_code": "agent_cert_renewal_window_delete_failed",
+                            "setting_key": SettingKey::AgentCertRenewalWindowHours.as_str(),
+                        }),
+                    );
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+            let hook = state.audit_emitter.commit_hook();
+
+            if let Err(e) =
+                delete_setting(&tx, tenant_id, SettingKey::AgentCertRenewalWindowHours).await
             {
                 tracing::error!("Failed to delete renewal window setting: {e:?}");
-                emit_agent_cert_settings_audit(
+                drop(tx);
+                emit_agent_cert_settings_event(
                     &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Failed,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Failed,
                     serde_json::json!({
                         "setting_area": "agent_certificates",
                         "reason_code": "agent_cert_renewal_window_delete_failed",
@@ -192,23 +306,107 @@ pub async fn update_agent_certificate_settings(
                 );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
+
+            let before_view = TenantSettingView {
+                key: SettingKey::AgentCertRenewalWindowHours.as_str().to_string(),
+                value: serde_json::json!(before_renewal_window),
+            };
+            let after_view = TenantSettingView {
+                key: SettingKey::AgentCertRenewalWindowHours.as_str().to_string(),
+                value: serde_json::Value::Null,
+            };
+            let audit_entry =
+                match AuditEntry::<Stateful>::tenant_setting_update(&before_view, &after_view)
+                    .tenant_scope(tenant_id)
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Success)
+                    .details(serde_json::json!({
+                        "setting_area": "agent_certificates",
+                        "setting_key": SettingKey::AgentCertRenewalWindowHours.as_str(),
+                        "renewal_window_reset_to_auto": true,
+                    }))
+                    .build()
+                {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to build audit entry for agent cert renewal window delete: {e}"
+                        );
+                        drop(tx);
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                };
+
+            if let Err(e) = state
+                .audit_emitter
+                .emit_stateful(&tx, &hook, audit_entry)
+                .await
+            {
+                tracing::error!(
+                    "Failed to emit stateful audit for agent cert renewal window delete: {e}"
+                );
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit agent cert renewal window delete: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            hook.flush_after_commit().await;
+
             state.settings.set_renewal_window_hours_override(None).await;
             renewal_window_reset_to_auto = true;
         } else {
+            let tx = match state
+                .db()
+                .begin_with_options(TransactionOptions {
+                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(tx) => tx,
+                Err(e) => {
+                    tracing::error!("Failed to begin tx for agent cert renewal window upsert: {e}");
+                    emit_agent_cert_settings_event(
+                        &state,
+                        actor_type,
+                        actor_id,
+                        AuditOutcome::Failed,
+                        serde_json::json!({
+                            "setting_area": "agent_certificates",
+                            "reason_code": "agent_cert_renewal_window_upsert_failed",
+                            "setting_key": SettingKey::AgentCertRenewalWindowHours.as_str(),
+                            "provided_renewal_window_hours": hours,
+                        }),
+                    );
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+            let hook = state.audit_emitter.commit_hook();
+
             if let Err(e) = upsert_setting(
-                state.db(),
-                state.default_tenant_id,
+                &tx,
+                tenant_id,
                 SettingKey::AgentCertRenewalWindowHours,
                 serde_json::json!(hours),
             )
             .await
             {
                 tracing::error!("Failed to save renewal window: {e:?}");
-                emit_agent_cert_settings_audit(
+                drop(tx);
+                emit_agent_cert_settings_event(
                     &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Failed,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Failed,
                     serde_json::json!({
                         "setting_area": "agent_certificates",
                         "reason_code": "agent_cert_renewal_window_upsert_failed",
@@ -218,6 +416,58 @@ pub async fn update_agent_certificate_settings(
                 );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
+
+            let before_view = TenantSettingView {
+                key: SettingKey::AgentCertRenewalWindowHours.as_str().to_string(),
+                value: serde_json::json!(before_renewal_window),
+            };
+            let after_view = TenantSettingView {
+                key: SettingKey::AgentCertRenewalWindowHours.as_str().to_string(),
+                value: serde_json::json!(hours),
+            };
+            let audit_entry =
+                match AuditEntry::<Stateful>::tenant_setting_update(&before_view, &after_view)
+                    .tenant_scope(tenant_id)
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Success)
+                    .details(serde_json::json!({
+                        "setting_area": "agent_certificates",
+                        "setting_key": SettingKey::AgentCertRenewalWindowHours.as_str(),
+                        "provided_renewal_window_hours": hours,
+                    }))
+                    .build()
+                {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to build audit entry for agent cert renewal window upsert: {e}"
+                        );
+                        drop(tx);
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                };
+
+            if let Err(e) = state
+                .audit_emitter
+                .emit_stateful(&tx, &hook, audit_entry)
+                .await
+            {
+                tracing::error!(
+                    "Failed to emit stateful audit for agent cert renewal window upsert: {e}"
+                );
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit agent cert renewal window upsert: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            hook.flush_after_commit().await;
+
             state
                 .settings
                 .set_renewal_window_hours_override(Some(hours))
@@ -226,19 +476,11 @@ pub async fn update_agent_certificate_settings(
         changed_keys.push(SettingKey::AgentCertRenewalWindowHours.as_str());
     }
 
-    if !changed_keys.is_empty() {
-        emit_agent_cert_settings_audit(
-            &state,
-            &user,
-            api_token_id,
-            uptrakit_audit_log::AuditOutcome::Success,
-            serde_json::json!({
-                "setting_area": "agent_certificates",
-                "changed_keys": changed_keys,
-                "renewal_window_reset_to_auto": renewal_window_reset_to_auto,
-            }),
-        );
-    }
+    // The `changed_keys` and `renewal_window_reset_to_auto` variables are
+    // retained here for potential future use (e.g. a combined summary event).
+    // Individual per-key stateful audit entries are already emitted above.
+    let _ = changed_keys;
+    let _ = renewal_window_reset_to_auto;
 
     (StatusCode::OK, Json(build_response(&state))).into_response()
 }

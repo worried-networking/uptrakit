@@ -31,6 +31,7 @@ pub mod software_items;
 pub mod software_states;
 pub mod system_enrollment_tokens;
 pub mod system_services;
+pub mod tenant_settings;
 pub mod update_batches;
 pub mod update_dispatch;
 pub mod update_history;

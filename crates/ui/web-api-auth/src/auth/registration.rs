@@ -176,9 +176,12 @@ impl RegistrationSettings {
 
     /// Admin action — change mode and/or set a new token.
     /// Updates both DB and in-memory state.
+    ///
+    /// `db` accepts any [`ConnectionTrait`] implementor so callers can pass a
+    /// transaction handle for atomicity (e.g. `BEGIN IMMEDIATE` for SQLite).
     pub async fn update(
         &mut self,
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         tenant_id: Uuid,
         mode: RegistrationMode,
         token: Option<String>,

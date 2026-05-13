@@ -2,9 +2,7 @@ use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 #[cfg(feature = "oidc")]
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -13,7 +11,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
+use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::tenant_settings::TenantSettingView;
 #[cfg(feature = "oidc")]
 use {
     sea_orm::{ColumnTrait, QueryFilter},
@@ -24,16 +25,15 @@ pub use uptrakit_web_api_types::settings_auth::{
     AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
 };
 
-fn emit_auth_settings_audit(
+/// Emit a failure/denied audit event for authentication settings (no DB write).
+fn emit_auth_settings_event(
     state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    actor_id: Option<uuid::Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
     )
     .tenant_scope(state.default_tenant_id)
@@ -47,7 +47,7 @@ fn emit_auth_settings_audit(
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -124,17 +124,18 @@ pub async fn update_authentication_settings(
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
 
     if let Some(password_enabled) = req.password_auth_enabled {
         let previous_enabled = state.settings.authentication().password_auth_enabled;
         if !password_enabled {
             // Safety: cannot disable password auth if current session uses password
             if user.auth_method == AuthMethod::Password {
-                emit_auth_settings_audit(
+                emit_auth_settings_event(
                     &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Denied,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Denied,
                     auth_settings_audit_details(
                         "authentication.password_auth_enabled",
                         previous_enabled,
@@ -160,11 +161,11 @@ pub async fn update_authentication_settings(
                     .unwrap_or_default();
 
                 if active_providers.is_empty() {
-                    emit_auth_settings_audit(
+                    emit_auth_settings_event(
                         &state,
-                        &user,
-                        api_token_id,
-                        uptrakit_audit_log::AuditOutcome::Denied,
+                        actor_type,
+                        actor_id,
+                        AuditOutcome::Denied,
                         auth_settings_audit_details(
                             "authentication.password_auth_enabled",
                             previous_enabled,
@@ -180,11 +181,11 @@ pub async fn update_authentication_settings(
             }
 
             if !cfg!(feature = "oidc") {
-                emit_auth_settings_audit(
+                emit_auth_settings_event(
                     &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Denied,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Denied,
                     auth_settings_audit_details(
                         "authentication.password_auth_enabled",
                         previous_enabled,
@@ -201,16 +202,53 @@ pub async fn update_authentication_settings(
 
         let mut auth_settings = state.settings.authentication();
         auth_settings.password_auth_enabled = password_enabled;
-        if let Err(e) = auth_settings
-            .save(state.db(), state.default_tenant_id)
+
+        let tenant_id = state.default_tenant_id;
+        let before_view = TenantSettingView {
+            key: "authentication".to_string(),
+            value: serde_json::json!({ "password_auth_enabled": previous_enabled }),
+        };
+        let after_view = TenantSettingView {
+            key: "authentication".to_string(),
+            value: serde_json::json!({ "password_auth_enabled": password_enabled }),
+        };
+
+        let tx = match state
+            .db()
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
             .await
         {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!("Failed to begin tx for authentication settings update: {e}");
+                emit_auth_settings_event(
+                    &state,
+                    actor_type,
+                    actor_id,
+                    AuditOutcome::Failed,
+                    auth_settings_audit_details(
+                        "authentication.password_auth_enabled",
+                        previous_enabled,
+                        password_enabled,
+                        Some("authentication_settings_update_failed"),
+                    ),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        let hook = state.audit_emitter.commit_hook();
+
+        if let Err(e) = auth_settings.save(&tx, tenant_id).await {
             tracing::error!("Failed to save authentication settings: {e:?}");
-            emit_auth_settings_audit(
+            drop(tx);
+            emit_auth_settings_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
+                AuditOutcome::Failed,
                 auth_settings_audit_details(
                     "authentication.password_auth_enabled",
                     previous_enabled,
@@ -220,20 +258,52 @@ pub async fn update_authentication_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        state.settings.set_authentication(auth_settings).await;
 
-        emit_auth_settings_audit(
-            &state,
-            &user,
-            api_token_id,
-            uptrakit_audit_log::AuditOutcome::Success,
-            auth_settings_audit_details(
-                "authentication.password_auth_enabled",
-                previous_enabled,
-                password_enabled,
-                None,
-            ),
-        );
+        let audit_entry =
+            match AuditEntry::<Stateful>::tenant_setting_update(&before_view, &after_view)
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(auth_settings_audit_details(
+                    "authentication.password_auth_enabled",
+                    previous_enabled,
+                    password_enabled,
+                    None,
+                ))
+                .build()
+            {
+                Ok(entry) => entry,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to build audit entry for authentication settings update: {e}"
+                    );
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
+        if let Err(e) = state
+            .audit_emitter
+            .emit_stateful(&tx, &hook, audit_entry)
+            .await
+        {
+            tracing::error!(
+                "Failed to emit stateful audit for authentication settings update: {e}"
+            );
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+
+        if let Err(e) = tx.commit().await {
+            tracing::error!("Failed to commit authentication settings update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        hook.flush_after_commit().await;
+
+        state.settings.set_authentication(auth_settings).await;
     }
 
     if let Some(two_factor_required) = req.two_factor_required {
@@ -245,11 +315,11 @@ pub async fn update_authentication_settings(
             .await
         {
             tracing::error!("Failed to save authentication settings: {e:?}");
-            emit_auth_settings_audit(
+            emit_auth_settings_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
+                AuditOutcome::Failed,
                 auth_settings_audit_details(
                     "authentication.two_factor_required",
                     previous_2fa,
@@ -261,11 +331,11 @@ pub async fn update_authentication_settings(
         }
         state.settings.set_authentication(auth_settings).await;
 
-        emit_auth_settings_audit(
+        emit_auth_settings_event(
             &state,
-            &user,
-            api_token_id,
-            uptrakit_audit_log::AuditOutcome::Success,
+            actor_type,
+            actor_id,
+            AuditOutcome::Success,
             auth_settings_audit_details(
                 "authentication.two_factor_required",
                 previous_2fa,
