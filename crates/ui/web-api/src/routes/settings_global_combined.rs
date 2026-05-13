@@ -63,6 +63,10 @@ pub async fn get_global_combined_settings(
         pki_addr: network.pki_addr,
         pki_addr_warning: None,
         cert_regenerated: None,
+        trust_domain: {
+            let tls = state.tls_config_rx.borrow();
+            tls.effective_trust_domain(&tls.sans).to_owned()
+        },
     };
 
     #[allow(

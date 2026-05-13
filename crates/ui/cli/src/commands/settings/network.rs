@@ -144,6 +144,7 @@ mod tests {
             pki_addr: Some("https://pki.example.com".to_string()),
             pki_addr_warning: Some("CA rotation required".to_string()),
             cert_regenerated: None,
+            trust_domain: String::new(),
         };
         let s = resp.to_human_string();
         assert!(s.contains("10.0.0.0/8"), "trusted proxies missing");

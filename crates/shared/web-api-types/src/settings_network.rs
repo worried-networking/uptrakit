@@ -17,6 +17,12 @@ pub struct NetworkSettingsResponse {
     /// Whether the server certificate was regenerated as part of this response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cert_regenerated: Option<bool>,
+    /// SPIFFE trust domain configured for mTLS agent identity.
+    ///
+    /// Empty string when not configured. Derived from `[tls] trust_domain` in
+    /// the controller config, falling back to the first server-cert SAN.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trust_domain: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -101,6 +107,7 @@ mod tests {
             pki_addr: Some("http://pki.example.com".to_string()),
             pki_addr_warning: Some("CA rotation required".to_string()),
             cert_regenerated: None,
+            trust_domain: "controller.example.com".to_string(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: NetworkSettingsResponse =
@@ -124,6 +131,7 @@ mod tests {
             pki_addr: None,
             pki_addr_warning: None,
             cert_regenerated: None,
+            trust_domain: String::new(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: NetworkSettingsResponse =

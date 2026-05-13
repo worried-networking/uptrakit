@@ -94,6 +94,7 @@ impl FromStr for Sha256Hash {
 }
 
 /// Error returned by [`Sha256Hash::from_str`].
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Sha256ParseError {
     /// The input (after stripping colons/spaces) was not exactly 64 hex characters.
@@ -121,6 +122,7 @@ pub enum TofuMode {
 }
 
 /// Resolved TLS trust configuration built from CLI flags.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct TofuConfig {
     /// Active trust mode.
@@ -179,6 +181,7 @@ impl TofuConfig {
 }
 
 /// Error returned by [`TofuConfig::from_flags`].
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum TofuConfigError {
     /// More than one exclusive trust-mode flag was set.
@@ -267,6 +270,7 @@ fn cert_ip_sans_match(cert: &x509_cert::Certificate, dialed: &[u8]) -> bool {
 ///
 /// Wraps the standard webpki verifier and replaces/disables checks per the
 /// active [`TofuMode`].
+#[non_exhaustive]
 #[derive(Debug)]
 pub struct ModeBasedVerifier {
     /// Active TOFU configuration.
@@ -275,6 +279,21 @@ pub struct ModeBasedVerifier {
     pub controller_ca_pem: Vec<u8>,
     /// Underlying system verifier (used for System mode and for handshake-signature checks).
     pub system_verifier: Arc<dyn ServerCertVerifier>,
+}
+
+impl ModeBasedVerifier {
+    /// Create a new `ModeBasedVerifier`.
+    pub fn new(
+        config: TofuConfig,
+        controller_ca_pem: Vec<u8>,
+        system_verifier: Arc<dyn ServerCertVerifier>,
+    ) -> Self {
+        Self {
+            config,
+            controller_ca_pem,
+            system_verifier,
+        }
+    }
 }
 
 impl ServerCertVerifier for ModeBasedVerifier {

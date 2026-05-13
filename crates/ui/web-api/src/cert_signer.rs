@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use thiserror::Error;
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum CertSignerError {
     #[error("CA key parse error: {0}")]

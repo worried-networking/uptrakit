@@ -223,6 +223,7 @@ fn sign_agent_csr(
         .push(ExtendedKeyUsagePurpose::ClientAuth);
     params.not_before = now;
     params.not_after = not_after;
+    params.subject_alt_names = csr_params.params.subject_alt_names.clone();
 
     if let Some(url) = pki_addr {
         crate::pki::add_pki_extensions(&mut params, url).map_err(|e| {

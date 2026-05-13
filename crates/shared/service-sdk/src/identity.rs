@@ -30,6 +30,8 @@ const STATE_FILE: &str = "service.json";
 const CA_CERT_FILE: &str = "ca.pem";
 const SERVICE_CERT_FILE: &str = "service.crt";
 const SERVICE_KEY_FILE: &str = "service.key";
+/// Maximum length of a SPIFFE trust domain per the SPIFFE ID specification.
+const MAX_TRUST_DOMAIN_LEN: usize = 255;
 
 /// Persisted enrollment state.
 ///
@@ -597,7 +599,7 @@ pub fn generate_keypair_and_csr(
     // Validate trust_domain when provided: SPIFFE trust-domain grammar
     // allows only lowercase ASCII letters, digits, dots, and hyphens.
     if !trust_domain.is_empty()
-        && (trust_domain.len() > 255
+        && (trust_domain.len() > MAX_TRUST_DOMAIN_LEN
             || !trust_domain
                 .chars()
                 .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '.' | '-')))

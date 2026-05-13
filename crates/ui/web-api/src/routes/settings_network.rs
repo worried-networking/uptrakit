@@ -183,6 +183,10 @@ pub async fn get_network_settings(
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
     let network = state.settings.network();
+    let trust_domain = {
+        let tls = state.tls_config_rx.borrow();
+        tls.effective_trust_domain(&tls.sans).to_owned()
+    };
     let response = NetworkSettingsResponse {
         trusted_proxies: network
             .trusted_proxies
@@ -197,6 +201,7 @@ pub async fn get_network_settings(
         pki_addr: network.pki_addr,
         pki_addr_warning: None,
         cert_regenerated: None,
+        trust_domain,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -508,6 +513,10 @@ async fn update_network_settings_inner(
     } else {
         None
     };
+    let trust_domain = {
+        let tls = state.tls_config_rx.borrow();
+        tls.effective_trust_domain(&tls.sans).to_owned()
+    };
     let response = NetworkSettingsResponse {
         trusted_proxies: network
             .trusted_proxies
@@ -522,6 +531,7 @@ async fn update_network_settings_inner(
         pki_addr: network.pki_addr,
         pki_addr_warning: warning,
         cert_regenerated,
+        trust_domain,
     };
     Ok((StatusCode::OK, Json(response)).into_response())
 }
