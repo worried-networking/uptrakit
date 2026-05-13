@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ServiceSettingsPayload.trust_domain: String` (`#[serde(default, skip_serializing_if = "String::is_empty")]`). Controller advertises its SPIFFE trust domain to every connecting Service. Empty string preserves pre-rollout wire-byte-compatibility for cross-version deployments.
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-internal-wire-v0.0.1) - 2026-04-27
 
 ### Added

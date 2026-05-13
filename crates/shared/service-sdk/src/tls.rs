@@ -551,7 +551,7 @@ mod tests {
             .await
             .expect("build");
         assert!(
-            store.len() >= 1,
+            !store.is_empty(),
             "at least controller CA; native roots may vary"
         );
     }

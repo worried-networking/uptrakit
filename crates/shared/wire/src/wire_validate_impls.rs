@@ -2210,6 +2210,7 @@ mod tests {
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(30),
             tenant_id: None,
+            trust_domain: String::new(),
         });
 
         assert!(msg.wire_validate().is_ok());
@@ -2228,6 +2229,7 @@ mod tests {
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(30),
             tenant_id: None,
+            trust_domain: String::new(),
         });
 
         let err = msg.wire_validate().unwrap_err();

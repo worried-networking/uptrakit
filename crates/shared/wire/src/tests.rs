@@ -679,6 +679,7 @@ fn service_settings_serialization_roundtrip() {
         shutdown_timeout: Some(std::time::Duration::from_secs(120)),
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
+        trust_domain: String::new(),
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert_eq!(
@@ -699,6 +700,7 @@ fn service_settings_without_shutdown_timeout() {
         shutdown_timeout: None,
         ping_interval: std::time::Duration::from_secs(15),
         tenant_id: None,
+        trust_domain: String::new(),
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"service_settings"#));
@@ -721,6 +723,7 @@ fn service_settings_serializes_non_default_report_page_limits() {
         shutdown_timeout: None,
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
+        trust_domain: String::new(),
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""report_page_limits":{"report_hosts":100"#));
@@ -743,6 +746,7 @@ fn service_settings_backward_compat_extra_fields() {
             shutdown_timeout: Some(std::time::Duration::from_secs(60)),
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
+            trust_domain: String::new(),
         })
     );
 }
@@ -762,6 +766,7 @@ fn service_settings_backward_compat_missing_shutdown_timeout() {
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
+            trust_domain: String::new(),
         })
     );
 }
@@ -776,6 +781,7 @@ fn duration_seconds_roundtrip() {
         shutdown_timeout: None,
         ping_interval: std::time::Duration::from_secs(42),
         tenant_id: None,
+        trust_domain: String::new(),
     };
     let json = serde_json::to_value(&payload).unwrap();
     assert_eq!(json["ping_interval"], 42);
@@ -783,6 +789,53 @@ fn duration_seconds_roundtrip() {
     assert_eq!(
         deserialized.ping_interval,
         std::time::Duration::from_secs(42)
+    );
+}
+
+#[test]
+fn service_settings_payload_trust_domain_round_trips() {
+    let mut payload = ServiceSettingsPayload {
+        renewal_window_hours: 24,
+        ca_bundle_hash: String::new(),
+        capabilities: BTreeSet::new(),
+        report_page_limits: ReportPageLimits::default(),
+        shutdown_timeout: None,
+        ping_interval: std::time::Duration::from_secs(300),
+        tenant_id: None,
+        trust_domain: String::new(),
+    };
+    payload.trust_domain = "controller.example.com".to_owned();
+    let json = serde_json::to_string(&payload).expect("serialize");
+    assert!(json.contains("\"trust_domain\":\"controller.example.com\""));
+    let back: ServiceSettingsPayload = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back.trust_domain, "controller.example.com");
+}
+
+#[test]
+fn service_settings_payload_trust_domain_default_empty() {
+    // Old Controller (no trust_domain) serializes without the field.
+    // New Agent deserializes with empty string default.
+    let json = r#"{"type":"service_settings","renewal_window_hours":24,"ping_interval":300}"#;
+    let payload: ServiceSettingsPayload = serde_json::from_str(json).expect("deserialize");
+    assert_eq!(payload.trust_domain, "");
+}
+
+#[test]
+fn service_settings_payload_empty_trust_domain_skipped_on_serialize() {
+    let payload = ServiceSettingsPayload {
+        renewal_window_hours: 24,
+        ca_bundle_hash: String::new(),
+        capabilities: BTreeSet::new(),
+        report_page_limits: ReportPageLimits::default(),
+        shutdown_timeout: None,
+        ping_interval: std::time::Duration::from_secs(300),
+        tenant_id: None,
+        trust_domain: String::new(),
+    };
+    let json = serde_json::to_string(&payload).expect("serialize");
+    assert!(
+        !json.contains("trust_domain"),
+        "empty trust_domain must be omitted from wire"
     );
 }
 
@@ -1946,6 +1999,7 @@ fn spec_conformance_service_settings() {
             shutdown_timeout: Some(std::time::Duration::from_secs(120)),
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: Some(TEST_UUID_1),
+            trust_domain: String::new(),
         }));
     spec.validate("serviceSettingsPayload", &json);
 }
@@ -3389,6 +3443,7 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
+            trust_domain: String::new(),
         }),
         ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
             ca_bundle_pem: String::new(),
