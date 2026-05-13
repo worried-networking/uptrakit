@@ -27,9 +27,9 @@ do_sign_csr_for_system_service = "ignore"
 revoke_system_certificate = "ignore"
 
 [routes."api_tokens.rs"]
-create_api_token = "no-db"
+create_api_token = "full-state"
 list_api_tokens = "no-db"
-revoke_api_token = "no-db"
+revoke_api_token = "full-state"
 
 [routes."audit_logs.rs"]
 list_audit_logs = "tenant-scoped"

@@ -10,6 +10,7 @@ use uuid::Uuid;
 /// `failed_with_reason` pairs the failing entity ID with a human-readable error message.
 pub type BatchOutcome = (Vec<Uuid>, Vec<(Uuid, String)>);
 
+pub mod api_tokens;
 pub mod audit_logs;
 pub mod autodiscovery;
 pub mod discovery_allowlist;

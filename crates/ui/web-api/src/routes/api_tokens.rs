@@ -1,4 +1,5 @@
-use crate::app_state::AuditEmitterState;
+use crate::AppState;
+use crate::auth::token::{generate_secure_token, generate_uuid, hash_token};
 use crate::error_response::error_response;
 use crate::extract::{ApiTokenSvc, Validated};
 use crate::middleware::require_auth::{
@@ -11,43 +12,19 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use std::sync::Arc;
+use time::OffsetDateTime;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_web_api_queries::queries::api_tokens::{
+    ApiTokenView, create_api_token_in_tx, revoke_api_token_in_tx,
+};
 use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;
 pub use uptrakit_web_api_types::api_tokens::{
     ApiTokenListResponse, ApiTokenResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
-
-struct AuditContext<'a> {
-    emitter: &'a uptrakit_audit_log::AuditEmitter,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_api_token_mutation_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_token_id: Option<Uuid>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
-
-    if let Some(token_id) = target_token_id {
-        builder = builder.target("api_token", token_id.to_string(), None);
-    }
-
-    if let Ok(entry) = builder.build() {
-        ctx.emitter.emit_best_effort(entry);
-    }
-}
 
 /// Create a new API token
 #[utoipa::path(
@@ -64,57 +41,101 @@ fn emit_api_token_mutation_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_api_token(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant: TenantContext,
-    api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateApiTokenRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let ctx = AuditContext {
-        emitter: &audit.0,
-        tenant_id: tenant.tenant_id,
-        user: &auth_user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&auth_user, api_token_id);
+    let tenant_id = tenant.tenant_id;
 
-    match api_token_svc
-        .create_token(auth_user.user_id, &req.name)
+    let raw_token = match generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to generate secure token: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let plaintext = format!("upk_{raw_token}");
+    let token_hash = hash_token(&plaintext);
+    let id = generate_uuid();
+    let created_at = OffsetDateTime::now_utc();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(created) => {
-            emit_api_token_mutation_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
-                Some(created.id),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "token_name": req.name,
-                }),
-            );
-            let response = CreateApiTokenResponse {
-                id: created.id,
-                token: SecretString::new(created.plaintext_token),
-                created_at: created.created_at,
-            };
-            (StatusCode::CREATED, Json(response)).into_response()
-        }
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!("Failed to create API token: {:?}", e);
-            emit_api_token_mutation_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "token_name": req.name,
-                    "reason_code": "api_token_create_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            tracing::error!("Failed to begin transaction for api token create: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let token_model = match create_api_token_in_tx(
+        &tx,
+        id,
+        auth_user.user_id,
+        &req.name,
+        token_hash,
+        created_at,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            drop(tx);
+            tracing::error!("Failed to create API token: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let after_view = ApiTokenView::from(&token_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::api_token_create(&AbsentView(&after_view), &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({ "token_name": req.name }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for api token create: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for api token create: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit api token create: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let response = CreateApiTokenResponse {
+        id: token_model.id,
+        token: SecretString::new(plaintext),
+        created_at: token_model.created_at,
+    };
+    (StatusCode::CREATED, Json(response)).into_response()
 }
 
 /// List user's API tokens
@@ -175,48 +196,93 @@ pub async fn list_api_tokens(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_api_token(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant: TenantContext,
-    api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let ctx = AuditContext {
-        emitter: &audit.0,
-        tenant_id: tenant.tenant_id,
-        user: &auth_user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&auth_user, api_token_id);
+    let tenant_id = tenant.tenant_id;
 
-    match api_token_svc
-        .revoke_token(token_id, auth_user.user_id)
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(()) => {
-            emit_api_token_mutation_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
-                Some(token_id),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for api token revoke: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        Err(_) => {
-            emit_api_token_mutation_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
-                Some(token_id),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "api_token_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "API token not found")
+    };
+
+    let pair = match revoke_api_token_in_tx(&tx, token_id, auth_user.user_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            drop(tx);
+            tracing::error!("Failed to revoke API token: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("api_token", token_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "api_token_not_found" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::NOT_FOUND, "API token not found");
+    };
+
+    let before_view = ApiTokenView::from(&before_model);
+    let after_view = ApiTokenView::from(&after_model);
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::api_token_revoke(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({}))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for api token revoke: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for api token revoke: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit api token revoke: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]
@@ -291,6 +357,17 @@ mod tests {
         );
         let details = row.details_json.expect("details");
         assert_eq!(details["token_name"], serde_json::json!("device-cli"));
+
+        // before snapshot is absent ({}), after snapshot has token fields
+        let before = row.before_snapshot.expect("before_snapshot");
+        assert_eq!(before, serde_json::json!({}));
+        let after = row.after_snapshot.expect("after_snapshot");
+        // id is excluded from snapshot (used as target_id only)
+        assert_eq!(after["name"], serde_json::json!("device-cli"));
+        assert!(
+            after.get("token_hash").is_none(),
+            "token_hash must not appear in snapshot"
+        );
     }
 
     #[tokio::test]
@@ -336,5 +413,23 @@ mod tests {
         assert_eq!(row.target_type.as_deref(), Some("api_token"));
         let expected_target_id = created.id.to_string();
         assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+
+        // before snapshot has name (id excluded — used as target_id only)
+        let before = row.before_snapshot.expect("before_snapshot");
+        assert_eq!(before["name"], serde_json::json!("build-agent"));
+        assert!(
+            before.get("token_hash").is_none(),
+            "token_hash must not appear in before snapshot"
+        );
+        // after snapshot has revoked_at set
+        let after = row.after_snapshot.expect("after_snapshot");
+        assert!(
+            !after["revoked_at"].is_null(),
+            "after snapshot must have revoked_at set"
+        );
+        assert!(
+            after.get("token_hash").is_none(),
+            "token_hash must not appear in after snapshot"
+        );
     }
 }
