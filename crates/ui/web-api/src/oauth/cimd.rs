@@ -701,4 +701,201 @@ mod tests {
             .len();
         assert_eq!(count, 0);
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Task 10 — material-change detection forces re-consent
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn material_change_marks_active_consents_for_revalidation() {
+        use uptrakit_shared_db::entity::user;
+        use uuid::Uuid;
+
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let now = *clock_cell.lock();
+        let fetcher = make_fetcher(db.clone(), Arc::clone(&clock_cell));
+
+        let server = MockServer::start_async().await;
+        let url = server.base_url();
+        seed_cached_row(&db, &url, now).await;
+
+        // Insert a user (FK target) and a consent for this client.
+        let user_id = Uuid::now_v7();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(uptrakit_shared_types::MaskedEmail::new(format!(
+                "u-{user_id}@example.com"
+            ))),
+            first_name: Set("U".into()),
+            last_name: Set("Ser".into()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        let consent_id = Uuid::now_v7();
+        oauth_consent::ActiveModel {
+            id: Set(consent_id),
+            user_id: Set(user_id),
+            client_id: Set(url.clone()),
+            scopes: Set("mcp:read".to_owned()),
+            cimd_content_hash_at_grant: Set(None),
+            revalidation_required_at: Set(None),
+            granted_at: Set(now),
+            revoked_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert consent");
+
+        // Now re-fetch with a *materially* different client_name field.
+        let new_body = serde_json::json!({
+            "client_id": url,
+            "redirect_uris": ["https://seeded.example.com/callback"],
+            "client_name": "RENAMED",
+        });
+        let body_str = new_body.to_string();
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200).body(&body_str);
+            })
+            .await;
+
+        let refetched = fetcher
+            .fetch_and_upsert(&url)
+            .await
+            .expect("refetch should succeed");
+        assert_eq!(refetched.client_name, "RENAMED");
+
+        // The consent row must now have revalidation_required_at set.
+        let consent_after = oauth_consent::Entity::find_by_id(consent_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("consent row");
+        assert!(
+            consent_after.revalidation_required_at.is_some(),
+            "active consent should be marked for revalidation on material change"
+        );
+    }
+
+    #[tokio::test]
+    async fn cosmetic_change_does_not_force_revalidation() {
+        use uptrakit_shared_db::entity::user;
+        use uuid::Uuid;
+
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let now = *clock_cell.lock();
+        let fetcher = make_fetcher(db.clone(), Arc::clone(&clock_cell));
+
+        let server = MockServer::start_async().await;
+        let url = server.base_url();
+
+        // Seed with a row whose metadata_raw contains exactly the same
+        // material fields we'll fetch — only a cosmetic `tos_uri` will differ.
+        let seed_body = serde_json::json!({
+            "client_id": url,
+            "redirect_uris": [format!("{url}/callback")],
+            "client_name": "App",
+            "tos_uri": "https://old.example.com/tos",
+        });
+        let active = oauth_client::ActiveModel {
+            id: Set(url.clone()),
+            client_name: Set("App".to_owned()),
+            client_uri: Set(None),
+            logo_uri: Set(None),
+            redirect_uris: Set(format!("[\"{url}/callback\"]")),
+            default_scope: Set(String::new()),
+            grant_types: Set("[\"authorization_code\"]".to_owned()),
+            response_types: Set("[\"code\"]".to_owned()),
+            token_endpoint_auth_method: Set("none".to_owned()),
+            client_secret_hash: Set(None),
+            registration_access_token_hash: Set(None),
+            created_via: Set("cimd_cache".to_owned()),
+            created_at: Set(now),
+            last_used_at: Set(None),
+            revoked_at: Set(None),
+            metadata_cached_at: Set(Some(now)),
+            metadata_etag: Set(None),
+            metadata_content_hash: Set(Some("seed-hash".to_owned())),
+            metadata_raw: Set(Some(seed_body.to_string())),
+            metadata_parse_error: Set(None),
+            metadata_parse_error_at: Set(None),
+            trusted_at: Set(None),
+        };
+        active.insert(&db).await.expect("seed row");
+
+        // Insert user and consent.
+        let user_id = Uuid::now_v7();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(uptrakit_shared_types::MaskedEmail::new(format!(
+                "u-{user_id}@example.com"
+            ))),
+            first_name: Set("U".into()),
+            last_name: Set("Ser".into()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        let consent_id = Uuid::now_v7();
+        oauth_consent::ActiveModel {
+            id: Set(consent_id),
+            user_id: Set(user_id),
+            client_id: Set(url.clone()),
+            scopes: Set("mcp:read".to_owned()),
+            cimd_content_hash_at_grant: Set(None),
+            revalidation_required_at: Set(None),
+            granted_at: Set(now),
+            revoked_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert consent");
+
+        // Re-fetch with the same material fields but a different `tos_uri`.
+        let refetched_body = serde_json::json!({
+            "client_id": url,
+            "redirect_uris": [format!("{url}/callback")],
+            "client_name": "App",
+            "tos_uri": "https://NEW.example.com/tos",
+        });
+        let body_str = refetched_body.to_string();
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200).body(&body_str);
+            })
+            .await;
+
+        fetcher
+            .fetch_and_upsert(&url)
+            .await
+            .expect("refetch should succeed");
+
+        // Consent must still be active (no revalidation_required_at).
+        let consent_after = oauth_consent::Entity::find_by_id(consent_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("consent row");
+        assert!(
+            consent_after.revalidation_required_at.is_none(),
+            "cosmetic-only change must NOT force revalidation"
+        );
+    }
 }
