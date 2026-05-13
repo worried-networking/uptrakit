@@ -65,3 +65,55 @@ pub fn authenticated_client(
     })
     .context_to()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serialize env-mutating tests so parallel test threads do not race on HOME.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run `f` with HOME pointing at an empty temp directory, then restore the
+    /// original value.  This prevents the test from reading real on-disk
+    /// config/credentials left by a logged-in developer session.
+    fn with_empty_home<F: FnOnce()>(f: F) {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        let tmp = std::env::temp_dir().join(format!(
+            "uptrakit-cli-test-home-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp home");
+        let prev = std::env::var_os("HOME");
+        // SAFETY: ENV_LOCK is held for the duration of this function, so no
+        // other thread in this process touches HOME concurrently.
+        unsafe { std::env::set_var("HOME", &tmp) };
+        f();
+        // SAFETY: same lock is still held; restoring HOME to its previous value.
+        match prev {
+            // SAFETY: ENV_LOCK is still held; no concurrent HOME access.
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            // SAFETY: ENV_LOCK is still held; no concurrent HOME access.
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        drop(std::fs::remove_dir_all(&tmp));
+    }
+
+    #[test]
+    fn resolve_server_and_token_returns_not_logged_in_when_both_absent() {
+        with_empty_home(|| {
+            resolve_server_and_token(None, None).unwrap_err();
+        });
+    }
+
+    #[test]
+    fn resolve_server_and_token_uses_overrides() {
+        let (server, token) =
+            resolve_server_and_token(Some("https://example.com"), Some("tok")).expect("ok");
+        assert_eq!(server, "https://example.com");
+        assert_eq!(token, "tok");
+    }
+}
