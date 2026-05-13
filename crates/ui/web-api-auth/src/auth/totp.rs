@@ -1,3 +1,4 @@
+use subtle::ConstantTimeEq;
 use totp_rs::{Algorithm, Secret, TOTP};
 
 /// Generate a new TOTP base32 secret suitable for storing in the DB.
@@ -44,7 +45,7 @@ pub fn verify_totp_code(secret: &str, code: &str) -> Option<i64> {
         }
         let step_time = (step as u64) * 30;
         let expected = totp.generate(step_time);
-        if expected == code {
+        if expected.as_bytes().ct_eq(code.as_bytes()).into() {
             return Some(step);
         }
     }
