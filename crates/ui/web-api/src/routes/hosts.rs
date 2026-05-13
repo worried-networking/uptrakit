@@ -4,9 +4,7 @@ use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
 };
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::hosts as host_queries;
 use crate::routes::service_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
@@ -16,9 +14,16 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter, RelationTrait, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
+};
 use std::sync::Arc;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_shared_db::entity::{host, prelude::*, service, service_host};
+use uptrakit_web_api_queries::queries::hosts::{
+    HostView, deactivate_host_in_tx, update_host_in_tx,
+};
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -30,36 +35,6 @@ pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
 };
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
-
-struct AuditContext<'a> {
-    state: &'a AppState,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_host_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target: Option<(Uuid, Option<String>)>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
-
-    if let Some((host_id, host_display)) = target {
-        builder = builder.target("host", host_id.to_string(), host_display);
-    }
-
-    if let Ok(entry) = builder.build() {
-        ctx.state.audit_emitter.emit_best_effort(entry);
-    }
-}
 
 // --- Endpoints ---
 
@@ -155,58 +130,102 @@ pub async fn update_host(
     Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
-    let ctx = state.mutation_context();
-    match host_actions::update(&tenant_db, &ctx, host_id, &body).await {
-        Ok(Some(resp)) => {
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
-                Some((resp.id, Some(resp.friendly_name.clone()))),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "friendly_name": resp.friendly_name,
-                    "changed_fields": if body.friendly_name.is_some() {
-                        vec!["friendly_name"]
-                    } else {
-                        Vec::<&str>::new()
-                    },
-                }),
-            );
-            (StatusCode::OK, Json(resp)).into_response()
-        }
-        Ok(None) => {
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
-                Some((host_id, None)),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "host_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Host not found")
-        }
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!("Failed to update host: {}", e);
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
-                Some((host_id, None)),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_update_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            tracing::error!("Failed to begin transaction for host update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let pair = match update_host_in_tx(&tx, tenant_id, host_id, &body).await {
+        Ok(p) => p,
+        Err(e) => {
+            drop(tx);
+            tracing::error!("Failed to update host: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("host", host_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "host_not_found" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::NOT_FOUND, "Host not found");
+    };
+
+    let before_view = HostView::from(&before_model);
+    let after_view = HostView::from(&after_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::host_update(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "changed_fields": if body.friendly_name.is_some() { vec!["friendly_name"] } else { Vec::<&str>::new() },
+        }))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for host update: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for host update: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit host update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let resp = match host_queries::get_active_host(&tenant_db, host_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) | Err(_) => {
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    state
+        .notification
+        .event_broadcaster
+        .send(
+            tenant_id,
+            uptrakit_web_api_types::events::AdminEvent::HostUpdated { id: host_id },
+        )
+        .await;
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Deactivate a host (soft-delete)
@@ -234,73 +253,94 @@ pub async fn deactivate_host(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
 ) -> Response {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
-    let existing_host = Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
-        .filter(host::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
-        .ok()
-        .flatten();
-    let ctx = state.mutation_context();
-    match host_actions::deactivate(&tenant_db, &ctx, host_id).await {
-        Ok(true) => {
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-                Some((
-                    host_id,
-                    existing_host
-                        .as_ref()
-                        .map(|host| host.friendly_name.clone()),
-                )),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-                Some((
-                    host_id,
-                    existing_host
-                        .as_ref()
-                        .map(|host| host.friendly_name.clone()),
-                )),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "host_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Host not found")
-        }
+    {
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!("Failed to deactivate host: {}", e);
-            emit_host_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-                Some((
-                    host_id,
-                    existing_host
-                        .as_ref()
-                        .map(|host| host.friendly_name.clone()),
-                )),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_deactivate_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            tracing::error!("Failed to begin transaction for host deactivate: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_model = match deactivate_host_in_tx(&tx, tenant_id, host_id).await {
+        Ok(m) => m,
+        Err(e) => {
+            drop(tx);
+            tracing::error!("Failed to deactivate host: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let Some(before_model) = before_model else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("host", host_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "host_not_found" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::NOT_FOUND, "Host not found");
+    };
+
+    let before_view = HostView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::host_deactivate(&before_view, &AbsentView(&before_view))
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({}))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for host deactivate: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for host deactivate: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit host deactivate: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    state
+        .notification
+        .event_broadcaster
+        .send(
+            tenant_id,
+            uptrakit_web_api_types::events::AdminEvent::HostDeleted { id: host_id },
+        )
+        .await;
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ── Autodiscovery endpoints ───────────────────────────────────────────────────
@@ -328,44 +368,47 @@ pub async fn discover_host(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
 ) -> Response {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     // Verify host belongs to tenant.
     let host_record = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
+        .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
         Ok(None) => {
-            emit_host_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
-                Some((host_id, None)),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "host_not_found",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "host_not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::NOT_FOUND, "Host not found");
         }
         Err(e) => {
             tracing::error!("DB error: {e}");
-            emit_host_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
-                Some((host_id, None)),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_lookup_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "host_lookup_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -384,15 +427,22 @@ pub async fn discover_host(
         Ok(l) => l,
         Err(e) => {
             tracing::error!("Failed to query service-host links: {e}");
-            emit_host_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
-                Some((host_id, Some(host_record.friendly_name.clone()))),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "host_service_link_lookup_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target(
+                "host",
+                host_id.to_string(),
+                Some(host_record.friendly_name.clone()),
+            )
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "host_service_link_lookup_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -402,22 +452,29 @@ pub async fn discover_host(
         trigger_discovery_for_agent_host(
             &state,
             link.service_id,
-            tenant_db.tenant_id(),
+            tenant_id,
             host_id,
             &host_record.machine_id,
         )
         .await;
     }
 
-    emit_host_audit(
-        &audit_ctx,
+    if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
-        Some((host_id, Some(host_record.friendly_name.clone()))),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "agents_notified": agents_notified,
-        }),
-    );
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .target(
+        "host",
+        host_id.to_string(),
+        Some(host_record.friendly_name.clone()),
+    )
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({ "agents_notified": agents_notified }))
+    .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
 
     (
         StatusCode::OK,
@@ -458,24 +515,25 @@ pub async fn batch_hosts(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        state: &state,
-        tenant_id: tenant_db.tenant_id(),
-        user: &caller,
-        api_token_id,
-    };
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
     if let Err(e) = body.validate() {
-        emit_host_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
             uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "update_kind": "batch_deactivate",
-                "reason_code": "invalid_request",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({
+            "update_kind": "batch_deactivate",
+            "reason_code": "invalid_request",
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -485,31 +543,39 @@ pub async fn batch_hosts(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch deactivate failed: {e}");
-                emit_host_audit(
-                    &audit_ctx,
+                if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                     uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-                    None,
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    serde_json::json!({
-                        "update_kind": "batch_deactivate",
-                        "reason_code": "host_batch_deactivate_failed",
-                    }),
-                );
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Failed)
+                .details(serde_json::json!({
+                    "update_kind": "batch_deactivate",
+                    "reason_code": "host_batch_deactivate_failed",
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
         unknown => {
-            emit_host_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                serde_json::json!({
-                    "update_kind": "batch_deactivate",
-                    "reason_code": "unknown_action",
-                    "action": unknown,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "update_kind": "batch_deactivate",
+                "reason_code": "unknown_action",
+                "action": unknown,
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown action: {unknown}. Supported: deactivate"),
@@ -517,24 +583,28 @@ pub async fn batch_hosts(
         }
     };
 
-    emit_host_audit(
-        &audit_ctx,
+    if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
-        None,
-        if failed.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Success
-        } else if succeeded_ids.is_empty() {
-            uptrakit_audit_log::AuditOutcome::Denied
-        } else {
-            uptrakit_audit_log::AuditOutcome::Partial
-        },
-        serde_json::json!({
-            "update_kind": "batch_deactivate",
-            "requested_count": body.ids.len(),
-            "deactivated_count": succeeded_ids.len(),
-            "failed_count": failed.len(),
-        }),
-    );
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(if failed.is_empty() {
+        AuditOutcome::Success
+    } else if succeeded_ids.is_empty() {
+        AuditOutcome::Denied
+    } else {
+        AuditOutcome::Partial
+    })
+    .details(serde_json::json!({
+        "update_kind": "batch_deactivate",
+        "requested_count": body.ids.len(),
+        "deactivated_count": succeeded_ids.len(),
+        "failed_count": failed.len(),
+    }))
+    .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -615,8 +685,23 @@ mod route_tests {
             row.outcome,
             uptrakit_audit_log::AuditOutcome::Success.as_str()
         );
+        assert_eq!(row.target_id.as_deref(), Some(host.id.to_string().as_str()));
+
+        // V2 stateful: before and after snapshots must be present
+        let before = row.before_snapshot.expect("before_snapshot");
+        assert_eq!(
+            before["friendly_name"],
+            serde_json::json!(host.friendly_name)
+        );
+
+        let after = row.after_snapshot.expect("after_snapshot");
+        assert_eq!(after["friendly_name"], serde_json::json!("Renamed Host"));
+
         let details = row.details_json.expect("details");
-        assert_eq!(details["friendly_name"], serde_json::json!("Renamed Host"));
+        assert_eq!(
+            details["changed_fields"],
+            serde_json::json!(["friendly_name"])
+        );
     }
 
     #[tokio::test]
@@ -646,6 +731,43 @@ mod route_tests {
         );
         let details = row.details_json.expect("details");
         assert_eq!(details["reason_code"], serde_json::json!("host_not_found"));
+    }
+
+    #[tokio::test]
+    async fn deactivate_host_writes_host_deactivate_stateful_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+        let host = insert_host(&app.db, app.tenant_id).await;
+
+        let status = client
+            .delete(&format!("/api/v1/hosts/{}", host.id))
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+            Some(host.id.to_string().as_str()),
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_id.as_deref(), Some(host.id.to_string().as_str()));
+
+        // V2 stateful: before snapshot has the host's friendly_name, after is {}
+        let before = row.before_snapshot.expect("before_snapshot");
+        assert_eq!(
+            before["friendly_name"],
+            serde_json::json!(host.friendly_name)
+        );
+
+        let after = row.after_snapshot.expect("after_snapshot");
+        assert_eq!(after, serde_json::json!({}));
     }
 
     #[tokio::test]
