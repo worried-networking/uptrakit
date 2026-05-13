@@ -17,10 +17,11 @@ use uuid::Uuid;
 const TTL_SECONDS: i64 = 600;
 
 /// Errors produced by [`OAuthAuthorizationRequestService`].
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum AuthorizationRequestError {
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 
     #[error("authorization request not found, expired, or already consumed")]
     NotFound,

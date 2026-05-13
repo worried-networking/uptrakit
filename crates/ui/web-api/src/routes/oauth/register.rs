@@ -223,7 +223,9 @@ pub async fn get_client_registration(
         return oauth_401("invalid registration access token");
     }
 
-    let resp = client_to_response(&client);
+    let Some(resp) = client_to_response(&client) else {
+        return oauth_500();
+    };
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -292,12 +294,27 @@ pub async fn update_client_registration(
         return oauth_400("invalid_client_metadata", &e.to_string());
     }
 
-    let redirect_uris_json =
-        serde_json::to_string(&req.redirect_uris).unwrap_or_else(|_| "[]".to_string());
-    let grant_types_json =
-        serde_json::to_string(&req.grant_types).unwrap_or_else(|_| "[]".to_string());
-    let response_types_json =
-        serde_json::to_string(&req.response_types).unwrap_or_else(|_| "[]".to_string());
+    let redirect_uris_json = match serde_json::to_string(&req.redirect_uris) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialize redirect_uris");
+            return oauth_500();
+        }
+    };
+    let grant_types_json = match serde_json::to_string(&req.grant_types) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialize grant_types");
+            return oauth_500();
+        }
+    };
+    let response_types_json = match serde_json::to_string(&req.response_types) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialize response_types");
+            return oauth_500();
+        }
+    };
 
     let mut active: oauth_client::ActiveModel = client.into();
     active.client_name = Set(req.client_name.clone());
@@ -317,7 +334,9 @@ pub async fn update_client_registration(
         }
     };
 
-    let resp = client_to_response(&updated);
+    let Some(resp) = client_to_response(&updated) else {
+        return oauth_500();
+    };
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -397,8 +416,29 @@ pub async fn delete_client_registration(
 /// The `registration_access_token` is omitted (`None`) — it is a one-time
 /// secret returned only in the initial POST response and must never be
 /// re-exposed on GET or PUT (RFC 7592 §2).
-fn client_to_response(client: &oauth_client::Model) -> DcrRegistrationResponse {
-    DcrRegistrationResponse::new(
+fn client_to_response(client: &oauth_client::Model) -> Option<DcrRegistrationResponse> {
+    let redirect_uris: Vec<String> = match serde_json::from_str(&client.redirect_uris) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to deserialize redirect_uris from db");
+            return None;
+        }
+    };
+    let grant_types: Vec<String> = match serde_json::from_str(&client.grant_types) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to deserialize grant_types from db");
+            return None;
+        }
+    };
+    let response_types: Vec<String> = match serde_json::from_str(&client.response_types) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to deserialize response_types from db");
+            return None;
+        }
+    };
+    Some(DcrRegistrationResponse::new(
         client.id.clone(),
         client.created_at.unix_timestamp(),
         None,
@@ -406,12 +446,12 @@ fn client_to_response(client: &oauth_client::Model) -> DcrRegistrationResponse {
         client.client_name.clone(),
         client.client_uri.clone(),
         client.logo_uri.clone(),
-        serde_json::from_str(&client.redirect_uris).unwrap_or_default(),
-        serde_json::from_str(&client.grant_types).unwrap_or_default(),
-        serde_json::from_str(&client.response_types).unwrap_or_default(),
+        redirect_uris,
+        grant_types,
+        response_types,
         client.token_endpoint_auth_method.clone(),
         client.default_scope.clone(),
-    )
+    ))
 }
 
 // ---------------------------------------------------------------------------

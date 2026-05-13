@@ -32,7 +32,7 @@ pub enum OAuthClientError {
     #[error("DCR per-IP lifetime cap exceeded")]
     RegistrationCapExceeded,
     #[error("database error")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthClientError>>;

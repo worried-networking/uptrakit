@@ -766,7 +766,8 @@ uptrakit_audit_log_derive::audit_actions! {
     oauth_consent_grant => OAUTH_CONSENT_GRANT, Event;
     oauth_consent_deny => OAUTH_CONSENT_DENY, Event;
     oauth_consent_revoke => OAUTH_CONSENT_REVOKE, Event;
-    oauth_rate_limited => OAUTH_RATE_LIMITED, Event
+    oauth_rate_limited => OAUTH_RATE_LIMITED, Event;
+    mcp_oauth_authenticate => MCP_OAUTH_AUTHENTICATE, Event
 }
 
 #[cfg(test)]

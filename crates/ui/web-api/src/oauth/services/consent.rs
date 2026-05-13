@@ -10,7 +10,7 @@ use sea_orm::{
 use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{oauth_consent, oauth_refresh_token};
+use uptrakit_shared_db::entity::{oauth_client, oauth_consent, oauth_refresh_token};
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ pub enum OAuthConsentError {
     #[error("consent not found or already revoked")]
     NotFound,
     #[error("database error")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthConsentError>>;
@@ -47,17 +47,30 @@ impl OAuthConsentService {
     /// Returns `true` when the consent screen may be skipped for this
     /// `(user_id, client_id, requested_scope)` triple.
     ///
-    /// Per spec §12.3, all four conditions must hold:
+    /// Per spec §12.3, all five conditions must hold:
     /// 1. A consent row exists for `(user_id, client_id)`.
     /// 2. `revoked_at IS NULL` — consent is active.
     /// 3. `revalidation_required_at IS NULL` — no forced re-prompt.
     /// 4. The granted scope set is a superset of `requested_scope`.
+    /// 5. The client is not unverified (`oauth_clients.trusted_at IS NOT NULL`).
     pub async fn should_skip_prompt(
         &self,
         user_id: Uuid,
         client_id: &str,
         requested_scope: &str,
     ) -> Result<bool> {
+        // Condition 5: unverified clients always require re-prompt.
+        let trusted = oauth_client::Entity::find_by_id(client_id)
+            .one(&self.db)
+            .await
+            .context_to()?
+            .map(|c| c.trusted_at.is_some())
+            .unwrap_or(false);
+
+        if !trusted {
+            return Ok(false);
+        }
+
         let row = oauth_consent::Entity::find()
             .filter(oauth_consent::Column::UserId.eq(user_id))
             .filter(oauth_consent::Column::ClientId.eq(client_id))
@@ -229,7 +242,7 @@ mod tests {
         id
     }
 
-    async fn insert_oauth_client(db: &DatabaseConnection) -> String {
+    async fn insert_oauth_client_with_trust(db: &DatabaseConnection, trusted: bool) -> String {
         let now = OffsetDateTime::now_utc();
         let client_id = format!("test-client-{}", Uuid::now_v7());
         oauth_client::ActiveModel {
@@ -254,12 +267,16 @@ mod tests {
             metadata_raw: Set(None),
             metadata_parse_error: Set(None),
             metadata_parse_error_at: Set(None),
-            trusted_at: Set(None),
+            trusted_at: Set(if trusted { Some(now) } else { None }),
         }
         .insert(db)
         .await
         .expect("insert oauth_client");
         client_id
+    }
+
+    async fn insert_oauth_client(db: &DatabaseConnection) -> String {
+        insert_oauth_client_with_trust(db, true).await
     }
 
     async fn insert_consent(
@@ -538,7 +555,32 @@ mod tests {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // Test 8 — revoke with wrong user returns NotFound
+    // Test 8 — should_skip returns false when client is unverified
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn should_skip_returns_false_when_client_unverified() {
+        let db = setup_migrated_db().await;
+        let user_id = insert_user(&db).await;
+        let client_id = insert_oauth_client_with_trust(&db, false).await;
+        insert_consent(&db, user_id, &client_id, "openid mcp:read mcp:write", None).await;
+
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let svc = OAuthConsentService::new(db, make_clock(Arc::clone(&clock_cell)));
+
+        let skip = svc
+            .should_skip_prompt(user_id, &client_id, "openid mcp:read")
+            .await
+            .expect("should_skip_prompt should succeed");
+
+        assert!(
+            !skip,
+            "unverified client (trusted_at IS NULL) must always re-prompt"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Test 9 — revoke with wrong user returns NotFound
     // ──────────────────────────────────────────────────────────────────────
 
     #[tokio::test]

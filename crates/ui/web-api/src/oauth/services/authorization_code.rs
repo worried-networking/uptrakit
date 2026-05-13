@@ -32,7 +32,7 @@ pub enum OAuthCodeError {
     #[error("invalid_target: resource mismatch")]
     InvalidTarget,
     #[error("database error")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthCodeError>>;

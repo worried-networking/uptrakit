@@ -50,10 +50,10 @@ pub enum OAuthRefreshError {
     ConsentRevoked,
     /// JWT signing failed when minting the new access token.
     #[error("jwt error: {0}")]
-    Jwt(#[from] crate::oauth::jwt::JwtError),
+    Jwt(crate::oauth::jwt::JwtError),
     /// Underlying database error.
     #[error("database error")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthRefreshError>>;
