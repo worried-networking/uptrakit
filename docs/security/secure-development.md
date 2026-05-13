@@ -257,3 +257,19 @@ credentials **must** be added to the `encrypt_message_configs()` /
 
 See [NATS Integration — Plugin Config Protection](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the full mechanism.
+
+## TLS hot-swap idioms
+
+Controller and Agent both rely on `rustls 0.23` trait-object hot-swap
+patterns:
+
+- `rustls::client::ResolvesClientCert` (Agent) — swap Agent cert without
+  reconnecting the WebSocket.
+- `rustls::server::ResolvesServerCert` (Controller) — swap server cert
+  without rebuilding `ServerConfig`.
+- `DynamicClientVerifier` (Controller) — wraps `WebPkiClientVerifier`
+  behind `arc_swap::ArcSwap`; CRL rebuilds and CA-bundle updates swap
+  the verifier in place.
+
+All three hold an `arc_swap::ArcSwap<_>` inner and are installed once
+on the relevant `Config` at startup. See spec §5.4.
