@@ -25,7 +25,10 @@ use uptrakit_shared_db::entity::{oauth_client, oauth_consent};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
+use uptrakit_web_api_auth::auth::rate_limit::{RateLimitOutcome, RateLimitStore};
+
 use crate::oauth::cimd_parser::{self, CimdDocument, CimdParseError};
+use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -54,9 +57,24 @@ pub enum CimdFetchError {
     /// CIMD document's `client_id` field does not equal the fetch URL.
     #[error("client_id in CIMD document does not match fetch URL")]
     ClientIdMismatch,
+    /// Rate limit exceeded for this `(source_ip, metadata_url)` bucket.
+    ///
+    /// Per spec §14.2: 5 requests per minute per `(source_ip, metadata_url)`.
+    #[error("rate limited: too many CIMD fetch attempts for this source IP + URL")]
+    RateLimited,
     /// Database error during upsert or cascade-revalidation.
     #[error("database error")]
     Database(sea_orm::DbErr),
+}
+
+impl CimdFetchError {
+    /// Returns `true` when this error is a rate-limit rejection.
+    ///
+    /// Callers in route handlers use this instead of `match .current_context()`
+    /// to stay compatible with the project's `check_legacy_error_matches` gate.
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited)
+    }
 }
 
 impl_report_conversion!(sea_orm::DbErr => CimdFetchError::Database);
@@ -83,6 +101,7 @@ pub struct CimdFetcher {
     clock: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
     db: DatabaseConnection,
     audit_emitter: Arc<AuditEmitter>,
+    rate_limiter: OAuthRateLimiter,
 }
 
 impl CimdFetcher {
@@ -129,11 +148,13 @@ impl CimdFetcher {
             .timeout(Duration::from_secs(60))
             .dns_resolver(Arc::new(resolver))
             .build()?;
+        let rate_limiter = OAuthRateLimiter::new(RateLimitStore::new(db.clone()));
         Ok(Self {
             client,
             clock,
             db,
             audit_emitter,
+            rate_limiter,
         })
     }
 
@@ -154,6 +175,7 @@ impl CimdFetcher {
     /// entry is emitted.
     ///
     /// # Errors
+    /// - [`CimdFetchError::RateLimited`] — rate limit exceeded for `(source_ip, url)` bucket
     /// - [`CimdFetchError::Http`] — network fetch failed
     /// - [`CimdFetchError::BodyTooLarge`] — response exceeded 64 KB
     /// - [`CimdFetchError::UnparseableFirstFetch`] — first-ever fetch produced
@@ -164,7 +186,24 @@ impl CimdFetcher {
     pub async fn fetch_and_upsert(
         &self,
         url: &str,
+        source_ip: Option<&str>,
     ) -> std::result::Result<oauth_client::Model, Report<CimdFetchError>> {
+        // -------------------------------------------------------------------
+        // Step 0: Rate-limit check per spec §14.2 — 5/min per (source_ip, url).
+        // -------------------------------------------------------------------
+        let bucket = format!("{}:{}", source_ip.unwrap_or("unknown"), url);
+        match self
+            .rate_limiter
+            .check(EndpointKind::CimdFetch, &bucket)
+            .await
+        {
+            Ok(RateLimitOutcome::Limited { .. }) => bail!(CimdFetchError::RateLimited),
+            Ok(RateLimitOutcome::Allowed) => {}
+            Err(e) => {
+                tracing::error!(error = %e, "CIMD rate limit check failed; allowing request");
+            }
+        }
+
         // -------------------------------------------------------------------
         // Step 1: HTTP fetch
         // -------------------------------------------------------------------
@@ -462,6 +501,7 @@ mod tests {
     )]
 
     use super::*;
+    use crate::oauth::rate_limit::EndpointKind;
     use crate::test_harness::setup_migrated_db;
     use httpmock::prelude::*;
     use parking_lot::Mutex;
@@ -518,7 +558,7 @@ mod tests {
             .await;
 
         let model = fetcher
-            .fetch_and_upsert(&base)
+            .fetch_and_upsert(&base, None)
             .await
             .expect("happy path should succeed");
 
@@ -550,7 +590,7 @@ mod tests {
             .await;
 
         let err = fetcher
-            .fetch_and_upsert(&server.base_url())
+            .fetch_and_upsert(&server.base_url(), None)
             .await
             .expect_err("oversized body should be rejected");
         assert!(matches!(
@@ -576,7 +616,7 @@ mod tests {
             .await;
 
         let err = fetcher
-            .fetch_and_upsert(&server.base_url())
+            .fetch_and_upsert(&server.base_url(), None)
             .await
             .expect_err("mismatched client_id should be rejected");
         assert!(matches!(
@@ -650,7 +690,7 @@ mod tests {
             .await;
 
         let refetched = fetcher
-            .fetch_and_upsert(&url)
+            .fetch_and_upsert(&url, None)
             .await
             .expect("parse failure on re-fetch should not error");
 
@@ -685,7 +725,7 @@ mod tests {
             .await;
 
         let err = fetcher
-            .fetch_and_upsert(&server.base_url())
+            .fetch_and_upsert(&server.base_url(), None)
             .await
             .expect_err("first fetch with unparseable bytes must error");
         assert!(matches!(
@@ -769,7 +809,7 @@ mod tests {
             .await;
 
         let refetched = fetcher
-            .fetch_and_upsert(&url)
+            .fetch_and_upsert(&url, None)
             .await
             .expect("refetch should succeed");
         assert_eq!(refetched.client_name, "RENAMED");
@@ -883,7 +923,7 @@ mod tests {
             .await;
 
         fetcher
-            .fetch_and_upsert(&url)
+            .fetch_and_upsert(&url, None)
             .await
             .expect("refetch should succeed");
 
@@ -897,5 +937,103 @@ mod tests {
             consent_after.revalidation_required_at.is_none(),
             "cosmetic-only change must NOT force revalidation"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Task 12 — CIMD rate-limit per spec §14.2
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Exhaust the per-(source_ip, url) bucket and verify the (N+1)-th call
+    /// returns `CimdFetchError::RateLimited` without hitting the network.
+    ///
+    /// The `CimdFetch` window is 5 requests per minute. We issue 5 calls with
+    /// a fixed source IP + URL, then verify the 6th is rate-limited.
+    #[tokio::test]
+    async fn fetch_and_upsert_rate_limited_after_window_exhausted() {
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let fetcher = make_fetcher(db.clone(), Arc::clone(&clock_cell));
+
+        let server = MockServer::start_async().await;
+        let url = server.base_url();
+        let body = cimd_body(&url, "Rate Test App");
+        let body_str = body.to_string();
+
+        // Serve a valid CIMD document for all successful requests.
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(&body_str);
+            })
+            .await;
+
+        let source_ip = "203.0.113.50";
+        let limit = EndpointKind::CimdFetch.default_per_window() as usize;
+
+        // Exhaust the window.
+        for i in 0..limit {
+            fetcher
+                .fetch_and_upsert(&url, Some(source_ip))
+                .await
+                .unwrap_or_else(|e| panic!("request {}/{limit} should succeed: {e}", i + 1));
+        }
+
+        // The (limit+1)-th request must be rate-limited.
+        let err = fetcher
+            .fetch_and_upsert(&url, Some(source_ip))
+            .await
+            .expect_err("request beyond window must be rate-limited");
+        assert!(
+            matches!(err.current_context(), CimdFetchError::RateLimited),
+            "expected RateLimited, got: {:?}",
+            err.current_context()
+        );
+    }
+
+    /// A different source IP must not be affected by another IP's exhausted bucket.
+    #[tokio::test]
+    async fn fetch_and_upsert_different_ips_have_independent_buckets() {
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let fetcher = make_fetcher(db.clone(), Arc::clone(&clock_cell));
+
+        let server = MockServer::start_async().await;
+        let url = server.base_url();
+        let body = cimd_body(&url, "Bucket Test App");
+        let body_str = body.to_string();
+
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(&body_str);
+            })
+            .await;
+
+        let ip_a = "203.0.113.60";
+        let ip_b = "203.0.113.61";
+        let limit = EndpointKind::CimdFetch.default_per_window() as usize;
+
+        // Exhaust ip_a's bucket.
+        for _ in 0..limit {
+            let _ = fetcher.fetch_and_upsert(&url, Some(ip_a)).await;
+        }
+        let rate_limited = fetcher
+            .fetch_and_upsert(&url, Some(ip_a))
+            .await
+            .expect_err("ip_a should be rate-limited");
+        assert!(matches!(
+            rate_limited.current_context(),
+            CimdFetchError::RateLimited
+        ));
+
+        // ip_b's first request must still be allowed.
+        fetcher
+            .fetch_and_upsert(&url, Some(ip_b))
+            .await
+            .expect("ip_b should not be affected by ip_a's exhausted bucket");
     }
 }
