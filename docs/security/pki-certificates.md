@@ -117,6 +117,24 @@ See also: [Secure Development](secure-development.md) for the general PKI securi
 - Renewals reuse the CSR flow with a fresh keypair.
 - The controller stores CA history in the database and includes all non-expired certificates in the trust bundle.
 
+## Service identity (SPIFFE)
+
+Every issued Service certificate carries a Subject Alternative Name URI of
+the form `spiffe://<trust_domain>/service/<service_id>`. `<trust_domain>`
+is the Controller's `[tls] trust_domain` setting (defaults to the first
+server-cert SAN); `<service_id>` is the UUIDv7 assigned during enrollment.
+
+CN remains in the Subject for the duration of the natural cert renewal
+cycle (≤2 years). A follow-up spec removes the CN once every Service has
+renewed at least once.
+
+The Controller's CSR signer rejects any CSR whose SPIFFE URI does not
+match the configured trust domain or whose `service_id` segment does not
+match the enrolling service's ID. Identity extraction prefers the SPIFFE
+SAN; falls back to CN when absent.
+
+See ADR-0011 for rationale.
+
 ## CA Rotation Flow
 
 1. Background task checks every 24 hours for CAs entering the 6-month rotation window. Admins can also trigger rotation
@@ -165,13 +183,11 @@ Changing the PKI address requires CA rotation (the URLs are embedded in the CA c
 
 ### DER encoding implementation
 
-AIA and CDP extension bodies are manually DER-encoded in `crates/core/controller/src/pki.rs`.
-The encoder supports the 2-byte long-form length encoding (`0x82`), which covers extension bodies
-up to 65 535 bytes. Extension bodies exceeding this limit are rejected with `PkiError::LengthOverflow`
-rather than silently truncating the high byte and producing a structurally malformed extension.
-
-In practice, AIA/CDP extension bodies are small (two or three short URLs; typically under 300 bytes)
-so the overflow guard is a safety net, not an expected code path.
+AIA and CDP extension bodies are encoded via `x509-cert::ext::pkix` builders
+(`AuthorityInfoAccessSyntax`, `CrlDistributionPoints`, `AccessDescription`,
+`DistributionPoint`) plus `der::Encode::to_der`. The `der` crate enforces
+DER length encoding correctly across all sizes; the historical hand-rolled
+2-byte-long-form length encoder and its 64 KB safety guard have been removed.
 
 ## OCSP Responder
 
@@ -258,6 +274,20 @@ See also:
 
 Pass `--ca-cert` and `--ca-key` to disable managed CA and rotation. The controller uses the provided CA as-is.
 
+## Agent / Service trust composition
+
+The Agent's `RootCertStore` is built from up to three sources, each
+opt-in via CLI flag:
+
+| Source                | Flag                   | Default |
+| --------------------- | ---------------------- | ------- |
+| Controller-CA bundle  | (always included)      | yes     |
+| `webpki-roots`        | `--trust-public-roots` | no      |
+| `rustls-native-certs` | `--trust-native-roots` | no      |
+
+See `docs/security/tofu-tls.md` for the full mode + composition surface
+and ADR-0012 for the rationale.
+
 ## Server Certificate Auto-Renewal
 
 When the server HTTPS certificate (also CA-signed) approaches expiry, a background task generates a new one and
@@ -303,6 +333,14 @@ needs to **sign** (OCSP responses, CRLs, certificates), also accept a `CaKeyStor
 
 Controllers poll the `pki.ca_version` settings key to detect CA changes made by other instances and reload both the
 public snapshot and key store.
+
+### Dynamic Client Verifier
+
+CRL rebuilds and CA-bundle updates hot-swap a `WebPkiClientVerifier`
+wrapped behind `arc_swap::ArcSwap` (`DynamicClientVerifier`) without
+rebuilding `rustls::ServerConfig` or restarting the HTTPS listener. The
+verifier is installed once at Controller startup and replaced atomically
+on every CRL refresh or CA-bundle change.
 
 ### Settings Snapshot Sharing
 
