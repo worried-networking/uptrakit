@@ -423,6 +423,66 @@ Add new subsections:
 
 ---
 
+## Task 12a: AppState call-site migration (Plan 2 Task 13 carry-over)
+
+**Context:** Plan 2 Task 13 was deferred. AppState already carries watch receivers for
+config sections (added in Plan 1) but the legacy direct-owned fields and their downstream
+call sites were never migrated.
+
+**Files:**
+
+- Modify: `crates/ui/web-api/src/app_state.rs`
+- Modify: `crates/core/controller-runtime/src/lib.rs`
+- Modify: every call site that reads `state.audit_log_filter` directly
+
+### Part A — `audit_log_filter` call-site migration
+
+`AuditDispatcherReloadable` already publishes updated `AuditConfig` snapshots through
+`app_state.audit_log_filter_rx: watch::Receiver<Arc<AuditConfig>>`. The legacy
+`pub audit_log_filter: AuditFilter` field is stale and bypasses the reload path.
+
+- [ ] **Step 1:** `rg -n 'audit_log_filter' crates/` — list every consumer.
+- [ ] **Step 2:** At each consumer, replace `state.audit_log_filter` with
+      `state.audit_log_filter_rx.borrow().clone()` (returns `Arc<AuditConfig>`; unwrap the
+      inner `AuditFilter` as needed).
+- [ ] **Step 3:** Remove the `pub audit_log_filter` field and its builder method from
+      `app_state.rs`. The initial value must flow through `audit_log_filter_rx` instead.
+- [ ] **Step 4:** Confirm `audit_log_dispatcher` and `audit_emitter` do **not** need
+      watch-receiver conversion — the reloadable updates config in-place on the shared Arc;
+      the instances themselves stay stable.
+- [ ] **Step 5:** `cargo test -p uptrakit-web-api -p uptrakit-controller-runtime`
+
+### Part B — DB pool spawn-site migration
+
+`DbPoolReloadable` publishes fresh `Arc<DbConnHandle>` handles but AppState still hands
+a cloned `DatabaseConnection` directly to every `tokio::spawn` site. Long-lived tasks
+that capture a bare `DatabaseConnection` via `move` pin the old pool forever.
+
+Approximately 7 sites in `controller-runtime/src/{lib,tasks}.rs` are affected (CRL
+manager, audit enricher, denylist cleanup, zeroconf advertiser, embedded-service bridges,
+ca_reload, pki_http). Pattern to apply (documented in Plan 4 Task 12):
+
+1. **Re-read pattern** (preferred for loop bodies): hold
+   `watch::Receiver<Arc<DbConnHandle>>` in captured set; call
+   `let db = state.db_rx.borrow().clone().conn().clone()` at top of every iteration.
+2. **Watch-driven re-spawn pattern** (for tasks holding connection state across
+   iterations): `select!` on `db_rx.changed()` and the worker handle; abort + respawn on
+   pool change.
+
+- [ ] **Step 1:** Add `pub db_rx: watch::Receiver<Arc<DbConnHandle>>` to `AppState` and
+      wire it from `DbPoolReloadable::receiver()` in `boot_config`/`lib.rs`.
+- [ ] **Step 2:** `rg -n 'tokio::spawn.*\bdb\b|tokio::spawn.*db_conn' crates/core/` —
+      enumerate all affected sites.
+- [ ] **Step 3:** Convert each site to pattern (1) or (2). One commit per site or
+      logical group.
+- [ ] **Step 4:** Integration test — boot against in-memory SQLite, trigger
+      `db.pool_size` reload, assert `Arc::strong_count` on the prior `DbConnHandle` drops to
+      zero within 5 s.
+- [ ] **Step 5:** Full quality gate suite.
+- [ ] **Step 6:** Commit — `feat(controller-runtime): AppState watch-receiver migration`
+
+---
+
 ## Task 13: `docs/development/plugin-guidelines.md` updates
 
 **Files:**
