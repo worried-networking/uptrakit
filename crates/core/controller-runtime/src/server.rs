@@ -49,6 +49,17 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
             cfg.app_state.audit_emitter.clone(),
             cfg.app_state.shutdown_token.clone(),
             Arc::clone(&cfg.app_state.update_dispatcher),
+            cfg.app_state.oauth.enabled,
+            if cfg.app_state.oauth.enabled {
+                Some(Arc::clone(&cfg.app_state.oauth.verifier))
+            } else {
+                None
+            },
+            if cfg.app_state.oauth.enabled {
+                Some(Arc::new(cfg.app_state.oauth.canonical.clone()))
+            } else {
+                None
+            },
         );
         router = router.merge(uptrakit_mcp::build_mcp_router(mcp_state));
     }

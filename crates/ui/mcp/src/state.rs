@@ -8,6 +8,7 @@ use uptrakit_controller_core::auth::AuthState;
 use uptrakit_controller_core::db::DbState;
 use uptrakit_controller_core::settings::Settings;
 use uptrakit_controller_core::update::UpdateDispatcher;
+use uptrakit_web_api_types::oauth::{CanonicalUrlConfig, McpOAuthJwtVerifier};
 
 /// Focused state struct for the MCP server.
 ///
@@ -30,6 +31,9 @@ pub struct McpState {
     pub audit_emitter: AuditEmitter,
     pub shutdown_token: CancellationToken,
     pub update_dispatcher: Arc<dyn UpdateDispatcher>,
+    pub oauth_enabled: bool,
+    pub oauth_verifier: Option<Arc<McpOAuthJwtVerifier>>,
+    pub oauth_canonical: Option<Arc<CanonicalUrlConfig>>,
 }
 
 impl McpState {
@@ -48,6 +52,9 @@ impl McpState {
         audit_emitter: AuditEmitter,
         shutdown_token: CancellationToken,
         update_dispatcher: Arc<dyn UpdateDispatcher>,
+        oauth_enabled: bool,
+        oauth_verifier: Option<Arc<McpOAuthJwtVerifier>>,
+        oauth_canonical: Option<Arc<CanonicalUrlConfig>>,
     ) -> Self {
         Self {
             db,
@@ -58,6 +65,9 @@ impl McpState {
             audit_emitter,
             shutdown_token,
             update_dispatcher,
+            oauth_enabled,
+            oauth_verifier,
+            oauth_canonical,
         }
     }
 }
