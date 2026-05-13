@@ -493,6 +493,10 @@ async fn send_service_settings(
     if let Some(tid) = tenant_id {
         settings = settings.with_tenant_id(tid);
     }
+    let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
+    if !trust_domain.is_empty() {
+        settings = settings.with_trust_domain(trust_domain);
+    }
     let settings_msg = ControllerMessage::ServiceSettings(settings);
 
     let json = serialize_controller_msg(out_seq, settings_msg).ok_or(())?;

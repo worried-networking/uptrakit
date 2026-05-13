@@ -61,6 +61,9 @@ pub(crate) struct ValidatedConfig {
 /// Result of loading the TOML config file at startup.
 pub(crate) struct BootedConfig {
     /// Parsed and validated runtime configuration (used for further startup wiring).
+    ///
+    /// Read at boot to wire `trust_domain` from `[tls]` into `RcgenAgentCertSigner`.
+    /// Also consumed by Plan 2 tasks to seed subsystem-level Reloadables.
     pub runtime: uptrakit_config_reload::RuntimeConfig,
     /// Coordinator (not yet spawned). Caller adds Reloadables via
     /// [`uptrakit_config_reload::ReloadCoordinator::extend_reloadables`], extracts

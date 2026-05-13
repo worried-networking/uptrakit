@@ -48,13 +48,6 @@ impl RcgenAgentCertSigner {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "builder method — wired from config once the trust_domain setting is plumbed; call site added in a follow-up task"
-        )
-    )]
     pub(crate) fn with_trust_domain(mut self, domain: String) -> Self {
         self.trust_domain = if domain.is_empty() {
             None
