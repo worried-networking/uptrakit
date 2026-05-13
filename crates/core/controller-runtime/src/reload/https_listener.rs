@@ -229,7 +229,8 @@ mod tests {
         let mut net = NetworkConfig::default();
         net.https = make_https_cfg("127.0.0.1:9");
         r.apply(Arc::new(net)).await.unwrap();
-        let _ = rx.changed().await; // consume the apply event
+        #[allow(clippy::let_underscore_must_use)]
+        let _ = rx.changed().await.ok(); // consume the apply event
 
         // Revert should broadcast the original address.
         r.revert().await.unwrap();
