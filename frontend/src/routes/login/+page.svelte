@@ -43,6 +43,7 @@
 	let loginFieldErrors = $state<LoginFieldErrors>({ email: '', password: '' });
 	let registrationTokenError = $state('');
 	let linkPasswordError = $state('');
+	let _authContext = $state<string | null>(null);
 
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
@@ -53,6 +54,8 @@
 
 	$effect(() => {
 		const params = page.url.searchParams;
+
+		_authContext = params.get('_auth_context');
 
 		const oidcCode = params.get('oidc_code');
 		if (oidcCode && processedOidcCode !== oidcCode) {
