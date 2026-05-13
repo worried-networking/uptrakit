@@ -942,9 +942,6 @@ async fn spawn_background_tasks(
         tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.auth.token_denylist));
     bg.track("denylist-cleanup", h);
 
-    let h = tasks::spawn_settings_reload(bg.child_token(), Arc::clone(app_state));
-    bg.track("settings-reload", h);
-
     if ca_managed {
         let h = tasks::spawn_ca_reload(
             bg.child_token(),

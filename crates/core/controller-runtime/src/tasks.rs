@@ -274,36 +274,6 @@ pub(crate) fn spawn_denylist_cleanup(
     })
 }
 
-/// Periodic settings version check for cross-instance cache invalidation.
-pub(crate) fn spawn_settings_reload(
-    token: CancellationToken,
-    app_state: Arc<AppState>,
-) -> JoinHandle<()> {
-    let settings = app_state.settings.clone();
-    let db = app_state.db().clone();
-    let tid = app_state.default_tenant_id;
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(durations::SETTINGS_POLL_INTERVAL);
-        // Skip the first immediate tick — settings were just loaded
-        interval.tick().await;
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    match settings.check_version_and_reload(&db, tid).await {
-                        Ok(true) => tracing::info!("settings reloaded from database (version changed)"),
-                        Ok(false) => tracing::debug!("settings version unchanged"),
-                        Err(e) => tracing::warn!(error = ?e, "periodic settings version check failed"),
-                    }
-                }
-                _ = token.cancelled() => {
-                    tracing::debug!("settings reload task shutting down");
-                    break;
-                }
-            }
-        }
-    })
-}
-
 /// Polls the CA version counter in the database to detect cross-instance CA updates.
 pub(crate) fn spawn_ca_reload(
     token: CancellationToken,
