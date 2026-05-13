@@ -5,7 +5,8 @@
 //! - Upsert and delete entries on behalf of services.
 
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, QueryFilter,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -18,6 +19,40 @@ pub struct ServiceConfigRow {
     pub key: String,
     /// Plaintext JSON value (decrypted if sensitive).
     pub value: serde_json::Value,
+}
+
+/// Audit view for a service config entry.
+///
+/// The `value` field is intentionally excluded — it may be sensitive.
+pub struct ServiceConfigView {
+    pub service_name: String,
+    pub key: String,
+    pub tenant_id: Option<Uuid>,
+    pub sensitive: bool,
+}
+
+impl uptrakit_audit_log::AuditView for ServiceConfigView {
+    const TARGET_TYPE: &'static str = "service_config";
+
+    fn audit_target_id(&self) -> String {
+        match self.tenant_id {
+            Some(tid) => format!("{}:{}:{}", self.service_name, tid, self.key),
+            None => format!("{}:global:{}", self.service_name, self.key),
+        }
+    }
+
+    fn audit_target_display(&self) -> Option<String> {
+        Some(self.key.clone())
+    }
+
+    fn audit_view(&self) -> serde_json::Value {
+        serde_json::json!({
+            "service_name": self.service_name,
+            "key": self.key,
+            "tenant_id": self.tenant_id,
+            "sensitive": self.sensitive,
+        })
+    }
 }
 
 /// Load all config entries for a given `service_name`.
@@ -165,6 +200,177 @@ pub async fn delete(
             .exec(db)
             .await?;
         Ok(result.rows_affected > 0)
+    }
+}
+
+/// Upsert a config entry within an existing transaction.
+///
+/// Returns `(before, after, plaintext_value)`:
+/// - `before` is `None` when inserting a new row, `Some(old_view)` when updating.
+/// - `after` is always the new state.
+/// - `plaintext_value` is the decrypted value for broadcasting.
+pub async fn upsert_in_tx(
+    tx: &impl ConnectionTrait,
+    service_name: &str,
+    tenant_id: Option<Uuid>,
+    key: &str,
+    value: serde_json::Value,
+    sensitive: bool,
+) -> Result<
+    (
+        Option<ServiceConfigView>,
+        ServiceConfigView,
+        serde_json::Value,
+    ),
+    sea_orm::DbErr,
+> {
+    let stored_value = if sensitive {
+        encrypt_value(&value, service_name, key)
+    } else {
+        value.to_string()
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let after_view = ServiceConfigView {
+        service_name: service_name.to_string(),
+        key: key.to_string(),
+        tenant_id,
+        sensitive,
+    };
+
+    let before_view = if let Some(tid) = tenant_id {
+        // Tenant-scoped upsert.
+        let existing = tenant_service_config::Entity::find()
+            .filter(tenant_service_config::Column::ServiceName.eq(service_name))
+            .filter(tenant_service_config::Column::TenantId.eq(tid))
+            .filter(tenant_service_config::Column::Key.eq(key))
+            .one(tx)
+            .await?;
+
+        if let Some(existing) = existing {
+            let before = ServiceConfigView {
+                service_name: service_name.to_string(),
+                key: key.to_string(),
+                tenant_id,
+                sensitive: existing.is_sensitive,
+            };
+            let mut active: tenant_service_config::ActiveModel = existing.into();
+            active.value = Set(stored_value);
+            active.is_sensitive = Set(sensitive);
+            active.updated_at = Set(now);
+            active.update(tx).await?;
+            Some(before)
+        } else {
+            let active = tenant_service_config::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                service_name: Set(service_name.to_string()),
+                tenant_id: Set(tid),
+                key: Set(key.to_string()),
+                value: Set(stored_value),
+                is_sensitive: Set(sensitive),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            active.insert(tx).await?;
+            None
+        }
+    } else {
+        // Global upsert.
+        let existing = global_service_config::Entity::find()
+            .filter(global_service_config::Column::ServiceName.eq(service_name))
+            .filter(global_service_config::Column::Key.eq(key))
+            .one(tx)
+            .await?;
+
+        if let Some(existing) = existing {
+            let before = ServiceConfigView {
+                service_name: service_name.to_string(),
+                key: key.to_string(),
+                tenant_id,
+                sensitive: existing.is_sensitive,
+            };
+            let mut active: global_service_config::ActiveModel = existing.into();
+            active.value = Set(stored_value);
+            active.is_sensitive = Set(sensitive);
+            active.updated_at = Set(now);
+            active.update(tx).await?;
+            Some(before)
+        } else {
+            let active = global_service_config::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                service_name: Set(service_name.to_string()),
+                key: Set(key.to_string()),
+                value: Set(stored_value),
+                is_sensitive: Set(sensitive),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            active.insert(tx).await?;
+            None
+        }
+    };
+
+    Ok((before_view, after_view, value))
+}
+
+/// Delete a config entry within an existing transaction.
+///
+/// Returns `Some(before_view)` if the row existed, `None` if not found.
+pub async fn delete_in_tx(
+    tx: &impl ConnectionTrait,
+    service_name: &str,
+    tenant_id: Option<Uuid>,
+    key: &str,
+) -> Result<Option<ServiceConfigView>, sea_orm::DbErr> {
+    if let Some(tid) = tenant_id {
+        // Check if entry exists first so we can build the before view.
+        let existing = tenant_service_config::Entity::find()
+            .filter(tenant_service_config::Column::ServiceName.eq(service_name))
+            .filter(tenant_service_config::Column::TenantId.eq(tid))
+            .filter(tenant_service_config::Column::Key.eq(key))
+            .one(tx)
+            .await?;
+
+        if let Some(existing) = existing {
+            let before = ServiceConfigView {
+                service_name: service_name.to_string(),
+                key: key.to_string(),
+                tenant_id: Some(tid),
+                sensitive: existing.is_sensitive,
+            };
+            tenant_service_config::Entity::delete_many()
+                .filter(tenant_service_config::Column::ServiceName.eq(service_name))
+                .filter(tenant_service_config::Column::TenantId.eq(tid))
+                .filter(tenant_service_config::Column::Key.eq(key))
+                .exec(tx)
+                .await?;
+            Ok(Some(before))
+        } else {
+            Ok(None)
+        }
+    } else {
+        let existing = global_service_config::Entity::find()
+            .filter(global_service_config::Column::ServiceName.eq(service_name))
+            .filter(global_service_config::Column::Key.eq(key))
+            .one(tx)
+            .await?;
+
+        if let Some(existing) = existing {
+            let before = ServiceConfigView {
+                service_name: service_name.to_string(),
+                key: key.to_string(),
+                tenant_id: None,
+                sensitive: existing.is_sensitive,
+            };
+            global_service_config::Entity::delete_many()
+                .filter(global_service_config::Column::ServiceName.eq(service_name))
+                .filter(global_service_config::Column::Key.eq(key))
+                .exec(tx)
+                .await?;
+            Ok(Some(before))
+        } else {
+            Ok(None)
+        }
     }
 }
 
