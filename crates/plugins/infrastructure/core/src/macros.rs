@@ -49,6 +49,10 @@ macro_rules! declare_plugin {
                 host_requirements: $infra_hr:expr,
                 capabilities: $infra_caps:expr $(,)?
             } )?
+            $(, release_fetcher_create: {
+                create: $rf_create_fn:expr,
+                host_requirements: $rf_hr:expr $(,)?
+            } )?
             $(, owned_surface_ids: $surface_action_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, global_provider_consumers: [ $( $global_provider_consumer:expr ),+ $(,)? ] )?
@@ -259,6 +263,12 @@ macro_rules! declare_plugin {
                         let _ = stringify!($infra_create_fn);
                     }
                 )?
+                $(
+                    rc.release_fetcher = Some($crate::ReleaseFetcherSlot {
+                        create: $rf_create_fn,
+                        host_requirements: $rf_hr,
+                    });
+                )?
                 rc
             },
             surface_actions: $crate::__optional_static_ref!(surface_actions
@@ -407,6 +417,7 @@ macro_rules! __define_role_creator {
         pub(super) fn create_release_fetcher(
             config: &serde_json::Value,
             runtime: std::sync::Arc<dyn $crate::HostRuntime>,
+            _ctx: &$crate::ReleaseFetchContext,
         ) -> $crate::error::Result<Box<dyn $crate::ReleaseFetcher>> {
             let cfg: $config = serde_json::from_value(config.clone()).map_err(|e| {
                 rootcause::report!($crate::PluginError::Configuration(format!(
@@ -500,7 +511,7 @@ macro_rules! __set_role_field {
         });
     };
     ($rc:ident, ReleaseFetcher, $hr:expr) => {
-        $rc.release_fetcher = Some($crate::RoleSlot {
+        $rc.release_fetcher = Some($crate::ReleaseFetcherSlot {
             create: __descriptor_impl::create_release_fetcher,
             host_requirements: $hr,
         });
