@@ -100,6 +100,7 @@ pub struct RepositoryTreeResponse {
 pub struct RepositoryTreeEntry {
     pub path: String,
     pub kind: RepositoryTreeEntryKind,
+    pub sha: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,6 +408,7 @@ struct RepositoryTreeEntryDto {
     path: String,
     #[serde(rename = "type")]
     kind: String,
+    sha: String,
 }
 
 impl RepositoryTreeDto {
@@ -428,6 +430,7 @@ impl RepositoryTreeDto {
                 Ok(RepositoryTreeEntry {
                     path: entry.path,
                     kind,
+                    sha: entry.sha,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -673,8 +676,8 @@ mod tests {
             then.status(200).json_body(serde_json::json!({
                 "truncated": false,
                 "tree": [
-                    { "path": "svg/nginx.svg", "type": "blob" },
-                    { "path": "svg", "type": "tree" }
+                    { "path": "svg/nginx.svg", "type": "blob", "sha": "aabbcc1122334455aabbcc1122334455aabbcc11" },
+                    { "path": "svg", "type": "tree", "sha": "bbccdd2233445566bbccdd2233445566bbccdd22" }
                 ]
             }));
         });
@@ -735,7 +738,7 @@ mod tests {
             then.status(200).json_body(serde_json::json!({
                 "truncated": false,
                 "tree": [
-                    { "path": "svg/nginx.svg", "type": "symlink" }
+                    { "path": "svg/nginx.svg", "type": "symlink", "sha": "aabbcc1122334455aabbcc1122334455aabbcc11" }
                 ]
             }));
         });
@@ -758,5 +761,48 @@ mod tests {
         assert!(matches!(error, GitHubClientError::InvalidResponse(_)));
         assert_eq!(decision, RetryDecision::DoNotRetry);
         assert_eq!(meta.status, Some(http::StatusCode::OK));
+    }
+
+    #[tokio::test]
+    async fn fetch_repository_tree_populates_sha_from_response() {
+        use httpmock::Method::GET;
+        use httpmock::MockServer;
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET)
+                .path("/repos/owner/repo/git/trees/main")
+                .query_param("recursive", "1");
+            then.status(200).json_body(serde_json::json!({
+                "truncated": false,
+                "tree": [
+                    {
+                        "path": "skills/brainstorming",
+                        "type": "tree",
+                        "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                    }
+                ]
+            }));
+        });
+
+        let client = GitHubClient::new(GitHubClientConfig::new(
+            reqwest::Client::new(),
+            url::Url::parse(&server.base_url()).unwrap(),
+            GitHubAuth::Anonymous,
+            "uptrakit-test",
+        ));
+
+        let outcome = client
+            .fetch_repository_tree("owner", "repo", "main", true)
+            .await
+            .unwrap();
+        let AttemptOutcome::Success(tree, _) = outcome else {
+            panic!("expected success");
+        };
+        assert_eq!(tree.entries.len(), 1);
+        assert_eq!(
+            tree.entries[0].sha,
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        );
     }
 }
