@@ -434,7 +434,16 @@ async fn handle_controller_message<H: ServiceHandler>(
             .await
             .context_to::<LoopError>(),
         Some(ControllerMessage::ServiceSettings(settings)) => {
-            process_service_settings(&settings, handler, conn, loop_state, identity, ctx).await;
+            process_service_settings(
+                &settings,
+                handler,
+                conn,
+                cert_handler,
+                loop_state,
+                identity,
+                ctx,
+            )
+            .await;
             Ok(None)
         }
         Some(ControllerMessage::CaBundleUpdated(payload)) => {
@@ -497,6 +506,7 @@ async fn process_service_settings<H: ServiceHandler>(
     settings: &ServiceSettingsPayload,
     handler: &mut H,
     conn: &mut ControllerConnection,
+    cert_handler: &mut CertificateRenewalHandler,
     loop_state: &mut LoopState<'_>,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
@@ -513,6 +523,15 @@ async fn process_service_settings<H: ServiceHandler>(
     conn.set_agreed_capabilities(agreed.clone());
     conn.set_report_page_limits(settings.report_page_limits.clone());
     tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
+
+    // Propagate the trust domain so future CSRs embed a SPIFFE URI SAN.
+    if !settings.trust_domain.is_empty() {
+        tracing::debug!(
+            trust_domain = %settings.trust_domain,
+            "received SPIFFE trust domain from controller"
+        );
+        cert_handler.trust_domain.clone_from(&settings.trust_domain);
+    }
 
     handle_service_settings(settings, loop_state, identity, ctx).await;
 

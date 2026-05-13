@@ -151,6 +151,13 @@ pub struct CertificateRenewalHandler {
     /// Expected lifetime of issued certificates in hours. Used to compute
     /// the `should_force_reconnect` threshold.
     pub cert_lifetime_hours: u32,
+    /// SPIFFE trust domain received from the controller via `ServiceSettings`.
+    ///
+    /// When non-empty, CSRs generated during renewal embed a SPIFFE URI SAN
+    /// of the form `spiffe://<trust_domain>/service/<service_id>`.
+    /// Empty string means no URI SAN (backwards-compatible with controllers
+    /// that do not advertise a trust domain).
+    pub trust_domain: String,
 }
 
 impl CertificateRenewalHandler {
@@ -160,7 +167,16 @@ impl CertificateRenewalHandler {
             pending_renewal_key: None,
             cert_resolver: None,
             cert_lifetime_hours: 168,
+            trust_domain: String::new(),
         }
+    }
+
+    /// Set the SPIFFE trust domain. Call when `ServiceSettings` arrives.
+    ///
+    /// When non-empty, subsequent CSRs will include a SPIFFE URI SAN.
+    pub fn with_trust_domain(mut self, trust_domain: String) -> Self {
+        self.trust_domain = trust_domain;
+        self
     }
 
     /// Set the certificate resolver. Call before entering the event loop.
@@ -339,7 +355,7 @@ impl CertificateRenewalHandler {
         let service_id = identity
             .service_id()
             .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?;
-        let (mut key_pem, csr_pem) = generate_keypair_and_csr(&service_id.to_string())?;
+        let (mut key_pem, csr_pem) = generate_keypair_and_csr(service_id, &self.trust_domain)?;
         // Shrink to exact length so `Zeroizing` wipes the full allocation on drop.
         key_pem.shrink_to_fit();
         debug_assert_eq!(
