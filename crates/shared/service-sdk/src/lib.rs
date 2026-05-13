@@ -74,6 +74,7 @@ pub mod surface_proxy;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod tls;
+pub mod tofu;
 pub mod tracing_init;
 pub(crate) mod ws;
 
