@@ -99,6 +99,21 @@ pub enum AuthError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("MFA challenge not found or already consumed")]
+    MfaChallengeNotFound,
+
+    #[error("MFA challenge has expired")]
+    MfaChallengeExpired,
+
+    #[error("MFA challenge exhausted (too many failed attempts)")]
+    MfaChallengeExhausted,
+
+    #[error("MFA code is invalid")]
+    MfaCodeInvalid,
+
+    #[error("Email delivery unavailable")]
+    EmailDeliveryUnavailable,
 }
 
 pub type Result<T> = std::result::Result<T, Report<AuthError>>;

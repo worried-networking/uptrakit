@@ -405,7 +405,7 @@ pub async fn register(
         match state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
         {
             Ok(token) => token,
             Err(e) => {
@@ -593,7 +593,7 @@ pub async fn login(
         match state
             .auth
             .jwt
-            .create_access_token(user.id, &permissions, "password", None)
+            .create_access_token(user.id, &permissions, "password", None, None)
         {
             Ok(token) => token,
             Err(e) => {
@@ -1890,6 +1890,7 @@ pub async fn refresh(
         &permissions,
         auth_method,
         oidc_provider_id,
+        None,
     ) {
         Ok(token) => token,
         Err(e) => {

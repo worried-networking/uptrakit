@@ -644,6 +644,7 @@ async fn merge_preview_allows_update_without_delete_but_execute_forbids_it() {
             &[Permission::UpdateSoftware],
             "password",
             None,
+            None,
         )
         .expect("mint update-only token");
 

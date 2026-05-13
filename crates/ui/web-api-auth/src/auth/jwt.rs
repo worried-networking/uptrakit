@@ -28,6 +28,11 @@ pub struct AccessTokenClaims {
     /// rejects them because `aud` is in `required_spec_claims`.
     #[serde(default)]
     pub aud: Vec<String>,
+    /// Present and `true` when the user has not yet completed MFA setup.
+    /// Omitted entirely from the JWT payload when `None` to keep token size
+    /// minimal for the common case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_required: Option<bool>,
 }
 
 pub struct JwtManager {
@@ -45,12 +50,17 @@ impl JwtManager {
     }
 
     /// Create a signed JWT access token.
+    ///
+    /// Pass `setup_required: Some(true)` when the user has not yet completed
+    /// MFA setup so that clients can redirect to the setup flow. Pass `None`
+    /// (the common case) to omit the claim from the token entirely.
     pub fn create_access_token(
         &self,
         user_id: uuid::Uuid,
         permissions: &[Permission],
         auth_method: &str,
         oidc_provider_id: Option<uuid::Uuid>,
+        setup_required: Option<bool>,
     ) -> Result<String> {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
@@ -64,6 +74,7 @@ impl JwtManager {
             exp: now + ACCESS_TOKEN_EXPIRY_SECS,
             iss: "uptrakit".to_string(),
             aud: vec!["uptrakit".to_string()],
+            setup_required,
         };
 
         jsonwebtoken::encode(&Header::default(), &claims, &self.encoding_key)
@@ -107,6 +118,7 @@ mod tests {
     )]
 
     use super::*;
+    use base64::Engine as _;
 
     fn test_manager() -> JwtManager {
         JwtManager::from_secret(b"test-secret-key-for-jwt-testing-only-do-not-use")
@@ -119,7 +131,7 @@ mod tests {
         let permissions = vec![Permission::ViewSettings, Permission::UpdateServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
@@ -140,7 +152,7 @@ mod tests {
         let permissions = vec![Permission::ViewServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id), None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
@@ -163,7 +175,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
 
         let token = manager1
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let result = manager2.decode_access_token(&token);
@@ -224,10 +236,39 @@ mod tests {
 
         let user_id = uuid::Uuid::now_v7();
         let token = manager1
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let claims = manager2.decode_access_token(&token).unwrap();
         assert_eq!(claims.sub, user_id.to_string());
+    }
+
+    #[test]
+    fn setup_required_claim_round_trips() {
+        let manager = JwtManager::from_secret(b"test-secret-that-is-long-enough!!");
+        let user_id = uuid::Uuid::now_v7();
+        let token = manager
+            .create_access_token(user_id, &[], "password", None, Some(true))
+            .expect("encode");
+        let claims = manager.decode_access_token(&token).expect("decode");
+        assert_eq!(claims.setup_required, Some(true));
+    }
+
+    #[test]
+    fn setup_required_absent_when_none() {
+        let manager = JwtManager::from_secret(b"test-secret-that-is-long-enough!!");
+        let user_id = uuid::Uuid::now_v7();
+        let token = manager
+            .create_access_token(user_id, &[], "password", None, None)
+            .expect("encode");
+        let claims = manager.decode_access_token(&token).expect("decode");
+        assert_eq!(claims.setup_required, None);
+        // Verify the JSON payload does not contain the field when None.
+        let parts: Vec<&str> = token.split('.').collect();
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[1])
+            .expect("decode b64");
+        let json: serde_json::Value = serde_json::from_slice(&payload).expect("json");
+        assert!(json.get("setup_required").is_none());
     }
 }

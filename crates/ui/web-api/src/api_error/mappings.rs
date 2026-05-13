@@ -915,6 +915,36 @@ impl From<Report<AuthError>> for ApiError {
                 "auth.internal",
                 Some(format_report_summary(&report)),
             ),
+            MfaChallengeNotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "MFA challenge not found or already consumed.",
+                "auth.mfa_challenge_not_found",
+                None,
+            ),
+            MfaChallengeExpired => ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "MFA challenge has expired.",
+                "auth.mfa_challenge_expired",
+                None,
+            ),
+            MfaChallengeExhausted => ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "MFA challenge exhausted (too many failed attempts).",
+                "auth.mfa_challenge_exhausted",
+                None,
+            ),
+            MfaCodeInvalid => ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "MFA code is invalid.",
+                "auth.mfa_code_invalid",
+                None,
+            ),
+            EmailDeliveryUnavailable => ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Email delivery is currently unavailable.",
+                "auth.email_delivery_unavailable",
+                None,
+            ),
         }
     }
 }

@@ -513,6 +513,7 @@ mod tests {
                 &[crate::auth::permissions::Permission::ManageAuthSettings],
                 "password",
                 None,
+                None,
             )
             .expect("create access token");
 
@@ -545,7 +546,7 @@ mod tests {
         // Mint a token with NO ManageAuthSettings permission.
         let user_id = uuid::Uuid::nil();
         let token = jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create access token");
 
         let status = client

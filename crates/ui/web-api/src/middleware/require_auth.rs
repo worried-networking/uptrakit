@@ -533,7 +533,7 @@ mod tests {
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         // Build app with auth middleware
@@ -679,7 +679,7 @@ mod tests {
         let other_jwt = JwtManager::from_secret(b"different-secret");
         let user_id = generate_uuid();
         let token = other_jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let app = Router::new()
@@ -754,7 +754,7 @@ mod tests {
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         let auth_user = authenticate_jwt(&state, &jwt_token).await.unwrap();
