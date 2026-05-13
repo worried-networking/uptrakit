@@ -948,7 +948,8 @@ pub async fn create_rule(
             {
                 state.audit_emitter.emit_event(entry);
             }
-            let status = match err.current_context() {
+            let ctx = err.current_context();
+            let status = match ctx {
                 notif_queries::RuleQueryError::ChannelNotFound => StatusCode::NOT_FOUND,
                 notif_queries::RuleQueryError::InvalidField(_) => StatusCode::BAD_REQUEST,
                 notif_queries::RuleQueryError::Db(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -1161,7 +1162,8 @@ pub async fn update_rule(
             {
                 state.audit_emitter.emit_event(entry);
             }
-            let status = match err.current_context() {
+            let ctx = err.current_context();
+            let status = match ctx {
                 notif_queries::RuleQueryError::InvalidField(_) => StatusCode::BAD_REQUEST,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };

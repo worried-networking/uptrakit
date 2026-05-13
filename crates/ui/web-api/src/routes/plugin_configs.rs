@@ -719,7 +719,8 @@ pub async fn update_plugin_config(
         Ok(p) => p,
         Err(err) => {
             drop(tx);
-            let (status, reason_code) = match err.current_context() {
+            let ctx = err.current_context();
+            let (status, reason_code) = match ctx {
                 pc_queries::PluginConfigError::EmptyName => (StatusCode::BAD_REQUEST, "empty_name"),
                 pc_queries::PluginConfigError::ConfigValidation(_) => {
                     (StatusCode::BAD_REQUEST, "config_validation_failed")

@@ -69,7 +69,7 @@ fn emit_mfa_audit(
         .details(serde_json::Value::Object(details));
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

@@ -389,7 +389,7 @@ async fn authorization_code_grant(
                     }))
                     .build();
                 if let Ok(entry) = entry {
-                    state.audit_emitter.emit_best_effort(entry);
+                    state.audit_emitter.emit_event(entry);
                 }
                 return oauth_400("invalid_client", "client has been revoked");
             }
@@ -405,7 +405,7 @@ async fn authorization_code_grant(
                 }))
                 .build();
             if let Ok(entry) = entry {
-                state.audit_emitter.emit_best_effort(entry);
+                state.audit_emitter.emit_event(entry);
             }
             return oauth_400("invalid_client", "unknown client_id");
         }
@@ -428,7 +428,7 @@ async fn authorization_code_grant(
             }))
             .build();
         if let Ok(entry) = entry {
-            state.audit_emitter.emit_best_effort(entry);
+            state.audit_emitter.emit_event(entry);
         }
         return oauth_400("invalid_target", "resource indicator not accepted");
     }
@@ -554,7 +554,7 @@ async fn authorization_code_grant(
         }))
         .build();
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 
     let body = TokenResponse::new(
