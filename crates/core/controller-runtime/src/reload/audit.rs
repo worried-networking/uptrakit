@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn audit_validate_rejects_invalid_filter() {
         let cfg = AuditConfig::new("invalid", 90);
-        assert!(cfg.validate().is_err());
+        cfg.validate().unwrap_err();
     }
 
     #[tokio::test(flavor = "current_thread")]

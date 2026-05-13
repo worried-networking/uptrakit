@@ -112,7 +112,7 @@ mod tests {
         let (r, _) = EmbeddedServicesReloadable::new(initial);
         let mut changed = EmbeddedServicesConfig::default();
         changed.agent = true; // topology change
-        assert!(r.validate(&changed).is_err());
+        r.validate(&changed).unwrap_err();
         assert!(
             r.validate(&changed)
                 .unwrap_err()
