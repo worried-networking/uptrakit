@@ -55,7 +55,7 @@ pub(crate) fn code_error_to_response(
                 }))
                 .build();
             if let Ok(entry) = entry {
-                audit_emitter.emit_best_effort(entry);
+                audit_emitter.emit_event(entry);
             }
             oauth_400("invalid_grant", reason)
         }
@@ -70,7 +70,7 @@ pub(crate) fn code_error_to_response(
                 }))
                 .build();
             if let Ok(entry) = entry {
-                audit_emitter.emit_best_effort(entry);
+                audit_emitter.emit_event(entry);
             }
             oauth_400("invalid_target", "resource indicator mismatch")
         }

@@ -56,7 +56,7 @@ fn emit_mfa_audit(
         .target("user", user_id.to_string(), None);
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

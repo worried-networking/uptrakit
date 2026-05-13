@@ -226,7 +226,8 @@ pub async fn create_software_item(
             {
                 state.audit_emitter.emit_event(entry);
             }
-            return match err.current_context() {
+            let ctx = err.current_context();
+            return match ctx {
                 item_queries::SoftwareItemQueryError::DuplicateItem => error_response(
                     StatusCode::CONFLICT,
                     "A software item with this name already exists",
@@ -543,7 +544,8 @@ pub async fn update_software_item(
                 {
                     state.audit_emitter.emit_event(entry);
                 }
-                return match err.current_context() {
+                let ctx = err.current_context();
+                return match ctx {
                     item_queries::SoftwareItemQueryError::EmptyName => {
                         error_response(StatusCode::BAD_REQUEST, "name must not be empty")
                     }
@@ -1055,7 +1057,8 @@ pub async fn assign_hosts(
         {
             state.audit_emitter.emit_event(entry);
         }
-        return match err.current_context() {
+        let ctx = err.current_context();
+        return match ctx {
             item_queries::SoftwareItemQueryError::NotFound => {
                 error_response(StatusCode::NOT_FOUND, "Software item not found")
             }
@@ -1424,7 +1427,8 @@ pub async fn update_host_assignment(
         {
             state.audit_emitter.emit_event(entry);
         }
-        return match err.current_context() {
+        let ctx = err.current_context();
+        return match ctx {
             item_queries::SoftwareItemQueryError::NotFound => error_response(
                 StatusCode::NOT_FOUND,
                 "Software item or host assignment not found",

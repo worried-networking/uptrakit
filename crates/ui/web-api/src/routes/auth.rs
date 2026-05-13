@@ -637,7 +637,7 @@ pub async fn login(
         .outcome(uptrakit_audit_log::AuditOutcome::Success)
         .build()
         {
-            state.audit_emitter.emit_best_effort(entry);
+            state.audit_emitter.emit_event(entry);
         }
 
         return (
