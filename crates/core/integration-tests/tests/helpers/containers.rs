@@ -191,7 +191,7 @@ impl ServiceContainer {
                 "uptrakit-agent-ssh".to_string(),
                 "--url".to_string(),
                 format!("https://{controller_name}:{CONTROLLER_PORT}"),
-                "--tofu".to_string(),
+                "--tofu-insecure".to_string(),
                 "--allow-plaintext-secrets".to_string(),
             ])
             .with_env_var("UPTRAKIT_ENROLLMENT_TOKEN", ENROLLMENT_TOKEN)
@@ -208,7 +208,7 @@ impl ServiceContainer {
     /// Start a service container with the standard flags.
     ///
     /// All services (agent, scheduler, mqtt) use the same CLI pattern:
-    /// `<binary> --url https://<controller>:8443 --tofu`
+    /// `<binary> --url https://<controller>:8443 --tofu-insecure`
     /// with `UPTRAKIT_ENROLLMENT_TOKEN` set via env var.
     ///
     /// Waits for the "enrollment complete, certificate saved to disk" log
@@ -228,7 +228,7 @@ impl ServiceContainer {
                 binary.to_string(),
                 "--url".to_string(),
                 format!("https://{controller_name}:{CONTROLLER_PORT}"),
-                "--tofu".to_string(),
+                "--tofu-insecure".to_string(),
             ])
             .with_env_var("UPTRAKIT_ENROLLMENT_TOKEN", token)
             .with_network(network)

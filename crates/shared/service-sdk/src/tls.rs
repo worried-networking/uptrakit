@@ -15,6 +15,7 @@ use crate::error::{EnrollmentError, Result, TlsError};
 // ── TrustOptions ─────────────────────────────────────────────────────
 
 /// Options controlling which root certificate sources to include.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TrustOptions {
     /// Add compiled-in `webpki-roots` (major public CAs).
