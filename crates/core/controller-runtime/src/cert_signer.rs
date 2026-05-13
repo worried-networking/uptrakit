@@ -159,7 +159,11 @@ fn sign_agent_csr(
         if let Some(uri) = spiffe_uri {
             let parsed = url::Url::parse(&uri)
                 .map_err(|e| report!(CertSignerError::CsrSpiffeParse(e.to_string())))?;
-            let actual_domain = parsed.host_str().unwrap_or("");
+            let actual_domain = parsed.host_str().ok_or_else(|| {
+                report!(CertSignerError::CsrSpiffeParse(
+                    "SPIFFE URI has no host".to_string()
+                ))
+            })?;
             if actual_domain != expected_domain {
                 bail!(CertSignerError::CsrTrustDomainMismatch {
                     expected: expected_domain.to_owned(),
