@@ -8,6 +8,7 @@ use clap::Parser;
 use uptrakit_openapi_client::Uuid;
 
 // Sub-enum re-imports for tests that destructure into nested variants.
+use commands::auth::{AuthCommands, CaCommands};
 use commands::autodiscovery::IgnoresCommands;
 use commands::settings::{
     AuthenticationCommands, CertificateCommands, NatsCommands, NetworkCommands, OidcCommands,
@@ -2048,6 +2049,112 @@ fn access_presets_list_parses() {
         args.command,
         Some(Commands::AccessPresets {
             command: AccessPresetsCommands::List
+        })
+    ));
+}
+
+// -- auth login --tofu tests --
+
+#[test]
+fn auth_login_tofu_bare_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "auth", "login", "--tofu"]).expect("should parse");
+    match args.command {
+        Some(Commands::Auth {
+            command: AuthCommands::Login { tofu },
+        }) => {
+            assert!(tofu.is_some());
+            assert_eq!(tofu.as_deref(), Some(""));
+        }
+        _ => panic!("expected Auth Login"),
+    }
+}
+
+#[test]
+fn auth_login_tofu_with_fingerprint_parses() {
+    let fp = "a".repeat(64);
+    let args = Cli::try_parse_from(["uptrakit", "auth", "login", &format!("--tofu={fp}")])
+        .expect("should parse");
+    match args.command {
+        Some(Commands::Auth {
+            command: AuthCommands::Login { tofu },
+        }) => {
+            assert_eq!(tofu.as_deref(), Some(fp.as_str()));
+        }
+        _ => panic!("expected Auth Login"),
+    }
+}
+
+#[test]
+fn auth_login_without_tofu_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "auth", "login"]).expect("should parse");
+    match args.command {
+        Some(Commands::Auth {
+            command: AuthCommands::Login { tofu },
+        }) => {
+            assert!(tofu.is_none());
+        }
+        _ => panic!("expected Auth Login"),
+    }
+}
+
+// -- auth ca subcommand tests --
+
+#[test]
+fn auth_ca_trust_bare_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "auth", "ca", "trust"]).expect("should parse");
+    match args.command {
+        Some(Commands::Auth {
+            command:
+                AuthCommands::Ca {
+                    command: CaCommands::Trust { tofu },
+                },
+        }) => {
+            assert!(tofu.is_none());
+        }
+        _ => panic!("expected Auth Ca Trust"),
+    }
+}
+
+#[test]
+fn auth_ca_trust_with_tofu_parses() {
+    let fp = "a".repeat(64);
+    let args = Cli::try_parse_from(["uptrakit", "auth", "ca", "trust", &format!("--tofu={fp}")])
+        .expect("should parse");
+    match args.command {
+        Some(Commands::Auth {
+            command:
+                AuthCommands::Ca {
+                    command: CaCommands::Trust { tofu },
+                },
+        }) => {
+            assert_eq!(tofu.as_deref(), Some(fp.as_str()));
+        }
+        _ => panic!("expected Auth Ca Trust"),
+    }
+}
+
+#[test]
+fn auth_ca_status_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "auth", "ca", "status"]).expect("should parse");
+    assert!(matches!(
+        args.command,
+        Some(Commands::Auth {
+            command: AuthCommands::Ca {
+                command: CaCommands::Status
+            }
+        })
+    ));
+}
+
+#[test]
+fn auth_ca_forget_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "auth", "ca", "forget"]).expect("should parse");
+    assert!(matches!(
+        args.command,
+        Some(Commands::Auth {
+            command: AuthCommands::Ca {
+                command: CaCommands::Forget
+            }
         })
     ));
 }
