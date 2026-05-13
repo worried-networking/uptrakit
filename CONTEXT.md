@@ -90,6 +90,12 @@ Software Discovery.
 The web UI through which Operators manage the system.
 _Avoid_: frontend, web app, admin panel
 
+**Dynamic Client Verifier**:
+The Controller-side wrapper around `rustls::server::WebPkiClientVerifier` that exposes an
+`ArcSwap` inner verifier. Lets CRL rebuilds and CA-bundle updates hot-swap the verifier
+without rebuilding `rustls::ServerConfig`.
+_Avoid_: verifier reload (overloaded with graceful-reload terminology).
+
 **Operator**:
 A person using the Dashboard or CLI to manage Updates and Hosts.
 _Avoid_: user, admin (too generic)
@@ -97,6 +103,12 @@ _Avoid_: user, admin (too generic)
 **MQTT Service**:
 The Service that exposes an MQTT interface for third-party integrations (e.g. Home Assistant).
 Not the core Controller↔Service transport (which is WSS).
+
+**SPIFFE Service Identity**:
+A Service's identity carried as a URI Subject Alternative Name on its client certificate,
+of the form `spiffe://<trust_domain>/service/<service_id>`. Replaces CN-only identity over
+the natural cert renewal cycle.
+_Avoid_: service URI, workload ID (SPIFFE has a precise term).
 
 **Surface**:
 A named UI extension point in the Dashboard, declared at a specific Slot, that built-ins,
@@ -112,6 +124,18 @@ _Avoid_: placeholder, region
 **Surface Provider**:
 A built-in, Plugin, or Service that registers a Surface into a Slot at runtime.
 _Avoid_: plugin provider (conflates with Plugin), contributor
+
+**TOFU mode**:
+One of `system`, `pin-fingerprint`, `pin-spki`, `insecure-tofu`. Selected at Service boot
+via a mutually-exclusive CLI flag. Determines how the Service verifies the Controller's
+TLS certificate during bootstrap and on reconnects when no CA bundle has been persisted.
+_Avoid_: TOFU enabled (ambiguous — every mode is "enabled" in some sense).
+
+**Trust Domain**:
+A string in the `[tls]` Config Section naming the Controller's SPIFFE namespace. Defaults
+to the first server-cert SAN. Must match the trust-domain segment of every Service's
+SPIFFE URI SAN.
+_Avoid_: domain (overloaded), namespace (Kubernetes overload).
 
 ## Relationships
 
