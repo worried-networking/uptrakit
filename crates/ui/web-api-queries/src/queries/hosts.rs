@@ -1,6 +1,6 @@
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, FromQueryResult, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, FromQueryResult, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -14,6 +14,41 @@ use uptrakit_web_api_types::services::ServiceStatus;
 use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
+
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+/// Audit snapshot for a host entity.
+///
+/// `tenant_id` is excluded from the snapshot: it is available as context and
+/// must not be repeated in the snapshot payload.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "host")]
+pub struct HostView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub hostname: String,
+    pub friendly_name: String,
+    pub os_type: Option<String>,
+    pub os_version: Option<String>,
+    pub architecture: Option<String>,
+    pub ip_address: Option<String>,
+}
+
+impl From<&host::Model> for HostView {
+    fn from(m: &host::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            hostname: m.hostname.clone(),
+            friendly_name: m.friendly_name.clone(),
+            os_type: m.os_type.clone(),
+            os_version: m.os_version.clone(),
+            architecture: m.architecture.clone(),
+            ip_address: m.ip_address.clone(),
+        }
+    }
+}
 
 // --- Private helpers ---
 
@@ -430,6 +465,66 @@ pub async fn batch_deactivate_hosts(
     }
 
     Ok((succeeded, failed))
+}
+
+// ---------------------------------------------------------------------------
+// Transaction-aware helpers (for emit_stateful callers)
+// ---------------------------------------------------------------------------
+
+/// Update a host's friendly_name inside a caller-managed `BEGIN IMMEDIATE`
+/// transaction. Returns `Some((before, after))` on success, `None` if not
+/// found or already deactivated.
+#[tracing::instrument(skip_all)]
+pub async fn update_host_in_tx(
+    tx: &DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    body: &UpdateHostRequest,
+) -> Result<Option<(host::Model, host::Model)>, sea_orm::DbErr> {
+    use sea_orm::EntityTrait;
+    let Some(before) = host::Entity::find_by_id(id)
+        .filter(host::Column::TenantId.eq(tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let mut active: host::ActiveModel = before.clone().into();
+    if let Some(ref name) = body.friendly_name {
+        active.friendly_name = Set(name.clone());
+    }
+    active.updated_at = Set(OffsetDateTime::now_utc());
+    let after = active.update(tx).await?;
+    Ok(Some((before, after)))
+}
+
+/// Soft-delete a host inside a caller-managed `BEGIN IMMEDIATE` transaction.
+/// Returns `Some(before)` on success, `None` if not found or already
+/// deactivated.
+#[tracing::instrument(skip_all)]
+pub async fn deactivate_host_in_tx(
+    tx: &DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<host::Model>, sea_orm::DbErr> {
+    use sea_orm::EntityTrait;
+    let Some(before) = host::Entity::find_by_id(id)
+        .filter(host::Column::TenantId.eq(tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let mut active: host::ActiveModel = before.clone().into();
+    active.deactivated_at = Set(Some(now));
+    active.updated_at = Set(now);
+    active.update(tx).await?;
+    Ok(Some(before))
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]
