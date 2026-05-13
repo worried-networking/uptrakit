@@ -369,62 +369,6 @@ pub async fn get_active_host(
     Ok(Some(host_to_response(h, agents, tags, software_status)))
 }
 
-/// Update the host's friendly name. Returns `None` if not found.
-#[tracing::instrument(skip_all)]
-pub async fn update_host(
-    tenant_db: &TenantDb,
-    id: Uuid,
-    body: &UpdateHostRequest,
-) -> Result<Option<HostResponse>, sea_orm::DbErr> {
-    let Some(h) = tenant_db
-        .find_by_id::<host::Entity, _>(id)
-        .filter(host::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    let mut active: host::ActiveModel = h.into();
-    if let Some(ref name) = body.friendly_name {
-        active.friendly_name = Set(name.clone());
-    }
-    active.updated_at = Set(OffsetDateTime::now_utc());
-
-    let updated = active.update(tenant_db.db()).await?;
-    let agents = load_host_agents(tenant_db, id).await;
-    let tags_map = super::host_tags::load_host_tags_batch(tenant_db, &[id]).await;
-    let tags = tags_map.get(&id).cloned().unwrap_or_default();
-    let software_status_map = load_host_software_statuses(tenant_db, &[id]).await;
-    let software_status = software_status_map.get(&id).copied().unwrap_or_default();
-    Ok(Some(host_to_response(
-        updated,
-        agents,
-        tags,
-        software_status,
-    )))
-}
-
-/// Soft-delete a host. Returns `true` if deactivated, `false` if not found.
-#[tracing::instrument(skip_all)]
-pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
-    let Some(h) = tenant_db
-        .find_by_id::<host::Entity, _>(id)
-        .filter(host::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await?
-    else {
-        return Ok(false);
-    };
-
-    let now = OffsetDateTime::now_utc();
-    let mut active: host::ActiveModel = h.into();
-    active.deactivated_at = Set(Some(now));
-    active.updated_at = Set(now);
-    active.update(tenant_db.db()).await?;
-    Ok(true)
-}
-
 // ---------------------------------------------------------------------------
 // Batch operations
 // ---------------------------------------------------------------------------
