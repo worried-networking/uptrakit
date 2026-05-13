@@ -7445,6 +7445,7 @@ name = "uptrakit-controller-runtime"
 version = "0.0.1"
 dependencies = [
  "arc-swap",
+ "async-nats",
  "async-trait",
  "axum",
  "axum-server",
