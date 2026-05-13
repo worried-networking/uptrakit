@@ -1,5 +1,4 @@
-import { authenticatedFetch } from '$lib/api';
-import { extractErrorMessage } from '$lib/api';
+import { authenticatedFetch, extractErrorMessage } from '$lib/api';
 
 // Internal helper — OAuth paths are NOT under /api/v1/, so we use authenticatedFetch
 // directly with absolute paths instead of the BASE-prefixed request() helper.
@@ -70,7 +69,6 @@ export async function approveConsent(
 ): Promise<{ redirect_to: string }> {
 	return oauthRequest(`/oauth/consent/${encodeURIComponent(requestId)}/approve`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ typed_confirmation: typedConfirmation })
 	});
 }
@@ -119,7 +117,6 @@ export interface ManualRegisterClientRequest {
 export async function manualRegisterClient(body: ManualRegisterClientRequest): Promise<OAuthClient> {
 	return oauthRequest('/api/oauth/clients', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body)
 	});
 }
