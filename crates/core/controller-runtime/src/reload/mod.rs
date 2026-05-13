@@ -7,3 +7,5 @@
 //! that the coordinator stores in its heterogeneous registry.
 
 pub(crate) mod db_pool;
+pub(crate) mod https_listener;
+pub(crate) mod probe;
