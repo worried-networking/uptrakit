@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::config::{
-    AuditConfig, DbConfig, EmbeddedServicesConfig, NatsConfig, NetworkConfig, TlsConfig,
-    ZeroconfConfig,
+    AuditConfig, DbConfig, EmbeddedServicesConfig, NatsConfig, NetworkConfig, PluginsConfig,
+    TlsConfig, ZeroconfConfig,
 };
 
 /// In-process delta carrying the new value for one config section.
@@ -27,4 +27,7 @@ pub enum RuntimeConfigDelta {
     Zeroconf(Arc<ZeroconfConfig>),
     /// New embedded-services toggle settings.
     EmbeddedServices(Arc<EmbeddedServicesConfig>),
+    /// Plugin settings reload signal (DB-driven; version counter incremented by
+    /// `ConfigReconciler` on each plugin settings change).
+    Plugins(Arc<PluginsConfig>),
 }
