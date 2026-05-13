@@ -11,6 +11,7 @@ pub mod instance_plugin_settings;
 pub mod notification_settings;
 pub mod notifier;
 pub mod queries;
+pub mod reload;
 pub mod settings_version;
 pub mod tenant_db;
 pub mod token_utils;
