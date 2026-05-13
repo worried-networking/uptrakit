@@ -1,1 +1,10 @@
-[]
+[
+	{
+		"scope": "oauth-consent-screen",
+		"owner": "frontend-team",
+		"expiry_date": "2026-11-13",
+		"capture_region": "frontend/src/routes/oauth/consent/[request_id]/+page.svelte",
+		"justification": "Consent screen is a dynamic route requiring live OAuth session state; screenshot cannot be captured without a running AS backend. Waived until integration test environment is available.",
+		"review_ref": "Plan C Task 4"
+	}
+]
