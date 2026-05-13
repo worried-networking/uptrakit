@@ -81,6 +81,38 @@ function contrastRatio(l1: number, l2: number): number {
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
+test('device lookup error shows user-friendly message', async ({ page }) => {
+	await mockAuthenticatedSession(page);
+	await mockAuthMethods(page);
+	await page.route('**/api/v1/auth/device/lookup*', (route) =>
+		route.fulfill({ status: 404, json: { error: 'Device flow not found' } })
+	);
+	await page.goto('/device');
+	await page.waitForSelector('[aria-label="Character 1 of 8"]');
+	const codes = ['B', 'C', 'D', 'F', 'G', 'H', 'J', 'K'];
+	for (let i = 0; i < 8; i++) {
+		await page.locator(`[aria-label="Character ${i + 1} of 8"]`).fill(codes[i]);
+	}
+	await page.waitForSelector('[data-ui="callout"][data-tone="danger"]');
+	await expect(page.locator('[data-ui="callout"][data-tone="danger"]')).toContainText('Code not found');
+});
+
+test('device manual fill shows approve button after successful lookup', async ({ page }) => {
+	await mockAuthenticatedSession(page);
+	await mockAuthMethods(page);
+	await page.route('**/api/v1/auth/device/lookup*', (route) =>
+		route.fulfill({ json: { client_name: null, expires_at: '2026-12-31T12:00:00Z' } })
+	);
+	await page.goto('/device');
+	await page.waitForSelector('[aria-label="Character 1 of 8"]');
+	const codes = ['B', 'C', 'D', 'F', 'G', 'H', 'J', 'K'];
+	for (let i = 0; i < 8; i++) {
+		await page.locator(`[aria-label="Character ${i + 1} of 8"]`).fill(codes[i]);
+	}
+	await page.waitForSelector('button:has-text("Approve")');
+	await expect(page.locator('button:has-text("Approve")')).toBeVisible();
+});
+
 test('Input error state meets WCAG AA contrast in light theme', async ({ page }) => {
 	await mockAnonymousSession(page);
 	await mockAuthMethods(page);
@@ -172,10 +204,21 @@ test.describe('public-entry snapshots', () => {
 				});
 			});
 
+			test(`device no-code form — ${theme}`, async ({ page }) => {
+				await mockAuthMethods(page);
+				await page.goto('/device');
+				await page.waitForSelector(SHELL_SELECTOR);
+				await page.waitForSelector('[aria-label="Character 1 of 8"]');
+				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-no-code-${theme}.png`, {
+					threshold: 0.005
+				});
+			});
+
 			test(`device unauthenticated — ${theme}`, async ({ page }) => {
 				await mockAuthMethods(page);
 				await page.goto('/device?user_code=BCDF-GHJK');
 				await page.waitForSelector(SHELL_SELECTOR);
+				await page.waitForSelector('a:has-text("Log in"), button:has-text("Log in")');
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-unauth-${theme}.png`, {
 					threshold: 0.005
 				});

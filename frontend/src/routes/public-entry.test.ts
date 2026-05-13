@@ -117,15 +117,15 @@ describe('Public entry shell contract', () => {
 		expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'true');
 	});
 
-	it('uses semantic invalid-code callout treatment on /device', () => {
+	it('invalid user_code URL param falls back to empty entry boxes on /device', () => {
 		page.url = new URL('http://localhost/device?user_code=AB12-1BAD') as typeof page.url;
 
 		render(DevicePage);
 
 		expect(document.querySelector('[data-ui="public-entry-shell"]')).toBeInTheDocument();
-		const invalidCodeCallout = document.querySelector('[data-ui="callout"][data-tone="danger"]');
-		expect(invalidCodeCallout).toBeInTheDocument();
-		expect(invalidCodeCallout).toHaveTextContent('Invalid device code format');
+		expect(document.querySelector('[data-ui="callout"][data-tone="danger"]')).not.toBeInTheDocument();
+		expect(screen.getByLabelText('Character 1 of 8')).toBeInTheDocument();
+		expect(screen.getByLabelText('Character 1 of 8')).toHaveValue('');
 		expect(screen.getByRole('heading', { name: 'Authorize Device' })).toBeInTheDocument();
 	});
 
@@ -180,7 +180,8 @@ describe('Public entry shell contract', () => {
 
 		render(DevicePage);
 
-		const approveBtn = screen.getByRole('button', { name: 'Approve' });
+		// Approve button only appears after lookupDeviceAuth resolves (phase: done)
+		const approveBtn = await waitFor(() => screen.getByRole('button', { name: 'Approve' }));
 		expect(approveBtn.className).toContain(BUTTON_HEIGHT);
 		expect(approveBtn.className).toContain(PRIMARY_GRADIENT);
 		expect(approveBtn.getAttribute('aria-busy')).toBeNull();
