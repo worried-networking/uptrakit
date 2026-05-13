@@ -52,12 +52,13 @@ fn emit_auth_settings_audit(
 }
 
 fn auth_settings_audit_details(
+    setting_key: &str,
     previous_enabled: bool,
     new_enabled: bool,
     reason_code: Option<&'static str>,
 ) -> serde_json::Value {
     let mut details = serde_json::json!({
-        "setting_key": "authentication.password_auth_enabled",
+        "setting_key": setting_key,
         "previous_enabled": previous_enabled,
         "new_enabled": new_enabled,
         "changed": previous_enabled != new_enabled,
@@ -135,6 +136,7 @@ pub async fn update_authentication_settings(
                     api_token_id,
                     uptrakit_audit_log::AuditOutcome::Denied,
                     auth_settings_audit_details(
+                        "authentication.password_auth_enabled",
                         previous_enabled,
                         password_enabled,
                         Some("cannot_disable_password_auth_while_using_password"),
@@ -164,6 +166,7 @@ pub async fn update_authentication_settings(
                         api_token_id,
                         uptrakit_audit_log::AuditOutcome::Denied,
                         auth_settings_audit_details(
+                            "authentication.password_auth_enabled",
                             previous_enabled,
                             password_enabled,
                             Some("cannot_disable_password_auth_without_active_oidc_providers"),
@@ -183,6 +186,7 @@ pub async fn update_authentication_settings(
                     api_token_id,
                     uptrakit_audit_log::AuditOutcome::Denied,
                     auth_settings_audit_details(
+                        "authentication.password_auth_enabled",
                         previous_enabled,
                         password_enabled,
                         Some("cannot_disable_password_auth_without_oidc_support"),
@@ -208,6 +212,7 @@ pub async fn update_authentication_settings(
                 api_token_id,
                 uptrakit_audit_log::AuditOutcome::Failed,
                 auth_settings_audit_details(
+                    "authentication.password_auth_enabled",
                     previous_enabled,
                     password_enabled,
                     Some("authentication_settings_update_failed"),
@@ -222,11 +227,17 @@ pub async fn update_authentication_settings(
             &user,
             api_token_id,
             uptrakit_audit_log::AuditOutcome::Success,
-            auth_settings_audit_details(previous_enabled, password_enabled, None),
+            auth_settings_audit_details(
+                "authentication.password_auth_enabled",
+                previous_enabled,
+                password_enabled,
+                None,
+            ),
         );
     }
 
     if let Some(two_factor_required) = req.two_factor_required {
+        let previous_2fa = state.settings.authentication().two_factor_required;
         let mut auth_settings = state.settings.authentication();
         auth_settings.two_factor_required = two_factor_required;
         if let Err(e) = auth_settings
@@ -234,9 +245,34 @@ pub async fn update_authentication_settings(
             .await
         {
             tracing::error!("Failed to save authentication settings: {e:?}");
+            emit_auth_settings_audit(
+                &state,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                auth_settings_audit_details(
+                    "authentication.two_factor_required",
+                    previous_2fa,
+                    two_factor_required,
+                    Some("authentication_settings_update_failed"),
+                ),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_authentication(auth_settings).await;
+
+        emit_auth_settings_audit(
+            &state,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditOutcome::Success,
+            auth_settings_audit_details(
+                "authentication.two_factor_required",
+                previous_2fa,
+                two_factor_required,
+                None,
+            ),
+        );
     }
 
     let auth_settings = state.settings.authentication();

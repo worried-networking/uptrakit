@@ -56,7 +56,7 @@ pub struct RefreshRequest {
     pub refresh_token: Option<SecretString>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AuthResponse {
     pub access_token: SecretString,
@@ -76,7 +76,7 @@ pub struct RefreshResponse {
     pub token_type: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UserResponse {
     pub id: Uuid,
