@@ -545,6 +545,7 @@ mod tests {
             },
             authentication: AuthenticationSettingsResponse {
                 password_auth_enabled: true,
+                two_factor_required: false,
             },
             agent_certificates: AgentCertificateSettingsResponse {
                 lifetime_hours: 8760,

@@ -60,6 +60,7 @@ pub async fn get_combined_settings(
     let auth_settings = state.settings.authentication();
     let authentication = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
+        two_factor_required: auth_settings.two_factor_required,
     };
 
     let agent_certificates = AgentCertificateSettingsResponse {
@@ -116,6 +117,7 @@ mod tests {
         let authentication =
             uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse {
                 password_auth_enabled: false,
+                two_factor_required: false,
             };
         let agent_certificates = AgentCertificateSettingsResponse {
             lifetime_hours: 336,
