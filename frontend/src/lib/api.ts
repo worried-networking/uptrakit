@@ -161,12 +161,17 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
 /**
  * Performs an authenticated fetch with automatic token refresh on 401.
  * Returns the raw Response for callers to handle body parsing.
+ *
+ * The `url` parameter must be the complete request URL (e.g. `/api/v1/foo` or
+ * `/oauth/consent/xyz`). Unlike the internal `request`/`requestVoid` helpers,
+ * this function does NOT prepend BASE — callers that use this export directly
+ * are responsible for constructing the full path.
  */
-async function authenticatedFetch(path: string, options: RequestInit = {}): Promise<Response> {
+export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
 	const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
 	const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
 
-	const res = await fetch(`${BASE}${path}`, {
+	const res = await fetch(url, {
 		credentials: 'same-origin',
 		...options,
 		headers: {
@@ -211,7 +216,7 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 			// to request(), which maps them to the correct user-facing messages.
 			// The .finally() clears the banner after the retry settles regardless
 			// of whether it succeeds or fails.
-			return fetch(`${BASE}${path}`, {
+			return fetch(url, {
 				credentials: 'same-origin',
 				...options,
 				headers: {
@@ -256,7 +261,7 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 	let res: Response;
 	try {
-		res = await authenticatedFetch(path, options);
+		res = await authenticatedFetch(`${BASE}${path}`, options);
 	} catch (err) {
 		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
 			throw new Error('Request timed out. Please try again.');
@@ -276,7 +281,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 async function requestVoid(path: string, options: RequestInit = {}): Promise<void> {
 	let res: Response;
 	try {
-		res = await authenticatedFetch(path, options);
+		res = await authenticatedFetch(`${BASE}${path}`, options);
 	} catch (err) {
 		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
 			throw new Error('Request timed out. Please try again.');
