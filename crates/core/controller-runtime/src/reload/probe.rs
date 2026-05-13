@@ -50,6 +50,6 @@ mod tests {
 
     #[test]
     fn pick_probe_addr_rejects_invalid() {
-        assert!(pick_probe_addr("not-an-addr").is_err());
+        pick_probe_addr("not-an-addr").unwrap_err();
     }
 }
