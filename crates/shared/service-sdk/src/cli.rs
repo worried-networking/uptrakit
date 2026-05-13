@@ -12,6 +12,11 @@ use crate::dirs::AppDirs;
 /// Both the agent and the MQTT service share these flags for controller
 /// connection, CA bootstrap, enrollment, and directory management.
 #[derive(clap::Args, Debug)]
+#[command(group(
+    clap::ArgGroup::new("tofu_mode")
+        .multiple(false)
+        .args(["tofu_fingerprint", "tofu_spki", "tofu_insecure"])
+))]
 pub struct CommonServiceArgs {
     /// Show crate version and build metadata.
     #[arg(long)]
@@ -22,15 +27,41 @@ pub struct CommonServiceArgs {
     #[arg(long)]
     pub url: Option<String>,
 
-    /// Trust the controller's TLS certificate on first connection (TOFU).
-    /// Only effective when no CA certificate is cached locally.
-    #[arg(long, conflicts_with_all = ["ca_cert", "pki_addr"])]
-    pub tofu: bool,
+    /// Pin the Controller's CA bundle by SHA-256 fingerprint. On first
+    /// successful connection, the bundle is persisted to disk.
+    /// Conflicts with `--ca-cert` and `--pki-addr`.
+    #[arg(long, value_name = "SHA256", conflicts_with_all = ["ca_cert", "pki_addr"])]
+    pub tofu_fingerprint: Option<crate::tofu::Sha256Hash>,
 
-    /// Expected SHA-256 fingerprint of the controller's CA certificate (hex).
-    /// Used during TOFU to verify the fetched CA matches. Requires `--tofu`.
-    #[arg(long, requires = "tofu")]
-    pub tofu_fingerprint: Option<String>,
+    /// Pin the Controller's CA by SubjectPublicKeyInfo SHA-256 hash.
+    /// Survives cert renewals that reuse the same keypair.
+    /// Conflicts with `--ca-cert` and `--pki-addr`.
+    #[arg(long, value_name = "SHA256", conflicts_with_all = ["ca_cert", "pki_addr"])]
+    pub tofu_spki: Option<crate::tofu::Sha256Hash>,
+
+    /// Accept any chain. Operates as stateless TOFU. Implies
+    /// `--tofu-skip-hostname`. Logs WARN on every connection.
+    /// Conflicts with `--ca-cert` and `--pki-addr`.
+    #[arg(long, conflicts_with_all = ["ca_cert", "pki_addr"])]
+    pub tofu_insecure: bool,
+
+    /// Disable ServerName check. Requires one of `--tofu-fingerprint`,
+    /// `--tofu-spki`, or `--tofu-insecure`.
+    #[arg(long, requires = "tofu_mode")]
+    pub tofu_skip_hostname: bool,
+
+    /// Acknowledge a fingerprint observed in a previous `--tofu-insecure`
+    /// run. Required to persist the CA bundle in insecure mode.
+    #[arg(long, value_name = "SHA256", requires = "tofu_insecure")]
+    pub tofu_fingerprint_acknowledge: Option<crate::tofu::Sha256Hash>,
+
+    /// Add compiled-in `webpki-roots` to the trust store.
+    #[arg(long)]
+    pub trust_public_roots: bool,
+
+    /// Add the OS root store via `rustls-native-certs` to the trust store.
+    #[arg(long)]
+    pub trust_native_roots: bool,
 
     /// Path to a PEM-encoded CA certificate file.
     #[arg(long)]
@@ -135,6 +166,21 @@ impl CommonServiceArgs {
     pub fn pki_addr(&self) -> Option<&str> {
         self.pki_addr.as_deref()
     }
+
+    /// Parse the TOFU flags into a validated `TofuConfig`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::tofu::TofuConfigError`] if the flag combination is invalid.
+    pub fn tofu_config(&self) -> Result<crate::tofu::TofuConfig, crate::tofu::TofuConfigError> {
+        crate::tofu::TofuConfig::from_flags(
+            self.tofu_fingerprint,
+            self.tofu_spki,
+            self.tofu_insecure,
+            self.tofu_skip_hostname,
+            self.tofu_fingerprint_acknowledge,
+        )
+    }
 }
 
 /// Validate `--pki-addr`: must be `http://` or `https://`, must have a host,
@@ -172,7 +218,12 @@ mod tests {
     fn defaults_parse() {
         let args = TestArgs::try_parse_from(["test-service", "--url", "https://controller:8443"])
             .expect("should parse defaults");
-        assert!(!args.common.tofu);
+        assert!(!args.common.tofu_insecure);
+        assert!(args.common.tofu_fingerprint.is_none());
+        assert!(args.common.tofu_spki.is_none());
+        assert!(!args.common.tofu_skip_hostname);
+        assert!(!args.common.trust_public_roots);
+        assert!(!args.common.trust_native_roots);
         assert!(!args.common.version);
         assert!(args.common.ca_cert.is_none());
         assert!(args.common.config_dir.is_none());
@@ -186,29 +237,69 @@ mod tests {
     }
 
     #[test]
-    fn tofu_and_ca_cert_conflict() {
+    fn tofu_fingerprint_and_ca_cert_conflict() {
+        let hex = "aa".repeat(32);
         let result = TestArgs::try_parse_from([
             "test-service",
             "--url",
             "https://host:8443",
-            "--tofu",
+            "--tofu-fingerprint",
+            &hex,
             "--ca-cert",
             "/some/path.pem",
         ]);
-        assert!(result.is_err(), "--tofu and --ca-cert should conflict");
+        assert!(
+            result.is_err(),
+            "--tofu-fingerprint and --ca-cert should conflict"
+        );
     }
 
     #[test]
-    fn tofu_and_pki_addr_conflict() {
+    fn tofu_fingerprint_and_pki_addr_conflict() {
+        let hex = "aa".repeat(32);
         let result = TestArgs::try_parse_from([
             "test-service",
             "--url",
             "https://host:8443",
-            "--tofu",
+            "--tofu-fingerprint",
+            &hex,
             "--pki-addr",
             "http://pki.local:8080",
         ]);
-        assert!(result.is_err(), "--tofu and --pki-addr should conflict");
+        assert!(
+            result.is_err(),
+            "--tofu-fingerprint and --pki-addr should conflict"
+        );
+    }
+
+    #[test]
+    fn tofu_insecure_implies_skip_hostname_via_config() {
+        let args = TestArgs::try_parse_from([
+            "test-service",
+            "--url",
+            "https://host:8443",
+            "--tofu-insecure",
+        ])
+        .expect("should parse");
+        let cfg = args.common.tofu_config().expect("valid config");
+        assert!(cfg.skip_hostname, "insecure mode forces skip_hostname");
+    }
+
+    #[test]
+    fn two_tofu_modes_conflict() {
+        let hex = "aa".repeat(32);
+        let result = TestArgs::try_parse_from([
+            "test-service",
+            "--url",
+            "https://host:8443",
+            "--tofu-fingerprint",
+            &hex,
+            "--tofu-insecure",
+        ]);
+        assert!(
+            result.is_err(),
+            "two TOFU modes should conflict via ArgGroup"
+        );
     }
 
     #[test]

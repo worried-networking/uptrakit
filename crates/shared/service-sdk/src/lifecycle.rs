@@ -252,18 +252,27 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
         identity.clear_enrollment_state().await?;
     }
 
-    // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust.
+    // CA bootstrap: cached → --ca-cert file → --pki-addr → TOFU → system trust.
     // When discovery provided a CA fingerprint, implicitly enable TOFU with that fingerprint.
-    let effective_tofu = args.tofu || conn.discovery_tofu;
-    let effective_tofu_fingerprint = args
-        .tofu_fingerprint
+    let tofu_config = args.tofu_config().map_err(|e| {
+        report!(EnrollmentError::Protocol(ProtocolError::Init(format!(
+            "invalid TOFU flags: {e}"
+        ))))
+    })?;
+    let use_tofu =
+        !matches!(tofu_config.mode, crate::tofu::TofuMode::System) || conn.discovery_tofu;
+    let fp_from_mode = match &tofu_config.mode {
+        crate::tofu::TofuMode::PinFingerprint(h) => Some(h.to_string()),
+        _ => None,
+    };
+    let effective_fingerprint = fp_from_mode
         .as_deref()
         .or(conn.discovery_tofu_fingerprint.as_deref());
     let ca_pem = crate::ca::bootstrap_ca(
         &mut identity,
         base_url,
-        effective_tofu,
-        effective_tofu_fingerprint,
+        use_tofu,
+        effective_fingerprint,
         args.ca_cert.as_deref(),
         pki_addr,
     )
