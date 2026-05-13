@@ -32,6 +32,9 @@ impl AuditLogCleanupExecutor {
 impl TaskExecutor for AuditLogCleanupExecutor {
     #[tracing::instrument(skip_all, fields(task = "audit_log_cleanup"))]
     async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
+        let correlation_id = uuid::Uuid::now_v7();
+        let audit_emitter = self.audit_emitter.with_correlation(correlation_id);
+
         let cutoff = OffsetDateTime::now_utc() - time::Duration::days(DEFAULT_RETENTION_DAYS);
 
         let txn = self.db.begin().await.context_to()?;
@@ -50,7 +53,7 @@ impl TaskExecutor for AuditLogCleanupExecutor {
 
         txn.commit().await.context_to()?;
 
-        self.audit_emitter.scheduler_audit_log_cleanup(
+        audit_emitter.scheduler_audit_log_cleanup(
             tenant_result.rows_affected,
             system_result.rows_affected,
             DEFAULT_RETENTION_DAYS,
@@ -183,6 +186,25 @@ mod tests {
         .expect("insert system audit log");
 
         (old_id, recent_id)
+    }
+
+    #[tokio::test]
+    async fn audit_log_cleanup_executor_sets_correlation_id() {
+        let db = setup_db().await;
+        let forwarder = Arc::new(RecordingForwarder::default());
+        let executor = AuditLogCleanupExecutor::new(
+            db.clone(),
+            RuntimeAuditEmitter::with_forwarder(forwarder.clone()),
+        );
+
+        executor.execute(&make_task()).await.expect("execute");
+
+        let events = forwarder.events();
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0].correlation_id.is_some(),
+            "cleanup event must have a correlation_id"
+        );
     }
 
     #[tokio::test]

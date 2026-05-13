@@ -63,6 +63,7 @@ fn emit_batch_update_audit(
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
+    correlation_id: Uuid,
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
@@ -74,6 +75,7 @@ fn emit_batch_update_audit(
     .target(target_type, target_id.to_string(), target_display)
     .outcome(outcome)
     .details(details)
+    .correlation_id(correlation_id)
     .build();
 
     if let Ok(entry) = entry {
@@ -127,6 +129,7 @@ pub async fn trigger_host_batch_update(
     Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let correlation_id = Uuid::now_v7();
     let audit_ctx = AuditContext {
         state: &state,
         tenant_id: tenant_db.tenant_id(),
@@ -199,6 +202,7 @@ pub async fn trigger_host_batch_update(
                     "excluded_item_count": excluded_item_count,
                     "reason_code": reason_code,
                 }),
+                correlation_id,
             );
             return Err(err.into());
         }
@@ -220,6 +224,7 @@ pub async fn trigger_host_batch_update(
             "excluded_item_count": excluded_item_count,
             "no_op": resp.total_created == 0,
         }),
+        correlation_id,
     );
 
     Ok((StatusCode::OK, Json(resp)).into_response())
@@ -257,6 +262,7 @@ pub async fn trigger_item_batch_update(
     Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let correlation_id = Uuid::now_v7();
     let audit_ctx = AuditContext {
         state: &state,
         tenant_id: tenant_db.tenant_id(),
@@ -305,6 +311,7 @@ pub async fn trigger_item_batch_update(
                     "requested_host_count": requested_host_count,
                     "reason_code": reason_code,
                 }),
+                correlation_id,
             );
             return Err(err.into());
         }
@@ -326,6 +333,7 @@ pub async fn trigger_item_batch_update(
             "requested_host_count": requested_host_count,
             "no_op": resp.total_created == 0,
         }),
+        correlation_id,
     );
 
     Ok((StatusCode::OK, Json(resp)).into_response())
@@ -1181,6 +1189,10 @@ mod tests {
         assert_eq!(details["skipped_count"], serde_json::json!(0));
         assert_eq!(details["category_filter_present"], serde_json::json!(false));
         assert_eq!(details["excluded_item_count"], serde_json::json!(0));
+        assert!(
+            row.correlation_id.is_some(),
+            "batch trigger audit row must carry a correlation_id"
+        );
     }
 
     #[tokio::test]
