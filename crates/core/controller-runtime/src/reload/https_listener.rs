@@ -160,10 +160,10 @@ impl Reloadable for HttpsListenerReloadable {
             tokio::net::TcpStream::connect(&probe_addr),
         )
         .await
-        .map_err(|_| {
+        .map_err(|_elapsed| {
             report!(ConfigReloadError::HealthFailed {
                 subsystem: "https_listener".into(),
-                message: format!("connect to {probe_addr} timed out"),
+                message: format!("connect to {probe_addr} timed out after 1s"),
             })
         })?
         .map_err(|e| {
