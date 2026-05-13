@@ -106,7 +106,13 @@ pub async fn authorize(
             }
         };
 
-        if let Err(e) = fetcher.fetch_and_upsert(&req.client_id).await {
+        if let Err(e) = fetcher
+            .fetch_and_upsert(&req.client_id, Some(ip_str.as_str()))
+            .await
+        {
+            if e.current_context().is_rate_limited() {
+                return StatusCode::TOO_MANY_REQUESTS.into_response();
+            }
             tracing::warn!(client_id = %req.client_id, error = %e, "CIMD fetch failed");
             return oauth_400("invalid_client", "failed to fetch client metadata document");
         }
