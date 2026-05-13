@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use axum::Router;
+use axum::routing::get;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 
 use crate::auth::McpAuthLayer;
+use crate::oauth::prm::get_prm;
 use crate::settings::McpSettings;
 use crate::state::McpState;
 use crate::tools::McpHandler;
@@ -40,7 +42,11 @@ pub fn build_mcp_router(state: McpState) -> Router {
         .layer(auth_layer)
         .service(raw_service);
 
-    Router::new().nest_service("/mcp", service)
+    Router::new()
+        .nest_service("/mcp", service)
+        .route("/.well-known/oauth-protected-resource", get(get_prm))
+        .route("/.well-known/oauth-protected-resource/mcp", get(get_prm))
+        .with_state(state)
 }
 
 fn build_config(settings: &McpSettings) -> StreamableHttpServerConfig {
