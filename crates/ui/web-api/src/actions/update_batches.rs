@@ -118,22 +118,15 @@ mod tests {
     use crate::batch_progress_broadcaster::BatchProgressBroadcaster;
     use crate::event_broadcaster::EventBroadcaster;
     use crate::notification_service::NotificationService;
-    use crate::notifications::dispatcher::NotificationDispatcher;
     use crate::service_connections::ServiceConnectionRegistry;
     use crate::tenant_db::TenantDb;
     use crate::test_harness::{insert_default_tenant, setup_migrated_db};
 
-    fn build_ctx_parts() -> (
-        NotificationService,
-        NotificationDispatcher,
-        EventBroadcaster,
-        tokio::sync::mpsc::Receiver<crate::notifications::events::NotificationEvent>,
-    ) {
-        let (dispatcher, dispatcher_rx) = NotificationDispatcher::test_channel();
+    fn build_ctx_parts() -> (NotificationService, EventBroadcaster) {
         let broadcaster = EventBroadcaster::new();
         let notification_svc =
             NotificationService::new(ServiceConnectionRegistry::default(), Uuid::nil());
-        (notification_svc, dispatcher, broadcaster, dispatcher_rx)
+        (notification_svc, broadcaster)
     }
 
     /// Insert a bare host row for testing (no software items installed → zero candidates).
@@ -192,11 +185,10 @@ mod tests {
         let tenant_id = insert_default_tenant(&db).await;
         let host_id = insert_bare_host(&db, tenant_id).await;
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let batch_progress = BatchProgressBroadcaster::new();
@@ -234,11 +226,10 @@ mod tests {
         let tenant_id = insert_default_tenant(&db).await;
         let item_id = insert_bare_software_item(&db, tenant_id).await;
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let batch_progress = BatchProgressBroadcaster::new();

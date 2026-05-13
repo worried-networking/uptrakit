@@ -91,6 +91,47 @@ impl ServiceQueryError {
     }
 }
 
+// --- Audit snapshot ---
+
+/// Audit snapshot for a service entity.
+///
+/// Security-sensitive fields (`enrollment_secret_hash`, `embedded_owner_key`,
+/// `tenant_id`) are explicitly excluded from snapshots via `#[audit(skip)]`.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "service")]
+pub struct ServiceView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub hostname: String,
+    pub friendly_name: String,
+    pub status: String,
+    #[audit(skip)]
+    pub enrollment_secret_hash: String,
+    pub ping_interval_seconds: Option<i32>,
+    pub cert_lifetime_hours: Option<i32>,
+    pub is_embedded: bool,
+    #[audit(skip)]
+    pub embedded_owner_key: Option<Uuid>,
+}
+
+impl From<&service::Model> for ServiceView {
+    fn from(m: &service::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            hostname: m.hostname.clone(),
+            friendly_name: m.friendly_name.clone(),
+            status: m.status.to_string(),
+            enrollment_secret_hash: m.enrollment_secret_hash.clone(),
+            ping_interval_seconds: m.ping_interval_seconds,
+            cert_lifetime_hours: m.cert_lifetime_hours,
+            is_embedded: m.is_embedded,
+            embedded_owner_key: m.embedded_owner_key,
+        }
+    }
+}
+
 // --- Private helpers ---
 
 fn model_to_response(m: service::Model, yielded_to: Option<Vec<Uuid>>) -> ServiceResponse {
@@ -371,6 +412,188 @@ pub async fn deactivate_service(
     txn.commit().await.context_to()?;
 
     Ok(true)
+}
+
+// --- Transaction-aware variants (for emit_stateful callers) ---
+
+/// Approve a pending service inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(before, after)` models so the caller can build audit snapshots.
+///
+/// # Errors
+///
+/// Returns [`ServiceQueryError::NotFound`] if no active service matches,
+/// [`ServiceQueryError::NotPending`] if the service is not in `Pending` status,
+/// or [`ServiceQueryError::Db`] on a database error.
+#[tracing::instrument(skip_all, fields(%id))]
+pub async fn approve_service_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<(service::Model, service::Model)> {
+    let svc = service::Entity::find_by_id(id)
+        .filter(service::Column::TenantId.eq(tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(ServiceQueryError::NotFound))?;
+
+    if svc.status != service::ServiceStatus::Pending {
+        bail!(ServiceQueryError::NotPending);
+    }
+
+    let before = svc.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut active: service::ActiveModel = svc.into();
+    active.status = Set(service::ServiceStatus::Approved);
+    active.updated_at = Set(now);
+    let after = active.update(tx).await.context_to()?;
+
+    Ok((before, after))
+}
+
+/// Reject a pending service inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(before, after)` models so the caller can build audit snapshots.
+///
+/// # Errors
+///
+/// Returns [`ServiceQueryError::NotFound`] if no active service matches,
+/// [`ServiceQueryError::NotPending`] if the service is not in `Pending` status,
+/// or [`ServiceQueryError::Db`] on a database error.
+#[tracing::instrument(skip_all, fields(%id))]
+pub async fn reject_service_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<(service::Model, service::Model)> {
+    let svc = service::Entity::find_by_id(id)
+        .filter(service::Column::TenantId.eq(tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(ServiceQueryError::NotFound))?;
+
+    if svc.status != service::ServiceStatus::Pending {
+        bail!(ServiceQueryError::NotPending);
+    }
+
+    let before = svc.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut active: service::ActiveModel = svc.into();
+    active.status = Set(service::ServiceStatus::Rejected);
+    active.deactivated_at = Set(Some(now));
+    active.updated_at = Set(now);
+    let after = active.update(tx).await.context_to()?;
+
+    Ok((before, after))
+}
+
+/// Update configurable service settings inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Applies the same `ping_interval_seconds`/`cert_lifetime_hours` update logic as
+/// [`update_service_settings`]. Returns `Some((before, after))` on success, or
+/// `None` if the service was not found.
+///
+/// # Errors
+///
+/// Returns [`ServiceQueryError::Db`] on a database error.
+#[tracing::instrument(skip_all, fields(%id))]
+pub async fn update_service_settings_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    ping_interval_seconds: Option<u32>,
+    cert_lifetime_hours: Option<u32>,
+) -> Result<Option<(service::Model, service::Model)>> {
+    let Some(svc) = service::Entity::find_by_id(id)
+        .filter(service::Column::TenantId.eq(tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    let before = svc.clone();
+    let mut active: service::ActiveModel = svc.into();
+    match ping_interval_seconds {
+        Some(0) => active.ping_interval_seconds = Set(None),
+        Some(v) => active.ping_interval_seconds = Set(Some(v as i32)),
+        None => {}
+    }
+    match cert_lifetime_hours {
+        Some(0) => active.cert_lifetime_hours = Set(None),
+        Some(v) => active.cert_lifetime_hours = Set(Some(v as i32)),
+        None => {}
+    }
+    active.updated_at = Set(OffsetDateTime::now_utc());
+    let after = active.update(tx).await.context_to()?;
+
+    Ok(Some((before, after)))
+}
+
+/// Soft-delete a service inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Revokes certificates and bumps the revocation version counter inside the same
+/// transaction. Returns `Some(before)` (the model before deactivation) if the
+/// service was found and deactivated, or `None` if not found.
+///
+/// # Errors
+///
+/// Returns [`ServiceQueryError::EmbeddedService`] if the service is embedded,
+/// or [`ServiceQueryError::Db`] on a database error.
+#[tracing::instrument(skip_all, fields(%id))]
+pub async fn deactivate_service_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    default_tenant_id: Uuid,
+) -> Result<Option<service::Model>> {
+    let Some(svc) = service::Entity::find_by_id(id)
+        .filter(service::Column::TenantId.eq(tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    if svc.is_embedded {
+        bail!(ServiceQueryError::EmbeddedService);
+    }
+
+    let before = svc.clone();
+    let now = OffsetDateTime::now_utc();
+    let mut active: service::ActiveModel = svc.into();
+    active.deactivated_at = Set(Some(now));
+    active.updated_at = Set(now);
+    active.update(tx).await.context_to()?;
+
+    ServiceCertificate::update_many()
+        .col_expr(
+            service_certificate::Column::RevokedAt,
+            Expr::value(Some(now)),
+        )
+        .col_expr(
+            service_certificate::Column::RevocationReason,
+            Expr::value(Some(RevocationReason::ServiceDeactivated)),
+        )
+        .filter(service_certificate::Column::ServiceId.eq(id))
+        .filter(service_certificate::Column::RevokedAt.is_null())
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    crate::settings_version::bump_revocation_version(tx, default_tenant_id)
+        .await
+        .map_err(|e| report!(ServiceQueryError::Db(e)))?;
+
+    Ok(Some(before))
 }
 
 /// Merge a pending (source) agent into an existing approved (target) agent.

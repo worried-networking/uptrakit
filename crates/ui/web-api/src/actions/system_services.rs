@@ -202,7 +202,6 @@ mod tests {
     use crate::app_state::CertState;
     use crate::event_broadcaster::EventBroadcaster;
     use crate::notification_service::NotificationService;
-    use crate::notifications::dispatcher::NotificationDispatcher;
     use crate::service_connections::ServiceConnectionRegistry;
     use crate::test_harness::setup_migrated_db;
 
@@ -235,17 +234,11 @@ mod tests {
         }
     }
 
-    fn build_ctx_parts() -> (
-        NotificationService,
-        NotificationDispatcher,
-        EventBroadcaster,
-        tokio::sync::mpsc::Receiver<crate::notifications::events::NotificationEvent>,
-    ) {
-        let (dispatcher, dispatcher_rx) = NotificationDispatcher::test_channel();
+    fn build_ctx_parts() -> (NotificationService, EventBroadcaster) {
         let broadcaster = EventBroadcaster::new();
         let notification_svc =
             NotificationService::new(ServiceConnectionRegistry::default(), Uuid::nil());
-        (notification_svc, dispatcher, broadcaster, dispatcher_rx)
+        (notification_svc, broadcaster)
     }
 
     /// Insert a minimal system service row with `Pending` status and return its id.
@@ -285,13 +278,12 @@ mod tests {
         let svc = insert_system_service(&db).await;
         let service_id = svc.id;
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         // send_global iterates all registered channels — subscribe with any tenant uuid.
         let any_tenant = Uuid::now_v7();
         let mut rx = broadcaster.subscribe(any_tenant).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
 
@@ -316,12 +308,11 @@ mod tests {
         let svc = insert_system_service(&db).await;
         let service_id = svc.id;
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let any_tenant = Uuid::now_v7();
         let mut rx = broadcaster.subscribe(any_tenant).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let connections = ServiceConnectionRegistry::default();
@@ -348,12 +339,11 @@ mod tests {
         let db = setup_migrated_db().await;
         let nonexistent_id = Uuid::now_v7();
 
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let any_tenant = Uuid::now_v7();
         let mut rx = broadcaster.subscribe(any_tenant).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let cert = make_cert_state();
@@ -364,10 +354,6 @@ mod tests {
             .expect("deactivate");
 
         assert!(!found, "should return Ok(false) for unknown system service");
-        assert!(
-            dispatcher_rx.try_recv().is_err(),
-            "no dispatcher event expected"
-        );
         assert_eq!(
             rx.try_recv().unwrap_err(),
             TryRecvError::Empty,
