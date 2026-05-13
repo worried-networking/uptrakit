@@ -89,6 +89,8 @@ pub async fn establish_ca_trust(
         .send()
         .await
         .context_to()?
+        .error_for_status()
+        .context_to()?
         .text()
         .await
         .context_to()?;
@@ -129,14 +131,13 @@ pub async fn establish_ca_trust(
                 "CA fingerprint mismatch: expected {expected}, got {fetched_fp}"
             )));
         }
+    } else if !std::io::stdin().is_terminal() {
+        bail!(CliError::Other(
+            "--tofu requires interactive confirmation when no fingerprint is provided; \
+             use --tofu=<fingerprint> for non-interactive use"
+                .into()
+        ));
     } else {
-        if !std::io::stdin().is_terminal() {
-            bail!(CliError::Other(
-                "--tofu requires interactive confirmation when no fingerprint is provided; \
-                 use --tofu=<fingerprint> for non-interactive use"
-                    .into()
-            ));
-        }
         let rotation_note = if config.ca_pem.is_some() {
             "\nWARNING: This will REPLACE the currently stored CA trust anchor.\n"
         } else {
@@ -989,7 +990,7 @@ mod ca_trust_tests {
             "uptrakit-auth-test-home-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos())
+                .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
         std::fs::create_dir_all(&tmp).expect("create temp home");
@@ -1160,6 +1161,34 @@ mod ca_trust_tests {
                 .await
                 .expect("should succeed — rotation allowed");
             assert_eq!(config.ca_pem.as_deref(), Some(new_pem.as_str()));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn non_200_response_returns_clear_error() {
+        with_temp_home(|| async {
+            let server = MockServer::start_async().await;
+            server.mock(|when, then| {
+                when.method(GET).path("/api/v1/pki/ca.crt");
+                then.status(404).body("Not Found");
+            });
+
+            let mut config = Config::default();
+            let err = establish_ca_trust(
+                &server.base_url(),
+                Some(&"a".repeat(64)),
+                false,
+                &mut config,
+            )
+            .await
+            .unwrap_err();
+            // Should get HTTP error, not "failed to parse CA certificate PEM"
+            let msg = err.to_string();
+            assert!(
+                !msg.contains("failed to parse"),
+                "got misleading parse error: {msg}"
+            );
         })
         .await;
     }
