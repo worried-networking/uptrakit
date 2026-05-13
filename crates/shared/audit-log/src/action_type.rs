@@ -105,6 +105,22 @@ impl AuditActionType {
         RegisteredAuditAction::new("auth.oidc.exchange", AuditActionKind::Event);
     pub const AUTH_OIDC_LINK: RegisteredAuditAction =
         RegisteredAuditAction::new("auth.oidc.link", AuditActionKind::Event);
+    pub const AUTH_MFA_CHALLENGE_ISSUED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.challenge_issued", AuditActionKind::Event);
+    pub const AUTH_MFA_VERIFIED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.verified", AuditActionKind::Event);
+    pub const AUTH_MFA_FAILED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.failed", AuditActionKind::Event);
+    pub const AUTH_MFA_CHALLENGE_EXHAUSTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.challenge_exhausted", AuditActionKind::Event);
+    pub const AUTH_MFA_ENROLLED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.enrolled", AuditActionKind::Event);
+    pub const AUTH_MFA_DISABLED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.disabled", AuditActionKind::Event);
+    pub const AUTH_MFA_RECOVERY_USED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.recovery_used", AuditActionKind::Event);
+    pub const AUTH_MFA_RECOVERY_REGENERATED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.mfa.recovery_regenerated", AuditActionKind::Event);
     pub const API_TOKEN_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("api_token.create", AuditActionKind::Stateful);
     pub const API_TOKEN_REVOKE: RegisteredAuditAction =
@@ -383,6 +399,14 @@ impl AuditActionType {
             AuditActionType::AUTH_OIDC_CALLBACK,
             AuditActionType::AUTH_OIDC_EXCHANGE,
             AuditActionType::AUTH_OIDC_LINK,
+            AuditActionType::AUTH_MFA_CHALLENGE_ISSUED,
+            AuditActionType::AUTH_MFA_VERIFIED,
+            AuditActionType::AUTH_MFA_FAILED,
+            AuditActionType::AUTH_MFA_CHALLENGE_EXHAUSTED,
+            AuditActionType::AUTH_MFA_ENROLLED,
+            AuditActionType::AUTH_MFA_DISABLED,
+            AuditActionType::AUTH_MFA_RECOVERY_USED,
+            AuditActionType::AUTH_MFA_RECOVERY_REGENERATED,
             AuditActionType::API_TOKEN_CREATE,
             AuditActionType::API_TOKEN_REVOKE,
             AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -631,6 +655,14 @@ uptrakit_audit_log_derive::audit_actions! {
     auth_oidc_callback => AUTH_OIDC_CALLBACK, Event;
     auth_oidc_exchange => AUTH_OIDC_EXCHANGE, Event;
     auth_oidc_link => AUTH_OIDC_LINK, Event;
+    auth_mfa_challenge_issued => AUTH_MFA_CHALLENGE_ISSUED, Event;
+    auth_mfa_verified => AUTH_MFA_VERIFIED, Event;
+    auth_mfa_failed => AUTH_MFA_FAILED, Event;
+    auth_mfa_challenge_exhausted => AUTH_MFA_CHALLENGE_EXHAUSTED, Event;
+    auth_mfa_enrolled => AUTH_MFA_ENROLLED, Event;
+    auth_mfa_disabled => AUTH_MFA_DISABLED, Event;
+    auth_mfa_recovery_used => AUTH_MFA_RECOVERY_USED, Event;
+    auth_mfa_recovery_regenerated => AUTH_MFA_RECOVERY_REGENERATED, Event;
 
     // tokens — Stateful
     api_token_create => API_TOKEN_CREATE, Stateful;
@@ -965,5 +997,33 @@ mod tests {
             AuditActionType::PLUGIN_CONFIG_UPDATE.kind(),
             AuditActionKind::Stateful
         );
+    }
+
+    #[test]
+    fn mfa_audit_actions_are_registered() {
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_CHALLENGE_ISSUED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_VERIFIED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_FAILED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_CHALLENGE_EXHAUSTED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_ENROLLED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_DISABLED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_RECOVERY_USED.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_MFA_RECOVERY_REGENERATED.as_str()
+        ));
     }
 }
