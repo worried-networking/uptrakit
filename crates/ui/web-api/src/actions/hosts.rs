@@ -69,22 +69,15 @@ mod tests {
     use crate::actions::MutationContext;
     use crate::event_broadcaster::EventBroadcaster;
     use crate::notification_service::NotificationService;
-    use crate::notifications::dispatcher::NotificationDispatcher;
     use crate::service_connections::ServiceConnectionRegistry;
     use crate::tenant_db::TenantDb;
     use crate::test_harness::{insert_default_tenant, setup_migrated_db};
 
-    fn build_ctx_parts() -> (
-        NotificationService,
-        NotificationDispatcher,
-        EventBroadcaster,
-        tokio::sync::mpsc::Receiver<crate::notifications::events::NotificationEvent>,
-    ) {
-        let (dispatcher, dispatcher_rx) = NotificationDispatcher::test_channel();
+    fn build_ctx_parts() -> (NotificationService, EventBroadcaster) {
         let broadcaster = EventBroadcaster::new();
         let notification_svc =
             NotificationService::new(ServiceConnectionRegistry::default(), Uuid::nil());
-        (notification_svc, dispatcher, broadcaster, dispatcher_rx)
+        (notification_svc, broadcaster)
     }
 
     // ── update not found ─────────────────────────────────────────────────
@@ -95,11 +88,10 @@ mod tests {
         let tenant_id = insert_default_tenant(&db).await;
         let nonexistent_id = Uuid::now_v7();
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
@@ -127,11 +119,10 @@ mod tests {
         let tenant_id = insert_default_tenant(&db).await;
         let nonexistent_id = Uuid::now_v7();
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
@@ -155,11 +146,10 @@ mod tests {
         let db = setup_migrated_db().await;
         let tenant_id = insert_default_tenant(&db).await;
 
-        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let tenant_db = TenantDb::new_for_test(db, tenant_id);

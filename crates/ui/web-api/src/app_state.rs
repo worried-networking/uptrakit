@@ -122,7 +122,6 @@ impl NotificationStateMutationExt for NotificationState {
     fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
         crate::actions::MutationContext {
             notification_service: &self.notification_service,
-            notification_dispatcher: &self.notification_dispatcher,
             event_broadcaster: &self.event_broadcaster,
         }
     }
@@ -1193,10 +1192,6 @@ mod from_ref_tests {
         assert!(std::ptr::eq(
             app_ctx.notification_service,
             notification_ctx.notification_service,
-        ));
-        assert!(std::ptr::eq(
-            app_ctx.notification_dispatcher,
-            notification_ctx.notification_dispatcher,
         ));
         assert!(std::ptr::eq(
             app_ctx.event_broadcaster,

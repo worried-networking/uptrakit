@@ -2,7 +2,6 @@ use uuid::Uuid;
 
 use crate::actions::MutationContext;
 use crate::app_state::CertState;
-use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::queries::services::{self as svc_queries, ServiceQueryError};
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::tenant_db::TenantDb;
@@ -11,111 +10,6 @@ use uptrakit_web_api_types::services::ServiceResponse;
 use uptrakit_wire::{
     ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
 };
-
-pub(crate) async fn approve(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    service_id: Uuid,
-) -> Result<ServiceResponse, rootcause::Report<ServiceQueryError>> {
-    let resp = svc_queries::approve_service(tenant_db, service_id).await?;
-
-    let _ = ctx
-        .notification_service
-        .send(
-            &service_id,
-            ControllerMessage::Approved(ApprovedPayload { service_id }),
-        )
-        .await;
-
-    let service_label = resp.service_label.clone();
-    ctx.notification_dispatcher.dispatch(NotificationEvent::new(
-        tenant_db.tenant_id(),
-        NotificationEventDetails::NewServiceEnrolled {
-            service_id,
-            service_label,
-        },
-    ));
-
-    ctx.event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::ServiceStatusChanged {
-                id: service_id,
-                status: "approved".to_string(),
-            },
-        )
-        .await;
-
-    Ok(resp)
-}
-
-/// NOTE: Does NOT dispatch a `NotificationEvent` (preserved asymmetry — individual approve only).
-pub(crate) async fn reject(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    service_id: Uuid,
-    service_connections: &ServiceConnectionRegistry,
-) -> Result<ServiceResponse, rootcause::Report<ServiceQueryError>> {
-    let resp = svc_queries::reject_service(tenant_db, service_id).await?;
-
-    let _ = ctx
-        .notification_service
-        .send(
-            &service_id,
-            ControllerMessage::Rejected(RejectedPayload { service_id }),
-        )
-        .await;
-
-    service_connections.force_disconnect(&service_id).await;
-
-    ctx.event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::ServiceStatusChanged {
-                id: service_id,
-                status: "rejected".to_string(),
-            },
-        )
-        .await;
-
-    Ok(resp)
-}
-
-/// Returns `Ok(true)` when the service was found and deactivated; `Ok(false)` when not found.
-/// No side effects are run when `Ok(false)`.
-pub(crate) async fn deactivate(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    service_id: Uuid,
-    default_tenant_id: Uuid,
-    cert: &CertState,
-    service_connections: &ServiceConnectionRegistry,
-) -> Result<bool, rootcause::Report<ServiceQueryError>> {
-    let found = svc_queries::deactivate_service(tenant_db, service_id, default_tenant_id).await?;
-    if !found {
-        return Ok(false);
-    }
-
-    cert.revocation_notify.notify_one();
-    ctx.notification_service
-        .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-            RequestCrlRenewalPayload::default(),
-        ))
-        .await;
-    service_connections.force_disconnect(&service_id).await;
-
-    ctx.event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::ServiceStatusChanged {
-                id: service_id,
-                status: "deactivated".to_string(),
-            },
-        )
-        .await;
-
-    Ok(true)
-}
 
 /// Parameters for a service merge operation.
 pub(crate) struct MergeParams {
@@ -278,8 +172,6 @@ mod tests {
     use crate::actions::MutationContext;
     use crate::event_broadcaster::EventBroadcaster;
     use crate::notification_service::NotificationService;
-    use crate::notifications::dispatcher::NotificationDispatcher;
-    use crate::notifications::events::NotificationEventDetails;
     use crate::service_connections::ServiceConnectionRegistry;
     use crate::tenant_db::TenantDb;
     use crate::test_harness::fixtures::insert_service;
@@ -314,168 +206,25 @@ mod tests {
         }
     }
 
-    fn build_ctx_parts() -> (
-        NotificationService,
-        NotificationDispatcher,
-        EventBroadcaster,
-        tokio::sync::mpsc::Receiver<crate::notifications::events::NotificationEvent>,
-    ) {
-        let (dispatcher, dispatcher_rx) = NotificationDispatcher::test_channel();
+    fn build_ctx_parts() -> (NotificationService, EventBroadcaster) {
         let broadcaster = EventBroadcaster::new();
         let notification_svc =
             NotificationService::new(ServiceConnectionRegistry::default(), Uuid::nil());
-        (notification_svc, dispatcher, broadcaster, dispatcher_rx)
-    }
-
-    // ── approve ─────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn approve_dispatches_notification_and_broadcasts() {
-        let db = setup_migrated_db().await;
-        let tenant_id = insert_default_tenant(&db).await;
-        let svc = insert_service(&db, tenant_id, ServiceStatus::Pending).await;
-        let service_id = svc.id;
-
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
-        let mut rx = broadcaster.subscribe(tenant_id).await;
-        let ctx = MutationContext {
-            notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
-            event_broadcaster: &broadcaster,
-        };
-        let tenant_db = TenantDb::new_for_test(db, tenant_id);
-
-        approve(&tenant_db, &ctx, service_id)
-            .await
-            .expect("approve");
-
-        // Dispatcher event fired.
-        let event = dispatcher_rx
-            .try_recv()
-            .expect("dispatcher should have received one event");
-        assert_eq!(event.tenant_id, tenant_id);
-        assert!(event.host_id.is_none());
-        assert!(event.host_name.is_none());
-        assert!(event.software_item_id.is_none());
-        assert!(event.software_item_name.is_none());
-        assert!(event.plugin_type.is_none());
-        assert!(
-            matches!(
-                event.details,
-                NotificationEventDetails::NewServiceEnrolled {
-                    service_id: sid,
-                    ..
-                } if sid == service_id
-            ),
-            "expected NewServiceEnrolled with correct service_id"
-        );
-
-        // Broadcaster event fired.
-        let broadcast = rx.try_recv().expect("broadcaster should have one event");
-        assert!(
-            matches!(
-                broadcast,
-                AdminEvent::ServiceStatusChanged { id, ref status } if id == service_id && status == "approved"
-            ),
-            "unexpected broadcast: {broadcast:?}"
-        );
-    }
-
-    // ── reject ───────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn reject_broadcasts_no_dispatcher_event() {
-        let db = setup_migrated_db().await;
-        let tenant_id = insert_default_tenant(&db).await;
-        let svc = insert_service(&db, tenant_id, ServiceStatus::Pending).await;
-        let service_id = svc.id;
-
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
-        let mut rx = broadcaster.subscribe(tenant_id).await;
-        let ctx = MutationContext {
-            notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
-            event_broadcaster: &broadcaster,
-        };
-        let connections = ServiceConnectionRegistry::default();
-        let tenant_db = TenantDb::new_for_test(db, tenant_id);
-
-        reject(&tenant_db, &ctx, service_id, &connections)
-            .await
-            .expect("reject");
-
-        // No dispatcher event for reject (preserved asymmetry).
-        assert!(
-            dispatcher_rx.try_recv().is_err(),
-            "reject must NOT dispatch a NotificationEvent"
-        );
-
-        // Broadcaster event fired with "rejected" status.
-        let broadcast = rx.try_recv().expect("broadcaster should have one event");
-        assert!(
-            matches!(
-                broadcast,
-                AdminEvent::ServiceStatusChanged { id, ref status } if id == service_id && status == "rejected"
-            ),
-            "unexpected broadcast: {broadcast:?}"
-        );
-    }
-
-    // ── deactivate not found ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn deactivate_not_found_has_zero_side_effects() {
-        let db = setup_migrated_db().await;
-        let tenant_id = insert_default_tenant(&db).await;
-        let nonexistent_id = Uuid::now_v7();
-
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
-        let mut rx = broadcaster.subscribe(tenant_id).await;
-        let ctx = MutationContext {
-            notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
-            event_broadcaster: &broadcaster,
-        };
-        let cert = make_cert_state();
-        let connections = ServiceConnectionRegistry::default();
-        let tenant_db = TenantDb::new_for_test(db, tenant_id);
-
-        let found = deactivate(
-            &tenant_db,
-            &ctx,
-            nonexistent_id,
-            Uuid::nil(),
-            &cert,
-            &connections,
-        )
-        .await
-        .expect("deactivate");
-
-        assert!(!found, "should return Ok(false) for unknown service");
-        assert!(
-            dispatcher_rx.try_recv().is_err(),
-            "no dispatcher event expected"
-        );
-        assert_eq!(
-            rx.try_recv().unwrap_err(),
-            TryRecvError::Empty,
-            "no broadcast event expected"
-        );
+        (notification_svc, broadcaster)
     }
 
     // ── batch_approve ────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_approve_no_dispatcher_dispatch() {
+    async fn batch_approve_broadcasts_status_changed() {
         let db = setup_migrated_db().await;
         let tenant_id = insert_default_tenant(&db).await;
         let svc = insert_service(&db, tenant_id, ServiceStatus::Pending).await;
 
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
@@ -485,12 +234,6 @@ mod tests {
             .expect("batch_approve");
 
         assert_eq!(succeeded, vec![svc.id]);
-
-        // Preserved asymmetry: batch approve must NOT dispatch NotificationEvent.
-        assert!(
-            dispatcher_rx.try_recv().is_err(),
-            "batch_approve must NOT dispatch a NotificationEvent"
-        );
 
         // Broadcaster event fired with "approved" status.
         let broadcast = rx.try_recv().expect("broadcaster should have one event");
@@ -551,11 +294,10 @@ mod tests {
         let target = insert_mergeable_service(&db, tenant_id, ServiceStatus::Approved).await;
         let source = insert_mergeable_service(&db, tenant_id, ServiceStatus::Pending).await;
 
-        let (notification_svc, dispatcher, broadcaster, mut dispatcher_rx) = build_ctx_parts();
+        let (notification_svc, broadcaster) = build_ctx_parts();
         let mut rx = broadcaster.subscribe(tenant_id).await;
         let ctx = MutationContext {
             notification_service: &notification_svc,
-            notification_dispatcher: &dispatcher,
             event_broadcaster: &broadcaster,
         };
         let cert = make_cert_state();
@@ -576,12 +318,6 @@ mod tests {
         )
         .await
         .expect("merge");
-
-        // Preserved asymmetry: merge must NOT dispatch NotificationEvent.
-        assert!(
-            dispatcher_rx.try_recv().is_err(),
-            "merge must NOT dispatch a NotificationEvent"
-        );
 
         // Preserved asymmetry: merge must NOT broadcast ServiceStatusChanged.
         assert_eq!(

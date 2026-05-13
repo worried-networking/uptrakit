@@ -9,6 +9,7 @@ use crate::middleware::permission::{
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
+use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::queries::services as svc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -17,9 +18,16 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
+use uptrakit_audit_log::{AuditEntry, AuditOutcome, Stateful};
+use uptrakit_web_api_queries::queries::services::ServiceView;
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
-use uptrakit_wire::{ControllerMessage, SetUpdateFreezePayload};
+use uptrakit_wire::{
+    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
+    SetUpdateFreezePayload,
+};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::batch_actions::{
@@ -57,7 +65,7 @@ fn emit_service_lifecycle_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 
@@ -77,7 +85,7 @@ fn emit_service_batch_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 
@@ -206,77 +214,142 @@ pub async fn update_service(
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
     let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+
     if let Err(e) = body.validate() {
-        emit_service_lifecycle_audit(
-            &audit_ctx,
+        // ValidationFailed — fire-and-forget (no DB mutation happened).
+        let entry = uptrakit_audit_log::AuditEntry::builder(
             uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
-            service_id,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("service", service_id.to_string(), None)
+        .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "invalid_request" }))
+        .build();
+        if let Ok(entry) = entry {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match svc_queries::update_service_settings(
-        &tenant_db,
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for service update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let result = svc_queries::update_service_settings_in_tx(
+        &tx,
+        tenant_id,
         service_id,
         body.ping_interval_seconds,
         body.cert_lifetime_hours,
     )
-    .await
-    {
-        Ok(Some(mut resp)) => {
-            if !trust_domain.is_empty() {
-                resp.spiffe_id = Some(format!("spiffe://{trust_domain}/service/{}", resp.id));
+    .await;
+
+    match result {
+        Ok(Some((before, after))) => {
+            let before_view = ServiceView::from(&before);
+            let after_view = ServiceView::from(&after);
+            let hook = state.audit_emitter.commit_hook();
+            let audit_entry =
+                match AuditEntry::<Stateful>::service_update(&before_view, &after_view)
+                    .tenant_scope(tenant_id)
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Success)
+                    .details(serde_json::json!({
+                        "ping_interval_seconds": body.ping_interval_seconds,
+                        "cert_lifetime_hours": body.cert_lifetime_hours,
+                    }))
+                    .build()
+                {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        tracing::error!("Failed to build audit entry for service update: {e}");
+                        drop(tx);
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                };
+            if let Err(e) = state
+                .audit_emitter
+                .emit_stateful(&tx, &hook, audit_entry)
+                .await
+            {
+                tracing::error!("Failed to emit stateful audit for service update: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
-            emit_service_lifecycle_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
-                resp.id,
-                Some(resp.friendly_name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "ping_interval_seconds": body.ping_interval_seconds,
-                    "cert_lifetime_hours": body.cert_lifetime_hours,
-                }),
-            );
-            (StatusCode::OK, Json(resp)).into_response()
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit service update: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            hook.flush_after_commit().await;
+
+            match svc_queries::get_active_service(&tenant_db, service_id).await {
+                Ok(Some(mut resp)) => {
+                    if !trust_domain.is_empty() {
+                        resp.spiffe_id =
+                            Some(format!("spiffe://{trust_domain}/service/{}", resp.id));
+                    }
+                    (StatusCode::OK, Json(resp)).into_response()
+                }
+                Ok(None) => {
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch updated service: {e}");
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+            }
         }
         Ok(None) => {
-            emit_service_lifecycle_audit(
-                &audit_ctx,
+            drop(tx);
+            // Denied — fire-and-forget (no DB mutation happened).
+            let entry = uptrakit_audit_log::AuditEntry::builder(
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
-                service_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "service.not_found",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "service.not_found" }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
+            }
             error_response(StatusCode::NOT_FOUND, "Service not found")
         }
         Err(e) => {
             tracing::error!("Failed to update service: {}", e);
-            emit_service_lifecycle_audit(
-                &audit_ctx,
+            drop(tx);
+            // Failed — fire-and-forget.
+            let entry = uptrakit_audit_log::AuditEntry::builder(
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
-                service_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "service.database_error",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(uptrakit_audit_log::AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "service.database_error" }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
+            }
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -308,41 +381,160 @@ pub async fn approve_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for service approve: {e}");
+            return Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ));
+        }
     };
-    let ctx = state.mutation_context();
-    let resp = match svc_actions::approve(&tenant_db, &ctx, service_id).await {
-        Ok(resp) => resp,
+
+    let (before, after) = match svc_queries::approve_service_in_tx(&tx, tenant_id, service_id).await
+    {
+        Ok(pair) => pair,
         Err(err) => {
             let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_service_lifecycle_audit(
-                &audit_ctx,
+            drop(tx);
+            let entry = uptrakit_audit_log::AuditEntry::builder(
                 uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
-                service_id,
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
+            }
             return Err(err.into());
         }
     };
-    emit_service_lifecycle_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
-        resp.id,
-        Some(resp.friendly_name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "status": resp.status,
-        }),
-    );
-    Ok((StatusCode::OK, Json(resp)).into_response())
+
+    let before_view = ServiceView::from(&before);
+    let after_view = ServiceView::from(&after);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::service_approve(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({}))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for service approve: {e}");
+            drop(tx);
+            return Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit stateful audit for service approve: {e}");
+        drop(tx);
+        return Err(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.",
+            "internal_error",
+            None,
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit service approve: {e}");
+        return Err(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.",
+            "internal_error",
+            None,
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    // Side effects (after commit).
+    let _ = state
+        .notification
+        .notification_service
+        .send(
+            &service_id,
+            ControllerMessage::Approved(ApprovedPayload { service_id }),
+        )
+        .await;
+
+    let service_label = {
+        use uptrakit_wire::Capability;
+        use uptrakit_wire::service_profile::{ServiceProfile, parse_capabilities};
+        let caps = parse_capabilities(&after.capabilities);
+        let has_ssh = caps.contains(&Capability::SshRemote);
+        ServiceProfile::from_capabilities(&caps)
+            .service_label(has_ssh)
+            .to_string()
+    };
+    state
+        .notification
+        .notification_dispatcher
+        .dispatch(NotificationEvent::new(
+            tenant_id,
+            NotificationEventDetails::NewServiceEnrolled {
+                service_id,
+                service_label,
+            },
+        ));
+
+    state
+        .notification
+        .event_broadcaster
+        .send(
+            tenant_id,
+            AdminEvent::ServiceStatusChanged {
+                id: service_id,
+                status: "approved".to_string(),
+            },
+        )
+        .await;
+
+    match svc_queries::get_active_service(&tenant_db, service_id).await {
+        Ok(Some(resp)) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        Ok(None) => Err(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.",
+            "internal_error",
+            None,
+        )),
+        Err(e) => {
+            tracing::error!("Failed to fetch approved service: {e}");
+            Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ))
+        }
+    }
 }
 
 /// Reject a pending service
@@ -371,42 +563,167 @@ pub async fn reject_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for service reject: {e}");
+            return Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ));
+        }
     };
-    let ctx = state.mutation_context();
-    let resp =
-        match svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await {
-            Ok(resp) => resp,
-            Err(err) => {
-                let (outcome, reason_code) = err.current_context().audit_classification();
-                emit_service_lifecycle_audit(
-                    &audit_ctx,
-                    uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
-                    service_id,
-                    None,
-                    outcome,
-                    serde_json::json!({
-                        "reason_code": reason_code,
-                    }),
-                );
-                return Err(err.into());
+
+    let (before, after) = match svc_queries::reject_service_in_tx(&tx, tenant_id, service_id).await
+    {
+        Ok(pair) => pair,
+        Err(err) => {
+            let (outcome, reason_code) = err.current_context().audit_classification();
+            drop(tx);
+            let entry = uptrakit_audit_log::AuditEntry::builder(
+                uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
             }
-        };
-    emit_service_lifecycle_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
-        resp.id,
-        Some(resp.friendly_name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "status": resp.status,
-        }),
-    );
-    Ok((StatusCode::OK, Json(resp)).into_response())
+            return Err(err.into());
+        }
+    };
+
+    let before_view = ServiceView::from(&before);
+    let after_view = ServiceView::from(&after);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::service_reject(&before_view, &after_view)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({}))
+        .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for service reject: {e}");
+            drop(tx);
+            return Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit stateful audit for service reject: {e}");
+        drop(tx);
+        return Err(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.",
+            "internal_error",
+            None,
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit service reject: {e}");
+        return Err(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.",
+            "internal_error",
+            None,
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    // Side effects (after commit).
+    let _ = state
+        .notification
+        .notification_service
+        .send(
+            &service_id,
+            ControllerMessage::Rejected(RejectedPayload { service_id }),
+        )
+        .await;
+    state
+        .service_connections
+        .force_disconnect(&service_id)
+        .await;
+    state
+        .notification
+        .event_broadcaster
+        .send(
+            tenant_id,
+            AdminEvent::ServiceStatusChanged {
+                id: service_id,
+                status: "rejected".to_string(),
+            },
+        )
+        .await;
+
+    match svc_queries::get_active_service(&tenant_db, service_id).await {
+        Ok(Some(resp)) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        // Service was rejected (deactivated_at set), so get_active_service returns None.
+        // Build a minimal response from the after model.
+        Ok(None) => {
+            use uptrakit_web_api_types::services::{ServiceResponse, ServiceStatus as WireStatus};
+            use uptrakit_wire::Capability;
+            use uptrakit_wire::service_profile::{ServiceProfile, parse_capabilities};
+            let caps = parse_capabilities(&after.capabilities);
+            let has_ssh = caps.contains(&Capability::SshRemote);
+            let profile = ServiceProfile::from_capabilities(&caps);
+            let cap_strings: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
+            let resp = ServiceResponse {
+                id: after.id,
+                capabilities: cap_strings,
+                service_label: profile.service_label(has_ssh).to_string(),
+                hostname: after.hostname.clone(),
+                friendly_name: after.friendly_name.clone(),
+                is_embedded: after.is_embedded,
+                ip_address: after.ip_address.clone(),
+                status: WireStatus::Rejected,
+                client_version: after.client_version.clone(),
+                last_seen_at: after.last_seen_at,
+                created_at: after.created_at,
+                updated_at: after.updated_at,
+                ping_interval_seconds: after.ping_interval_seconds.map(|v| v as u32),
+                cert_lifetime_hours: after.cert_lifetime_hours.map(|v| v as u32),
+                yielded_to: None,
+                spiffe_id: None,
+            };
+            Ok((StatusCode::OK, Json(resp)).into_response())
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch rejected service: {e}");
+            Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ))
+        }
+    }
 }
 
 /// Deactivate a service (soft-delete)
@@ -435,58 +752,152 @@ pub async fn deactivate_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for service deactivate: {e}");
+            return Err(ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "internal_error",
+                None,
+            ));
+        }
     };
-    let ctx = state.mutation_context();
-    let found = svc_actions::deactivate(
-        &tenant_db,
-        &ctx,
-        service_id,
-        state.default_tenant_id,
-        &state.cert,
-        &state.service_connections,
-    )
-    .await
-    .map_err(|err| {
-        let (outcome, reason_code) = err.current_context().audit_classification();
-        emit_service_lifecycle_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
-            service_id,
-            None,
-            outcome,
-            serde_json::json!({
-                "reason_code": reason_code,
-            }),
-        );
-        ApiError::from(err)
-    })?;
-    if found {
-        emit_service_lifecycle_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
-            service_id,
-            None,
-            uptrakit_audit_log::AuditOutcome::Success,
-            serde_json::json!({}),
-        );
-        Ok(StatusCode::NO_CONTENT.into_response())
-    } else {
-        emit_service_lifecycle_audit(
-            &audit_ctx,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
-            service_id,
-            None,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            serde_json::json!({
-                "reason_code": "service.not_found",
-            }),
-        );
-        Ok(error_response(StatusCode::NOT_FOUND, "Service not found"))
+
+    let result =
+        svc_queries::deactivate_service_in_tx(&tx, tenant_id, service_id, state.default_tenant_id)
+            .await;
+
+    match result {
+        Ok(Some(before)) => {
+            let before_view = ServiceView::from(&before);
+            // After view: same as before but with deactivated_at set.
+            // We build a synthetic after for the snapshot.
+            let after_view = {
+                let mut v = ServiceView::from(&before);
+                v.status = uptrakit_shared_types::ServiceStatus::Deactivated.to_string();
+                v
+            };
+            let hook = state.audit_emitter.commit_hook();
+            let audit_entry =
+                match AuditEntry::<Stateful>::service_deactivate(&before_view, &after_view)
+                    .tenant_scope(tenant_id)
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Success)
+                    .details(serde_json::json!({}))
+                    .build()
+                {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        tracing::error!("Failed to build audit entry for service deactivate: {e}");
+                        drop(tx);
+                        return Err(ApiError::new(
+                            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            "An internal error occurred.",
+                            "internal_error",
+                            None,
+                        ));
+                    }
+                };
+
+            if let Err(e) = state
+                .audit_emitter
+                .emit_stateful(&tx, &hook, audit_entry)
+                .await
+            {
+                tracing::error!("Failed to emit stateful audit for service deactivate: {e}");
+                drop(tx);
+                return Err(ApiError::new(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.",
+                    "internal_error",
+                    None,
+                ));
+            }
+
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit service deactivate: {e}");
+                return Err(ApiError::new(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.",
+                    "internal_error",
+                    None,
+                ));
+            }
+            hook.flush_after_commit().await;
+
+            // Side effects (after commit).
+            state.cert.revocation_notify.notify_one();
+            state
+                .notification
+                .notification_service
+                .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                    RequestCrlRenewalPayload::default(),
+                ))
+                .await;
+            state
+                .notification
+                .event_broadcaster
+                .send(
+                    tenant_id,
+                    AdminEvent::ServiceStatusChanged {
+                        id: service_id,
+                        status: "deactivated".to_string(),
+                    },
+                )
+                .await;
+            state
+                .service_connections
+                .force_disconnect(&service_id)
+                .await;
+
+            Ok(StatusCode::NO_CONTENT.into_response())
+        }
+        Ok(None) => {
+            drop(tx);
+            // Not found — fire-and-forget denied audit.
+            let entry = uptrakit_audit_log::AuditEntry::builder(
+                uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "service.not_found" }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
+            }
+            Ok(error_response(StatusCode::NOT_FOUND, "Service not found"))
+        }
+        Err(err) => {
+            let (outcome, reason_code) = err.current_context().audit_classification();
+            drop(tx);
+            let entry = uptrakit_audit_log::AuditEntry::builder(
+                uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("service", service_id.to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build();
+            if let Ok(entry) = entry {
+                state.audit_emitter.emit_event(entry);
+            }
+            Err(err.into())
+        }
     }
 }
 
@@ -1155,11 +1566,20 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::DatabaseBackend::new(db.clone()),
             )),
-            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
-                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                    uptrakit_audit_log::DatabaseBackend::new(db.clone()),
-                )),
-            ),
+            audit_emitter: {
+                let db_backend =
+                    std::sync::Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone()))
+                        as std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>;
+                let mirror = std::sync::Arc::new(uptrakit_audit_log::NoopBackend)
+                    as std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>;
+                uptrakit_audit_log::AuditEmitter::with_backends(
+                    uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                        uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+                    )),
+                    db_backend,
+                    mirror,
+                )
+            },
             surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
                 Arc::new(crate::surface_registry::SurfaceRegistry::new(
                     crate::surface_registry::SurfaceRegistryConfig::default(),
