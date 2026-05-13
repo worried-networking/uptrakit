@@ -4,6 +4,7 @@ pub mod authentication;
 pub mod device_flow;
 pub mod error;
 pub mod jwt;
+pub mod mfa_challenge;
 #[cfg(feature = "oidc")]
 pub mod oidc_state;
 pub mod password;
