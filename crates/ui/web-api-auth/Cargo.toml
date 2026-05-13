@@ -29,6 +29,7 @@ subtle = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+totp-rs = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 openidconnect = { workspace = true, optional = true }
