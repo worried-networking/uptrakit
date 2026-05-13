@@ -387,9 +387,16 @@ pub async fn status(
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
 ) -> Result<AuthStatusOutput> {
+    let config = load_config()?;
     let (server, token) = resolve_server_and_token(server_override, token_override)?;
-    let client =
-        UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()?;
+    let client = UptrakitClient::new(
+        &server,
+        Some(&token),
+        insecure,
+        config.ca_pem.as_deref(),
+        request_timeout,
+    )
+    .context_to()?;
 
     let user = client.me().await.context_to()?;
 
@@ -413,9 +420,16 @@ pub async fn token_create(
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
 ) -> Result<TokenCreateOutput> {
+    let config = load_config()?;
     let (server, token) = resolve_server_and_token(server_override, token_override)?;
-    let client =
-        UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()?;
+    let client = UptrakitClient::new(
+        &server,
+        Some(&token),
+        insecure,
+        config.ca_pem.as_deref(),
+        request_timeout,
+    )
+    .context_to()?;
 
     let resp = client
         .create_api_token(&CreateApiTokenRequest {
@@ -440,9 +454,16 @@ pub async fn token_list(
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
 ) -> Result<TokenListOutput> {
+    let config = load_config()?;
     let (server, token) = resolve_server_and_token(server_override, token_override)?;
-    let client =
-        UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()?;
+    let client = UptrakitClient::new(
+        &server,
+        Some(&token),
+        insecure,
+        config.ca_pem.as_deref(),
+        request_timeout,
+    )
+    .context_to()?;
 
     let resp = client.list_api_tokens().await.context_to()?;
 
@@ -475,9 +496,16 @@ pub async fn token_revoke(
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
 ) -> Result<TokenRevokeOutput> {
+    let config = load_config()?;
     let (server, token) = resolve_server_and_token(server_override, token_override)?;
-    let client =
-        UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()?;
+    let client = UptrakitClient::new(
+        &server,
+        Some(&token),
+        insecure,
+        config.ca_pem.as_deref(),
+        request_timeout,
+    )
+    .context_to()?;
 
     client.revoke_api_token(id).await.context_to()?;
 
