@@ -222,7 +222,7 @@ impl HumanOutput for TokenRevokeOutput {
 /// 4. Poll /api/v1/oauth/token with RFC error-code parsing until authorized/denied/expired
 /// 5. Store server URL + API token locally
 pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> {
-    let config = load_config()?;
+    let mut config = load_config()?;
     let server = if let Some(s) = server_override {
         s.to_string()
     } else if let Some(s) = &config.server {
@@ -257,7 +257,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
 
     eprintln!("  Waiting for authorization...");
 
-    poll_for_token(&client, &server, &start_resp, &client_name).await
+    poll_for_token(&client, &server, &start_resp, &client_name, &mut config).await
 }
 
 fn print_browser_instructions(start_resp: &DeviceAuthorizationResponse, insecure: bool) {
@@ -285,6 +285,7 @@ async fn poll_for_token(
     server: &str,
     start_resp: &DeviceAuthorizationResponse,
     client_name: &str,
+    config: &mut Config,
 ) -> Result<()> {
     let started = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(start_resp.expires_in);
@@ -307,10 +308,8 @@ async fn poll_for_token(
 
         match client.oauth_token(&req).await {
             Ok(resp) => {
-                save_config(&Config {
-                    server: Some(server.to_string()),
-                })
-                .await?;
+                config.server = Some(server.to_string());
+                save_config(config).await?;
                 save_credentials(&Credentials {
                     token: Some(resp.access_token),
                 })
