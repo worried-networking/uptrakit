@@ -165,6 +165,7 @@ pub async fn establish_ca_trust(
     Ok(())
 }
 
+#[non_exhaustive]
 #[derive(Debug, Subcommand)]
 pub enum AuthCommands {
     /// Login to the server via browser authorization
@@ -194,6 +195,7 @@ pub enum AuthCommands {
     },
 }
 
+#[non_exhaustive]
 #[derive(Debug, Subcommand)]
 pub enum CaCommands {
     /// Establish or update stored CA trust
@@ -214,6 +216,7 @@ pub enum CaCommands {
     Forget,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Subcommand)]
 pub enum TokenCommands {
     /// Create a new API token
@@ -1183,7 +1186,8 @@ mod ca_trust_tests {
     use httpmock::prelude::*;
 
     /// Serialize env-mutating async tests so parallel test threads do not race on HOME.
-    /// `tokio::sync::Mutex` is used so the guard can be held across `.await` points.
+    // parking_lot::Mutex intentionally not used here: the guard must span .await points
+    // to serialize HOME env writes across async test tasks.
     static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// Run an async closure with HOME pointing at a unique temp directory.
