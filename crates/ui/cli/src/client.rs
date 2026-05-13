@@ -29,12 +29,39 @@ pub fn resolve_server_and_token(
 }
 
 /// Build an authenticated API client from stored config/credentials or overrides.
+///
+/// Loads `ca_pem` from the stored [`Config`] so that connections to controllers
+/// whose TLS certificate was pinned with `uptrakit auth ca trust` succeed.
+/// When the connection fails and a custom CA is configured, a recovery hint is
+/// attached to the error pointing users toward `uptrakit auth ca trust` /
+/// `uptrakit auth ca forget`.
 pub fn authenticated_client(
     server: Option<&str>,
     token: Option<&str>,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
 ) -> Result<UptrakitClient> {
+    let config = load_config()?;
+    let ca_pem = config.ca_pem.clone();
     let (server, token) = resolve_server_and_token(server, token)?;
-    UptrakitClient::new(&server, Some(&token), insecure, None, request_timeout).context_to()
+
+    UptrakitClient::new(
+        &server,
+        Some(&token),
+        insecure,
+        ca_pem.as_deref(),
+        request_timeout,
+    )
+    .map_err(|e| {
+        if ca_pem.is_some() {
+            e.attach(
+                "connection failed with a pinned CA; if the controller CA has rotated, run \
+                     'uptrakit auth ca trust' to re-establish trust; if the controller now uses \
+                     a public CA, run 'uptrakit auth ca forget' to return to system roots",
+            )
+        } else {
+            e
+        }
+    })
+    .context_to()
 }
