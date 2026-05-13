@@ -23,6 +23,7 @@ pub mod host_tags;
 pub mod hosts;
 pub mod instance_plugins;
 pub mod masked_url;
+pub mod mfa;
 pub mod notifications;
 pub mod oauth;
 pub mod oidc_auth;
