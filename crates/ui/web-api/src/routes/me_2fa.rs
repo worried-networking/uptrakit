@@ -30,7 +30,6 @@ use crate::auth::totp::{build_otpauth_uri, generate_totp_secret, verify_totp_cod
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::require_auth::{AuthenticatedUser, FullSessionUser, SetupRequired};
-use crate::routes::mfa::build_full_session;
 use uptrakit_crypto::EncryptedString;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{user_recovery_code, user_totp};
@@ -145,9 +144,16 @@ async fn re_auth_ok(
         let secret = totp_row.secret.expose_secret().to_string();
         let code_owned = code.to_string();
 
-        let step = tokio::task::spawn_blocking(move || verify_totp_code(&secret, &code_owned))
+        let step = match tokio::task::spawn_blocking(move || verify_totp_code(&secret, &code_owned))
             .await
-            .unwrap_or(None);
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("re_auth_ok: spawn_blocking panicked: {:?}", e);
+                let _ = txn.rollback().await;
+                return false;
+            }
+        };
 
         let Some(step) = step else {
             let _ = txn.rollback().await;
@@ -292,6 +298,25 @@ pub async fn totp_enroll(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    // Reject if TOTP is already active.
+    match UserTotp::find()
+        .filter(user_totp::Column::UserId.eq(user_id))
+        .filter(user_totp::Column::IsActive.eq(true))
+        .count(&txn)
+        .await
+    {
+        Ok(0) => {}
+        Ok(_) => {
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::CONFLICT, "TOTP already active");
+        }
+        Err(e) => {
+            tracing::error!("totp_enroll: failed to check active TOTP: {e}");
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
 
     // Delete any existing pending (is_active=false) TOTP rows.
     if let Err(e) = UserTotp::delete_many()
@@ -484,20 +509,8 @@ pub async fn totp_confirm(
             }
         };
 
-        match build_full_session(&state, &session_svc, &user_row).await {
-            Ok(resp) => {
-                // Extract the AuthResponse body from the response.
-                // We need to parse the body to put into TotpConfirmResponse.
-                // Instead, we call create_access_token/refresh directly like build_full_session does.
-                // Re-use the same session construction path by delegating entirely.
-                // However, build_full_session returns a Response not AuthResponse.
-                // We need AuthResponse — re-implement the essentials here.
-                let _ = resp; // discard the pre-built response
-                match build_session_tokens(&state, &session_svc, &user_row).await {
-                    Ok(auth_resp) => Some(auth_resp),
-                    Err(err_resp) => return err_resp,
-                }
-            }
+        match build_session_tokens(&state, &session_svc, &user_row).await {
+            Ok(auth_resp) => Some(auth_resp),
             Err(err_resp) => return err_resp,
         }
     } else {
@@ -543,23 +556,37 @@ pub async fn totp_disable(
         return error_response(StatusCode::UNAUTHORIZED, "Re-authentication failed");
     }
 
-    // DELETE all user_totp rows for this user.
+    // DELETE all user_totp rows and recovery codes atomically.
+    let txn = match state.db().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("totp_disable: failed to begin transaction: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     if let Err(e) = UserTotp::delete_many()
         .filter(user_totp::Column::UserId.eq(user_id))
-        .exec(state.db())
+        .exec(&txn)
         .await
     {
         tracing::error!("totp_disable: failed to delete TOTP rows: {e}");
+        let _ = txn.rollback().await;
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // DELETE all recovery codes.
     if let Err(e) = UserRecoveryCode::delete_many()
         .filter(user_recovery_code::Column::UserId.eq(user_id))
-        .exec(state.db())
+        .exec(&txn)
         .await
     {
         tracing::error!("totp_disable: failed to delete recovery codes: {e}");
+        let _ = txn.rollback().await;
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("totp_disable: failed to commit: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
@@ -570,7 +597,7 @@ pub async fn totp_disable(
         uptrakit_audit_log::AuditOutcome::Success,
     );
 
-    StatusCode::OK.into_response()
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ── POST /api/v1/auth/me/2fa/recovery-codes/regenerate ───────────────────────
@@ -714,16 +741,25 @@ async fn build_session_tokens(
             }
         };
 
-    let has_pending_email_change = uptrakit_shared_db::entity::prelude::EmailChangeRequest::find()
-        .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
-        .filter(
-            uptrakit_shared_db::entity::email_change_request::Column::ExpiresAt
-                .gt(time::OffsetDateTime::now_utc()),
-        )
-        .one(state.db())
-        .await
-        .unwrap_or(None)
-        .is_some();
+    let has_pending_email_change =
+        match uptrakit_shared_db::entity::prelude::EmailChangeRequest::find()
+            .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
+            .filter(
+                uptrakit_shared_db::entity::email_change_request::Column::ExpiresAt
+                    .gt(time::OffsetDateTime::now_utc()),
+            )
+            .one(state.db())
+            .await
+        {
+            Ok(r) => r.is_some(),
+            Err(e) => {
+                tracing::error!("build_session_tokens: failed to query pending email change: {e}");
+                return Err(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
+            }
+        };
 
     Ok(AuthResponse {
         access_token: SecretString::new(access_token),
@@ -1081,10 +1117,10 @@ mod tests {
         assert_eq!(status.recovery_codes_count, 8);
     }
 
-    // ── disable with correct password → 200 ─────────────────────────────────
+    // ── disable with correct password → 204 ─────────────────────────────────
 
     #[tokio::test]
-    async fn disable_with_correct_password_returns_200() {
+    async fn disable_with_correct_password_returns_no_content() {
         uptrakit_crypto::enable_plaintext_mode();
 
         let db = setup_test_db().await;
@@ -1106,7 +1142,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
 
     // ── disable with wrong password → 401 ───────────────────────────────────

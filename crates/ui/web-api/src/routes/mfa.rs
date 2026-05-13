@@ -27,12 +27,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set,
     SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::user_totp;
+use uptrakit_shared_db::entity::{user_recovery_code, user_totp};
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::auth::AuthResponse;
 pub use uptrakit_web_api_types::auth::UserResponse;
@@ -47,6 +47,7 @@ fn emit_mfa_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&str>,
     method: Option<&str>,
+    extra: &[(&str, serde_json::Value)],
 ) {
     let mut details = serde_json::Map::new();
     if let Some(method) = method {
@@ -54,6 +55,9 @@ fn emit_mfa_audit(
     }
     if let Some(reason_code) = reason_code {
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+    for (k, v) in extra {
+        details.insert((*k).to_string(), v.clone());
     }
 
     let builder = uptrakit_audit_log::AuditEntry::builder(action)
@@ -124,16 +128,25 @@ pub(crate) async fn build_full_session(
 
     let cookie = set_refresh_token_cookie(&refresh_token);
 
-    let has_pending_email_change = uptrakit_shared_db::entity::prelude::EmailChangeRequest::find()
-        .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
-        .filter(
-            uptrakit_shared_db::entity::email_change_request::Column::ExpiresAt
-                .gt(time::OffsetDateTime::now_utc()),
-        )
-        .one(state.db())
-        .await
-        .unwrap_or(None)
-        .is_some();
+    let has_pending_email_change =
+        match uptrakit_shared_db::entity::prelude::EmailChangeRequest::find()
+            .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
+            .filter(
+                uptrakit_shared_db::entity::email_change_request::Column::ExpiresAt
+                    .gt(time::OffsetDateTime::now_utc()),
+            )
+            .one(state.db())
+            .await
+        {
+            Ok(r) => r.is_some(),
+            Err(e) => {
+                tracing::error!("Failed to query pending email change: {e}");
+                return Err(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
+            }
+        };
 
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
@@ -383,7 +396,7 @@ pub async fn mfa_verify(
             }
         }
 
-        MfaMethod::Other(_) | _ => {
+        _ => {
             tracing::warn!(method = %req.method, "unsupported MFA method in verify request");
             let _ = txn.rollback().await;
             return error_response(StatusCode::BAD_REQUEST, "Unsupported MFA method");
@@ -405,6 +418,8 @@ pub async fn mfa_verify(
             tracing::error!("Failed to commit MFA failure: {e}");
         }
 
+        let attempt_count = challenge.attempt_count + 1;
+
         if exhausted {
             emit_mfa_audit(
                 &state,
@@ -413,6 +428,7 @@ pub async fn mfa_verify(
                 uptrakit_audit_log::AuditOutcome::Denied,
                 Some("too_many_attempts"),
                 Some(req.method.as_str()),
+                &[("attempt_count", serde_json::json!(attempt_count))],
             );
             return error_response(StatusCode::UNAUTHORIZED, "Too many failed attempts");
         }
@@ -424,6 +440,7 @@ pub async fn mfa_verify(
             uptrakit_audit_log::AuditOutcome::Denied,
             Some("invalid_code"),
             Some(req.method.as_str()),
+            &[("attempt_count", serde_json::json!(attempt_count))],
         );
         return error_response(StatusCode::UNAUTHORIZED, "Invalid MFA code");
     }
@@ -458,6 +475,13 @@ pub async fn mfa_verify(
 
     // Emit audit events.
     if is_recovery {
+        let remaining = UserRecoveryCode::find()
+            .filter(user_recovery_code::Column::UserId.eq(user_id))
+            .filter(user_recovery_code::Column::UsedAt.is_null())
+            .count(state.db())
+            .await
+            .unwrap_or(0);
+
         emit_mfa_audit(
             &state,
             uptrakit_audit_log::AuditActionType::AUTH_MFA_RECOVERY_USED,
@@ -465,6 +489,7 @@ pub async fn mfa_verify(
             uptrakit_audit_log::AuditOutcome::Success,
             None,
             Some(req.method.as_str()),
+            &[("remaining_count", serde_json::json!(remaining))],
         );
     }
 
@@ -475,6 +500,7 @@ pub async fn mfa_verify(
         uptrakit_audit_log::AuditOutcome::Success,
         None,
         Some(req.method.as_str()),
+        &[],
     );
 
     // Build and return the full session.
@@ -496,7 +522,8 @@ pub async fn mfa_verify(
     path = "/api/v1/auth/mfa/email",
     request_body = uptrakit_web_api_types::mfa::MfaEmailRequest,
     responses(
-        (status = 204, description = "Email OTP sent (or silently ignored if email delivery is unavailable)"),
+        (status = 200, description = "Email OTP sent"),
+        (status = 400, description = "User has no email address configured"),
         (status = 401, description = "Invalid or expired MFA token")
     ),
     tag = "Authentication"
@@ -547,6 +574,12 @@ pub async fn mfa_send_email(
     };
 
     let email_addr = user.email.expose_email().to_string();
+    if email_addr.is_empty() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "User has no email address configured",
+        );
+    }
 
     // Generate OTP and hash it in spawn_blocking.
     let otp_code = generate_email_otp();
