@@ -168,7 +168,18 @@ pub async fn establish_ca_trust(
 #[derive(Debug, Subcommand)]
 pub enum AuthCommands {
     /// Login to the server via browser authorization
-    Login,
+    Login {
+        /// Trust the controller's CA on first use.
+        /// Bare --tofu prompts interactively; --tofu=<FINGERPRINT> pins without prompting.
+        #[arg(
+            long,
+            num_args = 0..=1,
+            require_equals = true,
+            value_name = "FINGERPRINT",
+            default_missing_value = ""
+        )]
+        tofu: Option<String>,
+    },
     /// Show current authentication status
     Status,
     /// API token management
@@ -176,6 +187,31 @@ pub enum AuthCommands {
         #[command(subcommand)]
         command: TokenCommands,
     },
+    /// CA trust management
+    Ca {
+        #[command(subcommand)]
+        command: CaCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CaCommands {
+    /// Establish or update stored CA trust
+    Trust {
+        /// Trust the controller's CA. Bare --tofu prompts interactively; --tofu=<FINGERPRINT> is non-interactive.
+        #[arg(
+            long,
+            num_args = 0..=1,
+            require_equals = true,
+            value_name = "FINGERPRINT",
+            default_missing_value = ""
+        )]
+        tofu: Option<String>,
+    },
+    /// Show stored CA trust status
+    Status,
+    /// Remove stored CA trust (revert to system roots)
+    Forget,
 }
 
 #[derive(Debug, Subcommand)]
@@ -197,8 +233,13 @@ pub enum TokenCommands {
 
 pub async fn dispatch(command: AuthCommands, ctx: &CliContext) -> Result<()> {
     match command {
-        AuthCommands::Login => {
-            login(ctx.server.as_deref(), ctx.insecure).await?;
+        AuthCommands::Login { tofu } => {
+            if ctx.insecure && tofu.is_some() {
+                bail!(CliError::Other(
+                    "--insecure and --tofu are mutually exclusive".into()
+                ));
+            }
+            login(ctx.server.as_deref(), ctx.insecure, tofu).await?;
         }
         AuthCommands::Status => {
             let resp = status(
@@ -242,6 +283,17 @@ pub async fn dispatch(command: AuthCommands, ctx: &CliContext) -> Result<()> {
                 )
                 .await?;
                 crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        AuthCommands::Ca { command } => match command {
+            CaCommands::Trust { tofu } => {
+                ca_trust(ctx.server.as_deref(), tofu).await?;
+            }
+            CaCommands::Status => {
+                ca_status()?;
+            }
+            CaCommands::Forget => {
+                ca_forget().await?;
             }
         },
     }
@@ -363,11 +415,16 @@ impl HumanOutput for TokenRevokeOutput {
 /// Interactive login flow using device authorization (RFC 8628).
 ///
 /// 1. Prompt for server URL (if not stored/provided)
-/// 2. POST /api/v1/oauth/device_authorization — get device_code, user_code, verification_uri
-/// 3. Open verification_uri_complete in browser; print user_code + plain verification_uri
-/// 4. Poll /api/v1/oauth/token with RFC error-code parsing until authorized/denied/expired
-/// 5. Store server URL + API token locally
-pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> {
+/// 2. Optionally establish CA trust via TOFU before OAuth flow
+/// 3. POST /api/v1/oauth/device_authorization — get device_code, user_code, verification_uri
+/// 4. Open verification_uri_complete in browser; print user_code + plain verification_uri
+/// 5. Poll /api/v1/oauth/token with RFC error-code parsing until authorized/denied/expired
+/// 6. Store server URL + API token locally
+pub async fn login(
+    server_override: Option<&str>,
+    insecure: bool,
+    tofu: Option<String>,
+) -> Result<()> {
     let mut config = load_config()?;
     let server = if let Some(s) = server_override {
         s.to_string()
@@ -382,13 +439,26 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         bail!(CliError::Other("server URL is required".into()));
     }
 
+    // TOFU: establish CA trust before OAuth flow.
+    // None=no TOFU, ""=interactive prompt, "fp"=non-interactive fingerprint.
+    if let Some(raw) = tofu {
+        let fp_hint = if raw.is_empty() {
+            None
+        } else {
+            Some(parse_fingerprint(&raw)?)
+        };
+        establish_ca_trust(&server, fp_hint.as_deref(), false, &mut config).await?;
+    }
+
     let host = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
     let date = chrono_date();
     let client_name = format!("cli-{host}-{date}");
 
-    let client = UptrakitClient::new(&server, None, insecure, None, None).context_to()?;
+    let ca_pem = config.ca_pem.clone();
+    let client =
+        UptrakitClient::new(&server, None, insecure, ca_pem.as_deref(), None).context_to()?;
 
     let start_resp = client
         .oauth_device_authorization(&DeviceAuthorizationRequest::new(
@@ -659,6 +729,55 @@ pub async fn token_revoke(
         id: *id,
         revoked: true,
     })
+}
+
+/// `auth ca trust` — establish or update stored CA trust.
+pub async fn ca_trust(server_override: Option<&str>, tofu: Option<String>) -> Result<()> {
+    let mut config = load_config()?;
+
+    let server = server_override
+        .map(|s| s.to_string())
+        .or_else(|| config.server.clone())
+        .ok_or_else(|| {
+            report!(CliError::Other(
+                "no server URL configured; run 'uptrakit auth login' first or supply --server"
+                    .into(),
+            ))
+        })?;
+
+    let fp_hint = match tofu {
+        None => None,
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(parse_fingerprint(&s)?),
+    };
+
+    establish_ca_trust(&server, fp_hint.as_deref(), true, &mut config).await
+}
+
+/// `auth ca status` — print stored CA fingerprint or "system roots".
+pub fn ca_status() -> Result<()> {
+    let config = load_config()?;
+    match &config.ca_pem {
+        None => println!("CA trust:    system roots"),
+        Some(pem) => {
+            let der = CertificateDer::from_pem_slice(pem.as_bytes())
+                .map_err(|_e| report!(CliError::Other("stored CA PEM is unparseable".into())))?;
+            let mut h = Sha256::new();
+            h.update(der.as_ref());
+            let fp = uptrakit_shared_types::hex::encode(h.finalize());
+            println!("CA trust:    {fp}");
+        }
+    }
+    Ok(())
+}
+
+/// `auth ca forget` — clear stored CA trust, revert to system roots.
+pub async fn ca_forget() -> Result<()> {
+    let mut config = load_config()?;
+    config.ca_pem = None;
+    save_config(&config).await?;
+    eprintln!("Stored CA trust removed. System roots will be used for future connections.");
+    Ok(())
 }
 
 fn prompt(msg: &str) -> Result<String> {
