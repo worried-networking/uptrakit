@@ -465,6 +465,7 @@ mod tests {
     use crate::test_harness::setup_migrated_db;
     use httpmock::prelude::*;
     use parking_lot::Mutex;
+    use sea_orm::ActiveModelTrait;
     use uptrakit_audit_log::{AuditEmitter, AuditLogDispatcher, NoopBackend};
 
     fn make_emitter() -> Arc<AuditEmitter> {
@@ -582,5 +583,122 @@ mod tests {
             err.current_context(),
             CimdFetchError::ClientIdMismatch
         ));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Task 9 — parse failure preservation
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Helper: pre-seed a cached row so we can re-fetch and observe
+    /// the parse-failure preservation branch.
+    async fn seed_cached_row(
+        db: &DatabaseConnection,
+        url: &str,
+        now: OffsetDateTime,
+    ) -> oauth_client::Model {
+        let active = oauth_client::ActiveModel {
+            id: Set(url.to_owned()),
+            client_name: Set("Seeded App".to_owned()),
+            client_uri: Set(None),
+            logo_uri: Set(None),
+            redirect_uris: Set("[\"https://seeded.example.com/callback\"]".to_owned()),
+            default_scope: Set(String::new()),
+            grant_types: Set("[\"authorization_code\"]".to_owned()),
+            response_types: Set("[\"code\"]".to_owned()),
+            token_endpoint_auth_method: Set("none".to_owned()),
+            client_secret_hash: Set(None),
+            registration_access_token_hash: Set(None),
+            created_via: Set("cimd_cache".to_owned()),
+            created_at: Set(now),
+            last_used_at: Set(None),
+            revoked_at: Set(None),
+            metadata_cached_at: Set(Some(now)),
+            metadata_etag: Set(None),
+            metadata_content_hash: Set(Some("seed-hash".to_owned())),
+            metadata_raw: Set(Some(
+                serde_json::json!({
+                    "client_id": url,
+                    "redirect_uris": ["https://seeded.example.com/callback"],
+                    "client_name": "Seeded App",
+                })
+                .to_string(),
+            )),
+            metadata_parse_error: Set(None),
+            metadata_parse_error_at: Set(None),
+            trusted_at: Set(None),
+        };
+        active.insert(db).await.expect("seed row")
+    }
+
+    #[tokio::test]
+    async fn fetch_parse_failure_preserves_existing_row_on_refetch() {
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let fetcher = make_fetcher(db.clone(), Arc::clone(&clock_cell));
+
+        let server = MockServer::start_async().await;
+        let url = server.base_url();
+        let now = *clock_cell.lock();
+        let original = seed_cached_row(&db, &url, now).await;
+
+        // Re-fetch produces garbage bytes.
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200).body("this is not json {");
+            })
+            .await;
+
+        let refetched = fetcher
+            .fetch_and_upsert(&url)
+            .await
+            .expect("parse failure on re-fetch should not error");
+
+        // Existing fields preserved.
+        assert_eq!(refetched.client_name, original.client_name);
+        assert_eq!(refetched.redirect_uris, original.redirect_uris);
+        assert_eq!(
+            refetched.metadata_content_hash, original.metadata_content_hash,
+            "content hash must not be replaced on parse failure"
+        );
+        assert_eq!(
+            refetched.metadata_raw, original.metadata_raw,
+            "raw must not be replaced on parse failure (preserve prior good value)"
+        );
+        // Error bookkeeping is updated.
+        assert!(refetched.metadata_parse_error.is_some());
+        assert!(refetched.metadata_parse_error_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn fetch_parse_failure_first_fetch_returns_error() {
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let fetcher = make_fetcher(db.clone(), clock_cell);
+
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/");
+                then.status(200).body("not-json");
+            })
+            .await;
+
+        let err = fetcher
+            .fetch_and_upsert(&server.base_url())
+            .await
+            .expect_err("first fetch with unparseable bytes must error");
+        assert!(matches!(
+            err.current_context(),
+            CimdFetchError::UnparseableFirstFetch
+        ));
+
+        // No row was created.
+        let count = oauth_client::Entity::find()
+            .all(&db)
+            .await
+            .expect("query")
+            .len();
+        assert_eq!(count, 0);
     }
 }
