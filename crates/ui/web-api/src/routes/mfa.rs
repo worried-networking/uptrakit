@@ -620,16 +620,6 @@ pub async fn mfa_send_email(
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::expect_used,
-        reason = "test code: panics on failure are acceptable"
-    )]
-    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
-    #![expect(
-        clippy::assertions_on_result_states,
-        reason = "test assertions use is_ok/is_err pattern"
-    )]
-
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::mfa_challenge::create_mfa_challenge;
