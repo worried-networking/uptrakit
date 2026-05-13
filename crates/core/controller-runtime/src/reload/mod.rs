@@ -8,6 +8,7 @@
 
 pub(crate) mod audit;
 pub(crate) mod db_pool;
+pub(crate) mod embedded;
 pub(crate) mod https_listener;
 #[cfg(feature = "nats")]
 #[expect(
@@ -18,3 +19,4 @@ pub(crate) mod nats;
 pub(crate) mod pki_listener;
 pub(crate) mod probe;
 pub(crate) mod tls_snapshot;
+pub(crate) mod zeroconf;
