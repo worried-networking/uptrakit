@@ -81,6 +81,9 @@ if (( ${#ROUTES_RS_FILES[@]} > 0 )); then
   echo '[pre-commit] Verifying DB access policy for staged routes/ files...'
   # Full stale-entry validation runs in CI; this check only covers staged files.
   python3 ci/verify_db_access_policy.py "${ROUTES_RS_FILES[@]}"
+  echo '[pre-commit] Scanning routes/ for legacy error-match patterns...'
+  # Script scans full routes/ dir; gated on staged routes files to keep hook fast.
+  ./scripts/check_legacy_error_matches.sh
 fi
 
 if (( ${#RUST_FILES[@]} > 0 )); then
