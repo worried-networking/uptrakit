@@ -1,5 +1,3 @@
-#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
-
 //! Audit dispatcher reloadable subsystem.
 //!
 //! [`AuditDispatcherReloadable`] wraps a live [`AuditConfig`] and is distributed to

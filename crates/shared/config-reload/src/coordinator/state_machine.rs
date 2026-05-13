@@ -60,6 +60,14 @@ impl ReloadCoordinator {
         self.handle.clone()
     }
 
+    /// Append additional reloadables before the coordinator is spawned.
+    ///
+    /// Must be called before [`ReloadCoordinator::run`] — adding reloadables
+    /// after the run loop starts is not supported.
+    pub fn extend_reloadables(&mut self, items: Vec<Arc<dyn ReloadableErased>>) {
+        self.reloadables.extend(items);
+    }
+
     /// Return a snapshot of the current coordinator state.
     #[must_use]
     pub fn state(&self) -> CoordinatorState {
