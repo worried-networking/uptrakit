@@ -288,12 +288,16 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
         ))))
     })?;
 
+    let trust_opts =
+        crate::tls::TrustOptions::from_cli(args.trust_public_roots, args.trust_native_roots);
+
     let auth_params = AuthLoopParams {
         host: &host,
         port,
         base_url,
         pki_addr,
         initial_ca_pem: ca_pem.as_deref(),
+        trust_opts,
     };
 
     // Check for existing certificate.
@@ -401,18 +405,25 @@ struct AuthLoopParams<'a> {
     /// Initial CA PEM bytes (seeded from bootstrap; updated each iteration
     /// from the in-memory identity so `CaBundleUpdated` is picked up).
     initial_ca_pem: Option<&'a [u8]>,
+    /// Which additional trust roots to include when building the root store.
+    trust_opts: crate::tls::TrustOptions,
 }
 
 /// Build an mTLS `TlsConnector` backed by the hot-swap resolver.
 ///
-/// When `ca_pem` is `Some`, a pinned-CA `ClientConfig` is built; otherwise
-/// the system/webpki root store is used.
-fn build_mtls_connector_with_resolver(
+/// When `ca_pem` is `Some`, a `RootCertStore` is built from the CA PEM and
+/// any opt-in trust sources in `trust_opts`; otherwise the system/webpki root
+/// store is used.
+async fn build_mtls_connector_with_resolver(
     ca_pem: Option<&[u8]>,
+    trust_opts: &crate::tls::TrustOptions,
     resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
 ) -> Result<tokio_rustls::TlsConnector> {
     let config = match ca_pem {
-        Some(pem) => crate::tls::build_client_config_with_resolver(pem, resolver)?,
+        Some(pem) => {
+            let root_store = crate::tls::build_root_store(pem, trust_opts).await?;
+            crate::tls::build_client_config_with_resolver(root_store, resolver)?
+        }
         None => crate::tls::build_system_trust_client_config_with_resolver(resolver)?,
     };
     Ok(tokio_rustls::TlsConnector::from(config))
@@ -459,8 +470,10 @@ async fn run_authenticated_with_reconnect(
     // Build the initial TlsConnector (backed by the resolver).
     let mut mtls_connector = build_mtls_connector_with_resolver(
         current_ca.as_deref(),
+        &params.trust_opts,
         std::sync::Arc::clone(&cert_resolver),
-    )?;
+    )
+    .await?;
 
     loop {
         // Refresh the CA from the in-memory identity cache.
@@ -475,8 +488,10 @@ async fn run_authenticated_with_reconnect(
                 current_ca = Some(new_ca);
                 mtls_connector = build_mtls_connector_with_resolver(
                     current_ca.as_deref(),
+                    &params.trust_opts,
                     std::sync::Arc::clone(&cert_resolver),
-                )?;
+                )
+                .await?;
             }
         }
 

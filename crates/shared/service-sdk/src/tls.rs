@@ -12,6 +12,27 @@ use tokio_rustls::TlsConnector;
 
 use crate::error::{EnrollmentError, Result, TlsError};
 
+// ── TrustOptions ─────────────────────────────────────────────────────
+
+/// Options controlling which root certificate sources to include.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TrustOptions {
+    /// Add compiled-in `webpki-roots` (major public CAs).
+    pub trust_public_roots: bool,
+    /// Add the OS root store via `rustls-native-certs` (loaded once at startup).
+    pub trust_native_roots: bool,
+}
+
+impl TrustOptions {
+    /// Create from CLI flags.
+    pub fn from_cli(trust_public_roots: bool, trust_native_roots: bool) -> Self {
+        Self {
+            trust_public_roots,
+            trust_native_roots,
+        }
+    }
+}
+
 // ── TlsConnector builders (agent-style manual TCP→TLS→WS) ───────────
 
 /// Build a TLS connector that trusts only the given CA PEM (no client auth).
@@ -42,7 +63,7 @@ pub fn build_system_trust_tls_connector() -> Result<TlsConnector> {
 ///
 /// Returns an error if `ca_pem` cannot be parsed or the root store is empty.
 pub fn build_pinned_ca_client_config(ca_pem: &[u8]) -> Result<rustls::ClientConfig> {
-    let root_store = build_root_store(ca_pem)?;
+    let root_store = build_controller_ca_root_store(ca_pem)?;
 
     let config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
@@ -64,7 +85,7 @@ pub fn build_mtls_client_config(
 ) -> Result<rustls::ClientConfig> {
     use rustls::pki_types::PrivateKeyDer;
 
-    let root_store = build_root_store(ca_pem)?;
+    let root_store = build_controller_ca_root_store(ca_pem)?;
 
     let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -184,15 +205,16 @@ pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
 ///
 /// Session resumption is enabled with a 256-entry in-memory cache.
 ///
+/// Callers should build the `RootCertStore` via [`build_root_store`] to
+/// incorporate any opt-in trust sources (public roots, native certs).
+///
 /// # Errors
 ///
-/// Returns an error if `ca_pem` cannot be parsed or the root store is empty.
+/// Returns an error if the crypto provider is not installed.
 pub fn build_client_config_with_resolver(
-    ca_pem: &[u8],
+    root_store: RootCertStore,
     resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
 ) -> Result<Arc<rustls::ClientConfig>> {
-    let root_store = build_root_store(ca_pem)?;
-
     let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_client_cert_resolver(resolver);
@@ -263,7 +285,7 @@ pub fn tls_connector(config: rustls::ClientConfig) -> TlsConnector {
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
-fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
+fn build_controller_ca_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
     let certs = CertificateDer::pem_slice_iter(ca_pem)
         .collect::<std::result::Result<Vec<_>, _>>()
         .context_to::<EnrollmentError>()?;
@@ -275,6 +297,39 @@ fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
     let mut root_store = RootCertStore::empty();
     for cert in certs {
         root_store.add(cert).context_to::<EnrollmentError>()?;
+    }
+
+    Ok(root_store)
+}
+
+/// Build a `RootCertStore` from the controller CA bundle plus any opt-in
+/// trust sources.
+///
+/// # Errors
+///
+/// Returns an error if `controller_ca_pem` cannot be parsed or is empty.
+pub async fn build_root_store(
+    controller_ca_pem: &[u8],
+    opts: &TrustOptions,
+) -> Result<RootCertStore> {
+    let mut root_store = build_controller_ca_root_store(controller_ca_pem)?;
+
+    if opts.trust_public_roots {
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    }
+
+    if opts.trust_native_roots {
+        let native = tokio::task::spawn_blocking(rustls_native_certs::load_native_certs)
+            .await
+            .map_err(|e| report!(EnrollmentError::Tls(TlsError::Config(e.to_string()))))?;
+        for err in &native.errors {
+            tracing::warn!(error = %err, "rustls-native-certs: partial load error");
+        }
+        for cert in native.certs {
+            if let Err(e) = root_store.add(cert) {
+                tracing::warn!(error = %e, "rustls-native-certs: skipping unparseable cert");
+            }
+        }
     }
 
     Ok(root_store)
@@ -328,24 +383,24 @@ mod tests {
         (cert.pem(), client_key.serialize_pem())
     }
 
-    // ── build_root_store ─────────────────────────────────────────────
+    // ── build_controller_ca_root_store ───────────────────────────────
 
     #[test]
     fn build_root_store_valid_ca() {
         let (ca_pem, _) = generate_test_ca();
-        let store = build_root_store(ca_pem.as_bytes()).expect("build");
+        let store = build_controller_ca_root_store(ca_pem.as_bytes()).expect("build");
         assert_eq!(store.len(), 1);
     }
 
     #[test]
     fn build_root_store_empty_pem_returns_error() {
-        let result = build_root_store(b"");
+        let result = build_controller_ca_root_store(b"");
         assert!(result.is_err());
     }
 
     #[test]
     fn build_root_store_invalid_pem_returns_error() {
-        let result = build_root_store(b"not a PEM");
+        let result = build_controller_ca_root_store(b"not a PEM");
         assert!(result.is_err());
     }
 
@@ -453,7 +508,51 @@ mod tests {
         let (ca1_pem, _) = generate_test_ca();
         let (ca2_pem, _) = generate_test_ca();
         let combined = format!("{ca1_pem}{ca2_pem}");
-        let store = build_root_store(combined.as_bytes()).expect("build");
+        let store = build_controller_ca_root_store(combined.as_bytes()).expect("build");
         assert_eq!(store.len(), 2);
+    }
+
+    // ── build_root_store (public async) ──────────────────────────────
+
+    #[tokio::test]
+    async fn root_store_default_includes_only_controller_ca() {
+        install_crypto_provider();
+        let (ca_pem, _) = generate_test_ca();
+        let opts = TrustOptions::default();
+        let store = build_root_store(ca_pem.as_bytes(), &opts)
+            .await
+            .expect("build");
+        assert_eq!(store.len(), 1, "only the controller CA cert");
+    }
+
+    #[tokio::test]
+    async fn root_store_with_public_roots_extends_store() {
+        install_crypto_provider();
+        let (ca_pem, _) = generate_test_ca();
+        let opts = TrustOptions {
+            trust_public_roots: true,
+            trust_native_roots: false,
+        };
+        let store = build_root_store(ca_pem.as_bytes(), &opts)
+            .await
+            .expect("build");
+        assert!(store.len() > 100, "webpki-roots adds many anchors");
+    }
+
+    #[tokio::test]
+    async fn root_store_with_native_roots_at_least_one() {
+        install_crypto_provider();
+        let (ca_pem, _) = generate_test_ca();
+        let opts = TrustOptions {
+            trust_public_roots: false,
+            trust_native_roots: true,
+        };
+        let store = build_root_store(ca_pem.as_bytes(), &opts)
+            .await
+            .expect("build");
+        assert!(
+            store.len() >= 1,
+            "at least controller CA; native roots may vary"
+        );
     }
 }
