@@ -34,6 +34,8 @@ use uptrakit_web_api_types::mfa::{MfaChallengeResponse, MfaMethod};
 
 use crate::auth::AuthMethod;
 use crate::extract::Validated;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_web_api_queries::queries::users::UserView;
 use uptrakit_web_api_types::SecretString;
 
 pub use uptrakit_web_api_types::auth::{
@@ -320,20 +322,23 @@ pub async fn register(
         updated_at: Set(now),
     };
 
-    if let Err(e) = new_user.insert(&txn).await {
-        tracing::error!("Failed to create user: {e}");
-        emit_user_register_audit(
-            &state,
-            Some(user_id),
-            uptrakit_audit_log::AuditOutcome::Failed,
-            Some("user_insert_failed"),
-            None,
-        );
-        return Ok(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal server error",
-        ));
-    }
+    let inserted_user = match new_user.insert(&txn).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Failed to create user: {e}");
+            emit_user_register_audit(
+                &state,
+                Some(user_id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("user_insert_failed"),
+                None,
+            );
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
     // Atomically check if this is the first user (threshold 1 because we just inserted)
     // and assign owner role + complete initial setup inside the same transaction.
@@ -354,6 +359,25 @@ pub async fn register(
         tracing::error!("Failed to assign user role: {e:?}");
     }
 
+    let after_view = UserView::from(&inserted_user);
+    let hook = state.audit_emitter.commit_hook();
+    if let Ok(audit_entry) =
+        AuditEntry::<Stateful>::user_create(&AbsentView(&after_view), &after_view)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::User, Some(user_id))
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "auth_method": "password",
+                "is_first_user": is_first_user,
+            }))
+            .build()
+    {
+        let _ = state
+            .audit_emitter
+            .emit_stateful(&txn, &hook, audit_entry)
+            .await;
+    }
+
     if let Err(e) = txn.commit().await {
         tracing::error!("Failed to commit registration transaction: {e}");
         emit_user_register_audit(
@@ -368,14 +392,7 @@ pub async fn register(
             "Internal server error",
         ));
     }
-
-    emit_user_register_audit(
-        &state,
-        Some(user_id),
-        uptrakit_audit_log::AuditOutcome::Success,
-        None,
-        Some(is_first_user),
-    );
+    hook.flush_after_commit().await;
 
     // Get user permissions
     let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user_id).await
@@ -1038,10 +1055,12 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::DatabaseBackend::new(db.clone()),
             )),
-            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+            audit_emitter: uptrakit_audit_log::AuditEmitter::with_backends(
                 uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                     uptrakit_audit_log::DatabaseBackend::new(db.clone()),
                 )),
+                Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone())),
+                Arc::new(uptrakit_audit_log::NoopBackend),
             ),
             surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
                 Arc::new(crate::surface_registry::SurfaceRegistry::new(
