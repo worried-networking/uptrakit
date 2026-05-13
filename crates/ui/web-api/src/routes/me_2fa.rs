@@ -185,6 +185,16 @@ async fn re_auth_ok(
 /// Return the current 2FA enrolment status for the authenticated user.
 ///
 /// Accessible from both setup-required and full sessions.
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/me/2fa",
+    responses(
+        (status = 200, description = "2FA status", body = uptrakit_web_api_types::mfa::MfaStatusResponse),
+        (status = 401, description = "Not authenticated")
+    ),
+    tag = "Authentication",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn mfa_status(
     State(state): State<Arc<AppState>>,
@@ -238,6 +248,17 @@ pub async fn mfa_status(
 /// Begin TOTP enrolment: generate a new secret and return the `otpauth://` URI.
 ///
 /// Accessible from setup-required sessions. Replaces any existing pending row.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/me/2fa/totp/enroll",
+    responses(
+        (status = 200, description = "TOTP enrolment started — returns otpauth URI and secret", body = uptrakit_web_api_types::mfa::TotpEnrollResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 409, description = "TOTP already active")
+    ),
+    tag = "Authentication",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn totp_enroll(
     State(state): State<Arc<AppState>>,
@@ -340,6 +361,18 @@ pub async fn totp_enroll(
 ///
 /// Accessible from setup-required sessions. If the session was setup-required, a
 /// full-session JWT is returned so the caller can proceed without re-login.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/me/2fa/totp/confirm",
+    request_body = uptrakit_web_api_types::mfa::TotpConfirmRequest,
+    responses(
+        (status = 200, description = "TOTP confirmed — recovery codes returned; session included when upgrading from setup-required", body = uptrakit_web_api_types::mfa::TotpConfirmResponse),
+        (status = 400, description = "No pending TOTP enrolment"),
+        (status = 401, description = "Not authenticated / wrong code")
+    ),
+    tag = "Authentication",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn totp_confirm(
     State(state): State<Arc<AppState>>,
@@ -483,6 +516,18 @@ pub async fn totp_confirm(
 /// Disable TOTP for the authenticated user after re-authentication.
 ///
 /// Requires a full session (not setup-required).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/me/2fa/totp/disable",
+    request_body = uptrakit_web_api_types::mfa::DisableTotpRequest,
+    responses(
+        (status = 204, description = "TOTP disabled"),
+        (status = 401, description = "Not authenticated / wrong credential"),
+        (status = 403, description = "Setup-required session cannot disable TOTP")
+    ),
+    tag = "Authentication",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn totp_disable(
     State(state): State<Arc<AppState>>,
@@ -533,6 +578,19 @@ pub async fn totp_disable(
 /// Regenerate recovery codes after re-authentication.
 ///
 /// Requires a full session (not setup-required).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/me/2fa/recovery-codes/regenerate",
+    request_body = uptrakit_web_api_types::mfa::RegenerateRecoveryCodesRequest,
+    responses(
+        (status = 200, description = "New recovery codes", body = uptrakit_web_api_types::mfa::RegenerateRecoveryCodesResponse),
+        (status = 401, description = "Not authenticated / wrong credential"),
+        (status = 403, description = "Setup-required session cannot regenerate codes"),
+        (status = 404, description = "No active TOTP to regenerate codes for")
+    ),
+    tag = "Authentication",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn regenerate_recovery_codes(
     State(state): State<Arc<AppState>>,

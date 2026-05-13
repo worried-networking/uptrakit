@@ -165,6 +165,17 @@ pub(crate) async fn build_full_session(
 /// The challenge identified by `mfa_token` must be unconsumed, unexpired, and
 /// have remaining attempts. On success the challenge is consumed and a full
 /// authenticated session is returned.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/mfa/verify",
+    request_body = uptrakit_web_api_types::mfa::MfaVerifyRequest,
+    responses(
+        (status = 200, description = "MFA verified — session issued", body = crate::routes::auth::AuthResponse),
+        (status = 401, description = "Invalid or expired MFA token / wrong code"),
+        (status = 429, description = "Too many failed attempts")
+    ),
+    tag = "Authentication"
+)]
 #[tracing::instrument(skip_all)]
 pub async fn mfa_verify(
     State(state): State<Arc<AppState>>,
@@ -480,6 +491,16 @@ pub async fn mfa_verify(
 /// Loads the challenge (read-only), generates a 6-digit OTP, hashes it with
 /// Argon2id in `spawn_blocking`, stores the hash in the challenge row, and
 /// sends the OTP via the transactional email plugin.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/mfa/email",
+    request_body = uptrakit_web_api_types::mfa::MfaEmailRequest,
+    responses(
+        (status = 204, description = "Email OTP sent (or silently ignored if email delivery is unavailable)"),
+        (status = 401, description = "Invalid or expired MFA token")
+    ),
+    tag = "Authentication"
+)]
 #[tracing::instrument(skip_all)]
 pub async fn mfa_send_email(
     State(state): State<Arc<AppState>>,
