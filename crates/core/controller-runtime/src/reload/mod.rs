@@ -8,4 +8,5 @@
 
 pub(crate) mod db_pool;
 pub(crate) mod https_listener;
+pub(crate) mod pki_listener;
 pub(crate) mod probe;
