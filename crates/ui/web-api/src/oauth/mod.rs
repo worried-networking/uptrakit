@@ -8,6 +8,7 @@
 pub mod audit;
 pub mod boot;
 pub mod canonical_url;
+pub mod http_responses;
 pub mod jwt;
 pub mod pkce;
 pub mod rate_limit;

@@ -20,9 +20,10 @@ use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::middleware::permission::CanManageAuthSettings;
-use crate::oauth::services::client::{OAuthClientError, OAuthClientService};
-use crate::routes::oauth::helpers::{oauth_400, oauth_500};
+use crate::oauth::http_responses::{oauth_400, oauth_500};
+use crate::oauth::services::client::OAuthClientService;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -183,23 +184,14 @@ pub(crate) async fn revoke_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
     Path(client_id): Path<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
-        return StatusCode::NOT_FOUND.into_response();
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
     let svc = build_client_service(&state);
-
-    match svc.revoke(&client_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if matches!(e.current_context(), OAuthClientError::NotFound) => {
-            StatusCode::NOT_FOUND.into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, client_id = %client_id, "revoke_client failed");
-            oauth_500()
-        }
-    }
+    svc.revoke(&client_id).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -228,23 +220,14 @@ pub(crate) async fn trust_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
     Path(client_id): Path<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
-        return StatusCode::NOT_FOUND.into_response();
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
     let svc = build_client_service(&state);
-
-    match svc.promote_trusted(&client_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if matches!(e.current_context(), OAuthClientError::NotFound) => {
-            StatusCode::NOT_FOUND.into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, client_id = %client_id, "trust_client failed");
-            oauth_500()
-        }
-    }
+    svc.promote_trusted(&client_id).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // ---------------------------------------------------------------------------

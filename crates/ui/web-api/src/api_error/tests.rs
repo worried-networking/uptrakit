@@ -1213,6 +1213,11 @@ const ALL_IMPL_CODES: &[&str] = &[
     "notification_rule.channel_not_found",
     "notification_rule.database_error",
     "notification_rule.invalid_field",
+    "oauth.client.database_error",
+    "oauth.client.not_found",
+    "oauth.client.registration_cap_exceeded",
+    "oauth.consent.database_error",
+    "oauth.consent.not_found",
     "plugin_config.config_validation",
     "plugin_config.duplicate_name",
     "plugin_config.empty_name",
@@ -1347,6 +1352,8 @@ fn mapping_review_md_exists_and_has_all_variant_names() {
         "ResetDataQueryError",
         "SystemEnrollmentTokenError",
         "AuthError",
+        "OAuthClientError",
+        "OAuthConsentError",
     ];
     for section in required_sections {
         assert!(

@@ -26,11 +26,13 @@ use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
 use crate::AppState;
 use crate::error_response::oauth_error_response;
 use crate::extract::ClientIp;
+use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter, check_rate_limit};
-use crate::oauth::services::authorization_code::{OAuthAuthorizationCodeService, OAuthCodeError};
+use crate::oauth::services::authorization_code::{
+    OAuthAuthorizationCodeService, code_error_to_response,
+};
 use crate::oauth::services::client::OAuthClientService;
-use crate::oauth::services::refresh_token::OAuthRefreshTokenService;
-use crate::routes::oauth::helpers::{oauth_400, oauth_500};
+use crate::oauth::services::refresh_token::{OAuthRefreshTokenService, refresh_error_to_response};
 
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const ACCESS_TOKEN_TTL_SECS: i64 = 900;
@@ -299,8 +301,6 @@ async fn refresh_token_grant(
     client_id: String,
     scope_opt: Option<String>,
 ) -> Response {
-    use crate::oauth::services::refresh_token::OAuthRefreshError;
-
     // Step 1 — validate resource indicator.
     if !state.oauth.canonical.accepts_audience(&resource) {
         return oauth_400("invalid_target", "resource indicator not accepted");
@@ -346,36 +346,7 @@ async fn refresh_token_grant(
         .await
     {
         Ok(o) => o,
-        Err(e) => {
-            return match e.current_context() {
-                OAuthRefreshError::InvalidGrant(reason) => oauth_400("invalid_grant", reason),
-                OAuthRefreshError::InvalidTarget => {
-                    oauth_400("invalid_target", "resource mismatch")
-                }
-                OAuthRefreshError::InvalidScope => {
-                    oauth_400("invalid_scope", "requested scope exceeds granted scope")
-                }
-                OAuthRefreshError::ConsentRevoked => {
-                    oauth_400("invalid_grant", "consent has been revoked")
-                }
-                OAuthRefreshError::Jwt(_) => {
-                    tracing::error!(error = %e, "JWT error during refresh_token rotation");
-                    oauth_500()
-                }
-                OAuthRefreshError::Database(_) => {
-                    tracing::error!(error = %e, "DB error during refresh_token rotation");
-                    oauth_500()
-                }
-                #[expect(
-                    unreachable_patterns,
-                    reason = "OAuthRefreshError is #[non_exhaustive]; wildcard required for forward-compatibility"
-                )]
-                _ => {
-                    tracing::error!(error = %e, "unexpected error during refresh_token rotation");
-                    oauth_500()
-                }
-            };
-        }
+        Err(e) => return refresh_error_to_response(&e),
     };
 
     // Step 4 — return token response.
@@ -471,43 +442,12 @@ async fn authorization_code_grant(
     {
         Ok(row) => row,
         Err(e) => {
-            return match e.current_context() {
-                OAuthCodeError::InvalidGrant(reason) => {
-                    let entry = AuditEntry::builder(AuditActionType::OAUTH_TOKEN_REJECTED)
-                        .tenant_scope(state.default_tenant_id)
-                        .actor_system()
-                        .outcome(AuditOutcome::Denied)
-                        .details(serde_json::json!({
-                            "reason": "invalid_grant",
-                            "detail": reason,
-                            "client_id": &client_id,
-                        }))
-                        .build();
-                    if let Ok(entry) = entry {
-                        state.audit_emitter.emit_best_effort(entry);
-                    }
-                    oauth_400("invalid_grant", reason)
-                }
-                OAuthCodeError::InvalidTarget => {
-                    let entry = AuditEntry::builder(AuditActionType::OAUTH_TOKEN_REJECTED)
-                        .tenant_scope(state.default_tenant_id)
-                        .actor_system()
-                        .outcome(AuditOutcome::Denied)
-                        .details(serde_json::json!({
-                            "reason": "invalid_target",
-                            "client_id": &client_id,
-                        }))
-                        .build();
-                    if let Ok(entry) = entry {
-                        state.audit_emitter.emit_best_effort(entry);
-                    }
-                    oauth_400("invalid_target", "resource indicator mismatch")
-                }
-                OAuthCodeError::Database(_) => {
-                    tracing::error!(error = %e, "DB error during code verification");
-                    oauth_500()
-                }
-            };
+            return code_error_to_response(
+                &e,
+                &state.audit_emitter,
+                state.default_tenant_id,
+                &client_id,
+            );
         }
     };
 

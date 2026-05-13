@@ -239,6 +239,32 @@ needed — they are available for future use.
 
 ---
 
+## OAuthClientError
+
+Serves the admin OAuth endpoints under `/api/oauth/clients/*` (DELETE, POST
+`/trust`). Does **not** serve the RFC 6749 DCR endpoint (`POST /oauth/register`) —
+that route uses `registration_error_to_response` in `oauth/services/client.rs`
+for the RFC 6749 body shape.
+
+| Variant | Status | Message Strategy | Code |
+| --- | --- | --- | --- |
+| `OAuthClientError::NotFound` | 404 | static | `oauth.client.not_found` |
+| `OAuthClientError::RegistrationCapExceeded` | 403 | static | `oauth.client.registration_cap_exceeded` |
+| `OAuthClientError::Database` | 500 | static | `oauth.client.database_error` |
+
+---
+
+## OAuthConsentError
+
+Serves the admin OAuth endpoint `DELETE /api/oauth/consents/{id}`.
+
+| Variant | Status | Message Strategy | Code |
+| --- | --- | --- | --- |
+| `OAuthConsentError::NotFound` | 404 | static | `oauth.consent.not_found` |
+| `OAuthConsentError::Database` | 500 | static | `oauth.consent.database_error` |
+
+---
+
 ## Intentional Pre-migration Deltas
 
 | Variant | Old Status | New Status | Rationale |

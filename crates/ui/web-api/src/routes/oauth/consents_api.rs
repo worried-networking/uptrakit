@@ -17,9 +17,10 @@ use uptrakit_shared_db::entity::oauth_consent;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::oauth::services::consent::{OAuthConsentError, OAuthConsentService};
-use crate::routes::oauth::helpers::oauth_500;
+use crate::oauth::http_responses::oauth_500;
+use crate::oauth::services::consent::OAuthConsentService;
 
 // ---------------------------------------------------------------------------
 // GET /api/oauth/consents
@@ -102,37 +103,29 @@ pub(crate) async fn revoke_consent(
     State(state): State<Arc<AppState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(id): Path<Uuid>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
-        return StatusCode::NOT_FOUND.into_response();
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
     // Pre-flight ownership check — gives a clean 403 before delegating to the service.
     let row = match oauth_consent::Entity::find_by_id(id).one(state.db()).await {
         Ok(Some(r)) => r,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => return Ok(StatusCode::NOT_FOUND.into_response()),
         Err(e) => {
             tracing::error!(error = %e, "consent lookup failed");
-            return oauth_500();
+            return Ok(oauth_500());
         }
     };
 
     if row.user_id != auth_user.user_id {
-        return StatusCode::FORBIDDEN.into_response();
+        return Ok(StatusCode::FORBIDDEN.into_response());
     }
 
     // Delegate to the service — it enforces ownership internally and cascades to refresh tokens.
     let svc = OAuthConsentService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
-    match svc.revoke(id, auth_user.user_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if matches!(e.current_context(), OAuthConsentError::NotFound) => {
-            StatusCode::NOT_FOUND.into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, consent_id = %id, "revoke consent failed");
-            oauth_500()
-        }
-    }
+    svc.revoke(id, auth_user.user_id).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // ---------------------------------------------------------------------------

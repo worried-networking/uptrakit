@@ -7,6 +7,7 @@
 //! an already-rotated or revoked token (replay) cascade-revokes the entire
 //! family.
 
+use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
@@ -27,6 +28,41 @@ use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
 use uptrakit_web_api_types::oauth::{McpAccessTokenClaims, OpaqueRefreshToken};
 use uuid::Uuid;
+
+use crate::oauth::http_responses::{oauth_400, oauth_500};
+
+/// Build the RFC 6749 response for a refresh-token rotation failure.
+///
+/// Sanctioned RFC 6749 exit for the `/oauth/token` endpoint's refresh_token
+/// grant — keeps the `match e.current_context()` pattern out of
+/// `crates/ui/web-api/src/routes/` per the `check_legacy_error_matches.sh` gate.
+/// See `docs/development/error-handling.md` Pattern 18.
+pub(crate) fn refresh_error_to_response(e: &Report<OAuthRefreshError>) -> Response {
+    match e.current_context() {
+        OAuthRefreshError::InvalidGrant(reason) => oauth_400("invalid_grant", reason),
+        OAuthRefreshError::InvalidTarget => oauth_400("invalid_target", "resource mismatch"),
+        OAuthRefreshError::InvalidScope => {
+            oauth_400("invalid_scope", "requested scope exceeds granted scope")
+        }
+        OAuthRefreshError::ConsentRevoked => oauth_400("invalid_grant", "consent has been revoked"),
+        OAuthRefreshError::Jwt(_) => {
+            tracing::error!(error = %e, "JWT error during refresh_token rotation");
+            oauth_500()
+        }
+        OAuthRefreshError::Database(_) => {
+            tracing::error!(error = %e, "DB error during refresh_token rotation");
+            oauth_500()
+        }
+        #[expect(
+            unreachable_patterns,
+            reason = "OAuthRefreshError is #[non_exhaustive]; wildcard required for forward-compatibility"
+        )]
+        _ => {
+            tracing::error!(error = %e, "unexpected error during refresh_token rotation");
+            oauth_500()
+        }
+    }
+}
 
 const DEFAULT_ACCESS_TOKEN_TTL_SECS: i64 = 900;
 const DEFAULT_REFRESH_TOKEN_TTL_SECS: i64 = 2_592_000; // 30 days

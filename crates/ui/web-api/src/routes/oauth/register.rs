@@ -19,9 +19,9 @@ use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::extract::ClientIp;
+use crate::oauth::http_responses::{oauth_400, oauth_403, oauth_500};
 use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter, check_rate_limit};
-use crate::oauth::services::client::{OAuthClientError, OAuthClientService};
-use crate::routes::oauth::helpers::{oauth_400, oauth_500};
+use crate::oauth::services::client::{OAuthClientService, registration_error_to_response};
 
 // ---------------------------------------------------------------------------
 // Local error helpers
@@ -32,17 +32,6 @@ fn oauth_401(description: &str) -> Response {
         StatusCode::UNAUTHORIZED,
         Json(serde_json::json!({
             "error": "unauthorized_client",
-            "error_description": description,
-        })),
-    )
-        .into_response()
-}
-
-fn oauth_403(error: &str, description: &str) -> Response {
-    (
-        StatusCode::FORBIDDEN,
-        Json(serde_json::json!({
-            "error": error,
             "error_description": description,
         })),
     )
@@ -150,15 +139,7 @@ pub async fn register(
 
     match client_svc.register_dcr(req, source_ip, &[]).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(e) => match e.current_context() {
-            OAuthClientError::RegistrationCapExceeded => {
-                oauth_403("registration_not_allowed", "per-IP lifetime cap exceeded")
-            }
-            OAuthClientError::Database(_) | OAuthClientError::NotFound => {
-                tracing::error!(error = %e, "DCR registration failed");
-                oauth_500()
-            }
-        },
+        Err(e) => registration_error_to_response(&e),
     }
 }
 
