@@ -364,21 +364,32 @@ pub async fn register(
 
     let after_view = UserView::from(&inserted_user);
     let hook = state.audit_emitter.commit_hook();
-    if let Ok(audit_entry) =
-        AuditEntry::<Stateful>::user_create(&AbsentView(&after_view), &after_view)
-            .tenant_scope(state.default_tenant_id)
-            .actor(uptrakit_audit_log::AuditActorType::User, Some(user_id))
-            .outcome(AuditOutcome::Success)
-            .details(serde_json::json!({
-                "auth_method": "password",
-                "is_first_user": is_first_user,
-            }))
-            .build()
-    {
-        let _ = state
-            .audit_emitter
-            .emit_stateful(&txn, &hook, audit_entry)
-            .await;
+    let audit_entry = AuditEntry::<Stateful>::user_create(&AbsentView(&after_view), &after_view)
+        .tenant_scope(state.default_tenant_id)
+        .actor(uptrakit_audit_log::AuditActorType::User, Some(user_id))
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "auth_method": "password",
+            "is_first_user": is_first_user,
+        }))
+        .build();
+    match audit_entry {
+        Ok(entry) => {
+            if let Err(e) = state.audit_emitter.emit_stateful(&txn, &hook, entry).await {
+                tracing::error!("Failed to write registration audit log: {e:?}");
+                return Ok(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to build registration audit entry: {e:?}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
     }
 
     if let Err(e) = txn.commit().await {
