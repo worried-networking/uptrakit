@@ -16,6 +16,7 @@ pub mod hosts;
 pub mod instance_plugins;
 #[cfg(feature = "interactive")]
 pub mod interactive_ws;
+pub mod mfa;
 pub mod notifications;
 pub mod oauth;
 pub mod ocsp;

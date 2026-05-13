@@ -111,6 +111,11 @@ handle_interactive_session = "ignore"
 handle_client_message = "ignore"
 forward_interactive_stdin = "ignore"
 
+[routes."mfa.rs"]
+mfa_verify = "full-state"
+mfa_send_email = "full-state"
+build_full_session = "ignore"
+
 [routes."oauth/device_authorization.rs"]
 device_authorization = "full-state"
 

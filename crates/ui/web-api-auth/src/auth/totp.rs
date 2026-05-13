@@ -14,6 +14,15 @@ pub fn build_otpauth_uri(secret: &str, user_email: &str, issuer: &str) -> Option
         .map(|totp| totp.get_url())
 }
 
+/// Generate the current TOTP code for a given secret.
+///
+/// Returns `None` if the secret is not valid base32 or if the system clock
+/// is unavailable.
+pub fn generate_totp_code(secret: &str) -> Option<String> {
+    let totp = build_totp(secret).ok()?;
+    totp.generate_current().ok()
+}
+
 /// Verify a 6-digit TOTP code with skew=1 (±30 s window).
 ///
 /// Returns `Some(step)` — the TOTP counter index the code matched — on success,
