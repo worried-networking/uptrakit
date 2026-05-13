@@ -12,6 +12,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
 
 pub use uptrakit_web_api_types::settings_zeroconf::{
     UpdateZeroconfSettingsRequest, ZeroconfSettingsResponse,
@@ -22,22 +25,18 @@ use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings::ZeroconfSnapshot;
-use crate::settings_store::upsert_global_setting;
+use crate::settings_store::{load_global_setting, upsert_global_setting};
 
-fn emit_zeroconf_settings_audit(
+/// Emit a failed zeroconf settings audit event (no DB write).
+fn emit_zeroconf_failed_event(
     state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    outcome: uptrakit_audit_log::AuditOutcome,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    actor_id: Option<uuid::Uuid>,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
     )
     .system_scope()
@@ -47,11 +46,11 @@ fn emit_zeroconf_settings_audit(
         "zeroconf".to_string(),
         Some("zeroconf".to_string()),
     )
-    .outcome(outcome)
+    .outcome(AuditOutcome::Failed)
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -117,24 +116,77 @@ pub async fn update_zeroconf_settings(
     Validated(req): Validated<UpdateZeroconfSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let mut snap = state.settings.zeroconf();
-    let mut changed_keys = Vec::new();
+
+    // Nothing requested — return immediately without opening a transaction.
+    if req.enabled.is_none() && req.url.is_none() && req.pki_addr.is_none() {
+        let ca_fingerprint = state.cert.ca_snapshot.borrow().active_fingerprint.clone();
+        return (
+            StatusCode::OK,
+            Json(ZeroconfSettingsResponse {
+                enabled: snap.enabled,
+                url: snap.url,
+                pki_addr: snap.pki_addr,
+                ca_fingerprint: Some(ca_fingerprint),
+            }),
+        )
+            .into_response();
+    }
+
+    // Read current DB values for each key that will be updated, before opening
+    // the transaction, so we can build accurate before-snapshots.
+    let before_enabled = if req.enabled.is_some() {
+        load_global_setting(state.db(), SettingKey::ZeroconfEnabled)
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    let before_url = if req.url.is_some() {
+        load_global_setting(state.db(), SettingKey::ZeroconfUrl)
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    let before_pki_addr = if req.pki_addr.is_some() {
+        load_global_setting(state.db(), SettingKey::ZeroconfPkiAddr)
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+
+    // Open a single BEGIN IMMEDIATE transaction for all zeroconf writes.
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin tx for zeroconf settings update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let hook = state.audit_emitter.commit_hook();
 
     // --- enabled ---
     if let Some(val) = req.enabled {
-        if let Err(e) = upsert_global_setting(
-            state.db(),
-            SettingKey::ZeroconfEnabled,
-            serde_json::json!(val),
-        )
-        .await
+        let new_value = serde_json::json!(val);
+        if let Err(e) =
+            upsert_global_setting(&tx, SettingKey::ZeroconfEnabled, new_value.clone()).await
         {
             tracing::error!("Failed to save zeroconf.enabled: {e:?}");
-            emit_zeroconf_settings_audit(
+            drop(tx);
+            emit_zeroconf_failed_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_enabled_upsert_failed",
@@ -144,8 +196,52 @@ pub async fn update_zeroconf_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+
+        let key_str = SettingKey::ZeroconfEnabled.as_str().to_string();
+        let after_view = GlobalSettingView {
+            key: key_str.clone(),
+            value: new_value,
+        };
+        let audit_entry = match before_enabled {
+            Some(bv) => {
+                let before_view = GlobalSettingView {
+                    key: key_str,
+                    value: bv,
+                };
+                AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+            }
+            None => {
+                AuditEntry::<Stateful>::global_setting_update(&AbsentView(&after_view), &after_view)
+            }
+        }
+        .system_scope()
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "setting_area": "zeroconf",
+            "changed_keys": [SettingKey::ZeroconfEnabled.as_str()],
+        }))
+        .build();
+
+        match audit_entry {
+            Ok(entry) => {
+                if let Err(e) = state.audit_emitter.emit_stateful(&tx, &hook, entry).await {
+                    tracing::error!("Failed to emit stateful audit for zeroconf.enabled: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for zeroconf.enabled: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        }
+
         snap.enabled = val;
-        changed_keys.push(SettingKey::ZeroconfEnabled.as_str());
     }
 
     // --- url ---
@@ -156,13 +252,14 @@ pub async fn update_zeroconf_settings(
         } else {
             (serde_json::json!(trimmed), Some(trimmed.to_string()))
         };
-        if let Err(e) = upsert_global_setting(state.db(), SettingKey::ZeroconfUrl, db_value).await {
+        if let Err(e) = upsert_global_setting(&tx, SettingKey::ZeroconfUrl, db_value.clone()).await
+        {
             tracing::error!("Failed to save zeroconf.url: {e:?}");
-            emit_zeroconf_settings_audit(
+            drop(tx);
+            emit_zeroconf_failed_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_url_upsert_failed",
@@ -172,8 +269,52 @@ pub async fn update_zeroconf_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+
+        let key_str = SettingKey::ZeroconfUrl.as_str().to_string();
+        let after_view = GlobalSettingView {
+            key: key_str.clone(),
+            value: db_value,
+        };
+        let audit_entry = match before_url {
+            Some(bv) => {
+                let before_view = GlobalSettingView {
+                    key: key_str,
+                    value: bv,
+                };
+                AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+            }
+            None => {
+                AuditEntry::<Stateful>::global_setting_update(&AbsentView(&after_view), &after_view)
+            }
+        }
+        .system_scope()
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "setting_area": "zeroconf",
+            "changed_keys": [SettingKey::ZeroconfUrl.as_str()],
+        }))
+        .build();
+
+        match audit_entry {
+            Ok(entry) => {
+                if let Err(e) = state.audit_emitter.emit_stateful(&tx, &hook, entry).await {
+                    tracing::error!("Failed to emit stateful audit for zeroconf.url: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for zeroconf.url: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        }
+
         snap.url = new_url;
-        changed_keys.push(SettingKey::ZeroconfUrl.as_str());
     }
 
     // --- pki_addr ---
@@ -185,14 +326,14 @@ pub async fn update_zeroconf_settings(
             (serde_json::json!(trimmed), Some(trimmed.to_string()))
         };
         if let Err(e) =
-            upsert_global_setting(state.db(), SettingKey::ZeroconfPkiAddr, db_value).await
+            upsert_global_setting(&tx, SettingKey::ZeroconfPkiAddr, db_value.clone()).await
         {
             tracing::error!("Failed to save zeroconf.pki_addr: {e:?}");
-            emit_zeroconf_settings_audit(
+            drop(tx);
+            emit_zeroconf_failed_event(
                 &state,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditOutcome::Failed,
+                actor_type,
+                actor_id,
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_pki_addr_upsert_failed",
@@ -202,9 +343,60 @@ pub async fn update_zeroconf_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+
+        let key_str = SettingKey::ZeroconfPkiAddr.as_str().to_string();
+        let after_view = GlobalSettingView {
+            key: key_str.clone(),
+            value: db_value,
+        };
+        let audit_entry = match before_pki_addr {
+            Some(bv) => {
+                let before_view = GlobalSettingView {
+                    key: key_str,
+                    value: bv,
+                };
+                AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+            }
+            None => {
+                AuditEntry::<Stateful>::global_setting_update(&AbsentView(&after_view), &after_view)
+            }
+        }
+        .system_scope()
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({
+            "setting_area": "zeroconf",
+            "changed_keys": [SettingKey::ZeroconfPkiAddr.as_str()],
+        }))
+        .build();
+
+        match audit_entry {
+            Ok(entry) => {
+                if let Err(e) = state.audit_emitter.emit_stateful(&tx, &hook, entry).await {
+                    tracing::error!("Failed to emit stateful audit for zeroconf.pki_addr: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for zeroconf.pki_addr: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        }
+
         snap.pki_addr = new_addr;
-        changed_keys.push(SettingKey::ZeroconfPkiAddr.as_str());
     }
+
+    // Commit the transaction (all key writes + all audit rows).
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit zeroconf settings update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
 
     // Update in-memory cache.
     let updated = ZeroconfSnapshot::new(snap.enabled, snap.url.clone(), snap.pki_addr.clone());
@@ -217,19 +409,6 @@ pub async fn update_zeroconf_settings(
         pki_addr: snap.pki_addr,
         ca_fingerprint: Some(ca_fingerprint),
     };
-
-    if !changed_keys.is_empty() {
-        emit_zeroconf_settings_audit(
-            &state,
-            &user,
-            api_token_id,
-            uptrakit_audit_log::AuditOutcome::Success,
-            serde_json::json!({
-                "setting_area": "zeroconf",
-                "changed_keys": changed_keys,
-            }),
-        );
-    }
 
     (StatusCode::OK, Json(resp)).into_response()
 }

@@ -12,6 +12,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
 
 use uptrakit_web_api_types::MaskedUrl;
 pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
@@ -24,7 +27,7 @@ use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
-use crate::settings_store::upsert_global_setting;
+use crate::settings_store::{load_global_setting, upsert_global_setting};
 
 fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
     let has_url = nats_url.is_some();
@@ -34,16 +37,14 @@ fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
     }
 }
 
-fn emit_nats_settings_audit(
+/// Emit a failed NATS settings audit event (no DB write — uses the dispatcher).
+fn emit_nats_failed_event(
     state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    outcome: uptrakit_audit_log::AuditOutcome,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    actor_id: Option<uuid::Uuid>,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
     )
     .system_scope()
@@ -53,11 +54,11 @@ fn emit_nats_settings_audit(
         SettingKey::NatsUrl.as_str().to_string(),
         Some(SettingKey::NatsUrl.as_str().to_string()),
     )
-    .outcome(outcome)
+    .outcome(AuditOutcome::Failed)
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -117,6 +118,7 @@ pub async fn update_nats_settings(
     Validated(req): Validated<UpdateNatsSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let mut nats_url = state.settings.nats_url();
     let mut changed = false;
 
@@ -125,16 +127,39 @@ pub async fn update_nats_settings(
             // Clear stored URL
             changed = nats_url.is_some();
             if changed {
+                // Read the before value for the audit snapshot.
+                let before_value = load_global_setting(state.db(), SettingKey::NatsUrl)
+                    .await
+                    .unwrap_or(None)
+                    .unwrap_or(serde_json::Value::Null);
+
+                let tx = match state
+                    .db()
+                    .begin_with_options(TransactionOptions {
+                        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                        ..Default::default()
+                    })
+                    .await
+                {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        tracing::error!("Failed to begin tx for nats url clear: {e}");
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                };
+
                 if let Err(e) =
-                    upsert_global_setting(state.db(), SettingKey::NatsUrl, serde_json::json!(""))
-                        .await
+                    upsert_global_setting(&tx, SettingKey::NatsUrl, serde_json::json!("")).await
                 {
                     tracing::error!("Failed to clear nats.url: {e:?}");
-                    emit_nats_settings_audit(
+                    drop(tx);
+                    emit_nats_failed_event(
                         &state,
-                        &user,
-                        api_token_id,
-                        uptrakit_audit_log::AuditOutcome::Failed,
+                        actor_type,
+                        actor_id,
                         serde_json::json!({
                             "setting_key": SettingKey::NatsUrl.as_str(),
                             "operation": "clear",
@@ -146,6 +171,62 @@ pub async fn update_nats_settings(
                         "Internal server error",
                     );
                 }
+
+                let key_str = SettingKey::NatsUrl.as_str().to_string();
+                let before_view = GlobalSettingView {
+                    key: key_str.clone(),
+                    value: before_value,
+                };
+                let after_view = GlobalSettingView {
+                    key: key_str,
+                    value: serde_json::json!(""),
+                };
+                let hook = state.audit_emitter.commit_hook();
+                let audit_entry =
+                    match AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+                        .system_scope()
+                        .actor(actor_type, actor_id)
+                        .outcome(AuditOutcome::Success)
+                        .details(serde_json::json!({
+                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "changed": true,
+                            "operation": "clear",
+                        }))
+                        .build()
+                    {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            tracing::error!("Failed to build audit entry for nats url clear: {e}");
+                            drop(tx);
+                            return error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Internal server error",
+                            );
+                        }
+                    };
+
+                if let Err(e) = state
+                    .audit_emitter
+                    .emit_stateful(&tx, &hook, audit_entry)
+                    .await
+                {
+                    tracing::error!("Failed to emit stateful audit for nats url clear: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+
+                if let Err(e) = tx.commit().await {
+                    tracing::error!("Failed to commit nats url clear: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+                hook.flush_after_commit().await;
+
                 nats_url = None;
             }
         } else if let Some(s) = val.as_str() {
@@ -154,15 +235,20 @@ pub async fn update_nats_settings(
                 state.settings.set_nats_url(nats_url.clone()).await;
                 return (StatusCode::OK, Json(snapshot_to_response(nats_url))).into_response();
             }
+
+            // Read the before value for the audit snapshot.
+            let before_value = load_global_setting(state.db(), SettingKey::NatsUrl)
+                .await
+                .unwrap_or(None);
+
             let stored_value = match uptrakit_crypto::encrypt_str(s, "uptrakit:settings:nats_url") {
                 Ok(encrypted) => serde_json::json!(encrypted),
                 Err(e) => {
                     tracing::error!("Failed to encrypt NATS URL: {e:?}");
-                    emit_nats_settings_audit(
+                    emit_nats_failed_event(
                         &state,
-                        &user,
-                        api_token_id,
-                        uptrakit_audit_log::AuditOutcome::Failed,
+                        actor_type,
+                        actor_id,
                         serde_json::json!({
                             "setting_key": SettingKey::NatsUrl.as_str(),
                             "operation": "save",
@@ -175,15 +261,34 @@ pub async fn update_nats_settings(
                     );
                 }
             };
+
+            let tx = match state
+                .db()
+                .begin_with_options(TransactionOptions {
+                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(tx) => tx,
+                Err(e) => {
+                    tracing::error!("Failed to begin tx for nats url save: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
             if let Err(e) =
-                upsert_global_setting(state.db(), SettingKey::NatsUrl, stored_value).await
+                upsert_global_setting(&tx, SettingKey::NatsUrl, stored_value.clone()).await
             {
                 tracing::error!("Failed to save nats.url: {e:?}");
-                emit_nats_settings_audit(
+                drop(tx);
+                emit_nats_failed_event(
                     &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Failed,
+                    actor_type,
+                    actor_id,
                     serde_json::json!({
                         "setting_key": SettingKey::NatsUrl.as_str(),
                         "operation": "save",
@@ -192,6 +297,72 @@ pub async fn update_nats_settings(
                 );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
+
+            let key_str = SettingKey::NatsUrl.as_str().to_string();
+            let after_view = GlobalSettingView {
+                key: key_str.clone(),
+                value: stored_value,
+            };
+            let hook = state.audit_emitter.commit_hook();
+            let audit_entry = match before_value {
+                Some(bv) => {
+                    let before_view = GlobalSettingView {
+                        key: key_str,
+                        value: bv,
+                    };
+                    AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+                        .system_scope()
+                        .actor(actor_type, actor_id)
+                        .outcome(AuditOutcome::Success)
+                        .details(serde_json::json!({
+                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "changed": true,
+                            "operation": "save",
+                        }))
+                        .build()
+                }
+                None => AuditEntry::<Stateful>::global_setting_update(
+                    &AbsentView(&after_view),
+                    &after_view,
+                )
+                .system_scope()
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(serde_json::json!({
+                    "setting_key": SettingKey::NatsUrl.as_str(),
+                    "changed": true,
+                    "operation": "save",
+                }))
+                .build(),
+            };
+            let audit_entry = match audit_entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    tracing::error!("Failed to build audit entry for nats url save: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
+            if let Err(e) = state
+                .audit_emitter
+                .emit_stateful(&tx, &hook, audit_entry)
+                .await
+            {
+                tracing::error!("Failed to emit stateful audit for nats url save: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit nats url save: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            hook.flush_after_commit().await;
+
             nats_url = Some(MaskedUrl::new(s));
         } else {
             changed = false;
@@ -199,20 +370,6 @@ pub async fn update_nats_settings(
     }
 
     state.settings.set_nats_url(nats_url.clone()).await;
-
-    if changed {
-        emit_nats_settings_audit(
-            &state,
-            &user,
-            api_token_id,
-            uptrakit_audit_log::AuditOutcome::Success,
-            serde_json::json!({
-                "setting_key": SettingKey::NatsUrl.as_str(),
-                "changed": true,
-                "operation": if nats_url.is_some() { "save" } else { "clear" },
-            }),
-        );
-    }
 
     (StatusCode::OK, Json(snapshot_to_response(nats_url))).into_response()
 }
