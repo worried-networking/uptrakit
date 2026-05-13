@@ -375,10 +375,13 @@ async fn do_enrollment<H: ServiceHandler>(
     Ok(())
 }
 
-/// Delay before reconnecting after certificate rotation. Allows the
-/// controller to finalize rotation before the service reconnects with
-/// its new certificate.
-const CERT_RECONNECT_DELAY: Duration = Duration::from_secs(2);
+/// Delay before reconnecting after certificate rotation.
+///
+/// With the resolver hot-swap path the session is retained on most renewals;
+/// a forced reconnect only occurs when the cert is close to expiry. The
+/// previous 2 s delay was a safety margin for the old full-rebuild path —
+/// no longer needed now that the resolver swap is instantaneous (spec §5.4).
+const CERT_RECONNECT_DELAY: Duration = Duration::from_millis(100);
 
 /// Stable connection parameters shared across reconnect iterations.
 struct AuthLoopParams<'a> {

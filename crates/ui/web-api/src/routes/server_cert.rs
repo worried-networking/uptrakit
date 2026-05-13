@@ -297,10 +297,15 @@ fn build_server_tls_config(
         .build()
         .map_err(|e| report!(TlsConfigError::Verifier(e.to_string())))?;
 
-    rustls::ServerConfig::builder()
+    let mut config = rustls::ServerConfig::builder()
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)
-        .map_err(|e| report!(TlsConfigError::ServerConfig(e.to_string())))
+        .map_err(|e| report!(TlsConfigError::ServerConfig(e.to_string())))?;
+
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config.session_storage = rustls::server::ServerSessionMemoryCache::new(1024);
+
+    Ok(config)
 }
 
 #[cfg(test)]
