@@ -126,7 +126,7 @@ pub struct TotpEnrollResponse {
 }
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/confirm`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TotpConfirmRequest {
     pub code: String,
 }
