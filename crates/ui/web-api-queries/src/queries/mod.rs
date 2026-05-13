@@ -19,6 +19,7 @@ pub mod enrollment_tokens;
 pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
+pub mod oidc_providers;
 pub mod plugin_configs;
 pub mod plugin_type_settings;
 pub mod reset_data;
