@@ -5,6 +5,7 @@ pub mod canonical_url;
 pub mod device;
 pub mod error;
 pub mod grant_type;
+pub mod jwt_verifier;
 pub mod metadata;
 pub mod requests;
 pub mod responses;
@@ -23,6 +24,7 @@ pub use device::{
 };
 pub use error::OAuthError;
 pub use grant_type::{CodeChallengeMethod, OAuthGrantType, ResponseType, TokenEndpointAuthMethod};
+pub use jwt_verifier::{JwtError, McpOAuthJwtVerifier};
 pub use metadata::{AuthorizationServerMetadata, ProtectedResourceMetadata};
 pub use requests::{AuthorizeRequest, ConsentDecision, TokenRequest};
 pub use responses::{DcrRegistrationRequest, DcrRegistrationResponse, TokenResponse};
