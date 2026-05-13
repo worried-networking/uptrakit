@@ -244,6 +244,24 @@ pub struct SurfaceRegistrationOps {
 pub type CreateRoleFn<R> =
     fn(&serde_json::Value, Arc<dyn HostRuntime>) -> crate::error::Result<Box<R>>;
 
+/// Creation function for a `ReleaseFetcher` role — 3-arg variant that receives
+/// a `ReleaseFetchContext` so controller-side fetchers can reach the global
+/// GitHub provider. All other role factories keep the 2-arg `CreateRoleFn<R>`.
+pub type CreateReleaseFetcherFn = fn(
+    &serde_json::Value,
+    Arc<dyn HostRuntime>,
+    &roles::ReleaseFetchContext,
+) -> crate::error::Result<Box<dyn roles::ReleaseFetcher>>;
+
+/// A `ReleaseFetcher` creation function paired with its host requirements.
+///
+/// Separate from `RoleSlot` because the factory takes 3 arguments (config,
+/// runtime, context) rather than the standard 2.
+pub struct ReleaseFetcherSlot {
+    pub create: CreateReleaseFetcherFn,
+    pub host_requirements: HostRequirements,
+}
+
 /// Creation for a notification transport (singleton).
 ///
 /// Always compiled — `CatalogConfig` is un-gated so this type is visible in all
@@ -472,7 +490,7 @@ pub struct RoleCreators {
     // Per-instance roles (config + runtime → Box<dyn Role>)
     pub discoverer: Option<RoleSlot<dyn roles::Discoverer>>,
     pub version_detector: Option<RoleSlot<dyn roles::VersionDetector>>,
-    pub release_fetcher: Option<RoleSlot<dyn roles::ReleaseFetcher>>,
+    pub release_fetcher: Option<ReleaseFetcherSlot>,
     pub package_indexer: Option<RoleSlot<dyn roles::PackageIndexer>>,
     pub update_executor: Option<RoleSlot<dyn roles::UpdateExecutor>>,
     pub lifecycle_hook: Option<RoleSlot<dyn roles::LifecycleHook>>,

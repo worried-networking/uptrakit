@@ -105,19 +105,21 @@ pub use descriptor::ControllerRuntime;
 pub use descriptor::PluginTableDescriptor;
 pub use descriptor::{
     ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
-    CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
-    GlobalProviderConsumerDecl, GlobalProviderLookup, InstanceConfigOps, PluginDescriptor,
-    PluginFamily, PluginScope, RoleCreators, RoleSlot, SurfaceActionContext,
-    SurfaceActionDescriptor, SurfaceActionError, SurfaceActionHandler, SurfaceActionLibrary,
-    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement,
-    SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn,
-    SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
+    CreateControllerProtectionFn, CreateEnhancementFn, CreateReleaseFetcherFn, CreateRoleFn,
+    CreateTransportFn, GlobalProviderConsumerDecl, GlobalProviderLookup, InstanceConfigOps,
+    PluginDescriptor, PluginFamily, PluginScope, ReleaseFetcherSlot, RoleCreators, RoleSlot,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError, SurfaceActionHandler,
+    SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
+    SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+    TypeSettingsOps,
 };
 pub use descriptor::{DbMigrateTablesFn, InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
 };
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+pub use roles::ReleaseFetchContext;
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{
