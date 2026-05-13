@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginOps, SoftwareItemLifecycleContext};
 use uptrakit_shared_db::entity::plugin_type_setting;
@@ -166,4 +166,128 @@ pub async fn delete_type_settings(
         .context_to()?;
 
     Ok(result.rows_affected > 0)
+}
+
+// ── Audit snapshot ─────────────────────────────────────────────────────────────
+
+/// Audit snapshot for a `plugin_type_setting` entity.
+///
+/// `config` is excluded: it may contain plugin-specific secrets. The entity's
+/// UUID `id` is omitted in favour of `plugin_type` as the semantic target
+/// identifier.
+pub struct PluginTypeSettingsView {
+    pub plugin_type: String,
+}
+
+impl uptrakit_audit_log::AuditView for PluginTypeSettingsView {
+    const TARGET_TYPE: &'static str = "plugin_type_settings";
+
+    fn audit_target_id(&self) -> String {
+        self.plugin_type.clone()
+    }
+
+    fn audit_target_display(&self) -> Option<String> {
+        Some(self.plugin_type.clone())
+    }
+
+    fn audit_view(&self) -> serde_json::Value {
+        serde_json::json!({ "plugin_type": self.plugin_type })
+    }
+}
+
+impl From<&plugin_type_setting::Model> for PluginTypeSettingsView {
+    fn from(m: &plugin_type_setting::Model) -> Self {
+        Self {
+            plugin_type: m.plugin_type.clone(),
+        }
+    }
+}
+
+// ── Connection-generic helper ──────────────────────────────────────────────────
+
+async fn get_type_settings_conn(
+    db: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    plugin_type: &str,
+) -> Result<Option<plugin_type_setting::Model>> {
+    plugin_type_setting::Entity::find()
+        .filter(plugin_type_setting::Column::TenantId.eq(tenant_id))
+        .filter(plugin_type_setting::Column::PluginType.eq(plugin_type))
+        .one(db)
+        .await
+        .context_to()
+}
+
+// ── Transaction-aware helpers ──────────────────────────────────────────────────
+
+/// Upsert plugin type settings inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `(None, after)` for a create (no prior settings exist), or
+/// `(Some(before), after)` for an update. All validation must be done by the
+/// caller before opening the transaction.
+pub async fn upsert_type_settings_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    plugin_type: &str,
+    config: serde_json::Value,
+) -> Result<(
+    Option<plugin_type_setting::Model>,
+    plugin_type_setting::Model,
+)> {
+    let now = OffsetDateTime::now_utc();
+    let existing = get_type_settings_conn(tx, tenant_id, plugin_type).await?;
+
+    if let Some(before) = existing {
+        let mut active: plugin_type_setting::ActiveModel = before.clone().into();
+        active.config = Set(config);
+        active.updated_at = Set(now);
+        let after = active.update(tx).await.context_to()?;
+        return Ok((Some(before), after));
+    }
+
+    let model = plugin_type_setting::ActiveModel {
+        id: Set(generate_uuid()),
+        tenant_id: Set(tenant_id),
+        plugin_type: Set(plugin_type.to_string()),
+        config: Set(config.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    match model.insert(tx).await {
+        Ok(inserted) => Ok((None, inserted)),
+        Err(e) if is_unique_constraint_violation(&e) => {
+            // A concurrent insert won the race. Fetch the winner and update it.
+            let before = get_type_settings_conn(tx, tenant_id, plugin_type)
+                .await?
+                .ok_or_else(|| report!(PluginTypeSettingsError::NotFound))?;
+            let mut active: plugin_type_setting::ActiveModel = before.clone().into();
+            active.config = Set(config);
+            active.updated_at = Set(now);
+            let after = active.update(tx).await.context_to()?;
+            Ok((Some(before), after))
+        }
+        Err(e) => Err(report!(PluginTypeSettingsError::Db(e))),
+    }
+}
+
+/// Delete plugin type settings inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `Some(before)` if a row was deleted, `None` if no settings exist for
+/// the given `(tenant_id, plugin_type)` pair.
+pub async fn delete_type_settings_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    plugin_type: &str,
+) -> Result<Option<plugin_type_setting::Model>> {
+    let Some(before) = get_type_settings_conn(tx, tenant_id, plugin_type).await? else {
+        return Ok(None);
+    };
+
+    plugin_type_setting::Entity::delete_by_id(before.id)
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(before))
 }

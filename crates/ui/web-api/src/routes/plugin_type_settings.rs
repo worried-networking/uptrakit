@@ -8,6 +8,7 @@ use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
 use crate::queries::plugin_type_settings as pts_queries;
+use crate::queries::plugin_type_settings::PluginTypeSettingsView;
 use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
@@ -15,7 +16,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::plugin_type_settings::{
@@ -79,62 +82,6 @@ fn validate_type_settings_payload(
 fn can_view_type_settings(user: &AuthenticatedUser) -> bool {
     user.has_permission(Permission::ViewSettings)
         || user.has_permission(Permission::ManageGlobalSettings)
-}
-
-struct AuditContext<'a> {
-    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
-    tenant_id: uuid::Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_plugin_type_settings_audit(
-    ctx: &AuditContext<'_>,
-    plugin_type: &str,
-    operation: &'static str,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    reason_code: Option<&'static str>,
-    config_field_count: Option<usize>,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let action_type = if operation == "delete" {
-        uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
-    } else {
-        uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT
-    };
-
-    let mut details = serde_json::Map::from_iter([
-        ("plugin_type".to_string(), serde_json::json!(plugin_type)),
-        ("operation".to_string(), serde_json::json!(operation)),
-        (
-            "changed".to_string(),
-            serde_json::json!(matches!(outcome, uptrakit_audit_log::AuditOutcome::Success)),
-        ),
-    ]);
-    if let Some(reason_code) = reason_code {
-        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
-    }
-    if let Some(field_count) = config_field_count {
-        details.insert(
-            "config_field_count".to_string(),
-            serde_json::json!(field_count),
-        );
-    }
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target(
-            "plugin_type_settings",
-            plugin_type.to_string(),
-            Some(plugin_type.to_string()),
-        )
-        .outcome(outcome)
-        .details(serde_json::Value::Object(details))
-        .build()
-    {
-        ctx.audit_emitter.emit_best_effort(entry);
-    }
 }
 
 /// List all plugin type settings for the current tenant.
@@ -275,12 +222,8 @@ pub async fn upsert_plugin_type_settings(
     Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
     let plugin_type_id = PluginTypeId::new(&plugin_type);
 
     if let Some(desc) = plugin_ops.0.get(&plugin_type_id)
@@ -293,53 +236,117 @@ pub async fn upsert_plugin_type_settings(
         return error_response(StatusCode::NOT_FOUND, "Unknown plugin type");
     }
 
-    let config_field_count = req.config.as_object().map(|v| v.len()).unwrap_or(0);
     if let Err((reason_code, rejection)) =
         validate_type_settings_payload(plugin_ops.0.as_ref(), &plugin_type_id, &req.config)
     {
-        emit_plugin_type_settings_audit(
-            &audit_ctx,
-            &plugin_type,
-            "upsert",
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            Some(reason_code),
-            Some(config_field_count),
-        );
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(
+            "plugin_type_settings",
+            plugin_type.clone(),
+            Some(plugin_type.clone()),
+        )
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": reason_code }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return rejection;
     }
 
-    match pts_queries::upsert_type_settings(
-        tenant_db.db(),
-        tenant_db.tenant_id(),
-        &plugin_type,
-        req.config,
-    )
-    .await
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
     {
-        Ok(model) => {
-            emit_plugin_type_settings_audit(
-                &audit_ctx,
-                &plugin_type,
-                "upsert",
-                uptrakit_audit_log::AuditOutcome::Success,
-                None,
-                Some(config_field_count),
-            );
-            (StatusCode::OK, Json(model_to_response(model))).into_response()
-        }
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, "Failed to upsert plugin type settings");
-            emit_plugin_type_settings_audit(
-                &audit_ctx,
-                &plugin_type,
-                "upsert",
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("plugin_type_settings_upsert_failed"),
-                Some(config_field_count),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            tracing::error!("Failed to begin transaction for plugin type settings upsert: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let (before_model, after_model) =
+        match pts_queries::upsert_type_settings_in_tx(&tx, tenant_id, &plugin_type, req.config)
+            .await
+        {
+            Ok(pair) => pair,
+            Err(e) => {
+                drop(tx);
+                tracing::error!("Failed to upsert plugin type settings: {e}");
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target(
+                    "plugin_type_settings",
+                    plugin_type.clone(),
+                    Some(plugin_type.clone()),
+                )
+                .outcome(AuditOutcome::Failed)
+                .details(serde_json::json!({
+                    "reason_code": "plugin_type_settings_upsert_failed"
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    let after_view = PluginTypeSettingsView::from(&after_model);
+    let audit_entry_result = if let Some(ref before) = before_model {
+        let before_view = PluginTypeSettingsView::from(before);
+        AuditEntry::<Stateful>::plugin_type_settings_upsert(&before_view, &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({}))
+            .build()
+    } else {
+        AuditEntry::<Stateful>::plugin_type_settings_upsert(&AbsentView(&after_view), &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({}))
+            .build()
+    };
+    let audit_entry = match audit_entry_result {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for plugin type settings upsert: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let hook = state.audit_emitter.commit_hook();
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for plugin type settings upsert: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit plugin type settings upsert: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    (StatusCode::OK, Json(model_to_response(after_model))).into_response()
 }
 
 /// Delete plugin type settings, resetting to defaults.
@@ -367,12 +374,8 @@ pub async fn delete_plugin_type_settings(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     let plugin_type_id = PluginTypeId::new(&plugin_type);
     if let Some(desc) = plugin_ops.0.get(&plugin_type_id)
@@ -388,47 +391,93 @@ pub async fn delete_plugin_type_settings(
         );
     }
 
-    match pts_queries::delete_type_settings(tenant_db.db(), tenant_db.tenant_id(), &plugin_type)
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
-        Ok(true) => {
-            emit_plugin_type_settings_audit(
-                &audit_ctx,
-                &plugin_type,
-                "delete",
-                uptrakit_audit_log::AuditOutcome::Success,
-                None,
-                None,
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_plugin_type_settings_audit(
-                &audit_ctx,
-                &plugin_type,
-                "delete",
-                uptrakit_audit_log::AuditOutcome::Denied,
-                Some("plugin_type_settings_not_found"),
-                None,
-            );
-            error_response(
-                StatusCode::NOT_FOUND,
-                "No settings found for this plugin type",
-            )
-        }
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, "Failed to delete plugin type settings");
-            emit_plugin_type_settings_audit(
-                &audit_ctx,
-                &plugin_type,
-                "delete",
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("plugin_type_settings_delete_failed"),
-                None,
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            tracing::error!("Failed to begin transaction for plugin type settings delete: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_model =
+        match pts_queries::delete_type_settings_in_tx(&tx, tenant_id, &plugin_type).await {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                drop(tx);
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target(
+                    "plugin_type_settings",
+                    plugin_type.clone(),
+                    Some(plugin_type.clone()),
+                )
+                .outcome(AuditOutcome::Denied)
+                .details(serde_json::json!({
+                    "reason_code": "plugin_type_settings_not_found"
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(
+                    StatusCode::NOT_FOUND,
+                    "No settings found for this plugin type",
+                );
+            }
+            Err(e) => {
+                drop(tx);
+                tracing::error!("Failed to delete plugin type settings: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    let before_view = PluginTypeSettingsView::from(&before_model);
+    let audit_entry = match AuditEntry::<Stateful>::plugin_type_settings_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({}))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for plugin type settings delete: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let hook = state.audit_emitter.commit_hook();
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for plugin type settings delete: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit plugin type settings delete: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]
@@ -477,7 +526,6 @@ mod tests {
             .plugin
             .plugin_ops
             .type_settings_sample(&plugin_type_id);
-        let config_field_count = config.as_object().map(|v| v.len()).unwrap_or(0);
 
         let request = UpsertPluginTypeSettingsRequest { config };
         let status = client
@@ -507,16 +555,16 @@ mod tests {
         assert_eq!(row.target_type.as_deref(), Some("plugin_type_settings"));
         assert_eq!(row.target_id.as_deref(), Some(plugin_type));
 
-        let details = row.details_json.expect("details");
-        assert_eq!(details["plugin_type"], serde_json::json!(plugin_type));
-        assert_eq!(details["operation"], serde_json::json!("upsert"));
-        assert_eq!(
-            details["config_field_count"],
-            serde_json::json!(config_field_count)
-        );
+        // First upsert — no prior settings: before_snapshot is {}
+        let before = row.before_snapshot.expect("before_snapshot must be set");
+        assert_eq!(before, serde_json::json!({}));
+        // after_snapshot has plugin_type as the semantic identifier
+        let after = row.after_snapshot.expect("after_snapshot must be set");
+        assert_eq!(after["plugin_type"], serde_json::json!(plugin_type));
+        // config must not appear in the snapshot
         assert!(
-            details.get("config").is_none(),
-            "raw config must not be present in audit details"
+            after.get("config").is_none(),
+            "raw config must not appear in after_snapshot"
         );
     }
 
@@ -547,7 +595,6 @@ mod tests {
             uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
         );
         let details = row.details_json.expect("details");
-        assert_eq!(details["operation"], serde_json::json!("upsert"));
         assert_eq!(
             details["reason_code"],
             serde_json::json!("unknown_plugin_type")
@@ -579,7 +626,6 @@ mod tests {
             uptrakit_audit_log::AuditOutcome::Denied.as_str()
         );
         let details = row.details_json.expect("details");
-        assert_eq!(details["operation"], serde_json::json!("delete"));
         assert_eq!(
             details["reason_code"],
             serde_json::json!("plugin_type_settings_not_found")
@@ -626,7 +672,6 @@ mod tests {
             uptrakit_audit_log::AuditOutcome::Failed.as_str()
         );
         let details = row.details_json.expect("details");
-        assert_eq!(details["operation"], serde_json::json!("upsert"));
         assert_eq!(
             details["reason_code"],
             serde_json::json!("plugin_type_settings_upsert_failed")
