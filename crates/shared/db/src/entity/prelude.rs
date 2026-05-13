@@ -29,6 +29,7 @@ pub use super::host_tag::{Entity as HostTag, Model as HostTagModel};
 pub use super::host_tag_assignment::{
     Entity as HostTagAssignment, Model as HostTagAssignmentModel,
 };
+pub use super::mfa_challenge::{Entity as MfaChallenge, Model as MfaChallengeModel};
 pub use super::notification_channel::{
     Entity as NotificationChannel, Model as NotificationChannelModel,
 };
@@ -109,4 +110,6 @@ pub use super::update_history::{
 pub use super::update_output_line::{Entity as UpdateOutputLine, Model as UpdateOutputLineModel};
 pub use super::user::{Entity as User, Model as UserModel};
 pub use super::user_oidc_link::{Entity as UserOidcLink, Model as UserOidcLinkModel};
+pub use super::user_recovery_code::{Entity as UserRecoveryCode, Model as UserRecoveryCodeModel};
 pub use super::user_role::{Entity as UserRole, Model as UserRoleModel};
+pub use super::user_totp::{Entity as UserTotp, Model as UserTotpModel};
