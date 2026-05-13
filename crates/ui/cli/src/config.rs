@@ -14,6 +14,7 @@ pub struct Config {
     pub ca_pem: Option<String>,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Credentials {
     #[serde(default)]
@@ -66,12 +67,6 @@ pub async fn save_credentials(creds: &Credentials) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::expect_used,
-        clippy::unwrap_used,
-        reason = "test code: panics on failure are acceptable"
-    )]
-
     use super::*;
 
     #[test]
