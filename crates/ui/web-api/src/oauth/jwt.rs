@@ -1,31 +1,14 @@
-//! MCP OAuth JWT signer + verifier. HS256 pinned; kid header for future rotation.
+//! MCP OAuth JWT signer. HS256 pinned; kid header for future rotation.
+//!
+//! The verifier ([`McpOAuthJwtVerifier`]) and error type ([`JwtError`]) live in
+//! `uptrakit-web-api-types` so that `uptrakit-mcp` can import them without a
+//! circular dependency on `uptrakit-web-api`.
 
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-use thiserror::Error;
 use uptrakit_web_api_types::oauth::McpAccessTokenClaims;
 
-/// Errors produced by JWT signing and verification.
-#[non_exhaustive]
-#[derive(Debug, Error)]
-pub enum JwtError {
-    /// Underlying `jsonwebtoken` error (invalid signature, expired, malformed, etc.).
-    #[error("jsonwebtoken: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
-    /// The token header declared an algorithm other than HS256.
-    #[error("algorithm pinning violation")]
-    AlgorithmPinningViolation,
-    /// The `aud` claim did not match any accepted audience.
-    #[error("audience mismatch")]
-    InvalidAudience,
-    /// The `iss` claim did not match the expected issuer.
-    #[error("issuer mismatch")]
-    InvalidIssuer,
-    /// A required application-level claim was present but empty.
-    #[error("missing required claim: {0}")]
-    MissingRequiredClaim(&'static str),
-}
+pub use uptrakit_web_api_types::oauth::{JwtError, McpOAuthJwtVerifier};
 
 /// Signs MCP OAuth access tokens using HS256.
 ///
@@ -70,81 +53,6 @@ impl McpOAuthJwtSigner {
     #[must_use]
     pub fn kid(&self) -> &str {
         &self.kid
-    }
-}
-
-/// Verifies MCP OAuth access tokens issued by [`McpOAuthJwtSigner`].
-///
-/// Enforces HS256-only algorithm, validates standard spec claims (`iss`, `sub`,
-/// `aud`, `exp`, `iat`, `nbf`, `jti`) via `jsonwebtoken`, and then checks that
-/// the application-level claims `client_id`, `tenant_id`, and `jti` are non-empty.
-///
-/// `DecodingKey` is not `Clone`, so wrap in `Arc<McpOAuthJwtVerifier>` for sharing.
-pub struct McpOAuthJwtVerifier {
-    key: DecodingKey,
-    expected_issuer: String,
-    accepted_audiences: HashSet<String>,
-}
-
-impl McpOAuthJwtVerifier {
-    /// Create a new verifier.
-    ///
-    /// - `secret`: the same HMAC secret used by the matching [`McpOAuthJwtSigner`].
-    /// - `expected_issuer`: the `iss` claim value that tokens must carry.
-    /// - `accepted_audiences`: the set of `aud` values that are considered valid.
-    pub fn new(secret: &[u8], expected_issuer: String, accepted_audiences: Vec<String>) -> Self {
-        let set = accepted_audiences.into_iter().collect();
-        Self {
-            key: DecodingKey::from_secret(secret),
-            expected_issuer,
-            accepted_audiences: set,
-        }
-    }
-
-    /// Verify a compact JWT string.
-    ///
-    /// Checks, in order:
-    /// 1. HS256 algorithm pin (via `Validation::algorithms`).
-    /// 2. All standard spec claims (`iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `jti`)
-    ///    are present and structurally valid.
-    /// 3. `iss` matches `expected_issuer`.
-    /// 4. `aud` is a member of `accepted_audiences`.
-    /// 5. Application claims `client_id`, `tenant_id`, and `jti` are non-empty strings.
-    ///
-    /// # Errors
-    ///
-    /// - [`JwtError::Jwt`] — signature invalid, token expired, missing spec claim, etc.
-    /// - [`JwtError::MissingRequiredClaim`] — `client_id`, `tenant_id`, or `jti` is empty.
-    pub fn verify(&self, token: &str) -> Result<McpAccessTokenClaims, JwtError> {
-        let mut validation = Validation::new(Algorithm::HS256);
-        // Pin to exactly one algorithm — rejects `alg: none` and any other alg.
-        validation.algorithms = vec![Algorithm::HS256];
-
-        // Require all standard spec claims defined by RFC 9068 / MCP OAuth §9.1.
-        let mut req = HashSet::new();
-        for c in ["iss", "sub", "aud", "exp", "iat", "nbf", "jti"] {
-            req.insert(c.to_string());
-        }
-        validation.required_spec_claims = req;
-
-        validation.set_issuer(&[self.expected_issuer.as_str()]);
-        let audiences: Vec<&str> = self.accepted_audiences.iter().map(String::as_str).collect();
-        validation.set_audience(&audiences);
-
-        let data = decode::<McpAccessTokenClaims>(token, &self.key, &validation)?;
-
-        // Application-level required non-empty claims.
-        if data.claims.client_id.is_empty() {
-            return Err(JwtError::MissingRequiredClaim("client_id"));
-        }
-        if data.claims.tenant_id.is_empty() {
-            return Err(JwtError::MissingRequiredClaim("tenant_id"));
-        }
-        if data.claims.jti.is_empty() {
-            return Err(JwtError::MissingRequiredClaim("jti"));
-        }
-
-        Ok(data.claims)
     }
 }
 

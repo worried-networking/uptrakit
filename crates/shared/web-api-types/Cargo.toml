@@ -13,10 +13,12 @@ default = []
 openapi = ["dep:utoipa", "uptrakit-shared-types/openapi"]
 
 [dependencies]
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 time = { workspace = true }
