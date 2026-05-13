@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn nats_validate_rejects_empty_url() {
         let cfg = NatsConfig::default(); // url = ""
-        assert!(cfg.validate().is_err());
+        cfg.validate().unwrap_err();
     }
 
     #[test]

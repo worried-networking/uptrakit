@@ -96,7 +96,7 @@ mod tests {
         let mut cfg = ZeroconfConfig::default();
         cfg.enabled = true;
         let (r, _) = ZeroconfReloadable::new(ZeroconfConfig::default());
-        assert!(r.validate(&cfg).is_err());
+        r.validate(&cfg).unwrap_err();
     }
 
     #[tokio::test(flavor = "current_thread")]

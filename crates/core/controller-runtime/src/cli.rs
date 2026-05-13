@@ -193,8 +193,8 @@ pub(crate) struct Args {
     pub enrollment_bootstrap: EnrollmentBootstrapArgs,
 
     /// Path to the PID file written by this process.
-    /// Required when --reuseport is used so the self-update plugin can signal
-    /// the running process via `kill -USR2 $(cat <pid-file>)` during an update.
+    /// Used by the self-update plugin to signal the running process via
+    /// `kill -USR2 $(cat <pid-file>)` during an update.
     #[arg(long)]
     pub pid_file: Option<std::path::PathBuf>,
 

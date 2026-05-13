@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "spawn_config_reconciler wired into startup in Task 14"
-)]
-
 //! DB-driven config reconciler: polls `settings_version` rows and emits
 //! [`ReloadRequest`]s when versions bump.
 //!

@@ -287,7 +287,7 @@ pub(crate) fn spawn_ca_reload(
     let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(durations::SETTINGS_POLL_INTERVAL);
+        let mut interval = tokio::time::interval(durations::CA_RELOAD_INTERVAL);
         let mut cached_version = initial_ca_version;
         interval.tick().await;
 

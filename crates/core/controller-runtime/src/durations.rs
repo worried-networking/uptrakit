@@ -13,8 +13,8 @@ pub(crate) const SERVER_CERT_RENEWAL_WINDOW_DAYS: i64 = 30;
 /// Server certificate validity period in days.
 pub(crate) const SERVER_CERT_VALIDITY_DAYS: i64 = 90;
 
-/// Interval for checking settings/CA version changes across instances (30 seconds).
-pub(crate) const SETTINGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
+/// Interval for polling the CA version counter to detect cross-instance CA updates (30 seconds).
+pub(crate) const CA_RELOAD_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Interval for checking server certificate renewal eligibility (24 hours).
 pub(crate) const SERVER_CERT_RENEWAL_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 3600);
