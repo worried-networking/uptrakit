@@ -1,3 +1,5 @@
+#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
+
 //! PKI listener reloadable subsystem.
 //!
 //! [`PkiListenerReloadable`] distributes updated [`PkiConfig`] values to the
