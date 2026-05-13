@@ -5,6 +5,7 @@
 
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::auth::mfa_challenge::create_mfa_challenge;
 use crate::auth::refresh_cookie::{
     clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
 };
@@ -27,8 +28,9 @@ use sea_orm::{
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{role, user, user_role};
+use uptrakit_shared_db::entity::{role, user, user_role, user_totp};
 use uptrakit_shared_types::MaskedEmail;
+use uptrakit_web_api_types::mfa::{MfaChallengeResponse, MfaMethod};
 
 use crate::auth::AuthMethod;
 use crate::extract::Validated;
@@ -560,6 +562,71 @@ pub async fn login(
         return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
     }
 
+    // Check if user has active TOTP enrolled — if so, issue an MFA challenge.
+    let active_totp = match UserTotp::find()
+        .filter(user_totp::Column::UserId.eq(user.id))
+        .filter(user_totp::Column::IsActive.eq(true))
+        .one(state.db())
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Failed to check TOTP status during login: {e}");
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("totp_check_failed"),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if active_totp.is_some() {
+        let challenge_token = match create_mfa_challenge(state.db(), user.id).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Failed to create MFA challenge: {:?}", e);
+                emit_auth_login_audit(
+                    &state,
+                    Some(user.id),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("mfa_challenge_create_failed"),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+        if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+            uptrakit_audit_log::AuditActionType::AUTH_MFA_CHALLENGE_ISSUED,
+        )
+        .tenant_scope(state.default_tenant_id)
+        .actor(uptrakit_audit_log::AuditActorType::User, Some(user.id))
+        .target("user", user.id.to_string(), None)
+        .outcome(uptrakit_audit_log::AuditOutcome::Success)
+        .build()
+        {
+            state.audit_emitter.emit_best_effort(entry);
+        }
+
+        return (
+            StatusCode::ACCEPTED,
+            Json(MfaChallengeResponse::new(
+                challenge_token,
+                vec![MfaMethod::Totp, MfaMethod::Email],
+            )),
+        )
+            .into_response();
+    }
+
+    // No active TOTP: determine whether this is a setup-required session.
+    let two_factor_required = state.settings.authentication().two_factor_required;
+    let setup_required_claim: Option<bool> = if two_factor_required {
+        Some(true)
+    } else {
+        None
+    };
+
     // Get user permissions
     let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
     {
@@ -589,24 +656,25 @@ pub async fn login(
     };
 
     // Create JWT access token
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user.id, &permissions, "password", None, None)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token: {:?}", e);
-                emit_auth_login_audit(
-                    &state,
-                    Some(user.id),
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    Some("access_token_create_failed"),
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let access_token = match state.auth.jwt.create_access_token(
+        user.id,
+        &permissions,
+        "password",
+        None,
+        setup_required_claim,
+    ) {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("access_token_create_failed"),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     emit_auth_login_audit(
         &state,
@@ -1542,6 +1610,106 @@ mod tests {
         assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Failed);
         assert_eq!(reason_code, "refresh_rotation_failed");
     }
+
+    async fn insert_active_totp(db: &DatabaseConnection, user_id: uuid::Uuid) {
+        use uptrakit_shared_db::entity::user_totp;
+        uptrakit_crypto::enable_plaintext_mode();
+        let secret = crate::auth::totp::generate_totp_secret();
+        let enc = uptrakit_crypto::EncryptedString::new(secret, "uptrakit:user_totp:secret")
+            .expect("encrypt");
+        user_totp::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user_id),
+            secret: Set(enc),
+            is_active: Set(true),
+            enrolled_at: Set(Some(OffsetDateTime::now_utc())),
+            last_used_step: Set(None),
+            created_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .expect("insert active totp");
+    }
+
+    #[tokio::test]
+    async fn login_returns_202_when_totp_active() {
+        uptrakit_crypto::enable_plaintext_mode();
+
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+
+        insert_active_totp(&db, user_id).await;
+
+        let response = login(
+            State(state),
+            crate::extract::SessionSvc::new(crate::auth::session::SessionService::new(db.clone())),
+            crate::extract::Validated(LoginRequest {
+                email: "test@example.com".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert!(
+            parsed["mfa_token"].is_string(),
+            "mfa_token should be present"
+        );
+        assert!(
+            parsed["mfa_methods"].is_array(),
+            "mfa_methods should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn login_returns_setup_required_jwt_when_enforcement_on_and_unenrolled() {
+        uptrakit_crypto::enable_plaintext_mode();
+
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        // Enable two_factor_required in settings.
+        let mut auth_settings = state.settings.authentication();
+        auth_settings.two_factor_required = true;
+        state.settings.set_authentication(auth_settings).await;
+
+        let response = login(
+            State(Arc::clone(&state)),
+            crate::extract::SessionSvc::new(crate::auth::session::SessionService::new(db.clone())),
+            crate::extract::Validated(LoginRequest {
+                email: "test@example.com".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        let token_str = parsed["access_token"].as_str().expect("access_token");
+
+        // Decode (without verification) to inspect claims.
+        let parts: Vec<&str> = token_str.split('.').collect();
+        assert_eq!(parts.len(), 3, "JWT must have 3 parts");
+        let payload =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
+                .expect("base64 decode claims");
+        let claims: serde_json::Value = serde_json::from_slice(&payload).expect("claims json");
+        assert_eq!(
+            claims["setup_required"],
+            serde_json::json!(true),
+            "setup_required claim must be true"
+        );
+    }
 }
 
 /// Confirm an email change via a one-time token.
@@ -1881,6 +2049,22 @@ pub async fn refresh(
         }
     };
 
+    // Determine setup_required: if 2FA is enforced and user has no active TOTP, carry it forward.
+    let active_totp_on_refresh = UserTotp::find()
+        .filter(user_totp::Column::UserId.eq(user.id))
+        .filter(user_totp::Column::IsActive.eq(true))
+        .one(state.db())
+        .await
+        .ok()
+        .flatten();
+    let refresh_two_factor_required = state.settings.authentication().two_factor_required;
+    let setup_required_claim: Option<bool> =
+        if refresh_two_factor_required && active_totp_on_refresh.is_none() {
+            Some(true)
+        } else {
+            None
+        };
+
     // Issue new JWT access token
     let auth_method = verified.auth_method.kind();
     let oidc_provider_id = verified.auth_method.oidc_provider_id();
@@ -1890,7 +2074,7 @@ pub async fn refresh(
         &permissions,
         auth_method,
         oidc_provider_id,
-        None,
+        setup_required_claim,
     ) {
         Ok(token) => token,
         Err(e) => {
