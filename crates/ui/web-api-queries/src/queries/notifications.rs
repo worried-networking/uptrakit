@@ -52,6 +52,40 @@ impl From<&notification_channel::Model> for NotificationChannelView {
     }
 }
 
+/// Audit snapshot for a `notification_rule` entity.
+///
+/// `tenant_id` is excluded because it is redundant with the tenant-scoped
+/// audit entry itself.  All other fields are non-sensitive and included
+/// verbatim.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "notification_rule")]
+pub struct NotificationRuleView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub channel_id: Uuid,
+    pub event_type: String,
+    pub host_id: Option<Uuid>,
+    pub software_item_id: Option<Uuid>,
+    pub plugin_type: Option<String>,
+    pub enabled: bool,
+}
+
+impl From<&notification_rule::Model> for NotificationRuleView {
+    fn from(m: &notification_rule::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            channel_id: m.channel_id,
+            event_type: m.event_type.clone(),
+            host_id: m.host_id,
+            software_item_id: m.software_item_id,
+            plugin_type: m.plugin_type.clone(),
+            enabled: m.enabled,
+        }
+    }
+}
+
 // -- Transaction-aware mutation helpers (for emit_stateful callers) -----------
 
 /// Insert a new notification channel inside a caller-managed `BEGIN IMMEDIATE`
@@ -379,6 +413,165 @@ pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> ChannelResult<boo
         .context_to()?;
 
     Ok(result.rows_affected > 0)
+}
+
+// -- Rules (transaction-aware helpers) ----------------------------------------
+
+/// Insert a new notification rule inside a caller-managed `BEGIN IMMEDIATE`
+/// transaction.
+///
+/// Validates that the referenced channel belongs to `tenant_id` before
+/// inserting.  Returns the inserted [`notification_rule::Model`] so the caller
+/// can build both the audit snapshot and the HTTP response without a second
+/// DB round-trip.
+///
+/// # Errors
+///
+/// Returns [`RuleQueryError::ChannelNotFound`] when the channel does not exist
+/// for the given tenant, or [`RuleQueryError::Db`] on any database error.
+pub async fn create_rule_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    req: &uptrakit_web_api_types::notifications::CreateNotificationRuleRequest,
+) -> RuleResult<notification_rule::Model> {
+    // Verify channel belongs to tenant.
+    let channel = notification_channel::Entity::find_by_id(req.channel_id)
+        .filter(notification_channel::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?;
+
+    if channel.is_none() {
+        bail!(RuleQueryError::ChannelNotFound);
+    }
+
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+
+    let model = notification_rule::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        channel_id: Set(req.channel_id),
+        event_type: Set(req.event_type.as_str().to_string()),
+        host_id: Set(req.host_id),
+        software_item_id: Set(req.software_item_id),
+        plugin_type: Set(req.plugin_type.clone()),
+        enabled: Set(req.enabled),
+        created_at: Set(now),
+    };
+
+    model.insert(tx).await.context_to()
+}
+
+/// Read then update a notification rule inside a caller-managed `BEGIN
+/// IMMEDIATE` transaction.
+///
+/// Returns `None` when the rule does not exist (tenant-scoped lookup).
+/// Returns `Some((before, after))` on success — `before` is the pre-update
+/// snapshot and `after` is the result of the update.
+///
+/// # Errors
+///
+/// Returns [`RuleQueryError`] if a scope field contains an invalid UUID or the
+/// DB read/write fails.
+pub async fn update_rule_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    rule_id: Uuid,
+    req: &uptrakit_web_api_types::notifications::UpdateNotificationRuleRequest,
+) -> RuleResult<Option<(notification_rule::Model, notification_rule::Model)>> {
+    let Some(before) = notification_rule::Entity::find_by_id(rule_id)
+        .filter(notification_rule::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    let mut active: notification_rule::ActiveModel = before.clone().into();
+
+    if let Some(event_type) = &req.event_type {
+        active.event_type = Set(event_type.as_str().to_string());
+    }
+    if let Some(enabled) = req.enabled {
+        active.enabled = Set(enabled);
+    }
+
+    // Scope filters use the `Option<serde_json::Value>` nullable-update pattern:
+    //   absent (None)          → keep current value
+    //   Some(Value::Null)      → clear to NULL
+    //   Some(Value::String(s)) → set to the parsed UUID value
+    if let Some(val) = &req.host_id {
+        match val {
+            serde_json::Value::Null => active.host_id = Set(None),
+            serde_json::Value::String(s) => {
+                let parsed = Uuid::parse_str(s).map_err(|e| {
+                    report!(RuleQueryError::InvalidField(format!(
+                        "host_id: invalid UUID: {e}"
+                    )))
+                })?;
+                active.host_id = Set(Some(parsed));
+            }
+            _ => bail!(RuleQueryError::InvalidField("host_id".to_string())),
+        }
+    }
+    if let Some(val) = &req.software_item_id {
+        match val {
+            serde_json::Value::Null => active.software_item_id = Set(None),
+            serde_json::Value::String(s) => {
+                let parsed = Uuid::parse_str(s).map_err(|e| {
+                    report!(RuleQueryError::InvalidField(format!(
+                        "software_item_id: invalid UUID: {e}"
+                    )))
+                })?;
+                active.software_item_id = Set(Some(parsed));
+            }
+            _ => bail!(RuleQueryError::InvalidField("software_item_id".to_string())),
+        }
+    }
+    if let Some(val) = &req.plugin_type {
+        match val {
+            serde_json::Value::Null => active.plugin_type = Set(None),
+            serde_json::Value::String(s) => active.plugin_type = Set(Some(s.clone())),
+            _ => bail!(RuleQueryError::InvalidField("plugin_type".to_string())),
+        }
+    }
+
+    let after = active.update(tx).await.context_to()?;
+    Ok(Some((before, after)))
+}
+
+/// Read then delete a notification rule inside a caller-managed `BEGIN
+/// IMMEDIATE` transaction.
+///
+/// Returns `None` when the rule does not exist (tenant-scoped lookup).
+/// Returns `Some(before)` — the pre-deletion model — on success, so the caller
+/// can build the audit snapshot.
+///
+/// # Errors
+///
+/// Returns [`RuleQueryError::Db`] if the DB read or delete fails.
+pub async fn delete_rule_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    rule_id: Uuid,
+) -> RuleResult<Option<notification_rule::Model>> {
+    let Some(before) = notification_rule::Entity::find_by_id(rule_id)
+        .filter(notification_rule::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    notification_rule::Entity::delete_by_id(rule_id)
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(before))
 }
 
 // -- Rules --------------------------------------------------------------------
@@ -758,7 +951,7 @@ fn empty_json_object_map() -> JsonObjectMap {
         .expect("empty JSON object should always convert to JsonObjectMap")
 }
 
-fn rule_to_response(model: notification_rule::Model) -> NotificationRuleResponse {
+pub fn rule_to_response(model: notification_rule::Model) -> NotificationRuleResponse {
     let event_type = model
         .event_type
         .parse::<NotificationEventType>()
