@@ -1,0 +1,2 @@
+# empty catalog for test — no entries match the handler in crates/web/src/routes.rs
+entries = []
