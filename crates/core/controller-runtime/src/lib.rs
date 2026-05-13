@@ -270,6 +270,22 @@ async fn run_server(args: cli::Args) -> Result<()> {
         initial_ca_version,
     } = pki;
 
+    // Load TOML config at boot. `args.config` carries the value from
+    // `--config` / `UPTRAKIT_CONFIG` env-var / default path.
+    // Loaded here (before cert_signer construction) so that trust_domain
+    // from [tls] can be wired into the signer at boot time.
+    let booted = match startup::boot_config(args.config.clone()).await {
+        Ok(b) => Some(b),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "TOML config not loaded (file may not exist yet); \
+                 using defaults for config-reload channels"
+            );
+            None
+        }
+    };
+
     // Build shared application state
     // Two-step: clone as concrete type then coerce to Arc<dyn IssuerSource>.
     // Arc::clone resolves its argument type from the return annotation, so
@@ -278,10 +294,26 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let concrete: Arc<crl_manager::CrlManager> = Arc::clone(&crl_manager);
         concrete
     };
-    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
-        ca_rx.clone(),
-        issuer_source,
-    ));
+    // Resolve the effective trust domain: explicit tls.trust_domain wins;
+    // falls back to tls.sans[0] (legacy derivation); empty = SPIFFE disabled.
+    let effective_trust_domain = booted
+        .as_ref()
+        .map(|b| {
+            b.runtime
+                .tls
+                .effective_trust_domain(&b.runtime.tls.sans)
+                .to_owned()
+        })
+        .unwrap_or_default();
+    let cert_signer = {
+        let signer = cert_signer::RcgenAgentCertSigner::new(ca_rx.clone(), issuer_source);
+        if effective_trust_domain.is_empty() {
+            Arc::new(signer) as Arc<dyn uptrakit_web_api::cert_signer::AgentCertSigner>
+        } else {
+            Arc::new(signer.with_trust_domain(effective_trust_domain))
+                as Arc<dyn uptrakit_web_api::cert_signer::AgentCertSigner>
+        }
+    };
 
     #[cfg(feature = "oidc")]
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
@@ -499,20 +531,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // in the state. The host's `add()` is called later in spawn_background_tasks.
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
     let builtin_host = service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
-
-    // Load TOML config at boot. `args.config` carries the value from
-    // `--config` / `UPTRAKIT_CONFIG` env-var / default path.
-    let booted = match startup::boot_config(args.config.clone()).await {
-        Ok(b) => Some(b),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "TOML config not loaded (file may not exist yet); \
-                 using defaults for config-reload channels"
-            );
-            None
-        }
-    };
 
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)

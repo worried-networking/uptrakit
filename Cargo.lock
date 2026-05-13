@@ -8427,6 +8427,7 @@ dependencies = [
  "reqwest",
  "rootcause",
  "rustls",
+ "rustls-native-certs",
  "sea-orm-migration",
  "serde",
  "serde_json",
