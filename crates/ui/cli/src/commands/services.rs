@@ -569,6 +569,7 @@ mod tests {
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
             yielded_to: None,
+            spiffe_id: None,
         }
     }
 

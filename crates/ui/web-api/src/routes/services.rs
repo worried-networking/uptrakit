@@ -1,7 +1,6 @@
 use crate::AppState;
 use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
-use crate::app_state::AuditEmitterState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
@@ -116,12 +115,21 @@ fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::Regi
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_services(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanViewServices(_user): CanViewServices,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     match svc_queries::list_services(&tenant_db, &query).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(mut resp) => {
+            let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
+            if !trust_domain.is_empty() {
+                for svc in &mut resp.items {
+                    svc.spiffe_id = Some(format!("spiffe://{trust_domain}/service/{}", svc.id));
+                }
+            }
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to list services: {}", e);
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -148,12 +156,19 @@ pub async fn list_services(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_service(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanViewServices(_user): CanViewServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match svc_queries::get_active_service(&tenant_db, service_id).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(Some(mut resp)) => {
+            let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
+            if !trust_domain.is_empty() {
+                resp.spiffe_id = Some(format!("spiffe://{trust_domain}/service/{}", resp.id));
+            }
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
@@ -183,7 +198,7 @@ pub async fn get_service(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_service(
-    State(audit_emitter_state): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateServices(user): CanUpdateServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -191,8 +206,9 @@ pub async fn update_service(
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
     let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
@@ -219,7 +235,10 @@ pub async fn update_service(
     )
     .await
     {
-        Ok(Some(resp)) => {
+        Ok(Some(mut resp)) => {
+            if !trust_domain.is_empty() {
+                resp.spiffe_id = Some(format!("spiffe://{trust_domain}/service/{}", resp.id));
+            }
             emit_service_lifecycle_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
@@ -1556,7 +1575,7 @@ mod tests {
         let missing_service_id = uuid::Uuid::now_v7();
 
         let response = update_service(
-            State(AuditEmitterState(state.audit_emitter.clone())),
+            State(Arc::clone(&state)),
             tenant_db,
             CanUpdateServices::new(auth_user),
             None,

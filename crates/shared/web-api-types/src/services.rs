@@ -49,6 +49,12 @@ pub struct ServiceResponse {
     /// External service IDs currently causing this embedded service to yield.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yielded_to: Option<Vec<Uuid>>,
+    /// SPIFFE identity URI from the service's current certificate.
+    ///
+    /// Present only when the controller has a trust domain configured and the
+    /// service certificate contains a SPIFFE URI SAN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spiffe_id: Option<String>,
 }
 
 /// Query parameters for listing services.
@@ -184,6 +190,7 @@ mod tests {
             ping_interval_seconds: Some(60),
             cert_lifetime_hours: None,
             yielded_to: None,
+            spiffe_id: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -222,6 +229,7 @@ mod tests {
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
             yielded_to: None,
+            spiffe_id: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -256,6 +264,7 @@ mod tests {
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
             yielded_to: None,
+            spiffe_id: None,
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -446,6 +455,7 @@ mod tests {
             ping_interval_seconds: None,
             cert_lifetime_hours: Some(48),
             yielded_to: Some(vec![sample_uuid()]),
+            spiffe_id: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(json.contains(r#""cert_lifetime_hours":48"#));
@@ -474,6 +484,7 @@ mod tests {
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
             yielded_to: None,
+            spiffe_id: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(!json.contains("cert_lifetime_hours"));

@@ -114,6 +114,7 @@ fn model_to_response(m: service::Model, yielded_to: Option<Vec<Uuid>>) -> Servic
         ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
         cert_lifetime_hours: m.cert_lifetime_hours.map(|v| v as u32),
         yielded_to,
+        spiffe_id: None,
     }
 }
 
