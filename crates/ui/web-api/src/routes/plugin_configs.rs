@@ -33,7 +33,7 @@ use sea_orm::{
     SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
-use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, AuditView, Event, Stateful};
 use uptrakit_plugin_infrastructure_registry::{ConfigModel, PluginDescriptor};
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
@@ -778,6 +778,13 @@ pub async fn update_plugin_config(
 
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::plugin_config_update(&before_view, &after_view)
+        // Override target_display with the after (new) name so the audit row
+        // reflects the post-update display, not the pre-update name.
+        .target(
+            "plugin_config",
+            after_view.audit_target_id(),
+            after_view.audit_target_display(),
+        )
         .tenant_scope(tenant_id)
         .actor(actor_type, actor_id)
         .outcome(AuditOutcome::Success)

@@ -164,10 +164,13 @@ async fn create_rule_returns_201() {
         uptrakit_audit_log::AuditOutcome::Success.as_str()
     );
     assert_eq!(row.target_type.as_deref(), Some("notification_rule"));
-    let details = row.details_json.expect("details");
-    assert_eq!(details["channel_id"], channel["id"]);
-    assert_eq!(details["event_type"], serde_json::json!("update_available"));
-    assert_eq!(details["enabled"], serde_json::json!(true));
+    // V2 stateful: state is in after_snapshot, not details_json.
+    let after = row
+        .after_snapshot
+        .expect("stateful entry must have after_snapshot");
+    assert_eq!(after["channel_id"], channel["id"]);
+    assert_eq!(after["event_type"], serde_json::json!("update_available"));
+    assert_eq!(after["enabled"], serde_json::json!(true));
 }
 
 #[tokio::test]

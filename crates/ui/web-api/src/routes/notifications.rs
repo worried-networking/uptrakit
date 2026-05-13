@@ -1294,6 +1294,18 @@ pub async fn delete_rule(
         Err(e) => {
             drop(tx);
             tracing::error!(error = ?e, "failed to delete notification rule");
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("notification_rule", rule_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "rule_delete_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };

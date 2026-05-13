@@ -12,11 +12,12 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_plugin_infrastructure_registry::{PluginDescriptor, PluginOps, PluginScope};
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_queries::instance_plugin_settings::{
-    self, InstancePluginRow, InstancePluginSnapshot,
+    self, InstancePluginRow, InstancePluginSettingView, InstancePluginSnapshot,
 };
 use uptrakit_web_api_types::instance_plugins::{
     InstancePluginDetail, InstancePluginSummary, SetInstancePluginEnabledRequest,
@@ -27,9 +28,7 @@ use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::routes::plugin_configs::plugin_field_to_api_field;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,72 +72,6 @@ fn build_summary(
         type_settings_form_fields,
         current_config,
         updated_at,
-    }
-}
-
-/// Emit an `INSTANCE_PLUGIN_TOGGLED` audit entry.
-fn emit_toggle_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    plugin_type: &str,
-    previous_enabled: Option<bool>,
-    new_enabled: bool,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-    let details = serde_json::json!({
-        "plugin_type": plugin_type,
-        "operation": "toggle",
-        "previous_enabled": previous_enabled,
-        "new_enabled": new_enabled,
-    });
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::INSTANCE_PLUGIN_TOGGLED,
-    )
-    .system_scope()
-    .actor(actor_type, actor_id)
-    .target(
-        "instance_plugin",
-        plugin_type.to_string(),
-        Some(plugin_type.to_string()),
-    )
-    .outcome(uptrakit_audit_log::AuditOutcome::Success)
-    .details(details)
-    .build()
-    {
-        audit_emitter.emit_best_effort(entry);
-    }
-}
-
-/// Emit an `INSTANCE_PLUGIN_CONFIG_UPSERTED` audit entry.
-fn emit_config_upsert_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    plugin_type: &str,
-    config_field_count: usize,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-    let details = serde_json::json!({
-        "plugin_type": plugin_type,
-        "operation": "config_upsert",
-        "config_field_count": config_field_count,
-    });
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::INSTANCE_PLUGIN_CONFIG_UPSERTED,
-    )
-    .system_scope()
-    .actor(actor_type, actor_id)
-    .target(
-        "instance_plugin",
-        plugin_type.to_string(),
-        Some(plugin_type.to_string()),
-    )
-    .outcome(uptrakit_audit_log::AuditOutcome::Success)
-    .details(details)
-    .build()
-    {
-        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -261,20 +194,84 @@ pub async fn set_instance_plugin_enabled(
         return r;
     }
 
-    let (previous_enabled, model) =
-        match instance_plugin_settings::set_enabled(state.db(), &plugin_type, req.enabled).await {
-            Ok(result) => result,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for instance plugin toggle");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let (before_model, after_model) =
+        match instance_plugin_settings::set_enabled_in_tx(&tx, &plugin_type, req.enabled).await {
+            Ok(pair) => pair,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to set instance plugin enabled");
+                drop(tx);
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
-    // Atomically update the in-memory snapshot.
+    let after_view = InstancePluginSettingView::from(&after_model);
+    let audit_entry_result = match before_model.as_ref() {
+        Some(before) => {
+            let before_view = InstancePluginSettingView::from(before);
+            AuditEntry::<Stateful>::instance_plugin_toggled(&before_view, &after_view)
+                .system_scope()
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(serde_json::json!({}))
+                .build()
+        }
+        None => {
+            AuditEntry::<Stateful>::instance_plugin_toggled(&AbsentView(&after_view), &after_view)
+                .system_scope()
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(serde_json::json!({}))
+                .build()
+        }
+    };
+    let audit_entry = match audit_entry_result {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for instance plugin toggle");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let hook = state.audit_emitter.commit_hook();
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for instance plugin toggle");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit instance plugin toggle");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Atomically update the in-memory snapshot AFTER commit.
     let new_row = InstancePluginRow {
-        enabled: model.enabled,
-        config: model.config,
-        updated_at: model.updated_at,
+        enabled: after_model.enabled,
+        config: after_model.config,
+        updated_at: after_model.updated_at,
     };
     let new_snapshot = Arc::new(
         state
@@ -285,15 +282,6 @@ pub async fn set_instance_plugin_enabled(
     state
         .instance_plugin_snapshot
         .store(Arc::clone(&new_snapshot));
-
-    emit_toggle_audit(
-        &state.audit_emitter,
-        &user,
-        api_token_id,
-        &plugin_type,
-        previous_enabled,
-        req.enabled,
-    );
 
     // The registry is immutable after boot; resolve_instance_plugin already verified this
     // plugin type exists and is Instance-scoped, so get() will succeed here.
@@ -351,22 +339,91 @@ pub async fn upsert_instance_plugin_config(
         );
     }
 
-    let config_field_count = req.config.as_object().map(|o| o.len()).unwrap_or(0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
 
-    let model =
-        match instance_plugin_settings::upsert_config(state.db(), &plugin_type, req.config).await {
-            Ok(m) => m,
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for instance plugin config upsert");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let (before_model, after_model) =
+        match instance_plugin_settings::upsert_config_in_tx(&tx, &plugin_type, req.config).await {
+            Ok(pair) => pair,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to upsert instance plugin config");
+                drop(tx);
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
-    // Atomically update the in-memory snapshot.
+    let after_view = InstancePluginSettingView::from(&after_model);
+    let audit_entry_result = match before_model.as_ref() {
+        Some(before) => {
+            let before_view = InstancePluginSettingView::from(before);
+            AuditEntry::<Stateful>::instance_plugin_config_upserted(&before_view, &after_view)
+                .system_scope()
+                .actor(actor_type, actor_id)
+                .outcome(AuditOutcome::Success)
+                .details(serde_json::json!({}))
+                .build()
+        }
+        None => AuditEntry::<Stateful>::instance_plugin_config_upserted(
+            &AbsentView(&after_view),
+            &after_view,
+        )
+        .system_scope()
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success)
+        .details(serde_json::json!({}))
+        .build(),
+    };
+    let audit_entry = match audit_entry_result {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "Failed to build audit entry for instance plugin config upsert"
+            );
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let hook = state.audit_emitter.commit_hook();
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(
+            error = %e,
+            "Failed to emit audit entry for instance plugin config upsert"
+        );
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit instance plugin config upsert");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    // Atomically update the in-memory snapshot AFTER commit.
     let new_row = InstancePluginRow {
-        enabled: model.enabled,
-        config: model.config,
-        updated_at: model.updated_at,
+        enabled: after_model.enabled,
+        config: after_model.config,
+        updated_at: after_model.updated_at,
     };
     let new_snapshot = Arc::new(
         state
@@ -377,14 +434,6 @@ pub async fn upsert_instance_plugin_config(
     state
         .instance_plugin_snapshot
         .store(Arc::clone(&new_snapshot));
-
-    emit_config_upsert_audit(
-        &state.audit_emitter,
-        &user,
-        api_token_id,
-        &plugin_type,
-        config_field_count,
-    );
 
     // The registry is immutable after boot; resolve_instance_plugin already verified this
     // plugin type exists and is Instance-scoped, so get() will succeed here.

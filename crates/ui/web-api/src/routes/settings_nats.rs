@@ -24,9 +24,7 @@ use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{load_global_setting, upsert_global_setting};
 
 fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
@@ -120,12 +118,11 @@ pub async fn update_nats_settings(
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let mut nats_url = state.settings.nats_url();
-    let mut changed = false;
 
     if let Some(ref val) = req.url {
         if val.is_null() {
             // Clear stored URL
-            changed = nats_url.is_some();
+            let changed = nats_url.is_some();
             if changed {
                 // Read the before value for the audit snapshot.
                 let before_value = load_global_setting(state.db(), SettingKey::NatsUrl)
@@ -230,7 +227,7 @@ pub async fn update_nats_settings(
                 nats_url = None;
             }
         } else if let Some(s) = val.as_str() {
-            changed = nats_url.as_ref().map(|value| value.as_raw_str()) != Some(s);
+            let changed = nats_url.as_ref().map(|value| value.as_raw_str()) != Some(s);
             if !changed {
                 state.settings.set_nats_url(nats_url.clone()).await;
                 return (StatusCode::OK, Json(snapshot_to_response(nats_url))).into_response();
@@ -364,8 +361,6 @@ pub async fn update_nats_settings(
             hook.flush_after_commit().await;
 
             nats_url = Some(MaskedUrl::new(s));
-        } else {
-            changed = false;
         }
     }
 
@@ -498,9 +493,9 @@ mod tests {
             Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
         );
-        let dispatcher = uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-            uptrakit_audit_log::DatabaseBackend::new(db.clone()),
-        ));
+        let db_backend = Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone()))
+            as Arc<dyn uptrakit_audit_log::AuditLogBackend>;
+        let dispatcher = uptrakit_audit_log::AuditLogDispatcher::new(Arc::clone(&db_backend));
 
         let (_, config_rx_for_settings_nats) =
             uptrakit_config_reload::RuntimeConfigChannels::from_runtime(
@@ -560,7 +555,11 @@ mod tests {
             embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: dispatcher.clone(),
-            audit_emitter: uptrakit_audit_log::AuditEmitter::new(dispatcher),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::with_backends(
+                dispatcher,
+                Arc::clone(&db_backend),
+                Arc::new(uptrakit_audit_log::NoopBackend),
+            ),
             surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
                 Arc::new(crate::surface_registry::SurfaceRegistry::new(
                     crate::surface_registry::SurfaceRegistryConfig::default(),
