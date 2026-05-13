@@ -185,6 +185,15 @@ use crate::AppState;
         // Access presets
         crate::routes::access_presets::list_access_presets,
         crate::routes::access_presets::apply_preset,
+        // MFA — unauthenticated challenge completion
+        crate::routes::mfa::mfa_verify,
+        crate::routes::mfa::mfa_send_email,
+        // MFA — authenticated enrollment and management
+        crate::routes::me_2fa::mfa_status,
+        crate::routes::me_2fa::totp_enroll,
+        crate::routes::me_2fa::totp_confirm,
+        crate::routes::me_2fa::totp_disable,
+        crate::routes::me_2fa::regenerate_recovery_codes,
     ),
     components(
         schemas(
@@ -346,6 +355,18 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<uptrakit_web_api_types::update_batches::UpdateBatchSummaryResponse>,
             crate::routes::settings_provider_github::GitHubProviderSettingsResponse,
             crate::routes::settings_provider_github::UpdateGitHubProviderSettingsRequest,
+            // MFA types
+            uptrakit_web_api_types::mfa::MfaMethod,
+            uptrakit_web_api_types::mfa::MfaChallengeResponse,
+            uptrakit_web_api_types::mfa::MfaVerifyRequest,
+            uptrakit_web_api_types::mfa::MfaEmailRequest,
+            uptrakit_web_api_types::mfa::MfaStatusResponse,
+            uptrakit_web_api_types::mfa::TotpEnrollResponse,
+            uptrakit_web_api_types::mfa::TotpConfirmRequest,
+            uptrakit_web_api_types::mfa::TotpConfirmResponse,
+            uptrakit_web_api_types::mfa::DisableTotpRequest,
+            uptrakit_web_api_types::mfa::RegenerateRecoveryCodesRequest,
+            uptrakit_web_api_types::mfa::RegenerateRecoveryCodesResponse,
         )
     ),
     info(
@@ -834,6 +855,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::delete(crate::routes::oauth::consents_api::revoke_consent),
         );
 
+    // MFA enrollment and management (authenticated).
+    let auth_routes = auth_routes
+        .routes(routes!(crate::routes::me_2fa::mfa_status))
+        .routes(routes!(crate::routes::me_2fa::totp_enroll))
+        .routes(routes!(crate::routes::me_2fa::totp_confirm))
+        .routes(routes!(crate::routes::me_2fa::totp_disable))
+        .routes(routes!(crate::routes::me_2fa::regenerate_recovery_codes));
+
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),
         crate::middleware::require_auth::require_auth,
@@ -875,6 +904,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/auth/email-change/confirm",
             axum::routing::get(crate::routes::auth::confirm_email_change),
         )
+        // MFA challenge completion — unauthenticated (pre-login).
+        .routes(routes!(crate::routes::mfa::mfa_verify))
+        .routes(routes!(crate::routes::mfa::mfa_send_email))
         // OAuth 2.0 device grant (RFC 8628) — unauthenticated, no CSRF required
         .routes(routes!(
             crate::routes::oauth::device_authorization::device_authorization

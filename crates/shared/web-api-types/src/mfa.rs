@@ -10,12 +10,14 @@ use crate::validation::{Validate, ValidationError};
 /// Loses `Copy` due to `String`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MfaMethod {
     Totp,
     Email,
     RecoveryCode,
     /// Unknown method from a future client; verified as false.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     Other(String),
 }
 
@@ -57,6 +59,7 @@ impl<'de> Deserialize<'de> for MfaMethod {
 /// Returned by `POST /api/v1/auth/login` when the user has 2FA enrolled.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MfaChallengeResponse {
     pub mfa_token: String,
     pub mfa_methods: Vec<MfaMethod>,
@@ -73,6 +76,7 @@ impl MfaChallengeResponse {
 
 /// Body for `POST /api/v1/auth/mfa/verify`.
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MfaVerifyRequest {
     pub mfa_token: String,
     pub code: String,
@@ -99,6 +103,7 @@ impl Validate for MfaVerifyRequest {
 
 /// Body for `POST /api/v1/auth/mfa/email`.
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MfaEmailRequest {
     pub mfa_token: String,
 }
@@ -118,6 +123,7 @@ impl Validate for MfaEmailRequest {
 /// Returned by `GET /api/v1/auth/me/2fa`.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MfaStatusResponse {
     pub totp_enrolled: bool,
     pub recovery_codes_count: u32,
@@ -143,6 +149,7 @@ impl MfaStatusResponse {
 /// Returned by `POST /api/v1/auth/me/2fa/totp/enroll`.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TotpEnrollResponse {
     /// `otpauth://totp/` URI for QR generation in the browser.
     pub otpauth_uri: String,
@@ -163,6 +170,7 @@ impl TotpEnrollResponse {
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/confirm`.
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TotpConfirmRequest {
     pub code: String,
 }
@@ -182,6 +190,7 @@ impl Validate for TotpConfirmRequest {
 /// Returned by `POST /api/v1/auth/me/2fa/totp/confirm`.
 #[non_exhaustive]
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TotpConfirmResponse {
     /// Plaintext recovery codes shown once.
     pub recovery_codes: Vec<String>,
@@ -202,6 +211,7 @@ impl TotpConfirmResponse {
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/disable`.
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DisableTotpRequest {
     pub password: Option<uptrakit_shared_types::SecretString>,
     pub totp_code: Option<String>,
@@ -221,6 +231,7 @@ impl Validate for DisableTotpRequest {
 
 /// Body for `POST /api/v1/auth/me/2fa/recovery-codes/regenerate`.
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegenerateRecoveryCodesRequest {
     pub password: Option<uptrakit_shared_types::SecretString>,
     pub totp_code: Option<String>,
@@ -241,6 +252,7 @@ impl Validate for RegenerateRecoveryCodesRequest {
 /// Returned by `POST /api/v1/auth/me/2fa/recovery-codes/regenerate`.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegenerateRecoveryCodesResponse {
     pub recovery_codes: Vec<String>,
 }
