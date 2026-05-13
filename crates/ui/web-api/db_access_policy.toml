@@ -70,10 +70,10 @@ add_host_discovery_allowlist_entry = "full-state"
 remove_host_discovery_allowlist_entry = "full-state"
 
 [routes."enrollment_tokens.rs"]
-create_enrollment_token = "tenant-scoped"
+create_enrollment_token = "full-state"
 list_enrollment_tokens = "tenant-scoped"
 get_enrollment_token = "tenant-scoped"
-revoke_enrollment_token = "tenant-scoped"
+revoke_enrollment_token = "full-state"
 
 [routes."events.rs"]
 stream_events = "full-state"

@@ -10,6 +10,41 @@ use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
+// ── Audit snapshot ────────────────────────────────────────────────────────────
+
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "enrollment_token")]
+pub struct EnrollmentTokenView {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    #[audit(skip)]
+    pub token_hash: String,
+    pub allowed_capabilities: Option<String>,
+    pub max_uses: Option<i32>,
+    pub current_uses: i32,
+    pub expires_at: Option<time::OffsetDateTime>,
+    pub revoked_at: Option<time::OffsetDateTime>,
+    pub created_by_user_id: Option<Uuid>,
+}
+
+impl From<&enrollment_token::Model> for EnrollmentTokenView {
+    fn from(m: &enrollment_token::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            name: m.name.clone(),
+            token_hash: m.token_hash.clone(),
+            allowed_capabilities: m.allowed_capabilities.clone(),
+            max_uses: m.max_uses,
+            current_uses: m.current_uses,
+            expires_at: m.expires_at,
+            revoked_at: m.revoked_at,
+            created_by_user_id: m.created_by_user_id,
+        }
+    }
+}
+
 /// Parameters for creating a new enrollment token.
 pub struct CreateTokenParams<'a> {
     pub id: Uuid,
@@ -71,6 +106,70 @@ pub async fn create_enrollment_token(
     };
 
     model.insert(tenant_db.db()).await
+}
+
+/// Insert a new enrollment token inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Mirrors [`create_enrollment_token`] but operates on a [`sea_orm::DatabaseTransaction`]
+/// and accepts a raw `tenant_id` instead of a [`TenantDb`].
+#[tracing::instrument(skip_all)]
+pub async fn create_enrollment_token_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    params: CreateTokenParams<'_>,
+) -> Result<enrollment_token::Model, sea_orm::DbErr> {
+    let caps_json = params
+        .allowed_capabilities
+        .map(|caps| {
+            serde_json::to_string(caps).map_err(|e| {
+                sea_orm::DbErr::Custom(format!("capability list serialization failed: {e}"))
+            })
+        })
+        .transpose()?;
+
+    let now = OffsetDateTime::now_utc();
+    let model = enrollment_token::ActiveModel {
+        id: Set(params.id),
+        tenant_id: Set(tenant_id),
+        name: Set(params.name.to_string()),
+        token_hash: Set(params.token_hash.to_string()),
+        allowed_capabilities: Set(caps_json),
+        max_uses: Set(params.max_uses.map(|v| v as i32)),
+        current_uses: Set(0),
+        expires_at: Set(params.expires_at),
+        created_at: Set(now),
+        revoked_at: Set(None),
+        created_by_user_id: Set(params.created_by_user_id),
+    };
+
+    model.insert(tx).await
+}
+
+/// Soft-revoke a token inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Reads the token before patching so both the `before` and `after` snapshots can be
+/// returned for stateful audit emission. Returns `Ok(None)` when no active (non-revoked)
+/// token with the given `id` and `tenant_id` is found.
+#[tracing::instrument(skip_all)]
+pub async fn revoke_enrollment_token_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<(enrollment_token::Model, enrollment_token::Model)>, sea_orm::DbErr> {
+    let Some(before) = enrollment_token::Entity::find_by_id(id)
+        .filter(enrollment_token::Column::TenantId.eq(tenant_id))
+        .filter(enrollment_token::Column::RevokedAt.is_null())
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let mut active: enrollment_token::ActiveModel = before.clone().into();
+    active.revoked_at = Set(Some(OffsetDateTime::now_utc()));
+    let after = active.update(tx).await?;
+
+    Ok(Some((before, after)))
 }
 
 /// List enrollment tokens for this tenant, ordered by `created_at` desc.

@@ -4,18 +4,22 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::app_state::AuditEmitterState;
+use crate::AppState;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageEnrollmentTokens;
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::enrollment_tokens as et_queries;
 use crate::tenant_db::TenantDb;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::enrollment_tokens::{
+    EnrollmentTokenView, create_enrollment_token_in_tx, revoke_enrollment_token_in_tx,
+};
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::enrollment_tokens::{
@@ -23,37 +27,6 @@ pub use uptrakit_web_api_types::enrollment_tokens::{
     EnrollmentTokensSummary, ListEnrollmentTokensQuery,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
-
-struct AuditContext<'a> {
-    emitter: &'a uptrakit_audit_log::AuditEmitter,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_enrollment_token_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_token_id: Option<Uuid>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
-
-    if let Some(token_id) = target_token_id {
-        builder = builder.target("enrollment_token", token_id.to_string(), None);
-    }
-
-    if let Ok(entry) = builder.build() {
-        ctx.emitter.emit_best_effort(entry);
-    }
-}
 
 /// Create a new enrollment token
 #[utoipa::path(
@@ -72,30 +45,28 @@ fn emit_enrollment_token_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateEnrollmentTokenRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let ctx = AuditContext {
-        emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if let Err(e) = body.validate() {
-        emit_enrollment_token_audit(
-            &ctx,
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "invalid_request" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -103,15 +74,17 @@ pub async fn create_enrollment_token(
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = ?e, "Failed to generate enrollment token");
-            emit_enrollment_token_audit(
-                &ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "token_generation_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "token_generation_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -120,15 +93,17 @@ pub async fn create_enrollment_token(
         Ok(h) => h,
         Err(e) => {
             tracing::error!(error = ?e, "Failed to hash enrollment token");
-            emit_enrollment_token_audit(
-                &ctx,
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "token_hash_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "token_hash_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -138,8 +113,24 @@ pub async fn create_enrollment_token(
         .expires_in_seconds
         .map(|secs| OffsetDateTime::now_utc() + time::Duration::seconds(secs as i64));
 
-    let model = match et_queries::create_enrollment_token(
-        &tenant_db,
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for enrollment token create");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let model = match create_enrollment_token_in_tx(
+        &tx,
+        tenant_id,
         et_queries::CreateTokenParams {
             id,
             name: &body.name,
@@ -155,37 +146,70 @@ pub async fn create_enrollment_token(
         Ok(m) => m,
         Err(e) => {
             tracing::error!(error = %e, "Failed to create enrollment token");
-            emit_enrollment_token_audit(
-                &ctx,
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
-                Some(id),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "token_name": body.name,
-                    "reason_code": "enrollment_token_create_failed",
-                }),
-            );
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({
+                "token_name": body.name,
+                "reason_code": "enrollment_token_create_failed",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    let after_view = EnrollmentTokenView::from(&model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::enrollment_token_create(
+        &AbsentView(&after_view),
+        &after_view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "token_name": model.name,
+        "has_capability_filter": model.allowed_capabilities.is_some(),
+        "has_expiry": model.expires_at.is_some(),
+        "max_uses": model.max_uses,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for enrollment token create");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for enrollment token create");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit enrollment token create");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
 
     let allowed_capabilities: Option<Vec<String>> = model
         .allowed_capabilities
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok());
-
-    emit_enrollment_token_audit(
-        &ctx,
-        uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
-        Some(model.id),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "token_name": model.name,
-            "has_capability_filter": model.allowed_capabilities.is_some(),
-            "has_expiry": model.expires_at.is_some(),
-            "max_uses": model.max_uses,
-        }),
-    );
 
     (
         StatusCode::CREATED,
@@ -288,58 +312,111 @@ pub async fn get_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let ctx = AuditContext {
-        emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to begin transaction for enrollment token revoke");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
 
-    match et_queries::revoke_enrollment_token(&tenant_db, token_id).await {
-        Ok(true) => {
-            emit_enrollment_token_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
-                Some(token_id),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_enrollment_token_audit(
-                &ctx,
-                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
-                Some(token_id),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "enrollment_token_not_found_or_revoked",
-                }),
-            );
-            error_response(
-                StatusCode::NOT_FOUND,
-                "Enrollment token not found or already revoked",
-            )
-        }
+    let pair = match revoke_enrollment_token_in_tx(&tx, tenant_id, token_id).await {
+        Ok(pair) => pair,
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke enrollment token");
-            emit_enrollment_token_audit(
-                &ctx,
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
-                Some(token_id),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "enrollment_token_revoke_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("enrollment_token", token_id.to_string(), None)
+            .outcome(AuditOutcome::Failed)
+            .details(serde_json::json!({ "reason_code": "enrollment_token_revoke_failed" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("enrollment_token", token_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "reason_code": "enrollment_token_not_found_or_revoked",
+        }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "Enrollment token not found or already revoked",
+        );
+    };
+
+    let before_view = EnrollmentTokenView::from(&before_model);
+    let after_view = EnrollmentTokenView::from(&after_model);
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::enrollment_token_revoke(
+        &before_view,
+        &AbsentView(&after_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({ "token_name": before_model.name }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to build audit entry for enrollment token revoke");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to emit audit entry for enrollment token revoke");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to commit enrollment token revoke");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
