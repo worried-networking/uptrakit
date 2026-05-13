@@ -58,6 +58,15 @@ impl AuditLogDispatcher {
         )]
         let _ = self.tx.send(entry);
     }
+
+    /// Check if the dispatcher's background loop is still running.
+    ///
+    /// Returns `true` if the receiver has been closed (e.g., the background loop
+    /// panicked or the dispatcher was shut down).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
 }
 
 async fn dispatch_loop(

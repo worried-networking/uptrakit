@@ -6,6 +6,7 @@
 //! object-safe [`uptrakit_config_reload::reloadable::ReloadableErased`] wrapper
 //! that the coordinator stores in its heterogeneous registry.
 
+pub(crate) mod audit;
 pub(crate) mod db_pool;
 pub(crate) mod embedded;
 pub(crate) mod https_listener;
