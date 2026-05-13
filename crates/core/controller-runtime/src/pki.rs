@@ -1168,8 +1168,6 @@ pub(crate) fn build_rustls_server_config(
         root_store.add(ca_cert).context_to::<PkiError>()?;
     }
 
-    // allow_unauthenticated() is intentional — see build_rustls_config_with_client_auth_and_crls
-    // for the full rationale.
     let initial_verifier: std::sync::Arc<dyn ClientCertVerifier> =
         WebPkiClientVerifier::builder(std::sync::Arc::new(root_store))
             .with_crls(crls)

@@ -21,6 +21,7 @@ use rustls::sign::CertifiedKey;
 /// Call [`swap`](Self::swap) at any time to atomically replace the active
 /// certificate without disrupting in-flight handshakes.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct AgentClientCertResolver {
     current: ArcSwap<CertifiedKey>,
 }

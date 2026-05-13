@@ -173,15 +173,18 @@ impl SignalWatcher {
     }
 }
 
-/// Mutex shared by every test in this crate that sends a UNIX signal to its
-/// own process. Tokio's `signal::unix::Signal` is backed by a process-global
-/// handler that broadcasts to every registered stream, so concurrent tests
-/// would see each other's signals. Hold this guard for the entire critical
-/// section — from creating the `SignalWatcher` through draining the expected
-/// signal — so the next test starts with a clean stream.
+/// Semaphore (capacity 1) shared by every test in this crate that sends a
+/// UNIX signal to its own process. Tokio's `signal::unix::Signal` is backed
+/// by a process-global handler that broadcasts to every registered stream, so
+/// concurrent tests would see each other's signals. Hold the single permit for
+/// the entire critical section — from creating the `SignalWatcher` through
+/// draining the expected signal — so the next test starts with a clean stream.
+///
+/// A `Semaphore` is used instead of `Mutex` because the permit must be held
+/// across `.await` points within async test bodies.
 #[cfg(all(test, unix))]
-pub(crate) static UNIX_SIGNAL_TEST_MUTEX: tokio::sync::Mutex<()> =
-    tokio::sync::Mutex::const_new(());
+pub(crate) static UNIX_SIGNAL_TEST_SEM: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(1);
 
 #[cfg(test)]
 mod tests {
@@ -222,7 +225,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_pending_when_no_signal() {
-        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
+        let _permit = UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         let result = poll_fn(|cx| Poll::Ready(watcher.poll_signal(cx))).await;
         assert!(result.is_pending());
@@ -231,7 +237,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_returns_sigterm() {
-        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
+        let _permit = UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGTERM).expect("failed to send SIGTERM");
         tokio::task::yield_now().await;
@@ -243,7 +252,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_returns_sighup() {
-        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
+        let _permit = UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGHUP).expect("failed to send SIGHUP");
         tokio::task::yield_now().await;
@@ -255,7 +267,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_priority_sigint_over_sigterm() {
-        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
+        let _permit = UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGTERM).expect("failed to send SIGTERM");
         nix_signal::kill(getpid(), NixSignal::SIGINT).expect("failed to send SIGINT");

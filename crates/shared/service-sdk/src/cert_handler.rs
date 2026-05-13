@@ -25,7 +25,7 @@ use crate::wire_api::{
 use rootcause::prelude::*;
 
 use crate::connection::ControllerConnection;
-use crate::error::{EnrollmentError, IdentityError, Result};
+use crate::error::{EnrollmentError, IdentityError, Result, TlsError};
 use crate::identity::{ServiceIdentityState, generate_keypair_and_csr};
 use crate::shared_types::LoopOutcome;
 
@@ -103,18 +103,19 @@ fn parse_cert_not_after(cert_pem: &str) -> Option<time::OffsetDateTime> {
 fn build_certified_key_from_pem(
     cert_pem: &str,
     key_pem: &str,
-) -> std::result::Result<rustls::sign::CertifiedKey, String> {
+) -> Result<rustls::sign::CertifiedKey> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| e.to_string())?;
-    let signing_key = rustls::crypto::CryptoProvider::get_default()
-        .ok_or("no crypto provider")?
+        .context_to::<EnrollmentError>()?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<EnrollmentError>()?;
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| report!(EnrollmentError::Tls(TlsError::NoCertificates)))?;
+    let signing_key = provider
         .key_provider
         .load_private_key(key)
-        .map_err(|e| e.to_string())?;
+        .context_to::<EnrollmentError>()?;
     Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
 }
 
@@ -137,6 +138,7 @@ fn build_certified_key_from_pem(
 /// the `RequestCertRenewal` → `Certificate` pair (or between a timer-based
 /// [`initiate_renewal`](Self::initiate_renewal) call and the subsequent
 /// `Certificate` response).
+#[non_exhaustive]
 pub struct CertificateRenewalHandler {
     /// Private key for an in-flight CSR. Held only between
     /// `initiate_renewal` and the matching `Certificate` response.
@@ -249,6 +251,11 @@ impl CertificateRenewalHandler {
     /// retained. Returns `Ok(Some(LoopOutcome::Reconnect))` when a full
     /// reconnect is required. Returns `Ok(Some(LoopOutcome::Disconnected))`
     /// when no pending renewal key exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisting the certificate or private key to disk
+    /// fails.
     pub async fn handle_certificate(
         &mut self,
         identity: &mut ServiceIdentityState,
@@ -323,6 +330,11 @@ impl CertificateRenewalHandler {
     /// [`handle_request_cert_renewal`](Self::handle_request_cert_renewal)
     /// and can also be called directly for timer-based renewal (e.g. in the
     /// agent's renewal window logic).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the service is not enrolled (no service ID) or if
+    /// keypair / CSR generation fails.
     pub fn initiate_renewal(&mut self, identity: &ServiceIdentityState) -> Result<String> {
         let service_id = identity
             .service_id()
@@ -703,5 +715,24 @@ mod tests {
         // not_after in the past → should force reconnect
         let not_after = now - time::Duration::seconds(1);
         assert!(should_force_reconnect(not_after, now, cert_lifetime));
+    }
+
+    #[test]
+    fn force_reconnect_threshold_short_lifetime() {
+        // 1 hour lifetime → max(60s, 3600/50) = max(60, 72) = 72s window.
+        let cert_lifetime = std::time::Duration::from_secs(3600);
+        let now = time::OffsetDateTime::now_utc();
+        // 50s until expiry → inside the 72s window → force reconnect
+        let not_after_inside = now + time::Duration::seconds(50);
+        assert!(
+            should_force_reconnect(not_after_inside, now, cert_lifetime),
+            "50s < 72s window → force"
+        );
+        // 80s until expiry → outside the 72s window → no force
+        let not_after_outside = now + time::Duration::seconds(80);
+        assert!(
+            !should_force_reconnect(not_after_outside, now, cert_lifetime),
+            "80s > 72s window → no force"
+        );
     }
 }

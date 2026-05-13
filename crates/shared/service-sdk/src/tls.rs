@@ -15,54 +15,32 @@ use crate::error::{EnrollmentError, Result, TlsError};
 // ── TlsConnector builders (agent-style manual TCP→TLS→WS) ───────────
 
 /// Build a TLS connector that trusts only the given CA PEM (no client auth).
+///
+/// # Errors
+///
+/// Returns an error if `ca_pem` cannot be parsed or the root store is empty.
 pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
     let config = build_pinned_ca_client_config(ca_pem)?;
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
-/// Build a TLS connector that trusts only the given CA PEM, with client cert (mTLS).
-pub fn build_tls_connector_with_client_cert(
-    ca_pem: &[u8],
-    cert_pem: &str,
-    key_pem: &str,
-) -> Result<TlsConnector> {
-    let config = build_mtls_client_config(ca_pem, cert_pem, key_pem)?;
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
 /// Build a TLS connector using system/webpki root certificates (no client auth).
+///
+/// # Errors
+///
+/// Returns an error if the system root store cannot be loaded.
 pub fn build_system_trust_tls_connector() -> Result<TlsConnector> {
     let config = build_system_roots_client_config()?;
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
-/// Build a TLS connector using system/webpki root certs with client cert (mTLS).
-pub fn build_system_trust_tls_connector_with_client_cert(
-    cert_pem: &str,
-    key_pem: &str,
-) -> Result<TlsConnector> {
-    use rustls::pki_types::PrivateKeyDer;
-
-    let root_store = build_webpki_root_store();
-
-    let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_to::<EnrollmentError>()?;
-
-    let client_key =
-        PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<EnrollmentError>()?;
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_client_auth_cert(client_certs, client_key)
-        .context_to::<EnrollmentError>()?;
-
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
 // ── ClientConfig builders (for MQTT's Connector::Rustls) ─────────────
 
 /// Build a `ClientConfig` trusting only the given CA PEM (no client auth).
+///
+/// # Errors
+///
+/// Returns an error if `ca_pem` cannot be parsed or the root store is empty.
 pub fn build_pinned_ca_client_config(ca_pem: &[u8]) -> Result<rustls::ClientConfig> {
     let root_store = build_root_store(ca_pem)?;
 
@@ -74,6 +52,11 @@ pub fn build_pinned_ca_client_config(ca_pem: &[u8]) -> Result<rustls::ClientConf
 }
 
 /// Build a `ClientConfig` for mTLS with pinned CA and client certificate.
+///
+/// # Errors
+///
+/// Returns an error if `ca_pem`, `cert_pem`, or `key_pem` cannot be parsed,
+/// or if the client certificate and key do not match.
 pub fn build_mtls_client_config(
     ca_pem: &[u8],
     cert_pem: &str,
@@ -99,6 +82,10 @@ pub fn build_mtls_client_config(
 }
 
 /// Build a `ClientConfig` using system/webpki root certificates (no client auth).
+///
+/// # Errors
+///
+/// Returns an error if the system root store cannot be loaded.
 pub fn build_system_roots_client_config() -> Result<rustls::ClientConfig> {
     let root_store = build_webpki_root_store();
 
@@ -114,6 +101,10 @@ pub fn build_system_roots_client_config() -> Result<rustls::ClientConfig> {
 /// Accepts any server certificate (the CA is not known yet) but still
 /// delegates TLS signature verification to the installed crypto provider,
 /// preventing trivial MITM attacks that forge invalid signatures.
+///
+/// # Errors
+///
+/// Returns an error if no crypto provider is installed.
 pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
     #[derive(Debug)]
     struct TofuVerifier;
@@ -192,6 +183,10 @@ pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
 /// rebuilding the `ClientConfig`.
 ///
 /// Session resumption is enabled with a 256-entry in-memory cache.
+///
+/// # Errors
+///
+/// Returns an error if `ca_pem` cannot be parsed or the root store is empty.
 pub fn build_client_config_with_resolver(
     ca_pem: &[u8],
     resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
@@ -213,6 +208,11 @@ pub fn build_client_config_with_resolver(
 /// Used by [`lifecycle`](crate::lifecycle) to build the initial
 /// [`crate::cert_resolver::AgentClientCertResolver`] before the reconnect
 /// loop, and by the tls hot-swap helpers.
+///
+/// # Errors
+///
+/// Returns an error if `cert_pem` or `key_pem` cannot be parsed, or if no
+/// crypto provider is installed.
 pub fn build_certified_key(cert_pem: &str, key_pem: &str) -> Result<rustls::sign::CertifiedKey> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -238,6 +238,10 @@ pub fn build_certified_key(cert_pem: &str, key_pem: &str) -> Result<rustls::sign
 /// certificate using system/webpki root certificates.
 ///
 /// Session resumption is enabled with a 256-entry in-memory cache.
+///
+/// # Errors
+///
+/// Returns an error if the system root store cannot be loaded.
 pub fn build_system_trust_client_config_with_resolver(
     resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
 ) -> Result<Arc<rustls::ClientConfig>> {
@@ -415,37 +419,12 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── build_tls_connector_with_client_cert ─────────────────────────
-
-    #[test]
-    fn tls_connector_with_client_cert_succeeds() {
-        install_crypto_provider();
-        let (ca_pem, ca_key) = generate_test_ca();
-        let (cert_pem, key_pem) = generate_test_client_cert(&ca_pem, &ca_key);
-        let connector =
-            build_tls_connector_with_client_cert(ca_pem.as_bytes(), &cert_pem, &key_pem)
-                .expect("connector");
-        let _ = connector;
-    }
-
     // ── build_system_trust_tls_connector ─────────────────────────────
 
     #[test]
     fn system_trust_tls_connector_succeeds() {
         install_crypto_provider();
         let connector = build_system_trust_tls_connector().expect("connector");
-        let _ = connector;
-    }
-
-    // ── build_system_trust_tls_connector_with_client_cert ────────────
-
-    #[test]
-    fn system_trust_tls_connector_with_client_cert_succeeds() {
-        install_crypto_provider();
-        let (ca_pem, ca_key) = generate_test_ca();
-        let (cert_pem, key_pem) = generate_test_client_cert(&ca_pem, &ca_key);
-        let connector = build_system_trust_tls_connector_with_client_cert(&cert_pem, &key_pem)
-            .expect("connector");
         let _ = connector;
     }
 

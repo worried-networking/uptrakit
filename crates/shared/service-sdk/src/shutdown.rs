@@ -98,7 +98,7 @@ impl ShutdownSignal for TokenShutdown {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::signal::{Signal, UNIX_SIGNAL_TEST_MUTEX};
+    use crate::signal::{Signal, UNIX_SIGNAL_TEST_SEM};
     use std::future::poll_fn;
     use std::task::Poll;
     use std::time::Duration;
@@ -187,7 +187,10 @@ mod tests {
 
     #[tokio::test]
     async fn signal_shutdown_maps_signal_to_cause() {
-        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
+        let _permit = UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
         let mut shutdown = SignalShutdown::from_default().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGTERM).expect("failed to send SIGTERM");
         tokio::time::sleep(Duration::from_millis(10)).await;
