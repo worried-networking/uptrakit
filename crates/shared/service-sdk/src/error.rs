@@ -65,6 +65,8 @@ pub enum CaError {
     Fetch(String),
     #[error("failed to read CA certificate file: {0}")]
     CertFile(String),
+    #[error("CA fingerprint mismatch: expected {expected}, actual {actual}")]
+    FingerprintMismatch { expected: String, actual: String },
 }
 
 // ── Top-level error ───────────────────────────────────────────────────

@@ -119,28 +119,29 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
 /// Full CA bootstrap logic shared by agent and MQTT service.
 ///
 /// Determines the CA certificate to use based on the following priority:
-/// 1. Already cached in identity → use cached, warn if `--tofu` was set
+/// 1. Already cached in identity → use cached, log warning if TOFU mode active
 /// 2. `--ca-cert` file → load, save to identity
 /// 3. `--pki-addr` → fetch with system trust, save to identity
-/// 4. `--tofu` → fetch from base URL with TOFU TLS, verify fingerprint if
-///    `--tofu-fingerprint` supplied, save to identity
-/// 5. None of the above → use system root certificates (returns `None`)
+/// 4. TOFU modes (see [`crate::tofu::TofuMode`]):
+///    - `System` → use system root certificates (returns `None`)
+///    - `PinFingerprint` → fetch from base URL via TOFU TLS, verify CA hash matches
+///    - `PinSpki` → fetch from base URL via TOFU TLS, save (SPKI check happens at handshake)
+///    - `InsecureTofu` → fetch from base URL via TOFU TLS, optionally verify + persist
 ///
 /// Returns `Some(ca_pem_bytes)` when a pinned CA is available, or `None`
 /// when system root certificates should be used.
 pub async fn bootstrap_ca(
     identity: &mut crate::identity::ServiceIdentityState,
     base_url: &str,
-    tofu: bool,
-    tofu_fingerprint: Option<&str>,
+    tofu_config: &crate::tofu::TofuConfig,
     ca_cert_path: Option<&std::path::Path>,
     pki_addr: Option<&str>,
 ) -> Result<Option<Vec<u8>>> {
     // 1. Already cached
     if let Some(cached) = identity.load_ca_cert().await? {
         tracing::info!("loaded CA certificate from disk");
-        if tofu {
-            tracing::warn!("--tofu ignored: CA already cached");
+        if !matches!(tofu_config.mode, crate::tofu::TofuMode::System) {
+            tracing::warn!("TOFU mode ignored: CA already cached on disk");
         }
         return Ok(Some(cached));
     }
@@ -178,41 +179,87 @@ pub async fn bootstrap_ca(
         return Ok(Some(pem));
     }
 
-    // 4. TOFU: fetch from controller URL with TOFU TLS + optional fingerprint pinning
-    if tofu {
-        tracing::info!("TOFU: fetching CA (accepting any server certificate)");
-        let pem = fetch_ca_certificate(base_url, CaTlsMode::Tofu).await?;
-
-        // Compute and log the fingerprint for manual verification
-        let fp = ca_pem_fingerprint(&pem)?;
-        tracing::warn!(fingerprint = %fp, "TOFU: accepted CA certificate with fingerprint SHA256:{fp}");
-
-        // Verify against --tofu-fingerprint if provided
-        if let Some(expected) = tofu_fingerprint {
-            let expected_normalized = expected.to_lowercase().replace(':', "");
-            if fp != expected_normalized {
-                bail!(EnrollmentError::Ca(CaError::Fetch(format!(
-                    "TOFU fingerprint mismatch: expected SHA256:{expected_normalized}, \
-                     got SHA256:{fp}"
-                ))));
-            }
-            tracing::info!("TOFU: fingerprint verified successfully");
-        } else {
-            tracing::warn!(
-                "TOFU: no --tofu-fingerprint supplied — verify the fingerprint manually: SHA256:{fp}"
-            );
+    // 4. TOFU modes: fetch from controller URL
+    match &tofu_config.mode {
+        crate::tofu::TofuMode::System => {
+            // No TOFU configured — use system root certificates
+            tracing::info!("using system root certificates");
+            Ok(None)
         }
+        crate::tofu::TofuMode::PinFingerprint(expected) => {
+            tracing::info!("TOFU pin-fingerprint: fetching CA certificate");
+            let pem = fetch_ca_certificate(base_url, CaTlsMode::Tofu).await?;
+            let actual = crate::tofu::sha256_of_bytes(&pem);
+            if &actual != expected {
+                tracing::error!(
+                    expected = %expected,
+                    actual = %actual,
+                    "TOFU pin-fingerprint mismatch"
+                );
+                bail!(EnrollmentError::Ca(CaError::FingerprintMismatch {
+                    expected: expected.to_string(),
+                    actual: actual.to_string(),
+                }));
+            }
+            identity
+                .save_ca_cert(&String::from_utf8_lossy(&pem))
+                .await?;
+            tracing::info!("CA certificate verified and saved (pin-fingerprint)");
+            Ok(Some(pem))
+        }
+        crate::tofu::TofuMode::PinSpki(_) => {
+            // SPKI verification is performed at each TLS handshake by ModeBasedVerifier;
+            // here we only fetch and persist the CA bundle.
+            tracing::info!("TOFU pin-spki: fetching CA certificate (SPKI checked at handshake)");
+            let pem = fetch_ca_certificate(base_url, CaTlsMode::Tofu).await?;
+            let fp = ca_pem_fingerprint(&pem)?;
+            tracing::warn!(fingerprint = %fp, "TOFU pin-spki: accepted CA with fingerprint");
+            identity
+                .save_ca_cert(&String::from_utf8_lossy(&pem))
+                .await?;
+            tracing::info!("CA certificate saved (pin-spki)");
+            Ok(Some(pem))
+        }
+        crate::tofu::TofuMode::InsecureTofu => {
+            tracing::info!("TOFU insecure: fetching CA certificate");
+            let pem = fetch_ca_certificate(base_url, CaTlsMode::Tofu).await?;
+            let actual = crate::tofu::sha256_of_bytes(&pem);
+            tracing::warn!(
+                fingerprint = %actual,
+                "insecure-tofu: CA fetched — pass via --tofu-fingerprint-acknowledge to persist"
+            );
 
-        identity
-            .save_ca_cert(&String::from_utf8_lossy(&pem))
-            .await?;
-        tracing::info!("CA certificate saved to disk");
-        return Ok(Some(pem));
+            match &tofu_config.fingerprint_acknowledge {
+                None => {
+                    // Stateless TOFU: no acknowledgement supplied, do not persist
+                    tracing::warn!(
+                        "insecure-tofu: no --tofu-fingerprint-acknowledge; CA not persisted"
+                    );
+                    Ok(Some(pem))
+                }
+                Some(expected) => {
+                    if expected != &actual {
+                        tracing::error!(
+                            expected = %expected,
+                            actual = %actual,
+                            "insecure-tofu: --tofu-fingerprint-acknowledge mismatch; refusing to persist"
+                        );
+                        bail!(EnrollmentError::Ca(CaError::FingerprintMismatch {
+                            expected: expected.to_string(),
+                            actual: actual.to_string(),
+                        }));
+                    }
+                    identity
+                        .save_ca_cert(&String::from_utf8_lossy(&pem))
+                        .await?;
+                    tracing::info!(
+                        "CA certificate saved (insecure-tofu with acknowledged fingerprint)"
+                    );
+                    Ok(Some(pem))
+                }
+            }
+        }
     }
-
-    // 5. Use system root certificates
-    tracing::info!("using system root certificates");
-    Ok(None)
 }
 
 /// Compute the SHA-256 hex hash of the local CA certificate file (`ca.pem`)
@@ -305,11 +352,12 @@ mod tests {
         let mut identity = crate::identity::ServiceIdentityState::new_single_dir(dir.path());
         identity.load().await.expect("load identity");
 
+        let tofu_config =
+            crate::tofu::TofuConfig::from_flags(None, None, false, false, None).expect("system");
         let result = bootstrap_ca(
             &mut identity,
             "https://controller.example.com",
-            false,
-            None,
+            &tofu_config,
             Some(&empty_ca_path),
             None,
         )
