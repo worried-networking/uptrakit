@@ -1,6 +1,5 @@
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageNotifications, CanViewNotifications};
 use crate::middleware::require_auth::{
@@ -890,70 +889,116 @@ pub async fn test_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_rule(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateNotificationRuleRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if let Err(e) = body.validate() {
-        emit_notification_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
             uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
-            "notification_rule",
-            "pending".to_string(),
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
-        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("notification_rule", "pending".to_string(), None)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "invalid_request" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let resp = match notif_queries::create_rule(&tenant_db, &body).await {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
-                "notification_rule",
-                "pending".to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            return Err(err.into());
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification rule create: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-    emit_notification_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
-        "notification_rule",
-        resp.id.to_string(),
-        None,
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "channel_id": resp.channel_id,
-            "event_type": resp.event_type.as_str(),
-            "enabled": resp.enabled,
-            "has_host_scope": resp.host_id.is_some(),
-            "has_software_item_scope": resp.software_item_id.is_some(),
-            "has_plugin_type_scope": resp.plugin_type.is_some(),
-        }),
-    );
-    Ok((StatusCode::CREATED, Json(resp)).into_response())
+
+    let model = match notif_queries::create_rule_in_tx(&tx, tenant_id, &body).await {
+        Ok(m) => m,
+        Err(err) => {
+            drop(tx);
+            let (outcome, reason_code) = err.current_context().audit_classification();
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("notification_rule", "pending".to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            let status = match err.current_context() {
+                notif_queries::RuleQueryError::ChannelNotFound => StatusCode::NOT_FOUND,
+                notif_queries::RuleQueryError::InvalidField(_) => StatusCode::BAD_REQUEST,
+                notif_queries::RuleQueryError::Db(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let msg = match status {
+                StatusCode::NOT_FOUND => "Channel not found",
+                StatusCode::BAD_REQUEST => "Invalid request",
+                _ => "Internal server error",
+            };
+            return error_response(status, msg);
+        }
+    };
+
+    let after_view = notif_queries::NotificationRuleView::from(&model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::notification_rule_create(
+        &AbsentView(&after_view),
+        &after_view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({}))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for notification rule create: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification rule create: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification rule create: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let resp = notif_queries::rule_to_response(model);
+    (StatusCode::CREATED, Json(resp)).into_response()
 }
 
 /// List notification rules
@@ -1056,7 +1101,7 @@ pub async fn get_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_rule(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -1064,92 +1109,124 @@ pub async fn update_rule(
     Json(body): Json<UpdateNotificationRuleRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if let Err(e) = body.validate() {
-        emit_notification_audit(
-            &audit_ctx,
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
             uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
-            "notification_rule",
-            rule_id.to_string(),
-            None,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
-        );
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("notification_rule", rule_id.to_string(), None)
+        .outcome(AuditOutcome::ValidationFailed)
+        .details(serde_json::json!({ "reason_code": "invalid_request" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match notif_queries::update_rule(&tenant_db, rule_id, &body).await {
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification rule update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let pair = match notif_queries::update_rule_in_tx(&tx, tenant_id, rule_id, &body).await {
+        Ok(p) => p,
         Err(err) => {
+            drop(tx);
             let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_notification_audit(
-                &audit_ctx,
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
-                "notification_rule",
-                rule_id.to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
-            );
-            let status = match outcome {
-                uptrakit_audit_log::AuditOutcome::Denied => StatusCode::NOT_FOUND,
-                uptrakit_audit_log::AuditOutcome::ValidationFailed => StatusCode::BAD_REQUEST,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("notification_rule", rule_id.to_string(), None)
+            .outcome(outcome)
+            .details(serde_json::json!({ "reason_code": reason_code }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            let status = match err.current_context() {
+                notif_queries::RuleQueryError::InvalidField(_) => StatusCode::BAD_REQUEST,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            let message = if status == StatusCode::NOT_FOUND {
-                "Rule not found"
-            } else if status == StatusCode::BAD_REQUEST {
+            let msg = if status == StatusCode::BAD_REQUEST {
                 "Invalid request"
             } else {
                 "Internal server error"
             };
-            error_response(status, message)
+            return error_response(status, msg);
         }
-        Ok(Some(resp)) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
-                "notification_rule",
-                resp.id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "channel_id": resp.channel_id,
-                    "event_type": resp.event_type.as_str(),
-                    "enabled": resp.enabled,
-                    "event_type_changed": body.event_type.is_some(),
-                    "host_scope_changed": body.host_id.is_some(),
-                    "software_item_scope_changed": body.software_item_id.is_some(),
-                    "plugin_type_scope_changed": body.plugin_type.is_some(),
-                    "enabled_changed": body.enabled.is_some(),
-                }),
-            );
-            (StatusCode::OK, Json(resp)).into_response()
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
+        )
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("notification_rule", rule_id.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": "rule_not_found" }))
+        .build()
+        {
+            state.audit_emitter.emit_event(entry);
         }
-        Ok(None) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
-                "notification_rule",
-                rule_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "rule_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Rule not found")
-        }
+        return error_response(StatusCode::NOT_FOUND, "Rule not found");
+    };
+
+    let before_view = notif_queries::NotificationRuleView::from(&before_model);
+    let after_view = notif_queries::NotificationRuleView::from(&after_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::notification_rule_update(&before_view, &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({}))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for notification rule update: {e}");
+                drop(tx);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification rule update: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification rule update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    let resp = notif_queries::rule_to_response(after_model);
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Delete a notification rule
@@ -1171,63 +1248,93 @@ pub async fn update_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_rule(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification rule delete: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
 
-    match notif_queries::delete_rule(&tenant_db, rule_id).await {
-        Ok(true) => {
-            emit_notification_audit(
-                &audit_ctx,
+    let before_model = match notif_queries::delete_rule_in_tx(&tx, tenant_id, rule_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
-                "notification_rule",
-                rule_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
-                "notification_rule",
-                rule_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "rule_not_found",
-                }),
-            );
-            error_response(StatusCode::NOT_FOUND, "Rule not found")
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("notification_rule", rule_id.to_string(), None)
+            .outcome(AuditOutcome::Denied)
+            .details(serde_json::json!({ "reason_code": "rule_not_found" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::NOT_FOUND, "Rule not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!(error = ?e, "failed to delete notification rule");
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
-                "notification_rule",
-                rule_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "rule_delete_failed",
-                }),
-            );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = notif_queries::NotificationRuleView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::notification_rule_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({}))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for notification rule delete: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification rule delete: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification rule delete: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ---------------------------------------------------------------------------
