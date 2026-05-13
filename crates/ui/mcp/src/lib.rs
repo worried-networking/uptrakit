@@ -12,6 +12,7 @@ use crate::tools::McpHandler;
 
 pub mod auth;
 pub mod context;
+pub mod oauth;
 pub mod settings;
 pub mod state;
 pub mod terminal;
