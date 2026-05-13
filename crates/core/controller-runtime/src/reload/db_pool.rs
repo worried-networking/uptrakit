@@ -83,24 +83,24 @@ impl Reloadable for DbPoolReloadable {
         "db_pool"
     }
 
-    /// Validate that the incoming config does not attempt to change the DB URL,
-    /// and that `pool_size` is at least 1.
+    /// Validate that the incoming config is internally consistent and does not
+    /// attempt to change the DB URL.
+    ///
+    /// Delegates field-level checks (empty URL, zero pool size, zero acquire
+    /// timeout) to [`DbConfig::validate`], then layers the URL-immutability
+    /// constraint on top.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigReloadError::Validate`] if the URL differs from the one
-    /// this pool was opened against, or if `pool_size` is zero.
+    /// Returns [`ConfigReloadError::Validate`] if the config is invalid or if
+    /// the URL differs from the one this pool was opened against.
     fn validate(&self, new: &DbConfig) -> Result<(), Report> {
+        new.validate()?;
         if new.url != self.current_url {
             bail!(ConfigReloadError::Validate(format!(
                 "db.url change requires reexec (current = {}, new = {})",
                 self.current_url, new.url
             )));
-        }
-        if new.pool_size == 0 {
-            bail!(ConfigReloadError::Validate(
-                "db.pool_size must be >= 1".into()
-            ));
         }
         Ok(())
     }
@@ -138,6 +138,7 @@ impl Reloadable for DbPoolReloadable {
             reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
         )]
         let _ = self.tx.send(new_handle);
+        tracing::info!(url = %new.url, pool_size = new.pool_size, "db pool reloaded");
         Ok(())
     }
 
@@ -154,6 +155,7 @@ impl Reloadable for DbPoolReloadable {
                 reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
             )]
             let _ = self.tx.send(prior);
+            tracing::info!("db pool reverted to prior handle");
         }
         Ok(())
     }
@@ -175,6 +177,7 @@ impl Reloadable for DbPoolReloadable {
                     message: e.to_string(),
                 })
             })?;
+        tracing::debug!("db pool health check ok");
         Ok(())
     }
 
@@ -199,10 +202,7 @@ mod tests {
     async fn db_reloadable_validates_url_unchanged() {
         let pool = build_test_pool().await;
         let reloadable = DbPoolReloadable::new(pool.clone(), TEST_URL.to_string());
-        let mut new = DbConfig::default();
-        new.url = TEST_URL.to_string();
-        new.pool_size = 32;
-        new.acquire_timeout_ms = 6_000;
+        let new = DbConfig::with_all(TEST_URL, 32, 6_000);
         reloadable.validate(&new).unwrap();
     }
 
@@ -210,10 +210,19 @@ mod tests {
     async fn db_reloadable_rejects_url_change() {
         let pool = build_test_pool().await;
         let reloadable = DbPoolReloadable::new(pool.clone(), TEST_URL.to_string());
-        let mut new = DbConfig::default();
-        new.url = "sqlite::memory:foo".to_string();
+        let new = DbConfig::with_all("sqlite::memory:foo", 16, 5_000);
         let err = reloadable.validate(&new).unwrap_err();
         assert!(err.to_string().contains("db.url"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn db_reloadable_apply_swaps_receiver() {
+        let pool = build_test_pool().await;
+        let reloadable = DbPoolReloadable::new(pool.clone(), TEST_URL.to_string());
+        let rx = reloadable.receiver();
+        let new_cfg = std::sync::Arc::new(DbConfig::with_all(TEST_URL, 32, 6_000));
+        reloadable.apply(new_cfg).await.unwrap();
+        assert!(rx.has_changed().unwrap());
     }
 
     async fn build_test_pool() -> DatabaseConnection {
