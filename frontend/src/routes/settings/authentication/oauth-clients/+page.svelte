@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { KeyRound } from 'lucide-svelte';
 	import { listOAuthClients, revokeOAuthClient, trustOAuthClient } from '$lib/api/oauth';
 	import type { OAuthClient } from '$lib/api/oauth';
 	import { getUser } from '$lib/auth.svelte';
-	import { hasPermissionValue } from '$lib/types';
+	import { hasPermissionValue, Permission } from '$lib/types';
 	import {
 		Callout,
 		DataTable,
@@ -19,6 +20,7 @@
 
 	const user = getUser();
 	const canManage = hasPermissionValue(user, 'manage_auth_settings');
+	const canManageGlobalSettings = hasPermissionValue(user, Permission.ManageGlobalSettings);
 
 	let clients: OAuthClient[] = $state([]);
 	let loading: boolean = $state(true);
@@ -26,6 +28,13 @@
 	let actionError: string | null = $state(null);
 	let processing: string | null = $state(null);
 	let showRegisterDialog: boolean = $state(false);
+
+	// OAuth settings state
+	let mcpEnabled = $state(false);
+	let dcrEnabled = $state(false);
+	let cimdEnabled = $state(false);
+	let settingsError = $state<string | null>(null);
+	let savingSettings = $state(false);
 
 	const columns: DataTableColumn[] = [
 		{ key: 'client_name', label: 'Name', mobileTitle: true },
@@ -98,6 +107,12 @@
 		if (via === 'dcr') return 'Dynamic Registration';
 		if (via === 'cimd_cache') return 'CIMD Cache';
 		return 'Manual';
+	}
+
+	async function handleMcpToggle() {
+		// Pre-flight: warn when enabling (canonical_host check is deferred to Plan D)
+		// For now just reflect the toggle — actual save deferred until Plan D ships
+		settingsError = null;
 	}
 </script>
 
@@ -194,6 +209,52 @@
 				</DataTable>
 			{/if}
 		</SectionCard>
+
+		{#if browser && import.meta.env.VITE_OAUTH_TOGGLE_PREVIEW}
+			{#if canManageGlobalSettings}
+				<SectionCard title="OAuth settings">
+					<div class="space-y-4">
+						<label class="flex items-center gap-3">
+							<input
+								type="checkbox"
+								bind:checked={mcpEnabled}
+								disabled={savingSettings}
+								class="h-4 w-4"
+								onchange={() => handleMcpToggle()}
+							/>
+							<span class="text-sm text-[var(--text-primary)]">Enable MCP OAuth (master switch)</span>
+						</label>
+						{#if mcpEnabled}
+							<Callout
+								tone="warning"
+								message="Ensure oauth.canonical_host is configured before enabling MCP OAuth. Tokens minted without a canonical host will be invalid."
+							/>
+						{/if}
+						<label class="flex items-center gap-3">
+							<input
+								type="checkbox"
+								bind:checked={dcrEnabled}
+								disabled={savingSettings || !mcpEnabled}
+								class="h-4 w-4"
+							/>
+							<span class="text-sm text-[var(--text-primary)]">Enable Dynamic Client Registration (DCR)</span>
+						</label>
+						<label class="flex items-center gap-3">
+							<input
+								type="checkbox"
+								bind:checked={cimdEnabled}
+								disabled={savingSettings || !mcpEnabled}
+								class="h-4 w-4"
+							/>
+							<span class="text-sm text-[var(--text-primary)]">Enable Client Initiated Metadata Discovery (CIMD)</span>
+						</label>
+						{#if settingsError}
+							<Callout tone="danger" message={settingsError} />
+						{/if}
+					</div>
+				</SectionCard>
+			{/if}
+		{/if}
 	{/if}
 </PageShell>
 
