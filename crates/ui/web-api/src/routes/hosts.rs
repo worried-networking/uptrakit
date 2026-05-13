@@ -734,6 +734,40 @@ mod route_tests {
     }
 
     #[tokio::test]
+    async fn update_missing_host_writes_host_update_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+        let missing_id = Uuid::now_v7();
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/hosts/{missing_id}"),
+                &UpdateHostRequest {
+                    friendly_name: Some("x".to_string()),
+                },
+            )
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let missing_id_string = missing_id.to_string();
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+            Some(missing_id_string.as_str()),
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], serde_json::json!("host_not_found"));
+    }
+
+    #[tokio::test]
     async fn deactivate_host_writes_host_deactivate_stateful_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
