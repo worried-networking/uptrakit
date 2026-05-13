@@ -78,6 +78,7 @@ mod m20260513_000005_oauth_refresh_tokens;
 mod m20260513_000006_oauth_controller_instances;
 mod m20260514_000001_audit_logs_v2;
 mod m20260515_000001_normalize_cert_serial_uppercase;
+mod m20260516_000001_2fa;
 
 pub struct Migrator;
 
@@ -160,6 +161,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000006_oauth_controller_instances::Migration),
             Box::new(m20260514_000001_audit_logs_v2::Migration),
             Box::new(m20260515_000001_normalize_cert_serial_uppercase::Migration),
+            Box::new(m20260516_000001_2fa::Migration),
         ]
     }
 }
