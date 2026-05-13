@@ -1019,7 +1019,7 @@ mod tests {
 
         // Exhaust ip_a's bucket.
         for _ in 0..limit {
-            let _ = fetcher.fetch_and_upsert(&url, Some(ip_a)).await;
+            drop(fetcher.fetch_and_upsert(&url, Some(ip_a)).await);
         }
         let rate_limited = fetcher
             .fetch_and_upsert(&url, Some(ip_a))

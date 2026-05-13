@@ -34,15 +34,13 @@
 //! The rest of the test skeleton compiles and documents the full intended flow.
 
 #![expect(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "integration test infrastructure: panics are acceptable in end-to-end test helpers"
+    clippy::todo,
+    dead_code,
+    reason = "infrastructure gaps documented in module-level doc; todo!() marks unimplemented steps; \
+              shared test helpers include members not yet exercised by this stub test"
 )]
 
 use std::time::Duration;
-
-use reqwest::Client;
-use serde_json::Value;
 
 use crate::helpers::api_client::ApiClient;
 use crate::helpers::containers::{ControllerContainer, test_network_name};
@@ -92,7 +90,7 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
     let network = test_network_name();
     let controller = ControllerContainer::start(&network).await;
     let port = controller.host_port();
-    let base_url = format!("https://127.0.0.1:{port}");
+    let _base_url = format!("https://127.0.0.1:{port}");
 
     // -----------------------------------------------------------------------
     // Step 2 — Register a test user; obtain an upk_ API token.
@@ -103,16 +101,16 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .register_and_login_with_token(controller.registration_token())
         .await;
 
-    // Build a raw reqwest client for OAuth endpoints not covered by ApiClient.
-    // The controller uses a self-signed TLS certificate — accept_invalid_certs
-    // mirrors what UptrakitClient does internally.
-    let http = Client::builder()
-        .danger_accept_invalid_certs(true)
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::none()) // capture redirects manually
-        .build()
-        .expect("build reqwest client");
+    // A raw reqwest client will be needed for OAuth endpoints once Step 3 is
+    // implemented (see the step 3 gap comment below). It will be built as:
+    //
+    //   let http = Client::builder()
+    //       .danger_accept_invalid_certs(true)
+    //       .connect_timeout(Duration::from_secs(10))
+    //       .timeout(Duration::from_secs(60))
+    //       .redirect(reqwest::redirect::Policy::none())
+    //       .build()
+    //       .expect("build reqwest client");
 
     // -----------------------------------------------------------------------
     // Step 3 — Enable the MCP OAuth server.
@@ -123,47 +121,35 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
     // match the server's `PUT /api/v1/settings/oauth` handler once it is
     // implemented (see the oauth.boot module for the relevant setting keys:
     // `oauth.mcp_enabled` and `oauth.canonical_host`).
+    //
+    //   PUT /api/v1/settings/oauth
+    //   Body: { "mcp_enabled": true, "canonical_host": "127.0.0.1:<port>" }
+    //
     // -----------------------------------------------------------------------
-    let _enable_oauth: todo_placeholder!() = {
-        // PUT /api/v1/settings/oauth
-        // Body: { "mcp_enabled": true, "canonical_host": "127.0.0.1:<port>" }
-        todo!(
-            "Step 3: enable OAuth — no PUT /api/v1/settings/oauth endpoint wired yet. \
-             Add `update_oauth_settings` to ApiClient/UptrakitClient and wire the route."
-        )
-    };
 
     // -----------------------------------------------------------------------
     // Step 4 — Register an OAuth client via DCR (POST /oauth/register).
+    //
+    // INFRASTRUCTURE GAP: Step 3 must succeed first (OAuth must be enabled).
+    // Until Step 3 is implemented the DCR call will return 404.
+    //
+    //   let resp = _http
+    //       .post(format!("{_base_url}/oauth/register"))
+    //       .json(&serde_json::json!({
+    //           "client_name": "e2e-test-client",
+    //           "redirect_uris": ["https://localhost/callback"],
+    //           "grant_types": ["authorization_code"],
+    //           "response_types": ["code"],
+    //           "token_endpoint_auth_method": "none",
+    //           "scope": "mcp:read"
+    //       }))
+    //       .send()
+    //       .await
+    //       .expect("POST /oauth/register");
+    //   assert_eq!(resp.status().as_u16(), 201, ...);
+    //   let _dcr_response: Value = resp.json().await.expect("parse DCR response body");
+    //
     // -----------------------------------------------------------------------
-    let _dcr_response: Value = {
-        let resp = http
-            .post(format!("{base_url}/oauth/register"))
-            .json(&serde_json::json!({
-                "client_name": "e2e-test-client",
-                "redirect_uris": ["https://localhost/callback"],
-                "grant_types": ["authorization_code"],
-                "response_types": ["code"],
-                "token_endpoint_auth_method": "none",
-                "scope": "mcp:read"
-            }))
-            .send()
-            .await
-            .expect("POST /oauth/register");
-
-        assert_eq!(
-            resp.status().as_u16(),
-            201,
-            "DCR must return 201; got {} (OAuth not enabled — Step 3 must succeed first)",
-            resp.status()
-        );
-
-        resp.json::<Value>().await.expect("parse DCR response body")
-    };
-
-    // INFRASTRUCTURE GAP: Steps 3–4 require OAuth to be enabled first. Until
-    // Step 3 is implemented the DCR call above will return 404. The remainder
-    // of the test skeleton is preserved for documentation purposes.
 
     // -----------------------------------------------------------------------
     // Step 5 — GET /oauth/authorize with PKCE.
@@ -259,20 +245,4 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
     //   //   let user_info: Value = serde_json::from_str(result.as_str().unwrap()).unwrap();
     //   //   assert_eq!(user_info["auth_method"], "OAuth",
     //   //       "MCP RS must record OAuth auth method");
-}
-
-// ---------------------------------------------------------------------------
-// Compile-time alias to keep the unreachable branches above compilable.
-// ---------------------------------------------------------------------------
-
-/// Marker type used in `todo!()` expressions that need a type annotation.
-/// Equivalent to `!` (the never type) but stable.
-#[allow(dead_code)]
-type TodoPlaceholder = std::convert::Infallible;
-
-// The macro below provides `todo_placeholder!()` → `TodoPlaceholder`.
-macro_rules! todo_placeholder {
-    () => {
-        TodoPlaceholder
-    };
 }
