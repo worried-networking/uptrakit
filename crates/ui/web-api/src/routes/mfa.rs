@@ -92,7 +92,10 @@ pub(crate) async fn build_full_session(
                 "Failed to get user permissions during MFA session build: {:?}",
                 e
             );
-            vec![]
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -261,8 +264,21 @@ pub async fn mfa_verify(
             };
 
             let secret = totp_row.secret.expose_secret().to_string();
+            let code = req.code.clone();
 
-            let step = verify_totp_code(&secret, &req.code);
+            // TOTP verification is synchronous HMAC — run off the async executor.
+            let step =
+                match tokio::task::spawn_blocking(move || verify_totp_code(&secret, &code)).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("spawn_blocking panicked in TOTP verify: {:?}", e);
+                        let _ = txn.rollback().await;
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                };
 
             // Anti-replay: reject if the matched step was already used.
             let valid = match step {
@@ -475,12 +491,18 @@ pub async fn mfa_verify(
 
     // Emit audit events.
     if is_recovery {
-        let remaining = UserRecoveryCode::find()
+        let remaining = match UserRecoveryCode::find()
             .filter(user_recovery_code::Column::UserId.eq(user_id))
             .filter(user_recovery_code::Column::UsedAt.is_null())
             .count(state.db())
             .await
-            .unwrap_or(0);
+        {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!("Failed to count remaining recovery codes: {e}");
+                0
+            }
+        };
 
         emit_mfa_audit(
             &state,
@@ -514,9 +536,9 @@ pub async fn mfa_verify(
 
 /// Generate and send an email OTP for the given MFA challenge.
 ///
-/// Loads the challenge (read-only), generates a 6-digit OTP, hashes it with
-/// Argon2id in `spawn_blocking`, stores the hash in the challenge row, and
-/// sends the OTP via the transactional email plugin.
+/// Generates a 6-digit OTP, hashes it with Argon2id in `spawn_blocking`, then
+/// atomically loads the challenge, validates it, and stores the hash inside a
+/// `BEGIN IMMEDIATE` transaction. The email is sent outside the transaction.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/mfa/email",
@@ -533,55 +555,9 @@ pub async fn mfa_send_email(
     State(state): State<Arc<AppState>>,
     Validated(req): Validated<MfaEmailRequest>,
 ) -> Response {
-    use crate::auth::token::hash_token;
     use uptrakit_plugin_infrastructure_registry::TransactionalEmailError;
-    use uptrakit_shared_db::entity::mfa_challenge;
 
-    // Load challenge (read-only — no transaction needed here; the subsequent
-    // store_email_otp_hash write is a single UPDATE, not read-then-conditional-write).
-    let token_hash = hash_token(&req.mfa_token);
-    let now = time::OffsetDateTime::now_utc();
-
-    let challenge = match MfaChallenge::find()
-        .filter(mfa_challenge::Column::TokenHash.eq(&token_hash))
-        .one(state.db())
-        .await
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired MFA token");
-        }
-        Err(e) => {
-            tracing::error!("Failed to load MFA challenge for email send: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    if challenge.consumed_at.is_some() || now >= challenge.expires_at {
-        return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired MFA token");
-    }
-
-    // Load the user's email address.
-    let user = match User::find_by_id(challenge.user_id).one(state.db()).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return error_response(StatusCode::UNAUTHORIZED, "User not found");
-        }
-        Err(e) => {
-            tracing::error!("Failed to load user for MFA email send: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let email_addr = user.email.expose_email().to_string();
-    if email_addr.is_empty() {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "User has no email address configured",
-        );
-    }
-
-    // Generate OTP and hash it in spawn_blocking.
+    // Generate OTP and pre-hash it (Argon2id) before opening any transaction.
     let otp_code = generate_email_otp();
     let otp_for_hash = otp_code.clone();
 
@@ -597,9 +573,77 @@ pub async fn mfa_send_email(
         }
     };
 
-    // Persist the hash.
-    if let Err(e) = store_email_otp_hash(state.db(), &challenge, otp_hash).await {
+    // BEGIN IMMEDIATE: load challenge, validate, load user email, store OTP hash.
+    // This prevents a TOCTOU race where two concurrent requests both pass validity
+    // checks and overwrite each other's hash.
+    let txn = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for mfa_send_email: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let challenge = match load_valid_challenge(&txn, &req.mfa_token).await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = txn.rollback().await;
+            use crate::auth::AuthError;
+            let (status, msg) = match e.current_context() {
+                AuthError::MfaChallengeNotFound => {
+                    (StatusCode::UNAUTHORIZED, "Invalid or expired MFA token")
+                }
+                AuthError::MfaChallengeExpired => {
+                    (StatusCode::UNAUTHORIZED, "MFA token has expired")
+                }
+                AuthError::MfaChallengeExhausted => {
+                    (StatusCode::UNAUTHORIZED, "Too many failed attempts")
+                }
+                _ => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+            };
+            return error_response(status, msg);
+        }
+    };
+
+    // Load the user's email address inside the transaction.
+    let user = match User::find_by_id(challenge.user_id).one(&txn).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::UNAUTHORIZED, "User not found");
+        }
+        Err(e) => {
+            tracing::error!("Failed to load user for MFA email send: {e}");
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let email_addr = user.email.expose_email().to_string();
+    if email_addr.is_empty() {
+        let _ = txn.rollback().await;
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "User has no email address configured",
+        );
+    }
+
+    // Persist the hash inside the transaction.
+    if let Err(e) = store_email_otp_hash(&txn, &challenge, otp_hash).await {
         tracing::error!("Failed to store email OTP hash: {:?}", e);
+        let _ = txn.rollback().await;
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Failed to commit email OTP hash: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 

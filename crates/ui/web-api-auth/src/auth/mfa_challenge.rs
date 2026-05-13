@@ -217,7 +217,11 @@ pub fn generate_recovery_codes() -> Vec<String> {
             (0..10)
                 .map(|_| {
                     let idx = rng.random_range(0..charset.len());
-                    charset.get(idx).copied().unwrap_or('A')
+                    #[expect(
+                        clippy::indexing_slicing,
+                        reason = "idx is in 0..charset.len() by construction"
+                    )]
+                    charset[idx]
                 })
                 .collect()
         })
@@ -285,18 +289,21 @@ pub async fn consume_recovery_code(
     Ok(())
 }
 
-/// Delete all existing recovery codes for `user_id` and insert 8 new ones.
+/// Delete all existing recovery codes for `user_id` and insert new ones.
 ///
 /// **Must be called inside a `BEGIN IMMEDIATE` transaction.**
 ///
+/// `code_hashes` must be pre-computed by the caller (via `spawn_blocking` +
+/// `hash_recovery_code`) before opening the transaction, to avoid running
+/// Argon2id while holding the write lock.
+///
 /// # Errors
 ///
-/// Returns [`AuthError::PasswordHash`] if any code cannot be hashed, or
-/// [`AuthError::Database`] on any DB failure.
+/// Returns [`AuthError::Database`] on any DB failure.
 pub async fn replace_recovery_codes(
     db: &impl sea_orm::ConnectionTrait,
     user_id: uuid::Uuid,
-    plaintext_codes: &[String],
+    code_hashes: &[String],
 ) -> Result<()> {
     UserRecoveryCode::delete_many()
         .filter(user_recovery_code::Column::UserId.eq(user_id))
@@ -305,12 +312,11 @@ pub async fn replace_recovery_codes(
         .context_to()?;
 
     let now = OffsetDateTime::now_utc();
-    for code in plaintext_codes {
-        let hash = hash_recovery_code(code)?;
+    for hash in code_hashes {
         user_recovery_code::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
             user_id: Set(user_id),
-            code_hash: Set(hash),
+            code_hash: Set(hash.clone()),
             created_at: Set(now),
             used_at: Set(None),
         }

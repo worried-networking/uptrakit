@@ -25,7 +25,9 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth::mfa_challenge::{generate_recovery_codes, replace_recovery_codes};
+use crate::auth::mfa_challenge::{
+    generate_recovery_codes, hash_recovery_code, replace_recovery_codes,
+};
 use crate::auth::totp::{build_otpauth_uri, generate_totp_secret, verify_totp_code};
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -33,6 +35,7 @@ use crate::middleware::require_auth::{AuthenticatedUser, FullSessionUser, SetupR
 use uptrakit_crypto::EncryptedString;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{user_recovery_code, user_totp};
+use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::mfa::{
     DisableTotpRequest, MfaMethod, MfaStatusResponse, RegenerateRecoveryCodesRequest,
     RegenerateRecoveryCodesResponse, TotpConfirmRequest, TotpConfirmResponse, TotpEnrollResponse,
@@ -230,7 +233,7 @@ pub async fn mfa_status(
             .count(state.db())
             .await
         {
-            Ok(n) => u32::try_from(n).unwrap_or(u32::MAX),
+            Ok(n) => n.min(u64::from(u32::MAX)) as u32,
             Err(e) => {
                 tracing::error!("mfa_status: failed to count recovery codes: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -375,7 +378,10 @@ pub async fn totp_enroll(
 
     (
         StatusCode::OK,
-        Json(TotpEnrollResponse::new(otpauth_uri, secret)),
+        Json(TotpEnrollResponse::new(
+            otpauth_uri,
+            SecretString::new(secret),
+        )),
     )
         .into_response()
 }
@@ -474,10 +480,34 @@ pub async fn totp_confirm(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // Generate and persist recovery codes.
+    // Pre-hash recovery codes outside the transaction (Argon2id is CPU-intensive).
     let plaintext_codes = generate_recovery_codes();
+    let codes_to_hash = plaintext_codes.clone();
+    let code_hashes = match tokio::task::spawn_blocking(move || {
+        codes_to_hash
+            .iter()
+            .map(|c| hash_recovery_code(c))
+            .collect::<crate::auth::Result<Vec<_>>>()
+    })
+    .await
+    {
+        Ok(Ok(hashes)) => hashes,
+        Ok(Err(e)) => {
+            tracing::error!("totp_confirm: failed to hash recovery codes: {:?}", e);
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        Err(e) => {
+            tracing::error!(
+                "totp_confirm: spawn_blocking panicked hashing recovery codes: {:?}",
+                e
+            );
+            let _ = txn.rollback().await;
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    if let Err(e) = replace_recovery_codes(&txn, user_id, &plaintext_codes).await {
+    if let Err(e) = replace_recovery_codes(&txn, user_id, &code_hashes).await {
         tracing::error!("totp_confirm: failed to replace recovery codes: {:?}", e);
         let _ = txn.rollback().await;
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -635,7 +665,34 @@ pub async fn regenerate_recovery_codes(
 
     let plaintext_codes = generate_recovery_codes();
 
-    // BEGIN IMMEDIATE: replace recovery codes.
+    // Pre-hash codes outside the transaction (Argon2id is CPU-intensive).
+    let codes_to_hash = plaintext_codes.clone();
+    let code_hashes = match tokio::task::spawn_blocking(move || {
+        codes_to_hash
+            .iter()
+            .map(|c| hash_recovery_code(c))
+            .collect::<crate::auth::Result<Vec<_>>>()
+    })
+    .await
+    {
+        Ok(Ok(hashes)) => hashes,
+        Ok(Err(e)) => {
+            tracing::error!(
+                "regenerate_recovery_codes: failed to hash recovery codes: {:?}",
+                e
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        Err(e) => {
+            tracing::error!(
+                "regenerate_recovery_codes: spawn_blocking panicked hashing codes: {:?}",
+                e
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // BEGIN IMMEDIATE: replace recovery codes (DB operations only).
     let txn = match state
         .db()
         .begin_with_options(TransactionOptions {
@@ -651,7 +708,7 @@ pub async fn regenerate_recovery_codes(
         }
     };
 
-    if let Err(e) = replace_recovery_codes(&txn, user_id, &plaintext_codes).await {
+    if let Err(e) = replace_recovery_codes(&txn, user_id, &code_hashes).await {
         tracing::error!(
             "regenerate_recovery_codes: failed to replace recovery codes: {:?}",
             e
@@ -701,7 +758,10 @@ async fn build_session_tokens(
         Ok(p) => p,
         Err(e) => {
             tracing::error!("build_session_tokens: failed to get permissions: {:?}", e);
-            vec![]
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -1076,7 +1136,7 @@ mod tests {
         let enroll: TotpEnrollResponse = serde_json::from_slice(&body).expect("parse enroll");
 
         // Generate a valid TOTP code from the returned secret.
-        let code = crate::auth::totp::generate_totp_code(&enroll.secret)
+        let code = crate::auth::totp::generate_totp_code(enroll.secret.expose_secret())
             .expect("should generate current TOTP code");
 
         // Step 2: confirm.
@@ -1247,7 +1307,7 @@ mod tests {
             .expect("body");
         let enroll: TotpEnrollResponse = serde_json::from_slice(&body).expect("parse enroll");
 
-        let code = crate::auth::totp::generate_totp_code(&enroll.secret)
+        let code = crate::auth::totp::generate_totp_code(enroll.secret.expose_secret())
             .expect("should generate current TOTP code");
 
         let session_svc = crate::extract::SessionSvc::new(SessionService::new(db.clone()));
@@ -1266,6 +1326,6 @@ mod tests {
             "confirm must succeed"
         );
 
-        enroll.secret
+        enroll.secret.expose_secret().to_string()
     }
 }

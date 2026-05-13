@@ -153,14 +153,15 @@ impl MfaStatusResponse {
 pub struct TotpEnrollResponse {
     /// `otpauth://totp/` URI for QR generation in the browser.
     pub otpauth_uri: String,
-    /// Human-readable base32 secret (for manual entry).
-    pub secret: String,
+    /// Human-readable base32 secret (for manual entry). Treated as a secret —
+    /// never logged.
+    pub secret: uptrakit_shared_types::SecretString,
 }
 
 impl TotpEnrollResponse {
     /// Construct a new [`TotpEnrollResponse`].
     #[must_use]
-    pub fn new(otpauth_uri: String, secret: String) -> Self {
+    pub fn new(otpauth_uri: String, secret: uptrakit_shared_types::SecretString) -> Self {
         Self {
             otpauth_uri,
             secret,
@@ -169,7 +170,7 @@ impl TotpEnrollResponse {
 }
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/confirm`.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TotpConfirmRequest {
     pub code: String,
@@ -189,7 +190,7 @@ impl Validate for TotpConfirmRequest {
 
 /// Returned by `POST /api/v1/auth/me/2fa/totp/confirm`.
 #[non_exhaustive]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TotpConfirmResponse {
     /// Plaintext recovery codes shown once.
@@ -559,12 +560,15 @@ mod tests {
     fn totp_enroll_response_round_trip() {
         let resp = TotpEnrollResponse {
             otpauth_uri: "otpauth://totp/test".to_string(),
-            secret: "JBSWY3DPEBLW64TMMQ======".to_string(),
+            secret: uptrakit_shared_types::SecretString::new("JBSWY3DPEBLW64TMMQ======"),
         };
         let json = serde_json::to_string(&resp).unwrap();
         let deserialized: TotpEnrollResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.otpauth_uri, "otpauth://totp/test");
-        assert_eq!(deserialized.secret, "JBSWY3DPEBLW64TMMQ======");
+        assert_eq!(
+            deserialized.secret.expose_secret(),
+            "JBSWY3DPEBLW64TMMQ======"
+        );
     }
 
     #[test]
