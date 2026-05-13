@@ -17,4 +17,5 @@ pub(crate) mod https_listener;
 pub(crate) mod nats;
 pub(crate) mod pki_listener;
 pub(crate) mod probe;
+pub(crate) mod tls_snapshot;
 pub(crate) mod zeroconf;
