@@ -209,13 +209,13 @@ create_oidc_exchange_and_redirect = "ignore"
 store_pending_link = "ignore"
 
 [routes."oidc_providers.rs"]
-create_provider = "tenant-scoped"
+create_provider = "full-state"
 list_providers = "tenant-scoped"
 get_provider = "tenant-scoped"
-update_provider = "tenant-scoped"
-delete_provider = "tenant-scoped"
-activate_provider = "tenant-scoped"
-deactivate_provider = "tenant-scoped"
+update_provider = "full-state"
+delete_provider = "full-state"
+activate_provider = "full-state"
+deactivate_provider = "full-state"
 find_non_deleted_provider = "ignore"
 
 [routes."plugin_configs.rs"]
