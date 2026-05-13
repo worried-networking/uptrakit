@@ -14,6 +14,7 @@ pub mod registration;
 pub mod session;
 pub mod token;
 pub mod token_denylist;
+pub mod totp;
 
 pub use api_token::ApiTokenOps;
 pub use auth_method::AuthMethod;
