@@ -111,6 +111,15 @@ handle_interactive_session = "ignore"
 handle_client_message = "ignore"
 forward_interactive_stdin = "ignore"
 
+[routes."me_2fa.rs"]
+mfa_status = "full-state"
+totp_enroll = "full-state"
+totp_confirm = "full-state"
+totp_disable = "full-state"
+regenerate_recovery_codes = "full-state"
+re_auth_ok = "ignore"
+build_session_tokens = "ignore"
+
 [routes."mfa.rs"]
 mfa_verify = "full-state"
 mfa_send_email = "full-state"
