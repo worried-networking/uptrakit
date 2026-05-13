@@ -115,6 +115,22 @@ pub struct MfaStatusResponse {
     pub methods_available: Vec<MfaMethod>,
 }
 
+impl MfaStatusResponse {
+    /// Construct a new [`MfaStatusResponse`].
+    #[must_use]
+    pub fn new(
+        totp_enrolled: bool,
+        recovery_codes_count: u32,
+        methods_available: Vec<MfaMethod>,
+    ) -> Self {
+        Self {
+            totp_enrolled,
+            recovery_codes_count,
+            methods_available,
+        }
+    }
+}
+
 /// Returned by `POST /api/v1/auth/me/2fa/totp/enroll`.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,6 +139,17 @@ pub struct TotpEnrollResponse {
     pub otpauth_uri: String,
     /// Human-readable base32 secret (for manual entry).
     pub secret: String,
+}
+
+impl TotpEnrollResponse {
+    /// Construct a new [`TotpEnrollResponse`].
+    #[must_use]
+    pub fn new(otpauth_uri: String, secret: String) -> Self {
+        Self {
+            otpauth_uri,
+            secret,
+        }
+    }
 }
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/confirm`.
@@ -151,6 +178,17 @@ pub struct TotpConfirmResponse {
     pub recovery_codes: Vec<String>,
     /// New full-session tokens (replaces the restricted session, if any).
     pub session: Option<crate::auth::AuthResponse>,
+}
+
+impl TotpConfirmResponse {
+    /// Construct a new [`TotpConfirmResponse`].
+    #[must_use]
+    pub fn new(recovery_codes: Vec<String>, session: Option<crate::auth::AuthResponse>) -> Self {
+        Self {
+            recovery_codes,
+            session,
+        }
+    }
 }
 
 /// Body for `POST /api/v1/auth/me/2fa/totp/disable`.
@@ -196,6 +234,14 @@ impl Validate for RegenerateRecoveryCodesRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegenerateRecoveryCodesResponse {
     pub recovery_codes: Vec<String>,
+}
+
+impl RegenerateRecoveryCodesResponse {
+    /// Construct a new [`RegenerateRecoveryCodesResponse`].
+    #[must_use]
+    pub fn new(recovery_codes: Vec<String>) -> Self {
+        Self { recovery_codes }
+    }
 }
 
 #[cfg(test)]
