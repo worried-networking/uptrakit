@@ -8,9 +8,7 @@ use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::upsert_global_setting;
 use axum::{
     Extension, Json,
@@ -19,40 +17,15 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
 
 pub use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
-
-fn emit_network_settings_audit(
-    state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
-    )
-    .system_scope()
-    .actor(actor_type, actor_id)
-    .target(
-        "global_setting",
-        "network".to_string(),
-        Some("network".to_string()),
-    )
-    .outcome(outcome)
-    .details(details)
-    .build()
-    {
-        state.audit_emitter.emit_best_effort(entry);
-    }
-}
 
 fn network_settings_audit_details(
     requested_keys: &[&str],
@@ -229,6 +202,8 @@ pub async fn update_network_settings(
     Validated(req): Validated<UpdateNetworkSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
     let mut requested_keys = Vec::new();
     if req.trusted_proxies.is_some() {
         requested_keys.push(SettingKey::TrustedProxies.as_str());
@@ -253,36 +228,128 @@ pub async fn update_network_settings(
     }
     let regenerate_cert_requested = req.regenerate_cert == Some(true);
 
-    match update_network_settings_inner(&state, req).await {
+    if requested_keys.is_empty() {
+        // No DB-writing fields requested (only regenerate_cert, or nothing).
+        return match update_network_settings_inner(state.db(), &state, req).await {
+            Ok(resp) => resp,
+            Err(error) => error.response,
+        };
+    }
+
+    // Open a BEGIN IMMEDIATE transaction so that all global_setting writes and
+    // the audit row land atomically.
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin tx for network settings update: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Build the "network" before-view from the in-memory state (before any writes).
+    let network_before = state.settings.network();
+    let before_json = serde_json::json!({
+        "trusted_proxies": network_before.trusted_proxies.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+        "real_ip_header": network_before.real_ip_header,
+        "sans": network_before.sans,
+        "https_addr": network_before.https_addr.to_string(),
+        "forwarded_client_cert_info_header": network_before.forwarded_client_cert_info_header,
+        "forwarded_client_cert_pem_header": network_before.forwarded_client_cert_pem_header,
+        "pki_addr": network_before.pki_addr,
+    });
+    let before_view = GlobalSettingView {
+        key: "network".to_string(),
+        value: before_json,
+    };
+
+    match update_network_settings_inner(&tx, &state, req).await {
         Ok(resp) => {
-            if !requested_keys.is_empty() {
-                emit_network_settings_audit(
-                    &state,
-                    &user,
-                    api_token_id,
-                    uptrakit_audit_log::AuditOutcome::Success,
-                    network_settings_audit_details(
+            // Build the after-view from the now-updated in-memory state.
+            let network_after = state.settings.network();
+            let after_json = serde_json::json!({
+                "trusted_proxies": network_after.trusted_proxies.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+                "real_ip_header": network_after.real_ip_header,
+                "sans": network_after.sans,
+                "https_addr": network_after.https_addr.to_string(),
+                "forwarded_client_cert_info_header": network_after.forwarded_client_cert_info_header,
+                "forwarded_client_cert_pem_header": network_after.forwarded_client_cert_pem_header,
+                "pki_addr": network_after.pki_addr,
+            });
+            let after_view = GlobalSettingView {
+                key: "network".to_string(),
+                value: after_json,
+            };
+
+            let hook = state.audit_emitter.commit_hook();
+            let audit_entry =
+                AuditEntry::<Stateful>::global_setting_update(&before_view, &after_view)
+                    .system_scope()
+                    .actor(actor_type, actor_id)
+                    .outcome(AuditOutcome::Success)
+                    .details(network_settings_audit_details(
                         &requested_keys,
                         regenerate_cert_requested,
                         serde_json::json!({}),
-                    ),
-                );
+                    ))
+                    .build();
+
+            match audit_entry {
+                Ok(entry) => {
+                    if let Err(e) = state.audit_emitter.emit_stateful(&tx, &hook, entry).await {
+                        tracing::error!("Failed to emit stateful audit for network settings: {e}");
+                        drop(tx);
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to build audit entry for network settings: {e}");
+                    drop(tx);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
             }
+
+            if let Err(e) = tx.commit().await {
+                tracing::error!("Failed to commit network settings update: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            hook.flush_after_commit().await;
+
             resp
         }
         Err(error) => {
-            if !requested_keys.is_empty() {
-                emit_network_settings_audit(
-                    &state,
-                    &user,
-                    api_token_id,
-                    error.outcome,
-                    network_settings_audit_details(
-                        &requested_keys,
-                        regenerate_cert_requested,
-                        error.details,
-                    ),
-                );
+            drop(tx);
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
+            )
+            .system_scope()
+            .actor(actor_type, actor_id)
+            .target(
+                "global_setting",
+                "network".to_string(),
+                Some("network".to_string()),
+            )
+            .outcome(error.outcome)
+            .details(network_settings_audit_details(
+                &requested_keys,
+                regenerate_cert_requested,
+                error.details,
+            ))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
             }
             error.response
         }
@@ -290,11 +357,10 @@ pub async fn update_network_settings(
 }
 
 async fn update_network_settings_inner(
+    db: &impl ConnectionTrait,
     state: &AppState,
     req: UpdateNetworkSettingsRequest,
 ) -> Result<Response, NetworkSettingsUpdateError> {
-    let db = state.db();
-
     // Validate and apply trusted proxies (runtime-changeable)
     if let Some(ref proxies) = req.trusted_proxies {
         let parsed = parse_trusted_proxies(proxies).map_err(|msg| {
