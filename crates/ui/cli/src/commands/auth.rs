@@ -34,8 +34,7 @@ const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 pub fn parse_fingerprint(s: &str) -> Result<String> {
     let hex_part = if let Some(rest) = s.strip_prefix("sha256:") {
         rest
-    } else if let Some(colon_pos) = s.find(':') {
-        let prefix = &s[..colon_pos];
+    } else if let Some((prefix, _rest)) = s.split_once(':') {
         bail!(CliError::Other(format!(
             "unsupported fingerprint algorithm '{prefix}'; supported: sha256"
         )));
@@ -95,13 +94,13 @@ pub async fn establish_ca_trust(
         .context_to()?;
 
     let der = CertificateDer::from_pem_slice(fetched_pem.as_bytes())
-        .map_err(|_| report!(CliError::Other("failed to parse CA certificate PEM".into())))?;
+        .map_err(|_e| report!(CliError::Other("failed to parse CA certificate PEM".into())))?;
     let mut hasher = Sha256::new();
     hasher.update(der.as_ref());
     let fetched_fp = uptrakit_shared_types::hex::encode(hasher.finalize());
 
     if let Some(stored_pem) = &config.ca_pem {
-        let stored_der = CertificateDer::from_pem_slice(stored_pem.as_bytes()).map_err(|_| {
+        let stored_der = CertificateDer::from_pem_slice(stored_pem.as_bytes()).map_err(|_e| {
             report!(CliError::Other(
                 "failed to parse stored CA certificate PEM".into()
             ))
@@ -971,44 +970,45 @@ mod tests {
 mod ca_trust_tests {
     use super::*;
     use httpmock::prelude::*;
-    use std::sync::Mutex;
 
     /// Serialize env-mutating async tests so parallel test threads do not race on HOME.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    /// `tokio::sync::Mutex` is used so the guard can be held across `.await` points.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// Run an async closure with HOME pointing at a unique temp directory.
-    /// Returns the temp dir path so the caller can clean up.
+    /// Holds `ENV_LOCK` for the full duration of the closure so that HOME is
+    /// never mutated by a concurrent test while the async body is executing.
     async fn with_temp_home<F, Fut>(f: F)
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
-        let tmp = {
-            let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-            let tmp = std::env::temp_dir().join(format!(
-                "uptrakit-auth-test-home-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.subsec_nanos())
-                    .unwrap_or(0)
-            ));
-            std::fs::create_dir_all(&tmp).expect("create temp home");
-            let prev = std::env::var_os("HOME");
-            // SAFETY: ENV_LOCK is held while we set HOME; we restore below.
-            unsafe { std::env::set_var("HOME", &tmp) };
-            (tmp, prev)
-        };
+        let _guard = ENV_LOCK.lock().await;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "uptrakit-auth-test-home-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp home");
+        let prev = std::env::var_os("HOME");
+        // SAFETY: ENV_LOCK is held for the entire duration of this function,
+        // including all await points, so no other test thread mutates HOME
+        // concurrently.
+        unsafe { std::env::set_var("HOME", &tmp) };
 
         f().await;
 
-        {
-            let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-            match &tmp.1 {
-                Some(v) => unsafe { std::env::set_var("HOME", v) },
-                None => unsafe { std::env::remove_var("HOME") },
-            }
+        match prev {
+            // SAFETY: ENV_LOCK is still held; restoring HOME to its previous value.
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            // SAFETY: ENV_LOCK is still held; no concurrent HOME access.
+            None => unsafe { std::env::remove_var("HOME") },
         }
-        drop(std::fs::remove_dir_all(&tmp.0));
+        drop(std::fs::remove_dir_all(&tmp));
+        // _guard dropped here, releasing the lock.
     }
 
     fn make_test_cert_pem() -> String {
