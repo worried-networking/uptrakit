@@ -8,6 +8,8 @@
 pub mod audit;
 pub mod boot;
 pub mod canonical_url;
+pub mod cimd;
+pub mod cimd_parser;
 pub mod http_responses;
 pub mod jwt;
 pub mod pkce;

@@ -9,7 +9,7 @@ version = "0.0.1"
 
 [features]
 default = ["oidc"]
-oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect", "dep:reqwest"]
+oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats", "uptrakit-controller-core/nats"]
 interactive = []
@@ -57,7 +57,7 @@ uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = { workspace = true }
 openidconnect = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
+reqwest = { workspace = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
 axum-server = { workspace = true }
@@ -98,6 +98,7 @@ uptrakit-config-reload = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }
 tower = { workspace = true }
 http-body-util = { workspace = true }
+httpmock = { workspace = true }
 metrics-util = { workspace = true }
 strum = { workspace = true }
 tracing-subscriber = { workspace = true }
