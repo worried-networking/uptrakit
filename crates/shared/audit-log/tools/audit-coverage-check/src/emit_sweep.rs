@@ -1,12 +1,14 @@
 //! Emit-site sweep for stateful audit actions.
 //!
 //! Scans the workspace source tree to verify that every [`Kind::Stateful`]
-//! action registered in the [`Registry`] has at least one `AuditEntry::<method>(` call
-//! site in the source tree (excluding the `audit-log` crate's own `src/` where
-//! the methods are defined).
+//! action registered in the [`Registry`] has at least one emit call site in
+//! the source tree (excluding the `audit-log` crate's own `src/` where the
+//! methods are defined).
 //!
 //! The method name is derived from the action value by replacing `.` with `_`.
-//! For example, action `"plugin_config.update"` → needle `"AuditEntry::plugin_config_update("`.
+//! For example, action `"plugin_config.update"` matches either
+//! `AuditEntry::plugin_config_update(` (plain form) or
+//! `AuditEntry::<Stateful>::plugin_config_update(` (explicit type-parameter form).
 
 use std::path::Path;
 
@@ -23,8 +25,9 @@ pub struct EmitReport {
 /// stateful actions in `registry`.
 ///
 /// For each `Stateful` action, searches all `.rs` files under `crates/`
-/// (excluding `audit-log/src/`) for the pattern `AuditEntry::<method>(`, where
-/// `<method>` is the action value with `.` replaced by `_`.
+/// (excluding `audit-log/src/`) for either `AuditEntry::<method>(` or
+/// `AuditEntry::<Stateful>::<method>(`, where `<method>` is the action value
+/// with `.` replaced by `_`.
 ///
 /// # Errors
 ///
@@ -40,7 +43,11 @@ pub fn scan(root: &Path, registry: &Registry) -> Result<EmitReport, String> {
     let mut missing = Vec::new();
     for action in stateful {
         let method = action.value.replace('.', "_");
-        let needle = format!("AuditEntry::{method}(");
+        // Match both plain `AuditEntry::method(` and the turbofish form
+        // `AuditEntry::<Stateful>::method(` used at call sites that name the
+        // type parameter explicitly.
+        let needle_plain = format!("AuditEntry::{method}(");
+        let needle_stateful = format!("AuditEntry::<Stateful>::{method}(");
         let mut found = false;
         'files: for f in &files {
             // Skip the audit-log crate itself (where the methods are *defined*).
@@ -48,7 +55,7 @@ pub fn scan(root: &Path, registry: &Registry) -> Result<EmitReport, String> {
                 continue;
             }
             match std::fs::read_to_string(f) {
-                Ok(src) if src.contains(&needle) => {
+                Ok(src) if src.contains(&needle_plain) || src.contains(&needle_stateful) => {
                     found = true;
                     break 'files;
                 }

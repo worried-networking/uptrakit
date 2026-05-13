@@ -6,13 +6,16 @@
 //!
 //! # Detection rules
 //!
-//! Three kinds of mutation sites are detected:
+//! Four kinds of mutation sites are detected:
 //!
-//! 1. **Axum handler functions** — `.route("...", post(handler))` / `put` / `patch` / `delete`
+//! 1. **utoipa-axum handler functions** — `async fn` annotated with
+//!    `#[utoipa::path(post/put/patch/delete, ...)]`; emits
+//!    `<module_path>::<fn_name>` for each such function.
+//! 2. **Axum handler functions** — `.route("...", post(handler))` / `put` / `patch` / `delete`
 //!    chains; emits `<module_path>::<handler_ident>` for each handler ident.
-//! 2. **Scheduler executors** — any `impl …Executor for X` block where a `run` method is
+//! 3. **Scheduler executors** — any `impl …Executor for X` block where a `run` method is
 //!    implemented; emits `<module_path>::<X>::run`.
-//! 3. **`#[audit_required]` functions** — emits `<module_path>::<fn_name>`.
+//! 4. **`#[audit_required]` functions** — emits `<module_path>::<fn_name>`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -35,13 +38,13 @@ pub struct WalkReport {
 // ── File collection ──────────────────────────────────────────────────────────
 
 /// Collect all `.rs` files under `<root>/crates/`, skipping `target/`, hidden
-/// directories, and `node_modules/`.
+/// directories, `node_modules/`, and `fixtures/`.
 pub(crate) fn collect_rust_sources(root: &Path) -> Vec<PathBuf> {
     walkdir::WalkDir::new(root.join("crates"))
         .into_iter()
         .filter_entry(|e| {
             let n = e.file_name().to_string_lossy();
-            !(n == "target" || n.starts_with('.') || n == "node_modules")
+            !(n == "target" || n.starts_with('.') || n == "node_modules" || n == "fixtures")
         })
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
@@ -196,6 +199,72 @@ pub(crate) fn derive_module_path(root: &Path, file: &Path, cache: &mut CargoCach
             eprintln!("warning: no Cargo.toml found for {}", file.display());
             mod_segments.join("::")
         }
+    }
+}
+
+// ── utoipa-axum handler collector ────────────────────────────────────────────
+
+/// Returns `true` if `attrs` contains `#[utoipa::path(post/put/patch/delete, ...)]`.
+///
+/// Handles both single-line (`#[utoipa::path(post, path = "...")]`) and
+/// multi-line forms where the verb is the first token inside the attribute.
+fn has_mutation_verb_utoipa_path(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        let path = attr.path();
+        // Must be `utoipa::path` (two segments).
+        if path.segments.len() != 2 {
+            return false;
+        }
+        if path.segments.first().is_none_or(|s| s.ident != "utoipa") {
+            return false;
+        }
+        if path.segments.last().is_none_or(|s| s.ident != "path") {
+            return false;
+        }
+        // Parse the first identifier from the attribute token stream (the HTTP verb).
+        let Ok(meta_list) = attr.meta.require_list() else {
+            return false;
+        };
+        let parser =
+            |input: syn::parse::ParseStream<'_>| -> syn::Result<syn::Ident> { input.parse() };
+        if let Ok(ident) = syn::parse::Parser::parse2(parser, meta_list.tokens.clone()) {
+            return matches!(
+                ident.to_string().as_str(),
+                "post" | "put" | "patch" | "delete"
+            );
+        }
+        false
+    })
+}
+
+/// Collect handler idents from `async fn` functions annotated with
+/// `#[utoipa::path(post/put/patch/delete, ...)]`.
+///
+/// This is the primary detection mechanism for the `utoipa-axum` pattern used
+/// throughout the web-api crate.
+pub(crate) struct UtoipaHandlerCollector {
+    /// Handler function name strings found.
+    pub handlers: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for UtoipaHandlerCollector {
+    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+        if f.sig.asyncness.is_some() && has_mutation_verb_utoipa_path(&f.attrs) {
+            self.handlers.push(f.sig.ident.to_string());
+        }
+        syn::visit::visit_item_fn(self, f);
+    }
+
+    fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+        for item in &i.items {
+            if let syn::ImplItem::Fn(method) = item
+                && method.sig.asyncness.is_some()
+                && has_mutation_verb_utoipa_path(&method.attrs)
+            {
+                self.handlers.push(method.sig.ident.to_string());
+            }
+        }
+        syn::visit::visit_item_impl(self, i);
     }
 }
 
@@ -400,6 +469,12 @@ pub fn scan(root: &Path, catalog: &Catalog, registry: &Registry) -> Result<WalkR
             Err(_) => continue, // skip unparseable files (build scripts, proc-macro crates)
         };
         let module_path = derive_module_path(root, path, &mut cache);
+
+        let mut utoipa = UtoipaHandlerCollector { handlers: vec![] };
+        syn::visit::visit_file(&mut utoipa, &file);
+        for h in utoipa.handlers {
+            discovered.insert(format!("{module_path}::{h}"));
+        }
 
         let mut verbs = VerbHandlerCollector { handlers: vec![] };
         syn::visit::visit_file(&mut verbs, &file);
