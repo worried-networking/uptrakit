@@ -974,7 +974,8 @@ pub(super) async fn ingest_service_audit_event(
                 payload.target_display.clone(),
             )
             .outcome(outcome)
-            .request_id_opt(payload.request_id.clone());
+            .request_id_opt(payload.request_id.clone())
+            .correlation_id_opt(payload.correlation_id);
     builder = if let Some(tenant_id) = target_tenant_id {
         builder.tenant_scope(tenant_id)
     } else {
