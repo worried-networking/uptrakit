@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
     PluginCapability, PluginConfigValidationError, PluginDescriptor, PluginError, PluginFamily,
-    PluginMeta, PluginScope, ReleaseFetcher, Result, RoleCreators, RoleSlot, UpstreamRelease,
-    form_schema::FormFieldDescriptor,
+    PluginMeta, PluginScope, ReleaseFetcher, Result, RoleCreators, UpstreamRelease,
+    descriptor::ReleaseFetcherSlot, form_schema::FormFieldDescriptor, roles::ReleaseFetchContext,
 };
 use uptrakit_shared_types::PluginTypeId;
 
@@ -59,6 +59,7 @@ impl PluginMeta for TestPerItemFailPlugin {
 fn create_release_fetcher(
     _cfg: &serde_json::Value,
     _runtime: Arc<dyn HostRuntime>,
+    _ctx: &ReleaseFetchContext,
 ) -> Result<Box<dyn ReleaseFetcher>> {
     Ok(Box::new(TestFetchFailPlugin))
 }
@@ -66,6 +67,7 @@ fn create_release_fetcher(
 fn create_per_item_fail_release_fetcher(
     _cfg: &serde_json::Value,
     _runtime: Arc<dyn HostRuntime>,
+    _ctx: &ReleaseFetchContext,
 ) -> Result<Box<dyn ReleaseFetcher>> {
     Ok(Box::new(TestPerItemFailPlugin))
 }
@@ -111,7 +113,7 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     roles: RoleCreators {
         discoverer: None,
         version_detector: None,
-        release_fetcher: Some(RoleSlot {
+        release_fetcher: Some(ReleaseFetcherSlot {
             create: create_release_fetcher,
             host_requirements: HostRequirements::CONTROLLER_ONLY,
         }),
@@ -155,7 +157,7 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     roles: RoleCreators {
         discoverer: None,
         version_detector: None,
-        release_fetcher: Some(RoleSlot {
+        release_fetcher: Some(ReleaseFetcherSlot {
             create: create_per_item_fail_release_fetcher,
             host_requirements: HostRequirements::CONTROLLER_ONLY,
         }),

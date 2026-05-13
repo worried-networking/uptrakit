@@ -34,6 +34,8 @@ use crate::UpdateOutputSender;
 use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
 use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
+#[cfg(feature = "catalog")]
+use crate::descriptor::GlobalProviderLookup;
 use crate::error::Result;
 use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleContext};
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
@@ -97,6 +99,40 @@ pub trait VersionDetector: PluginMeta {
             }
         }
         Ok(results)
+    }
+}
+
+/// Context provided to [`ReleaseFetcher`] factory functions at construction time.
+///
+/// Passed as the third argument alongside the config JSON and `HostRuntime`
+/// when the scheduler creates a fetcher instance. Existing plugins ignore this
+/// context; the `package_manager_skills` plugin reads `global_provider_lookup`
+/// to reach the GitHub provider.
+#[non_exhaustive]
+pub struct ReleaseFetchContext {
+    /// Global GitHub provider lookup, available when the embedded scheduler
+    /// runs inside the controller. `None` in standalone-scheduler deployments.
+    #[cfg(feature = "catalog")]
+    pub global_provider_lookup: Option<std::sync::Arc<dyn GlobalProviderLookup>>,
+}
+
+impl ReleaseFetchContext {
+    /// Construct a context with no provider lookup (standalone / test path).
+    pub fn none() -> Self {
+        Self {
+            #[cfg(feature = "catalog")]
+            global_provider_lookup: None,
+        }
+    }
+
+    /// Construct from an `Option<Arc<dyn GlobalProviderLookup>>`.
+    ///
+    /// `None` → standalone / test path; `Some(lookup)` → controller path.
+    #[cfg(feature = "catalog")]
+    pub fn with_lookup_opt(lookup: Option<std::sync::Arc<dyn GlobalProviderLookup>>) -> Self {
+        Self {
+            global_provider_lookup: lookup,
+        }
     }
 }
 
@@ -712,6 +748,20 @@ pub trait GuestExec: PluginMeta {
         ctx: &crate::agent_infra::InfraPluginContext<'_>,
         request: &SurfaceActionRequest,
     ) -> Option<SurfaceActionResponse>;
+}
+
+#[cfg(test)]
+mod release_fetch_context_tests {
+    use super::*;
+
+    #[test]
+    fn release_fetch_context_none_has_no_lookup() {
+        let ctx = ReleaseFetchContext::none();
+        #[cfg(feature = "catalog")]
+        assert!(ctx.global_provider_lookup.is_none());
+        #[cfg(not(feature = "catalog"))]
+        let _ = ctx;
+    }
 }
 
 #[cfg(test)]
