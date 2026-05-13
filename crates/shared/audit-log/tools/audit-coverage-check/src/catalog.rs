@@ -5,6 +5,7 @@
 //! explicit skip decisions).
 
 use serde::Deserialize;
+use std::path::Path;
 
 /// The top-level structure of `audit-catalog.toml`.
 #[derive(Deserialize, Debug)]
@@ -16,29 +17,33 @@ pub struct Catalog {
 /// A single call-site decision in the catalog.
 #[derive(Deserialize, Debug)]
 pub struct Entry {
-    /// Unique identifier for the call site (e.g. `"web_api::routes::hosts::create"`).
+    /// Fully-qualified Rust path, e.g. `"uptrakit_web_api::routes::plugin_configs::create"`.
     pub site: String,
-    /// Registered audit action constant name to emit at this site, if any.
+    /// Registered action key (audited), e.g. `"plugin_config.create"`.
     pub action: Option<String>,
-    /// Reason this site is intentionally skipped, if applicable.
+    /// Reason this site is intentionally not audited.
     pub skip: Option<String>,
 }
 
 /// Load the audit catalog from the TOML file at `path`.
 ///
-/// Returns an empty catalog (no entries) when the file does not yet exist,
-/// so the tool can be run in a freshly-bootstrapped workspace without error.
+/// Returns an error if the file cannot be read, cannot be parsed, or contains
+/// an entry that sets both `action` and `skip` (or neither).
 ///
 /// # Errors
 ///
-/// Returns a descriptive string if the file exists but cannot be read or parsed.
-pub fn load(path: &std::path::Path) -> Result<Catalog, String> {
-    if !path.exists() {
-        return Ok(Catalog { entries: vec![] });
+/// Returns a descriptive string if the file cannot be read, parsed, or
+/// contains an entry with neither or both of `action` / `skip` set.
+pub fn load(path: &Path) -> Result<Catalog, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let catalog: Catalog = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    for e in &catalog.entries {
+        if e.action.is_some() == e.skip.is_some() {
+            return Err(format!(
+                "catalog entry '{}': must set exactly one of `action` or `skip`",
+                e.site
+            ));
+        }
     }
-
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-
-    toml::from_str::<Catalog>(&content).map_err(|e| format!("cannot parse {}: {e}", path.display()))
+    Ok(catalog)
 }
