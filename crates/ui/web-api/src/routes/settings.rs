@@ -2,31 +2,32 @@ use crate::AppState;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use axum::{
     Extension, Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_web_api_queries::queries::tenant_settings::TenantSettingView;
 
 pub use uptrakit_web_api_types::settings::{
     RegistrationSettingsResponse, UpdateRegistrationSettingsRequest,
 };
 
-fn emit_registration_settings_audit(
+/// Emit a validation failure or persistence failure audit event for registration
+/// settings (no DB write — uses the event dispatcher).
+fn emit_registration_settings_event(
     state: &AppState,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    actor_id: Option<uuid::Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
-
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(
         uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
     )
     .tenant_scope(state.default_tenant_id)
@@ -40,7 +41,7 @@ fn emit_registration_settings_audit(
     .details(details)
     .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -93,13 +94,16 @@ pub async fn update_registration_settings(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateRegistrationSettingsRequest>,
 ) -> Response {
+    let api_token_id_inner = api_token_id.map(|value| value.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id_inner);
+
     // Validate: invite mode requires a token
     if req.mode == RegistrationMode::Invite && req.token.is_none() {
-        emit_registration_settings_audit(
+        emit_registration_settings_event(
             &state,
-            &user,
-            api_token_id.map(|value| value.0),
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            actor_type,
+            actor_id,
+            AuditOutcome::ValidationFailed,
             serde_json::json!({
                 "setting_area": "registration",
                 "reason_code": "invite_mode_requires_token",
@@ -116,11 +120,54 @@ pub async fn update_registration_settings(
     let token_provided = req.token.is_some();
     let mode_is_invite = req.mode == RegistrationMode::Invite;
 
+    // Capture before-state for the audit view.
+    let before_reg = state.settings.registration();
+    let before_view = TenantSettingView {
+        key: "registration".to_string(),
+        value: serde_json::json!({
+            "mode": before_reg.mode.as_str(),
+            "require_token_for_oidc": before_reg.require_token_for_oidc,
+        }),
+    };
+    let had_existing_settings = before_reg.token_hash.is_some()
+        || before_reg.mode != RegistrationMode::Closed
+        || before_reg.require_token_for_oidc;
+
+    let tenant_id = state.default_tenant_id;
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin tx for registration settings update: {e}");
+            emit_registration_settings_event(
+                &state,
+                actor_type,
+                actor_id,
+                AuditOutcome::Failed,
+                serde_json::json!({
+                    "setting_area": "registration",
+                    "reason_code": "registration_settings_update_failed",
+                    "mode_is_invite": mode_is_invite,
+                    "token_provided": token_provided,
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let hook = state.audit_emitter.commit_hook();
+
     let mut reg = state.settings.registration();
     if let Err(e) = reg
         .update(
-            state.db(),
-            state.default_tenant_id,
+            &tx,
+            tenant_id,
             req.mode,
             req.token.map(|t| t.expose_secret().to_string()),
             req.require_token_for_oidc,
@@ -128,11 +175,12 @@ pub async fn update_registration_settings(
         .await
     {
         tracing::error!(error = ?e, "Failed to update registration settings");
-        emit_registration_settings_audit(
+        drop(tx);
+        emit_registration_settings_event(
             &state,
-            &user,
-            api_token_id.map(|value| value.0),
-            uptrakit_audit_log::AuditOutcome::Failed,
+            actor_type,
+            actor_id,
+            AuditOutcome::Failed,
             serde_json::json!({
                 "setting_area": "registration",
                 "reason_code": "registration_settings_update_failed",
@@ -142,6 +190,66 @@ pub async fn update_registration_settings(
         );
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    let after_view = TenantSettingView {
+        key: "registration".to_string(),
+        value: serde_json::json!({
+            "mode": reg.mode.as_str(),
+            "require_token_for_oidc": reg.require_token_for_oidc,
+        }),
+    };
+
+    let audit_entry_result = if had_existing_settings {
+        AuditEntry::<Stateful>::tenant_setting_update(&before_view, &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "setting_area": "registration",
+                "mode_is_invite": mode_is_invite,
+                "require_token_for_oidc": reg.require_token_for_oidc,
+                "token_provided": token_provided,
+            }))
+            .build()
+    } else {
+        AuditEntry::<Stateful>::tenant_setting_update(&AbsentView(&after_view), &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "setting_area": "registration",
+                "mode_is_invite": mode_is_invite,
+                "require_token_for_oidc": reg.require_token_for_oidc,
+                "token_provided": token_provided,
+            }))
+            .build()
+    };
+
+    let audit_entry = match audit_entry_result {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for registration settings update: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit stateful audit for registration settings update: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit registration settings update: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
     state.settings.set_registration(reg).await;
 
     let reg = state.settings.registration();
@@ -149,19 +257,6 @@ pub async fn update_registration_settings(
         mode: reg.mode,
         require_token_for_oidc: reg.require_token_for_oidc,
     };
-
-    emit_registration_settings_audit(
-        &state,
-        &user,
-        api_token_id.map(|value| value.0),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "setting_area": "registration",
-            "mode_is_invite": mode_is_invite,
-            "require_token_for_oidc": reg.require_token_for_oidc,
-            "token_provided": token_provided,
-        }),
-    );
 
     (StatusCode::OK, Json(response)).into_response()
 }
