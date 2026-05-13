@@ -16,7 +16,7 @@ name = "audit_coverage_check"
 path = "src/lib.rs"
 
 [dependencies]
-syn = { workspace = true }
+syn = { workspace = true, features = ["visit"] }
 proc-macro2 = { workspace = true }
 walkdir = { workspace = true }
 toml = { workspace = true }

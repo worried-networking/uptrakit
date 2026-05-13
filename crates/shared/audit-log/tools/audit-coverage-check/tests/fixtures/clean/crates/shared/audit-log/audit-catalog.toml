@@ -1,0 +1,3 @@
+[[entries]]
+site = "test_web_clean::routes::test_create_item"
+skip = "test fixture - only for walker test"
