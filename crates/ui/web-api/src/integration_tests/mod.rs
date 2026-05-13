@@ -7,6 +7,7 @@ mod instance_plugins;
 mod notifications;
 mod oauth_boot_validation;
 mod oauth_master_switch_off;
+#[cfg(feature = "oidc")]
 mod oidc_callback;
 mod plugin_configs;
 mod plugin_type_settings;
