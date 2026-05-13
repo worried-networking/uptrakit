@@ -178,6 +178,106 @@ pub fn normalize_serial(hex: &str) -> String {
     result
 }
 
+/// Extract service UUID from SPIFFE URI: `spiffe://<trust_domain>/service/<uuid>`.
+///
+/// Returns `None` if the scheme is not `"spiffe"`, if the host does not match
+/// `trust_domain`, or if the path is not exactly `/service/<uuid>` where
+/// `<uuid>` is a valid [`uuid::Uuid`].
+fn try_parse_spiffe_service_id(uri: &str, trust_domain: &str) -> Option<uuid::Uuid> {
+    let url = url::Url::parse(uri).ok()?;
+    if url.scheme() != "spiffe" {
+        return None;
+    }
+    if url.host_str() != Some(trust_domain) {
+        return None;
+    }
+    let mut segments = url.path_segments()?;
+    let kind = segments.next()?;
+    let id_str = segments.next()?;
+    if kind != "service" || segments.next().is_some() {
+        return None;
+    }
+    id_str.parse::<uuid::Uuid>().ok()
+}
+
+/// Extract service UUID from certificate CN (migration fallback).
+fn extract_cn_service_id(cert: &x509_cert::Certificate) -> Option<uuid::Uuid> {
+    use const_oid::db::rfc4519::COMMON_NAME;
+    use der::asn1::{PrintableStringRef, Utf8StringRef};
+    cert.tbs_certificate
+        .subject
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .filter(|atv| atv.oid == COMMON_NAME)
+        .find_map(|atv| {
+            atv.value
+                .decode_as::<Utf8StringRef<'_>>()
+                .map(|s| s.as_str().to_owned())
+                .ok()
+                .or_else(|| {
+                    atv.value
+                        .decode_as::<PrintableStringRef<'_>>()
+                        .map(|s| s.as_str().to_owned())
+                        .ok()
+                })
+        })
+        .and_then(|cn| cn.parse::<uuid::Uuid>().ok())
+}
+
+/// Parse [`ServiceIdentity`] from DER-encoded X.509 certificate bytes,
+/// preferring a SPIFFE URI SAN over the CN (migration fallback).
+///
+/// - If the cert contains a `spiffe://<trust_domain>/service/<uuid>` URI SAN
+///   matching `trust_domain`, that UUID is used as the service identity.
+/// - Otherwise falls back to CN (supports pre-SPIFFE certs during the ≤2-year
+///   renewal tail).
+pub fn service_identity_from_der_with_trust_domain(
+    der: &[u8],
+    trust_domain: &str,
+) -> Option<ServiceIdentity> {
+    use const_oid::db::rfc5280::ID_CE_SUBJECT_ALT_NAME;
+    use der::Decode;
+    use x509_cert::Certificate;
+    use x509_cert::ext::pkix::SubjectAltName;
+    use x509_cert::ext::pkix::name::GeneralName;
+
+    let cert = Certificate::from_der(der).ok()?;
+    let cert_serial = cert.tbs_certificate.serial_number.to_string();
+
+    // 1. SPIFFE SAN path.
+    if let Some(exts) = &cert.tbs_certificate.extensions {
+        for ext in exts {
+            if ext.extn_id != ID_CE_SUBJECT_ALT_NAME {
+                continue;
+            }
+            let Ok(san) = SubjectAltName::from_der(ext.extn_value.as_bytes()) else {
+                continue;
+            };
+            for gn in san.0 {
+                if let GeneralName::UniformResourceIdentifier(uri) = gn
+                    && let Some(service_id) =
+                        try_parse_spiffe_service_id(uri.as_str(), trust_domain)
+                {
+                    return Some(ServiceIdentity {
+                        service_id,
+                        cert_serial,
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. CN fallback.
+    tracing::debug!(
+        "no SPIFFE SAN matched trust domain {trust_domain:?}; falling back to CN (migration tail)"
+    );
+    extract_cn_service_id(&cert).map(|service_id| ServiceIdentity {
+        service_id,
+        cert_serial,
+    })
+}
+
 /// Axum extractor that deserialises the request body as JSON and immediately
 /// validates it with [`Validate::validate()`].
 ///
@@ -402,6 +502,102 @@ mod tests {
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
         assert!(service_identity_from_der(cert.der()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod spiffe_tests {
+    use super::service_identity_from_der_with_trust_domain;
+
+    fn make_cert_with_spiffe_san(service_id: uuid::Uuid, trust_domain: &str) -> Vec<u8> {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, service_id.to_string());
+        params.subject_alt_names.push(rcgen::SanType::URI(
+            format!("spiffe://{trust_domain}/service/{service_id}")
+                .as_str()
+                .try_into()
+                .unwrap(),
+        ));
+        params.self_signed(&key).unwrap().der().to_vec()
+    }
+
+    fn make_cert_cn_only(service_id: uuid::Uuid) -> Vec<u8> {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, service_id.to_string());
+        params.self_signed(&key).unwrap().der().to_vec()
+    }
+
+    fn make_cert_non_spiffe_uri_san_no_uuid_cn() -> Vec<u8> {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "not-a-uuid");
+        params.subject_alt_names.push(rcgen::SanType::URI(
+            "https://example.com".try_into().unwrap(),
+        ));
+        params.self_signed(&key).unwrap().der().to_vec()
+    }
+
+    fn make_cert_non_spiffe_uri_san_with_uuid_cn(service_id: uuid::Uuid) -> Vec<u8> {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, service_id.to_string());
+        params.subject_alt_names.push(rcgen::SanType::URI(
+            "https://example.com".try_into().unwrap(),
+        ));
+        params.self_signed(&key).unwrap().der().to_vec()
+    }
+
+    const TRUST_DOMAIN: &str = "example.org";
+    const SERVICE_ID: uuid::Uuid = uuid::uuid!("550e8400-e29b-41d4-a716-446655440000");
+
+    #[test]
+    fn spiffe_san_preferred_over_cn() {
+        let der = make_cert_with_spiffe_san(SERVICE_ID, TRUST_DOMAIN);
+        let identity = service_identity_from_der_with_trust_domain(&der, TRUST_DOMAIN)
+            .expect("should parse identity from SPIFFE SAN");
+        assert_eq!(identity.service_id, SERVICE_ID);
+        assert!(!identity.cert_serial.is_empty());
+    }
+
+    #[test]
+    fn cn_fallback_when_no_spiffe_san() {
+        let der = make_cert_cn_only(SERVICE_ID);
+        let identity = service_identity_from_der_with_trust_domain(&der, TRUST_DOMAIN)
+            .expect("should parse identity from CN");
+        assert_eq!(identity.service_id, SERVICE_ID);
+    }
+
+    #[test]
+    fn wrong_trust_domain_falls_back_to_cn() {
+        let der = make_cert_with_spiffe_san(SERVICE_ID, "wrong.domain");
+        let identity = service_identity_from_der_with_trust_domain(&der, TRUST_DOMAIN)
+            .expect("should fall back to CN when trust domain does not match");
+        assert_eq!(identity.service_id, SERVICE_ID);
+    }
+
+    #[test]
+    fn non_spiffe_uri_san_no_uuid_cn_returns_none() {
+        let der = make_cert_non_spiffe_uri_san_no_uuid_cn();
+        let result = service_identity_from_der_with_trust_domain(&der, TRUST_DOMAIN);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn non_spiffe_uri_san_falls_back_to_cn() {
+        let der = make_cert_non_spiffe_uri_san_with_uuid_cn(SERVICE_ID);
+        let identity = service_identity_from_der_with_trust_domain(&der, TRUST_DOMAIN)
+            .expect("should fall back to CN when URI SAN is not SPIFFE");
+        assert_eq!(identity.service_id, SERVICE_ID);
     }
 }
 
