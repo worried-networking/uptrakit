@@ -30,6 +30,7 @@ mod mtls_acceptor;
 mod pki;
 mod reconcile;
 mod reencrypt;
+mod reload;
 #[cfg(feature = "embedded-scheduler")]
 mod scheduler;
 mod server;
