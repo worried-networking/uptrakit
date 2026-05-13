@@ -10,6 +10,7 @@
 		Callout,
 		DataTable,
 		EmptyState,
+		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge,
@@ -19,7 +20,7 @@
 	import RegisterClientDialog from './RegisterClientDialog.svelte';
 
 	const user = getUser();
-	const canManage = hasPermissionValue(user, 'manage_auth_settings');
+	const canManage = hasPermissionValue(user, Permission.ManageAuthSettings);
 	const canManageGlobalSettings = hasPermissionValue(user, Permission.ManageGlobalSettings);
 
 	let clients: OAuthClient[] = $state([]);
@@ -28,6 +29,7 @@
 	let actionError: string | null = $state(null);
 	let processing: string | null = $state(null);
 	let showRegisterDialog: boolean = $state(false);
+	let detailClient = $state<OAuthClient | null>(null);
 
 	// OAuth settings state
 	let mcpEnabled = $state(false);
@@ -180,6 +182,13 @@
 							</td>
 							<td class="table-cell-pad">
 								<div class="flex flex-wrap gap-2">
+									<Button
+										variant="ghost"
+										size="sm"
+										onclick={() => {
+											detailClient = client;
+										}}>View details</Button
+									>
 									{#if client.trusted_at === null && client.revoked_at === null}
 										<Button
 											variant="secondary"
@@ -257,6 +266,42 @@
 		{/if}
 	{/if}
 </PageShell>
+
+{#if detailClient !== null}
+	{@const dc = detailClient}
+	<ModalShell
+		title="Client details"
+		onclose={() => {
+			detailClient = null;
+		}}
+		maxWidth="max-w-lg"
+	>
+		<div class="space-y-3 text-sm">
+			<div>
+				<span class="text-[var(--text-muted)]">Client ID</span>
+				<p class="font-mono text-xs text-[var(--text-primary)] break-all">{dc.id}</p>
+			</div>
+			<div>
+				<span class="text-[var(--text-muted)]">Redirect URIs</span>
+				<ul class="mt-1 space-y-1">
+					{#each dc.redirect_uris as uri (uri)}
+						<li class="font-mono text-xs text-[var(--text-primary)] break-all">{uri}</li>
+					{/each}
+				</ul>
+			</div>
+			{#if dc.client_uri}
+				<div>
+					<span class="text-[var(--text-muted)]">Client URI</span>
+					<p class="text-[var(--text-primary)]">{dc.client_uri}</p>
+				</div>
+			{/if}
+			<div>
+				<span class="text-[var(--text-muted)]">Created</span>
+				<p class="text-[var(--text-primary)]">{new Date(dc.created_at).toLocaleString()}</p>
+			</div>
+		</div>
+	</ModalShell>
+{/if}
 
 <RegisterClientDialog
 	open={showRegisterDialog}

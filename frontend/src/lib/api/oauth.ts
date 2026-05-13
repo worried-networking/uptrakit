@@ -112,6 +112,7 @@ export interface ManualRegisterClientRequest {
 	client_uri: string | null;
 	redirect_uris: string[];
 	default_scope: string;
+	token_endpoint_auth_method: 'none' | 'client_secret_basic';
 }
 
 export async function manualRegisterClient(body: ManualRegisterClientRequest): Promise<OAuthClient> {

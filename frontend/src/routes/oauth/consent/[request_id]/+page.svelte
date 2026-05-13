@@ -6,6 +6,7 @@
 	import type { StatusBadgeTone } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import { getConsentDetails, approveConsent, denyConsent, type ConsentDetails } from '$lib/api/oauth';
+	import { getUser } from '$lib/auth.svelte';
 
 	let details = $state<ConsentDetails | null>(null);
 	let loadError = $state<string | null>(null);
@@ -156,6 +157,15 @@
 					tone="info"
 					message="{details.client_name} will act using your existing permissions — it cannot do anything you cannot already do."
 				/>
+			</div>
+		</SectionCard>
+
+		<SectionCard title="Signed in as">
+			<div class="flex items-start justify-between gap-4">
+				<span class="text-sm text-[var(--text-primary)]">{getUser()?.email ?? ''}</span>
+				<a href="/login?_auth_context=oauth" class="text-sm text-[var(--text-secondary)] underline">
+					Not you? Sign in as someone else
+				</a>
 			</div>
 		</SectionCard>
 

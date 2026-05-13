@@ -19,6 +19,7 @@
 	let clientUri: string = $state('');
 	let redirectUrisRaw: string = $state('');
 	let defaultScope: string = $state('mcp:read');
+	let tokenEndpointAuthMethod = $state<'none' | 'client_secret_basic'>('none');
 	let submitting: boolean = $state(false);
 	let submitError: string | null = $state(null);
 	let fieldErrors: Record<string, string> = $state({});
@@ -92,7 +93,8 @@
 				client_name: clientName.trim(),
 				client_uri: clientUri.trim() || null,
 				redirect_uris: parseRedirectUris(redirectUrisRaw),
-				default_scope: defaultScope
+				default_scope: defaultScope,
+				token_endpoint_auth_method: tokenEndpointAuthMethod
 			});
 			resetForm();
 			onSuccess(client);
@@ -109,6 +111,7 @@
 		clientUri = '';
 		redirectUrisRaw = '';
 		defaultScope = 'mcp:read';
+		tokenEndpointAuthMethod = 'none';
 		fieldErrors = {};
 		submitError = null;
 	}
@@ -179,6 +182,18 @@
 			<FormFieldRow label="Default scope" inputId="reg-default-scope">
 				<Select id="reg-default-scope" bind:value={defaultScope} options={scopeOptions} />
 			</FormFieldRow>
+
+			<div class="space-y-1">
+				<span class="block text-xs text-[var(--text-muted)]">Auth method</span>
+				<label class="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+					<input type="radio" bind:group={tokenEndpointAuthMethod} value="none" />
+					Public client (none)
+				</label>
+				<label class="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+					<input type="radio" bind:group={tokenEndpointAuthMethod} value="client_secret_basic" />
+					Confidential client (client_secret_basic)
+				</label>
+			</div>
 		</div>
 
 		{#snippet footer()}
