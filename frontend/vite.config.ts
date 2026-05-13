@@ -18,6 +18,10 @@ export default defineConfig({
 			'/api': {
 				target: 'https://localhost:8443',
 				secure: false
+			},
+			'/oauth': {
+				target: 'https://localhost:8443',
+				secure: false
 			}
 		}
 	}
