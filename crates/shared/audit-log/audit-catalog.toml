@@ -5,6 +5,680 @@
 #
 # Run `cargo run -p audit-coverage-check` to verify coverage.
 
+# ---------------------------------------------------------------------------
+# Integration test infrastructure — not user-driven state changes
+# ---------------------------------------------------------------------------
+
 [[entries]]
-site = "uptrakit_web_api::routes::host_status::record_heartbeat"
-skip = "heartbeat denormalization; covered by transport access log, no security event"
+site = "uptrakit_integration_tests::crates::core::integration-tests::tests::reverse_proxy::ocsp_responder::handle_ocsp"
+skip = "integration-test OCSP responder stub; infrastructure only, no security event"
+
+# ---------------------------------------------------------------------------
+# router:: namespace — walker detects trailing idents from .route() calls in
+# router.rs; these are duplicates of the corresponding routes:: entries below
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::router::cancel_email_change"
+skip = "no AuditEntry call; cancels pending email-change request, covered by user.update on confirm"
+
+[[entries]]
+site = "uptrakit_web_api::router::change_password"
+action = "user.update"
+
+[[entries]]
+site = "uptrakit_web_api::router::initiate_email_change"
+skip = "no AuditEntry call; initiates email-change flow, covered by user.update on confirm"
+
+[[entries]]
+site = "uptrakit_web_api::router::invoke_surface_interaction"
+action = "surface_action.invoke"
+
+[[entries]]
+site = "uptrakit_web_api::router::manual_register_client"
+skip = "delegates to OAuthClientService; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::router::notification_callback"
+action = "notification.callback"
+
+[[entries]]
+site = "uptrakit_web_api::router::ocsp_post"
+skip = "OCSP certificate status responder; no user-driven state change"
+
+[[entries]]
+site = "uptrakit_web_api::router::revoke_client"
+skip = "delegates to OAuthClientService.revoke; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::router::revoke_consent"
+skip = "delegates to OAuthConsentService.revoke; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::router::trust_client"
+skip = "delegates to OAuthClientService.promote_trusted; no direct AuditEntry emit in handler"
+
+# ---------------------------------------------------------------------------
+# Access presets
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::access_presets::apply_preset"
+action = "user.update"
+
+# ---------------------------------------------------------------------------
+# API tokens
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::api_tokens::create_api_token"
+action = "api_token.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::api_tokens::revoke_api_token"
+action = "api_token.revoke"
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::auth::login"
+action = "auth.login"
+
+[[entries]]
+site = "uptrakit_web_api::routes::auth::logout"
+action = "auth.logout"
+
+[[entries]]
+site = "uptrakit_web_api::routes::auth::refresh"
+action = "auth.token_refresh"
+
+[[entries]]
+site = "uptrakit_web_api::routes::auth::register"
+action = "user.create"
+
+# ---------------------------------------------------------------------------
+# Autodiscovery ignores
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::autodiscovery::batch_autodiscovery_ignores"
+action = "software.ignore.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::autodiscovery::create_autodiscovery_ignore"
+action = "software.ignore.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::autodiscovery::delete_autodiscovery_ignore"
+action = "software.ignore.delete"
+
+# ---------------------------------------------------------------------------
+# Device auth
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::device_auth::device_auth_approve"
+action = "auth.device.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::device_auth::device_auth_deny"
+action = "auth.device.deny"
+
+# ---------------------------------------------------------------------------
+# Discovery allowlist
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::discovery_allowlist::add_host_discovery_allowlist_entry"
+action = "discovery_allowlist.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::discovery_allowlist::add_tenant_discovery_allowlist_entry"
+action = "discovery_allowlist.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::discovery_allowlist::remove_host_discovery_allowlist_entry"
+action = "discovery_allowlist.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::discovery_allowlist::remove_tenant_discovery_allowlist_entry"
+action = "discovery_allowlist.delete"
+
+# ---------------------------------------------------------------------------
+# Enrollment tokens
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::enrollment_tokens::create_enrollment_token"
+action = "enrollment_token.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::enrollment_tokens::revoke_enrollment_token"
+action = "enrollment_token.revoke"
+
+# ---------------------------------------------------------------------------
+# Host tags
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_tags::batch_host_tags"
+action = "host_tag.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_tags::create_host_tag"
+action = "host_tag.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_tags::delete_host_tag"
+action = "host_tag.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_tags::set_host_tags"
+action = "host_tag.assign"
+
+[[entries]]
+site = "uptrakit_web_api::routes::host_tags::update_host_tag"
+action = "host_tag.update"
+
+# ---------------------------------------------------------------------------
+# Hosts
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::hosts::batch_hosts"
+action = "host.deactivate"
+
+[[entries]]
+site = "uptrakit_web_api::routes::hosts::deactivate_host"
+action = "host.deactivate"
+
+[[entries]]
+site = "uptrakit_web_api::routes::hosts::discover_host"
+action = "host.discover"
+
+[[entries]]
+site = "uptrakit_web_api::routes::hosts::update_host"
+action = "host.update"
+
+# ---------------------------------------------------------------------------
+# Instance plugins
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::instance_plugins::set_instance_plugin_enabled"
+action = "instance_plugin.toggled"
+
+[[entries]]
+site = "uptrakit_web_api::routes::instance_plugins::upsert_instance_plugin_config"
+action = "instance_plugin.config_upserted"
+
+# ---------------------------------------------------------------------------
+# MFA self-service (me/2fa)
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::me_2fa::regenerate_recovery_codes"
+action = "auth.mfa.recovery_regenerated"
+
+[[entries]]
+site = "uptrakit_web_api::routes::me_2fa::totp_confirm"
+action = "auth.mfa.enrolled"
+
+[[entries]]
+site = "uptrakit_web_api::routes::me_2fa::totp_disable"
+action = "auth.mfa.disabled"
+
+[[entries]]
+site = "uptrakit_web_api::routes::me_2fa::totp_enroll"
+skip = "provisioning step only; no AuditEntry emitted — enrollment is confirmed and audited by totp_confirm"
+
+# ---------------------------------------------------------------------------
+# MFA challenge (pre-login)
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::mfa::mfa_send_email"
+skip = "sends OTP email for MFA challenge; no AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::mfa::mfa_verify"
+action = "auth.mfa.verified"
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::create_channel"
+action = "notification_channel.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::create_rule"
+action = "notification_rule.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::delete_channel"
+action = "notification_channel.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::delete_rule"
+action = "notification_rule.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::test_channel"
+action = "notification_channel.test"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::update_channel"
+action = "notification_channel.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::notifications::update_rule"
+action = "notification_rule.update"
+
+# ---------------------------------------------------------------------------
+# OAuth — consent flow (routes::oauth module aliases)
+# These are additional paths discovered by the walker from the oauth router
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::approve_consent"
+action = "oauth.consent_grant"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::clients_api::manual_register_client"
+skip = "delegates to OAuthClientService; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::clients_api::revoke_client"
+skip = "delegates to OAuthClientService.revoke; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::clients_api::trust_client"
+skip = "delegates to OAuthClientService.promote_trusted; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::consent::approve_consent"
+action = "oauth.consent_grant"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::consent::deny_consent"
+action = "oauth.consent_deny"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::consents_api::revoke_consent"
+skip = "delegates to OAuthConsentService.revoke; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::delete_client_registration"
+skip = "walker alias for routes::oauth::register::delete_client_registration; no direct AuditEntry emit"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::deny_consent"
+action = "oauth.consent_deny"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::device_authorization::device_authorization"
+action = "auth.device.start"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::mcp_token"
+action = "oauth.token_issued"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::register"
+skip = "walker alias for routes::oauth::register::register (DCR); audit emitted by OAuthClientService on rate-limit only"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::register::delete_client_registration"
+skip = "DCR client deletion (RFC 7592); delegates to OAuthClientService; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::register::register"
+skip = "DCR registration (RFC 7591); OAuthClientService emits rate-limited audit only; no success emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::register::update_client_registration"
+skip = "DCR client update (RFC 7592); delegates to OAuthClientService; no direct AuditEntry emit in handler"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::token::mcp_token"
+action = "oauth.token_issued"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::token::token"
+action = "auth.device.poll"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oauth::update_client_registration"
+skip = "walker alias for routes::oauth::register::update_client_registration; no direct AuditEntry emit"
+
+# ---------------------------------------------------------------------------
+# OIDC auth flow
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_auth::oidc_complete_registration"
+action = "user.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_auth::oidc_exchange"
+action = "auth.oidc.exchange"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_auth::oidc_link"
+action = "auth.oidc.link"
+
+# ---------------------------------------------------------------------------
+# OIDC providers
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_providers::activate_provider"
+action = "oidc_provider.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_providers::create_provider"
+action = "oidc_provider.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_providers::deactivate_provider"
+action = "oidc_provider.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_providers::delete_provider"
+action = "oidc_provider.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_providers::update_provider"
+action = "oidc_provider.update"
+
+# ---------------------------------------------------------------------------
+# Plugin configs
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::batch_plugin_configs"
+action = "plugin_config.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::create_plugin_config"
+action = "plugin_config.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::delete_plugin_config"
+action = "plugin_config.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::discover_plugin_config"
+skip = "read-only discovery probe; no state change, no AuditEntry emit"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::test_plugin_config"
+skip = "test probe; no state change, no AuditEntry emit"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_configs::update_plugin_config"
+action = "plugin_config.update"
+
+# ---------------------------------------------------------------------------
+# Plugin type settings
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_type_settings::delete_plugin_type_settings"
+action = "plugin_type_settings.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::plugin_type_settings::upsert_plugin_type_settings"
+action = "plugin_type_settings.upsert"
+
+# ---------------------------------------------------------------------------
+# Scheduler
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::scheduler::trigger_scheduled_task"
+action = "scheduled_task.trigger"
+
+[[entries]]
+site = "uptrakit_web_api::routes::scheduler::update_scheduled_task"
+action = "scheduled_task.update"
+
+# ---------------------------------------------------------------------------
+# Server certificate
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::server_cert::renew_server_certificate"
+action = "system.server_certificate.renew"
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::approve_service"
+action = "service.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::batch_services"
+action = "service.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::deactivate_service"
+action = "service.deactivate"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::merge_service"
+action = "service.merge"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::reject_service"
+action = "service.reject"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::set_update_freeze"
+action = "service.update_freeze.enable"
+
+[[entries]]
+site = "uptrakit_web_api::routes::services::update_service"
+action = "service.update"
+
+# ---------------------------------------------------------------------------
+# Settings — agent certificates
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_agent_certs::update_agent_certificate_settings"
+action = "tenant_setting.update"
+
+# ---------------------------------------------------------------------------
+# Settings — authentication
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_auth::update_authentication_settings"
+action = "tenant_setting.update"
+
+# ---------------------------------------------------------------------------
+# Settings — CA rotation
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_ca::rotate_ca"
+action = "system.ca.rotate"
+
+# ---------------------------------------------------------------------------
+# Settings — NATS
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_nats::update_nats_settings"
+action = "global_setting.update"
+
+# ---------------------------------------------------------------------------
+# Settings — network
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_network::update_network_settings"
+action = "global_setting.update"
+
+# ---------------------------------------------------------------------------
+# Settings — GitHub provider
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_provider_github::update_github_provider_settings"
+skip = "updates GitHub provider defaults; no AuditEntry emit in handler"
+
+# ---------------------------------------------------------------------------
+# Settings — data reset
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_reset::reset_data"
+action = "tenant.data.reset"
+
+# ---------------------------------------------------------------------------
+# Settings — zeroconf
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings_zeroconf::update_zeroconf_settings"
+action = "global_setting.update"
+
+# ---------------------------------------------------------------------------
+# Settings — registration
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::settings::update_registration_settings"
+action = "tenant_setting.update"
+
+# ---------------------------------------------------------------------------
+# Software items
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::approve_software_item"
+action = "software_item.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::assign_hosts"
+action = "software_item.assign_hosts"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::batch_software_items"
+action = "software_item.batch"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::check_versions"
+action = "software.version_check.triggered"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::check_versions_host"
+action = "software.version_check.triggered"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::create_software_item"
+action = "software_item.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::delete_plugin_assignment"
+action = "software_item.delete_plugin_assignment"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::delete_software_item"
+action = "software_item.delete"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::execute_software_item_merge"
+action = "software_item.merge"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::preview_software_item_merge"
+skip = "preview only; no state change, no AuditEntry emit"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::trigger_update"
+action = "software.update.triggered"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::unassign_host"
+action = "software_item.unassign_host"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::update_host_assignment"
+action = "software_item.update_host_assignment"
+
+[[entries]]
+site = "uptrakit_web_api::routes::software_items::update_software_item"
+action = "software_item.update"
+
+# ---------------------------------------------------------------------------
+# System enrollment tokens
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_enrollment_tokens::create_system_enrollment_token"
+action = "enrollment_token.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_enrollment_tokens::revoke_system_enrollment_token"
+action = "enrollment_token.revoke"
+
+# ---------------------------------------------------------------------------
+# System services
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_services::approve_system_service"
+action = "service.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_services::batch_system_services"
+action = "service.approve"
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_services::deactivate_system_service"
+action = "service.deactivate"
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_services::reject_system_service"
+action = "service.reject"
+
+[[entries]]
+site = "uptrakit_web_api::routes::system_services::update_system_service"
+action = "service.update"
+
+# ---------------------------------------------------------------------------
+# Update batches
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::update_batches::trigger_host_batch_update"
+action = "software.batch_update.triggered"
+
+[[entries]]
+site = "uptrakit_web_api::routes::update_batches::trigger_item_batch_update"
+action = "software.batch_update.triggered"
+
+# ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::update_profile"
+action = "user.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::update_user_active"
+action = "user.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::update_user_roles"
+action = "user.update"

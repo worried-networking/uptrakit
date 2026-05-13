@@ -133,8 +133,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("user.create", AuditActionKind::Stateful);
     pub const USER_UPDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("user.update", AuditActionKind::Stateful);
-    pub const USER_DELETE: RegisteredAuditAction =
-        RegisteredAuditAction::new("user.delete", AuditActionKind::Stateful);
+    // USER_DELETE intentionally omitted: no hard-delete handler exists yet.
+    // Re-add when a delete-user feature is implemented and the emit site is present.
     pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("oidc_provider.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
@@ -209,10 +209,12 @@ impl AuditActionType {
         RegisteredAuditAction::new("service.reject", AuditActionKind::Stateful);
     pub const SERVICE_MERGE: RegisteredAuditAction =
         RegisteredAuditAction::new("service.merge", AuditActionKind::Event);
+    // update-freeze is a fire-and-forget WS command; no DB transaction or before/after
+    // snapshot is taken, so these are classified as Event (not Stateful).
     pub const SERVICE_UPDATE_FREEZE_ENABLE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.update_freeze.enable", AuditActionKind::Stateful);
+        RegisteredAuditAction::new("service.update_freeze.enable", AuditActionKind::Event);
     pub const SERVICE_UPDATE_FREEZE_DISABLE: RegisteredAuditAction =
-        RegisteredAuditAction::new("service.update_freeze.disable", AuditActionKind::Stateful);
+        RegisteredAuditAction::new("service.update_freeze.disable", AuditActionKind::Event);
     pub const SERVICE_DEACTIVATE: RegisteredAuditAction =
         RegisteredAuditAction::new("service.deactivate", AuditActionKind::Stateful);
     pub const SERVICE_CONFIG_STORE: RegisteredAuditAction =
@@ -424,7 +426,6 @@ impl AuditActionType {
             AuditActionType::ENROLLMENT_TOKEN_REVOKE,
             AuditActionType::USER_CREATE,
             AuditActionType::USER_UPDATE,
-            AuditActionType::USER_DELETE,
             AuditActionType::OIDC_PROVIDER_CREATE,
             AuditActionType::OIDC_PROVIDER_UPDATE,
             AuditActionType::OIDC_PROVIDER_DELETE,
@@ -684,7 +685,6 @@ uptrakit_audit_log_derive::audit_actions! {
     // users — Stateful
     user_create => USER_CREATE, Stateful;
     user_update => USER_UPDATE, Stateful;
-    user_delete => USER_DELETE, Stateful;
 
     // oidc providers — Stateful
     oidc_provider_create => OIDC_PROVIDER_CREATE, Stateful;
@@ -738,8 +738,8 @@ uptrakit_audit_log_derive::audit_actions! {
     service_approve => SERVICE_APPROVE, Stateful;
     service_reject => SERVICE_REJECT, Stateful;
     service_merge => SERVICE_MERGE, Event;
-    service_update_freeze_enable => SERVICE_UPDATE_FREEZE_ENABLE, Stateful;
-    service_update_freeze_disable => SERVICE_UPDATE_FREEZE_DISABLE, Stateful;
+    service_update_freeze_enable => SERVICE_UPDATE_FREEZE_ENABLE, Event;
+    service_update_freeze_disable => SERVICE_UPDATE_FREEZE_DISABLE, Event;
     service_deactivate => SERVICE_DEACTIVATE, Stateful;
     service_config_store => SERVICE_CONFIG_STORE, Stateful;
     service_config_delete => SERVICE_CONFIG_DELETE, Stateful;
