@@ -311,7 +311,7 @@ mod tests {
 
         let token = app
             .jwt
-            .create_access_token(user_a, &[], "password", None)
+            .create_access_token(user_a, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -354,7 +354,7 @@ mod tests {
 
         let token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -386,7 +386,7 @@ mod tests {
 
         let token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -426,7 +426,7 @@ mod tests {
         // User B tries to revoke user A's consent.
         let token_b = app
             .jwt
-            .create_access_token(user_b, &[], "password", None)
+            .create_access_token(user_b, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -459,7 +459,7 @@ mod tests {
 
         let token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let random_id = uuid::Uuid::new_v4();
@@ -492,7 +492,7 @@ mod tests {
 
         let user_id = uuid::Uuid::nil();
         let token = jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create access token");
 
         let router = build_router(Arc::clone(&state));

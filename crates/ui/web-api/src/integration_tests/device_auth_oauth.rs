@@ -516,6 +516,7 @@ async fn deny_requires_permission() {
             &[Permission::ViewSettings],
             "password",
             None,
+            None,
         )
         .expect("mint viewer token");
 

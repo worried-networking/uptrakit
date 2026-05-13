@@ -682,7 +682,7 @@ mod tests {
 
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -719,7 +719,7 @@ mod tests {
 
         let other_jwt = app
             .jwt
-            .create_access_token(other_id, &[], "password", None)
+            .create_access_token(other_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -769,7 +769,7 @@ mod tests {
 
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -817,7 +817,7 @@ mod tests {
 
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let body = serde_json::json!({ "typed_confirmation": "wrong-host.com" });
@@ -850,7 +850,7 @@ mod tests {
 
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()

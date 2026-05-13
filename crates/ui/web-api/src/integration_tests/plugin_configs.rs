@@ -79,6 +79,7 @@ async fn list_plugin_types_allows_view_settings_without_view_software() {
             &[Permission::ViewSettings],
             "password",
             None,
+            None,
         )
         .expect("mint settings-only token");
 
@@ -107,6 +108,7 @@ async fn list_plugin_types_allows_manage_global_settings() {
             &[Permission::ManageGlobalSettings],
             "password",
             None,
+            None,
         )
         .expect("mint global-settings token");
 
@@ -134,6 +136,7 @@ async fn list_plugin_type_settings_allows_manage_global_settings() {
             uuid::Uuid::now_v7(),
             &[Permission::ManageGlobalSettings],
             "password",
+            None,
             None,
         )
         .expect("mint global-settings token");

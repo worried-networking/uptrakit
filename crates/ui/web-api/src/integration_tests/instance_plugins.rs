@@ -68,6 +68,7 @@ async fn list_requires_manage_global_settings() {
             &[Permission::ViewSettings],
             "password",
             None,
+            None,
         )
         .expect("mint viewer token");
 
