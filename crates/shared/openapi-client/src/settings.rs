@@ -127,6 +127,7 @@ mod tests {
     fn update_authentication_settings_serialization() {
         let req = UpdateAuthenticationSettingsRequest {
             password_auth_enabled: Some(false),
+            two_factor_required: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["password_auth_enabled"], false);
