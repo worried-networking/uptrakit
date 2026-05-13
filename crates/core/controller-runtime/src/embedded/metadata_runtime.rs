@@ -10,7 +10,6 @@ use uptrakit_plugin_infrastructure_core::service_metadata::{
 pub(crate) struct ControllerMetadataProvider {
     service_name: String,
     version: String,
-    reuseport_configured: bool,
     pid_file: Option<std::path::PathBuf>,
 }
 
@@ -19,13 +18,11 @@ impl ControllerMetadataProvider {
     pub(crate) fn new(
         service_name: String,
         version: String,
-        reuseport_configured: bool,
         pid_file: Option<std::path::PathBuf>,
     ) -> Self {
         Self {
             service_name,
             version,
-            reuseport_configured,
             pid_file,
         }
     }
@@ -40,7 +37,7 @@ impl ServiceMetadataProvider for ControllerMetadataProvider {
             binary_path,
             self.version.clone(),
             DeploymentTopology::UnixBinary,
-            self.reuseport_configured,
+            false,
             self.pid_file.clone(),
         )
     }
@@ -63,7 +60,6 @@ mod tests {
         let provider = ControllerMetadataProvider::new(
             "uptrakit-controller".to_string(),
             "1.0.0".to_string(),
-            false,
             None,
         );
         let runtime = MetadataAwareHostRuntime::new(inner, Arc::new(provider));
