@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/core/*",
     "crates/shared/*",
+    "crates/shared/audit-log/tools/audit-coverage-check",
     "crates/ui/*",
     "crates/plugins/*/*",
     "crates/plugins/hooks/*",
@@ -204,6 +205,7 @@ serde_urlencoded = "0.7"
 husky-rs = { version = "0.3", default-features = false }
 socket2 = "0.6"
 mdns-sd = { version = "0.19", default-features = false }
+walkdir = "2"
 
 [workspace.lints.rust]
 warnings = "deny"

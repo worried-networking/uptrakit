@@ -11,6 +11,7 @@ pub mod runtime_emitter;
 
 pub use commit_hook::AuditCommitHook;
 pub use uptrakit_audit_log_derive::AuditView;
+pub use uptrakit_audit_log_derive::audit_required;
 
 pub use action_type::{AuditActionKind, AuditActionType, RegisteredAuditAction};
 #[cfg(feature = "db")]
