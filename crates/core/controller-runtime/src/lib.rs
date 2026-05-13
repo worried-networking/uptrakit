@@ -720,7 +720,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
         &service_connections,
         &builtin_host,
         app_dirs.state_dir().to_path_buf(),
-        args.reuseport,
         args.pid_file.clone(),
         #[cfg(feature = "nats")]
         &nats_transport,
@@ -733,9 +732,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
     })?;
     let mut sigint = signal(SignalKind::interrupt())
         .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
-    let mut sigusr1 = signal(SignalKind::user_defined1()).context_transform(|e| {
-        AppError::Config(format!("failed to set up SIGUSR1 handler: {e}"))
-    })?;
 
     // Spawn HTTPS server
     let server_handle = axum_server::Handle::new();
@@ -745,12 +741,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         app_state: Arc::clone(&app_state),
         static_dir: validated.static_dir,
         handle: server_handle.clone(),
-        enable_reuseport: args.reuseport,
     };
     let server_task = tokio::spawn(server::run(server_options));
-
-    // Coordinate takeover from old process if requested
-    handle_server_takeover(args.takeover_from, &server_handle).await;
 
     // Spawn zeroconf mDNS advertiser if enabled
     #[cfg(feature = "zeroconf")]
@@ -785,10 +777,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
         _ = sigint.recv() => {
             tracing::info!("received SIGINT, initiating graceful shutdown");
             "SIGINT"
-        }
-        _ = sigusr1.recv() => {
-            tracing::info!("received SIGUSR1 (new process ready), initiating graceful shutdown");
-            "SIGUSR1 (takeover)"
         }
     };
 
@@ -930,14 +918,6 @@ async fn spawn_background_tasks(
             reason = "only used inside the #[cfg(feature = \"embedded-agent\")] block"
         )
     )]
-    reuseport_configured: bool,
-    #[cfg_attr(
-        not(feature = "embedded-agent"),
-        expect(
-            unused_variables,
-            reason = "only used inside the #[cfg(feature = \"embedded-agent\")] block"
-        )
-    )]
     pid_file: Option<std::path::PathBuf>,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
@@ -1007,7 +987,6 @@ async fn spawn_background_tasks(
             bg,
             controller_installation_id,
             state_dir.clone(),
-            reuseport_configured,
             pid_file.clone(),
         )
         .await
@@ -1094,35 +1073,6 @@ async fn spawn_background_tasks(
 
     // Suppress unused-variable warnings when nats feature is disabled.
     let _ = &service_connections;
-}
-
-/// Wait for the HTTPS server to become ready, then signal the old controller
-/// process via SIGUSR1 to begin its graceful shutdown.
-async fn handle_server_takeover(
-    old_pid: Option<u32>,
-    server_handle: &axum_server::Handle<SocketAddr>,
-) {
-    let Some(old_pid) = old_pid else {
-        return;
-    };
-
-    // Wait until the new server is actually listening before signaling the old
-    // process. A 10-second timeout guards against a port conflict or slow TLS
-    // init keeping us blocked indefinitely.
-    match tokio::time::timeout(Duration::from_secs(10), server_handle.listening()).await {
-        Ok(_) => tracing::info!("server is listening; signaling old process"),
-        Err(_) => tracing::warn!(
-            "timed out waiting for server to become ready (10s); \
-             signaling old process anyway"
-        ),
-    }
-    match nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(old_pid as i32),
-        nix::sys::signal::Signal::SIGUSR1,
-    ) {
-        Ok(()) => tracing::info!(pid = old_pid, "sent SIGUSR1 to old process"),
-        Err(e) => tracing::warn!(pid = old_pid, error = %e, "failed to signal old process"),
-    }
 }
 
 /// Spawn the zeroconf mDNS advertiser if the feature is enabled and configured.
