@@ -1,6 +1,10 @@
 //! Tests that the JWT verifier correctly rejects tokens with mismatched audience.
 //!
 //! Per spec §6 + §9.1 RFC 8707 audience binding.
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test helpers — unwrap on infallible token encoding"
+)]
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use uptrakit_web_api_types::oauth::{McpAccessTokenClaims, McpOAuthJwtVerifier};
@@ -27,8 +31,7 @@ fn mint_token_with_aud(aud: &str) -> String {
 
     let mut header = Header::new(Algorithm::HS256);
     header.typ = Some("at+jwt".to_string());
-    encode(&header, &claims, &EncodingKey::from_secret(SECRET))
-        .expect("token encoding should not fail in tests")
+    encode(&header, &claims, &EncodingKey::from_secret(SECRET)).unwrap()
 }
 
 #[test]

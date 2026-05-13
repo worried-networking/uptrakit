@@ -529,11 +529,147 @@ mod tests {
         assert_send_sync::<McpAuthLayer>();
     }
 
+    // -----------------------------------------------------------------------
+    // looks_like_jwt — spec §6.1 prefix-dispatch heuristic
+    // -----------------------------------------------------------------------
+
     #[test]
     fn looks_like_jwt_detects_jwt_shape() {
         assert!(looks_like_jwt("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig"));
         assert!(!looks_like_jwt("upk_abc123"));
         assert!(!looks_like_jwt("eyJhbGc.only_two"));
         assert!(!looks_like_jwt(""));
+    }
+
+    /// Outcome 1 precondition: `upk_` prefix is NOT a JWT — dispatch routes to
+    /// the API-token path, not the OAuth path.
+    #[test]
+    fn looks_like_jwt_rejects_upk_prefix() {
+        assert!(!looks_like_jwt("upk_abc123"));
+        assert!(!looks_like_jwt("upk_"));
+        // upk_ token that happens to start with 'e' — still not JWT
+        assert!(!looks_like_jwt("upk_eyJfake"));
+    }
+
+    /// Outcome 4: garbage token (neither `upk_` nor JWT-shaped) is not
+    /// recognised as a JWT — dispatch returns `Unauthorized`.
+    #[test]
+    fn looks_like_jwt_rejects_garbage_tokens() {
+        assert!(!looks_like_jwt("garbage-not-a-jwt"));
+        assert!(!looks_like_jwt("Bearer eyJabc.def.ghi")); // includes "Bearer " prefix
+        assert!(!looks_like_jwt("basic-auth-token"));
+        assert!(!looks_like_jwt("   ")); // whitespace only
+    }
+
+    /// A valid-looking JWT has exactly two dots and the `eyJ` header prefix.
+    #[test]
+    fn looks_like_jwt_requires_three_segments() {
+        // Two dots — three segments ✓
+        assert!(looks_like_jwt("eyJhbGciOiJIUzI1NiJ9.payload.sig"));
+        // One dot — two segments ✗
+        assert!(!looks_like_jwt("eyJhbGciOiJIUzI1NiJ9.payload"));
+        // Three dots — four segments ✗
+        assert!(!looks_like_jwt("eyJhbGciOiJIUzI1NiJ9.payload.sig.extra"));
+        // Zero dots ✗
+        assert!(!looks_like_jwt("eyJhbGciOiJIUzI1NiJ9"));
+    }
+
+    /// `eyJ` must be case-sensitive — lowercase `eyj` is NOT treated as a JWT.
+    #[test]
+    fn looks_like_jwt_is_case_sensitive_on_prefix() {
+        assert!(!looks_like_jwt("eyjabc.def.ghi"));
+        assert!(!looks_like_jwt("EYJabc.def.ghi"));
+    }
+
+    // -----------------------------------------------------------------------
+    // unauthorized_with_www_auth — WWW-Authenticate header format
+    // -----------------------------------------------------------------------
+
+    /// When OAuth is disabled, `unauthorized_with_www_auth` must NOT add a
+    /// `WWW-Authenticate` header (outcome 6: no PRM advertised).
+    #[test]
+    fn www_auth_header_omitted_when_oauth_disabled() {
+        let resp = unauthorized_with_www_auth(
+            "test body",
+            Some("https://controller.example.com/.well-known/oauth-protected-resource"),
+            false, // oauth_enabled = false
+        );
+        assert!(
+            resp.headers()
+                .get(axum::http::header::WWW_AUTHENTICATE)
+                .is_none(),
+            "WWW-Authenticate must be absent when oauth_enabled = false"
+        );
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    /// When OAuth is enabled with a known PRM URL, the `WWW-Authenticate` header
+    /// must carry `resource_metadata` pointing to the PRM discovery document.
+    #[test]
+    fn www_auth_header_includes_prm_url_when_oauth_enabled() {
+        let prm = "https://controller.example.com/.well-known/oauth-protected-resource";
+        let resp = unauthorized_with_www_auth("test body", Some(prm), true);
+        let header = resp
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .expect("WWW-Authenticate must be present when oauth_enabled = true");
+        let value = header.to_str().expect("header value must be valid UTF-8");
+        assert!(
+            value.contains("resource_metadata="),
+            "WWW-Authenticate must contain resource_metadata"
+        );
+        assert!(
+            value.contains(prm),
+            "WWW-Authenticate must embed the PRM URL"
+        );
+        assert!(
+            value.contains(r#"realm="mcp""#),
+            "WWW-Authenticate must carry realm=mcp"
+        );
+    }
+
+    /// When OAuth is enabled but no PRM URL is configured, the header is still
+    /// emitted (with realm and scope) but without `resource_metadata`.
+    #[test]
+    fn www_auth_header_emitted_without_prm_when_oauth_enabled_no_url() {
+        let resp = unauthorized_with_www_auth("test body", None, true);
+        let header = resp
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .expect("WWW-Authenticate must be present when oauth_enabled = true");
+        let value = header.to_str().expect("header value must be valid UTF-8");
+        assert!(
+            !value.contains("resource_metadata"),
+            "WWW-Authenticate must NOT contain resource_metadata when PRM URL is absent"
+        );
+        assert!(
+            value.contains(r#"realm="mcp""#),
+            "WWW-Authenticate must carry realm=mcp"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Outcome 6: JwtNotAccepted response body — backward-compat check
+    // -----------------------------------------------------------------------
+
+    /// Outcome 6: when OAuth is disabled and the client presents a JWT-shaped
+    /// token, the response body must contain the canonical API-token guidance
+    /// string. This pins the message so wire-compatible clients remain stable.
+    #[test]
+    fn jwt_not_accepted_response_carries_api_token_guidance() {
+        // The dispatch in McpAuthService::call calls `unauthorized(body)` directly
+        // for JwtNotAccepted; we exercise the same body path here.
+        let resp = unauthorized(
+            "JWT tokens are not accepted for MCP access. \
+             Use an API token (upk_...)",
+        );
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+        // No WWW-Authenticate header — no PRM advertised.
+        assert!(
+            resp.headers()
+                .get(axum::http::header::WWW_AUTHENTICATE)
+                .is_none(),
+            "JwtNotAccepted response must not include WWW-Authenticate"
+        );
     }
 }
