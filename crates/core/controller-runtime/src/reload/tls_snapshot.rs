@@ -1,5 +1,3 @@
-#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
-
 //! TLS config snapshot reloadable subsystem.
 //!
 //! [`TlsSnapshotReloadable`] wraps a live [`TlsConfig`] and is distributed to

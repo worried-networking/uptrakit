@@ -61,23 +61,19 @@ pub(crate) struct ValidatedConfig {
 /// Result of loading the TOML config file at startup.
 pub(crate) struct BootedConfig {
     /// Parsed and validated runtime configuration (used for further startup wiring).
-    ///
-    /// Plan 2 tasks consume this to seed subsystem-level Reloadables.
-    #[expect(
-        dead_code,
-        reason = "read by Plan 2 tasks; unused until those tasks are wired in"
-    )]
     pub runtime: uptrakit_config_reload::RuntimeConfig,
-    /// Coordinator handle for state introspection and request submission.
-    pub coordinator_handle: uptrakit_config_reload::ReloadCoordinatorHandle,
+    /// Coordinator (not yet spawned). Caller adds Reloadables via
+    /// [`uptrakit_config_reload::ReloadCoordinator::extend_reloadables`], extracts
+    /// a handle, then spawns.
+    pub coordinator: uptrakit_config_reload::ReloadCoordinator,
     /// Settings-version counter cache.
     pub settings_version_cache: uptrakit_config_reload::SettingsVersionCache,
     /// Watch channel senders held by the coordinator for publishing live updates.
     ///
-    /// Plan 2 Reloadables call `channels.db.send(...)` etc. to push new values.
+    /// Plan 3 wires these into the run loop; unused until then.
     #[expect(
         dead_code,
-        reason = "consumed by Plan 2 Reloadables; unused until those are wired in"
+        reason = "consumed by Plan 3 coordinator fan-out; unused until then"
     )]
     pub channels: uptrakit_config_reload::RuntimeConfigChannels,
     /// Watch channel receivers distributed to subsystems at startup.
@@ -102,11 +98,8 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     let (channels, receivers) =
         uptrakit_config_reload::RuntimeConfigChannels::from_runtime(&loaded.config);
     let (audit_tx, _audit_rx) = tokio::sync::mpsc::unbounded_channel();
-    // Reloadables are populated in Plan 2; start with an empty list.
-    let reloadables: Vec<std::sync::Arc<dyn uptrakit_config_reload::ReloadableErased>> = Vec::new();
     let (coordinator, handle) =
-        uptrakit_config_reload::ReloadCoordinator::new(reloadables, audit_tx);
-    tokio::spawn(coordinator.run());
+        uptrakit_config_reload::ReloadCoordinator::new(Vec::new(), audit_tx);
     let _sighup = uptrakit_config_reload::triggers::sighup::spawn_sighup_task(handle.sender());
     let _watch = uptrakit_config_reload::triggers::file_watch::spawn_file_watch_task(
         config_path,
@@ -115,7 +108,7 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     let settings_version_cache = uptrakit_config_reload::SettingsVersionCache::new();
     Ok(BootedConfig {
         runtime: loaded.config,
-        coordinator_handle: handle,
+        coordinator,
         settings_version_cache,
         channels,
         receivers,

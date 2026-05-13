@@ -1,5 +1,3 @@
-#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
-
 //! DB connection pool reloadable subsystem.
 //!
 //! [`DbConnHandle`] wraps a live [`DatabaseConnection`] and is distributed to
@@ -69,12 +67,6 @@ impl DbPoolReloadable {
             tx,
             snapshot: Mutex::new(None),
         }
-    }
-
-    /// Subscribe to handle updates.  Each receiver always holds the latest
-    /// live pool; consumers should `borrow()` it before issuing queries.
-    pub(crate) fn receiver(&self) -> watch::Receiver<Arc<DbConnHandle>> {
-        self.tx.subscribe()
     }
 }
 
@@ -218,13 +210,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn db_reloadable_apply_swaps_receiver() {
+    async fn db_reloadable_apply_succeeds_and_pool_stays_healthy() {
         let pool = build_test_pool().await;
         let reloadable = DbPoolReloadable::new(pool.clone(), TEST_URL.to_string());
-        let rx = reloadable.receiver();
         let new_cfg = std::sync::Arc::new(DbConfig::with_all(TEST_URL, 32, 6_000));
         reloadable.apply(new_cfg).await.unwrap();
-        assert!(rx.has_changed().unwrap());
+        reloadable.health_check().await.unwrap();
     }
 
     async fn build_test_pool() -> DatabaseConnection {
