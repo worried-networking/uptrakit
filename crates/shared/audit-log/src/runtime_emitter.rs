@@ -12,6 +12,7 @@ pub struct RuntimeAuditEvent {
     pub level: tracing::Level,
     pub occurred_at: OffsetDateTime,
     pub details: serde_json::Value,
+    pub correlation_id: Option<uuid::Uuid>,
 }
 
 pub trait RuntimeAuditForwarder: Send + Sync {
@@ -21,6 +22,7 @@ pub trait RuntimeAuditForwarder: Send + Sync {
 #[derive(Clone, Default)]
 pub struct RuntimeAuditEmitter {
     forwarders: Vec<Arc<dyn RuntimeAuditForwarder>>,
+    correlation_id: Option<uuid::Uuid>,
 }
 
 impl RuntimeAuditEmitter {
@@ -31,12 +33,22 @@ impl RuntimeAuditEmitter {
     pub fn with_forwarder(forwarder: Arc<dyn RuntimeAuditForwarder>) -> Self {
         Self {
             forwarders: vec![forwarder],
+            correlation_id: None,
         }
     }
 
     pub fn with_additional_forwarder(mut self, forwarder: Arc<dyn RuntimeAuditForwarder>) -> Self {
         self.forwarders.push(forwarder);
         self
+    }
+
+    /// Returns a clone of this emitter that stamps every emitted event with
+    /// the given `correlation_id`.
+    pub fn with_correlation(&self, id: uuid::Uuid) -> Self {
+        Self {
+            forwarders: self.forwarders.clone(),
+            correlation_id: Some(id),
+        }
     }
 
     pub fn emit(
@@ -50,6 +62,7 @@ impl RuntimeAuditEmitter {
             level,
             occurred_at: OffsetDateTime::now_utc(),
             details,
+            correlation_id: self.correlation_id,
         };
 
         match event.level {
