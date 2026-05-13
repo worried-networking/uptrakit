@@ -579,7 +579,31 @@ impl ServiceIdentityState {
 /// Returns `(key_pem, csr_pem)`. The keypair is **not** persisted; this is
 /// used for certificate renewal where a fresh keypair is needed without
 /// overwriting the current one on disk until the new certificate arrives.
-pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
+///
+/// When `trust_domain` is non-empty, a SPIFFE URI SAN of the form
+/// `spiffe://<trust_domain>/service/<service_id>` is embedded in the CSR.
+/// When `trust_domain` is empty, no URI SAN is added (backwards-compatible).
+///
+/// # Errors
+///
+/// Returns [`IdentityError::InvalidTrustDomain`] when `trust_domain` is
+/// non-empty but contains whitespace or exceeds 255 characters.
+/// Returns [`IdentityError::CsrGeneration`] on keypair or CSR failures.
+pub fn generate_keypair_and_csr(
+    service_id: uuid::Uuid,
+    trust_domain: &str,
+) -> Result<(String, String)> {
+    // Validate trust_domain when provided.
+    if !trust_domain.is_empty()
+        && (trust_domain.len() > 255 || trust_domain.chars().any(char::is_whitespace))
+    {
+        bail!(EnrollmentError::Identity(
+            IdentityError::InvalidTrustDomain {
+                domain: trust_domain.to_string(),
+            }
+        ));
+    }
+
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
         report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
             format!("key generation failed: {e}")
@@ -590,6 +614,16 @@ pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
     params
         .distinguished_name
         .push(rcgen::DnType::CommonName, service_id.to_string());
+
+    if !trust_domain.is_empty() {
+        let spiffe_uri = format!("spiffe://{trust_domain}/service/{service_id}");
+        let ia5 = spiffe_uri.as_str().try_into().map_err(|e: rcgen::Error| {
+            report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+                format!("SPIFFE URI is not a valid IA5 string: {e}")
+            )))
+        })?;
+        params.subject_alt_names.push(rcgen::SanType::URI(ia5));
+    }
 
     let csr = params.serialize_request(&key_pair).map_err(|e| {
         report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
@@ -1362,6 +1396,93 @@ mod tests {
         );
 
         assert!(matches!(outcome, SaveOutcome::CrashAfterCert));
+    }
+
+    // ── generate_keypair_and_csr SPIFFE SAN tests ──────────────────────
+
+    #[test]
+    fn spiffe_uri_san_in_csr() {
+        let sid = Uuid::now_v7();
+        let (_, csr_pem) =
+            generate_keypair_and_csr(sid, "example.com").expect("generate_keypair_and_csr");
+
+        assert!(
+            csr_pem.contains("BEGIN CERTIFICATE REQUEST"),
+            "CSR must begin with the PEM header"
+        );
+        // The SPIFFE URI is embedded in the CSR as an IA5 string. Decode the
+        // base64 DER payload and search for the raw URI bytes.
+        let expected = format!("spiffe://example.com/service/{sid}");
+        let der_bytes = {
+            // Strip PEM header/footer and decode base64 body.
+            let body: String = csr_pem
+                .lines()
+                .filter(|l| !l.starts_with("-----"))
+                .collect();
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD
+                .decode(body.trim())
+                .expect("base64 decode")
+        };
+        assert!(
+            der_bytes
+                .windows(expected.len())
+                .any(|w| w == expected.as_bytes()),
+            "SPIFFE URI must be present in CSR DER bytes; expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn empty_trust_domain_no_san() {
+        let sid = Uuid::now_v7();
+        let (_, csr_pem) =
+            generate_keypair_and_csr(sid, "").expect("generate_keypair_and_csr with empty domain");
+
+        assert!(
+            csr_pem.contains("BEGIN CERTIFICATE REQUEST"),
+            "CSR must begin with the PEM header"
+        );
+        // No SPIFFE URI should appear in the DER bytes.
+        let body: String = csr_pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+        use base64::Engine as _;
+        let encoded_bytes = base64::engine::general_purpose::STANDARD
+            .decode(body.trim())
+            .expect("base64 decode");
+
+        let needle = b"spiffe://";
+        assert!(
+            !encoded_bytes.windows(needle.len()).any(|w| w == needle),
+            "no SPIFFE URI should be embedded when trust_domain is empty"
+        );
+    }
+
+    #[test]
+    fn invalid_trust_domain_rejected() {
+        let sid = Uuid::now_v7();
+
+        // Contains whitespace.
+        let err = generate_keypair_and_csr(sid, " bad domain ").expect_err("must fail");
+        assert!(
+            matches!(
+                err.current_context(),
+                EnrollmentError::Identity(crate::error::IdentityError::InvalidTrustDomain { .. })
+            ),
+            "whitespace domain must yield InvalidTrustDomain, got: {err}"
+        );
+
+        // Exceeds 255 characters.
+        let long_domain = "a".repeat(256);
+        let err2 = generate_keypair_and_csr(sid, &long_domain).expect_err("must fail");
+        assert!(
+            matches!(
+                err2.current_context(),
+                EnrollmentError::Identity(crate::error::IdentityError::InvalidTrustDomain { .. })
+            ),
+            "256-char domain must yield InvalidTrustDomain, got: {err2}"
+        );
     }
 
     #[tokio::test]

@@ -31,6 +31,8 @@ pub enum IdentityError {
     NotEnrolled,
     #[error("identity not certified (no certificate)")]
     NotCertified,
+    #[error("invalid SPIFFE trust domain: {domain:?}")]
+    InvalidTrustDomain { domain: String },
 }
 
 /// Enrollment protocol and connection errors.
