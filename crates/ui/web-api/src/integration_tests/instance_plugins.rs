@@ -161,18 +161,25 @@ async fn set_enabled_persists_and_audits() {
         Some("enhancement_dashboard_icons")
     );
 
-    let details = row.details_json.expect("audit row must have details");
+    // V2 stateful: before snapshot is {} (AbsentView — no prior row existed).
+    let before = row
+        .before_snapshot
+        .expect("stateful entry must have before_snapshot");
     assert_eq!(
-        details["plugin_type"],
+        before,
+        serde_json::json!({}),
+        "before must be empty object for first-toggle (AbsentView)"
+    );
+
+    // V2 stateful: after snapshot reflects the new enabled state.
+    let after = row
+        .after_snapshot
+        .expect("stateful entry must have after_snapshot");
+    assert_eq!(
+        after["plugin_type_id"],
         serde_json::json!("enhancement_dashboard_icons")
     );
-    assert_eq!(details["operation"], serde_json::json!("toggle"));
-    assert_eq!(details["new_enabled"], serde_json::json!(true));
-    assert_eq!(
-        details["previous_enabled"],
-        serde_json::Value::Null,
-        "first toggle must have null previous_enabled"
-    );
+    assert_eq!(after["enabled"], serde_json::json!(true));
 }
 
 /// PUT .../enabled with an unrecognised plugin type returns 404.

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, DatabaseConnection, EntityTrait, Set, SqliteTransactionMode,
+    ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Set, SqliteTransactionMode,
     TransactionOptions, TransactionTrait,
 };
 use thiserror::Error;
@@ -199,6 +199,126 @@ pub async fn upsert_config(
     txn.commit().await.context_to()?;
 
     Ok(model)
+}
+
+// ── Audit snapshot ─────────────────────────────────────────────────────────────
+
+/// Audit snapshot for an `instance_plugin_setting` entity.
+///
+/// `config` is excluded — it may contain plugin-specific secrets.
+pub struct InstancePluginSettingView {
+    /// The plugin type identifier (primary key).
+    pub plugin_type_id: String,
+    /// Whether the plugin is currently enabled.
+    pub enabled: bool,
+}
+
+impl uptrakit_audit_log::AuditView for InstancePluginSettingView {
+    const TARGET_TYPE: &'static str = "instance_plugin";
+
+    fn audit_target_id(&self) -> String {
+        self.plugin_type_id.clone()
+    }
+
+    fn audit_target_display(&self) -> Option<String> {
+        Some(self.plugin_type_id.clone())
+    }
+
+    fn audit_view(&self) -> serde_json::Value {
+        serde_json::json!({
+            "plugin_type_id": self.plugin_type_id,
+            "enabled": self.enabled,
+        })
+    }
+}
+
+impl From<&Model> for InstancePluginSettingView {
+    fn from(m: &Model) -> Self {
+        Self {
+            plugin_type_id: m.plugin_type_id.clone(),
+            enabled: m.enabled,
+        }
+    }
+}
+
+// ── Transaction-aware helpers ──────────────────────────────────────────────────
+
+async fn find_by_id_conn(db: &impl ConnectionTrait, plugin_type_id: &str) -> Result<Option<Model>> {
+    Entity::find_by_id(plugin_type_id.to_string())
+        .one(db)
+        .await
+        .context_to()
+}
+
+/// Toggle the `enabled` flag for a plugin inside a caller-managed transaction.
+///
+/// Returns `(None, after)` when no row existed prior to this call (INSERT), or
+/// `(Some(before), after)` when a row existed (UPDATE). The caller is responsible
+/// for opening a `BEGIN IMMEDIATE` transaction before calling this function.
+#[tracing::instrument(skip_all, fields(%plugin_type_id, %new_enabled))]
+pub async fn set_enabled_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    plugin_type_id: &str,
+    new_enabled: bool,
+) -> Result<(Option<Model>, Model)> {
+    let existing = find_by_id_conn(tx, plugin_type_id).await?;
+    let now = OffsetDateTime::now_utc();
+    match existing {
+        Some(before) => {
+            let mut active: ActiveModel = before.clone().into();
+            active.enabled = Set(new_enabled);
+            active.updated_at = Set(now);
+            let after = active.update(tx).await.context_to()?;
+            Ok((Some(before), after))
+        }
+        None => {
+            let active = ActiveModel {
+                plugin_type_id: Set(plugin_type_id.to_string()),
+                enabled: Set(new_enabled),
+                config: Set(serde_json::json!({})),
+                updated_at: Set(now),
+            };
+            let after = active.insert(tx).await.context_to()?;
+            Ok((None, after))
+        }
+    }
+}
+
+/// Upsert the `config` for a plugin inside a caller-managed transaction,
+/// preserving the existing `enabled` value.
+///
+/// Returns `(None, after)` when no row existed (INSERT), or
+/// `(Some(before), after)` when a row existed (UPDATE). The caller is responsible
+/// for opening a `BEGIN IMMEDIATE` transaction before calling this function.
+///
+/// If no row exists, one is inserted with `enabled = false`.
+#[tracing::instrument(skip_all, fields(%plugin_type_id))]
+pub async fn upsert_config_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    plugin_type_id: &str,
+    new_config: serde_json::Value,
+) -> Result<(Option<Model>, Model)> {
+    let existing = find_by_id_conn(tx, plugin_type_id).await?;
+    let now = OffsetDateTime::now_utc();
+    match existing {
+        Some(before) => {
+            let mut active: ActiveModel = before.clone().into();
+            active.config = Set(new_config);
+            active.updated_at = Set(now);
+            let after = active.update(tx).await.context_to()?;
+            Ok((Some(before), after))
+        }
+        None => {
+            let active = ActiveModel {
+                plugin_type_id: Set(plugin_type_id.to_string()),
+                enabled: Set(false),
+                config: Set(new_config),
+                updated_at: Set(now),
+            };
+            let after = active.insert(tx).await.context_to()?;
+            Ok((None, after))
+        }
+    }
 }
 
 #[cfg(test)]
