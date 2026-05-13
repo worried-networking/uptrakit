@@ -366,6 +366,277 @@ async fn upsert_role_assignment(
 // Public query functions
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Transaction-aware _in_tx variants (for emit_stateful callers)
+// ---------------------------------------------------------------------------
+
+/// Assign hosts inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Inserts or upserts host links and role assignments; does not reload the full
+/// detail response — that is the caller's responsibility.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::NotFound`, `SoftwareItemQueryError::HostNotFound`,
+/// or other validation / DB errors.
+pub async fn assign_hosts_in_tx(
+    ops: &dyn PluginConfigOps,
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    req: &AssignHostsRequest,
+) -> super::Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    for assignment in &req.host_assignments {
+        let host_id = assignment.host_id;
+
+        let host_model = Host::find_by_id(host_id)
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(txn)
+            .await
+            .context_to()?
+            .ok_or_else(|| report!(SoftwareItemQueryError::HostNotFound(host_id)))?;
+
+        let hsi_id = ensure_host_link(txn, host_id, id, now).await?;
+
+        for role_assignment in &assignment.plugins {
+            upsert_role_assignment(
+                ops,
+                txn,
+                tenant_id,
+                &host_model,
+                id,
+                hsi_id,
+                role_assignment,
+                now,
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Update a host assignment inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Does not reload the full detail response — that is the caller's responsibility.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::NotFound`, validation errors, or DB errors.
+pub async fn update_host_assignment_in_tx(
+    ops: &dyn PluginConfigOps,
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    id: Uuid,
+    host_id: Uuid,
+    req: UpdateHostAssignmentRequest,
+) -> super::Result<()> {
+    let hsi_link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(id))
+        .one(txn)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
+    let hsi_id = hsi_link.id;
+
+    let existing_plugin = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
+        .filter(host_software_item_plugin::Column::Role.eq(req.role.as_str()))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(req.ordinal))
+        .one(txn)
+        .await
+        .context_to()?;
+
+    let (existing_pcid, existing_pkg, existing_override, existing_exec_site) =
+        if let Some(ref ep) = existing_plugin {
+            (
+                ep.plugin_config_id,
+                Some(ep.package_identifier.clone()),
+                parse_stored_config_override(ep.config.clone())?,
+                Some(ep.execution_site.clone()),
+            )
+        } else {
+            (None, None, None, None)
+        };
+
+    let effective_pkg = req
+        .package_identifier
+        .clone()
+        .or(existing_pkg.clone())
+        .unwrap_or_default();
+    let effective_exec_site = req
+        .execution_site
+        .clone()
+        .or(existing_exec_site)
+        .unwrap_or_else(|| "auto".to_string());
+
+    validate_execution_site(&effective_exec_site, &req.role)?;
+
+    // Load host model for compatibility validation.
+    let host_model = Host::find_by_id(host_id)
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(txn)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(SoftwareItemQueryError::HostNotFound(host_id)))?;
+
+    let now = OffsetDateTime::now_utc();
+
+    if let Some(pt) = req.plugin_type {
+        // Type-only inline assignment: no plugin_configs row is created.
+        let effective_override =
+            resolve_type_only_inline_override(&req.config_override, existing_override.clone());
+
+        validate_assignment(
+            ops,
+            pt.as_str(),
+            None,
+            &effective_pkg,
+            effective_override.as_ref(),
+        )?;
+
+        validate_host_compatibility(
+            ops,
+            &host_model,
+            pt.as_str(),
+            &req.role,
+            &effective_exec_site,
+        )?;
+
+        match existing_plugin {
+            Some(existing) => {
+                let mut active: host_software_item_plugin::ActiveModel = existing.into();
+                active.plugin_config_id = Set(None);
+                active.plugin_type = Set(pt.to_string());
+                active.package_identifier = Set(effective_pkg);
+                if !req.config_override.is_keep() {
+                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
+                }
+                active.execution_site = Set(effective_exec_site);
+                active.updated_at = Set(now);
+                active.update(txn).await.context_to()?;
+            }
+            None => {
+                let plugin_row = host_software_item_plugin::ActiveModel {
+                    id: Set(generate_uuid()),
+                    host_id: Set(host_id),
+                    software_item_id: Set(id),
+                    host_software_item_id: Set(hsi_id),
+                    plugin_config_id: Set(None),
+                    plugin_type: Set(pt.to_string()),
+                    role: Set(req.role.as_str().to_string()),
+                    ordinal: Set(req.ordinal),
+                    package_identifier: Set(effective_pkg),
+                    config: Set(req.config_override.into_option().map(Into::into)),
+                    execution_site: Set(effective_exec_site),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                plugin_row.insert(txn).await.context_to()?;
+            }
+        }
+    } else {
+        // Config-based assignment.
+        let synthetic = HostPluginRoleAssignment {
+            role: req.role.clone(),
+            ordinal: req.ordinal,
+            plugin_config_id: req.plugin_config_id.or(existing_pcid),
+            plugin_config: req.plugin_config,
+            package_identifier: effective_pkg.clone(),
+            config_override: req.config_override.clone().resolve(existing_override),
+            execution_site: effective_exec_site.clone(),
+        };
+
+        let (plugin_config_id, config) =
+            resolve_plugin_config_txn(ops, txn, tenant_id, &synthetic).await?;
+
+        validate_assignment(
+            ops,
+            &config.plugin_type,
+            Some(&config.config),
+            &synthetic.package_identifier,
+            synthetic.config_override.as_ref(),
+        )?;
+
+        validate_host_compatibility(
+            ops,
+            &host_model,
+            &config.plugin_type,
+            &req.role,
+            &effective_exec_site,
+        )?;
+
+        match existing_plugin {
+            Some(existing) => {
+                let mut active: host_software_item_plugin::ActiveModel = existing.into();
+                active.plugin_config_id = Set(Some(plugin_config_id));
+                active.plugin_type = Set(config.plugin_type.clone());
+                active.package_identifier = Set(synthetic.package_identifier);
+
+                if !req.config_override.is_keep() {
+                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
+                }
+
+                active.execution_site = Set(synthetic.execution_site);
+                active.updated_at = Set(now);
+                active.update(txn).await.context_to()?;
+            }
+            None => {
+                let plugin_row = host_software_item_plugin::ActiveModel {
+                    id: Set(generate_uuid()),
+                    host_id: Set(host_id),
+                    software_item_id: Set(id),
+                    host_software_item_id: Set(hsi_id),
+                    plugin_config_id: Set(Some(plugin_config_id)),
+                    plugin_type: Set(config.plugin_type.clone()),
+                    role: Set(req.role.as_str().to_string()),
+                    ordinal: Set(req.ordinal),
+                    package_identifier: Set(synthetic.package_identifier),
+                    config: Set(synthetic.config_override.map(Into::into)),
+                    execution_site: Set(synthetic.execution_site),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                plugin_row.insert(txn).await.context_to()?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Unassign a host inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `true` if a link was found and deleted, `false` if not found.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::Db` on DB failures.
+pub async fn unassign_host_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    id: Uuid,
+    host_id: Uuid,
+) -> super::Result<bool> {
+    let link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(id))
+        .one(txn)
+        .await
+        .context_to()?;
+
+    match link {
+        Some(l) => {
+            l.delete(txn).await.context_to()?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
 /// Assign hosts to a software item. Each host carries its own list of role-specific
 /// plugin assignments. Returns the updated detail response, or an error if the item
 /// or a host is not found.

@@ -14,6 +14,36 @@ use super::{
     load_latest_version_for_item, load_plugins,
 };
 
+// ---------------------------------------------------------------------------
+// Transaction-aware _in_tx variant (for emit_stateful callers)
+// ---------------------------------------------------------------------------
+
+/// Delete a plugin assignment inside a caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Returns `true` if the assignment was found and deleted, `false` if not found.
+///
+/// # Errors
+///
+/// Returns `SoftwareItemQueryError::Db` on DB failures.
+pub async fn delete_plugin_assignment_in_tx(
+    txn: &sea_orm::DatabaseTransaction,
+    item_id: Uuid,
+    host_id: Uuid,
+    role: &PluginRole,
+    ordinal: i32,
+) -> super::Result<bool> {
+    let deleted = HostSoftwareItemPlugin::delete_many()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(ordinal))
+        .exec(txn)
+        .await
+        .context_to()?;
+
+    Ok(deleted.rows_affected > 0)
+}
+
 /// Remove a specific plugin assignment identified by `(item_id, host_id, role, ordinal)`.
 ///
 /// Returns the updated [`SoftwareItemDetailResponse`] on success. Returns

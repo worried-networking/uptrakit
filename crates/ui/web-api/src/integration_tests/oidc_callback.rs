@@ -20,12 +20,18 @@
     expect(clippy::panic, reason = "test code: panics on failure are acceptable")
 )]
 
+
 #[cfg(feature = "oidc")]
 use crate::test_harness::TestApp;
 
 /// Helper: extract the `Location` header from a response and return it as a
 /// `String`.  Panics if the header is absent.
 #[cfg(feature = "oidc")]
+#[expect(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "test helper: panics on missing header are intentional"
+)]
 fn location(resp: &http::Response<axum::body::Body>) -> String {
     resp.headers()
         .get(http::header::LOCATION)
