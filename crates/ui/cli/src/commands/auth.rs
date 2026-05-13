@@ -309,6 +309,7 @@ pub struct AuthStatusOutput {
     pub email: String,
     pub user_id: Uuid,
     pub permissions: Vec<String>,
+    pub ca_fingerprint: Option<String>,
 }
 
 impl HumanOutput for AuthStatusOutput {
@@ -323,6 +324,10 @@ impl HumanOutput for AuthStatusOutput {
         out.push_str(&format!("User ID:     {}\n", self.user_id));
         if !self.permissions.is_empty() {
             out.push_str(&format!("Permissions: {}\n", self.permissions.join(", ")));
+        }
+        match &self.ca_fingerprint {
+            Some(fp) => out.push_str(&format!("CA trust:    {fp}\n")),
+            None => out.push_str("CA trust:    system roots\n"),
         }
         out
     }
@@ -618,6 +623,25 @@ pub async fn status(
 
     let permissions: Vec<String> = user.permissions.iter().map(|p| p.to_string()).collect();
 
+    let ca_fingerprint = if insecure {
+        None
+    } else {
+        match config.ca_pem.as_deref() {
+            None => None,
+            Some(pem) => {
+                let der = CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|_e| {
+                    report!(CliError::Other(
+                        "stored CA PEM is unparseable; run 'uptrakit auth ca trust' to re-establish"
+                            .into(),
+                    ))
+                })?;
+                let mut h = Sha256::new();
+                h.update(der.as_ref());
+                Some(uptrakit_shared_types::hex::encode(h.finalize()))
+            }
+        }
+    };
+
     Ok(AuthStatusOutput {
         server,
         first_name: user.first_name,
@@ -625,6 +649,7 @@ pub async fn status(
         email: user.email,
         user_id: user.id,
         permissions,
+        ca_fingerprint,
     })
 }
 
@@ -852,6 +877,7 @@ mod tests {
             email: "john@example.com".to_string(),
             user_id,
             permissions: vec!["view_settings".to_string(), "manage_agents".to_string()],
+            ca_fingerprint: None,
         };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
@@ -870,11 +896,76 @@ mod tests {
             email: "john@example.com".to_string(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
             permissions: vec!["view_settings".to_string()],
+            ca_fingerprint: None,
         };
         let s = output.to_human_string();
         assert!(s.contains("https://example.com"), "server missing");
         assert!(s.contains("john@example.com"), "email missing");
         assert!(s.contains("view_settings"), "permissions missing");
+    }
+
+    #[test]
+    fn auth_status_output_includes_ca_fingerprint() {
+        let fp = "e".repeat(64);
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "Alice".into(),
+            last_name: "B".into(),
+            email: "alice@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            permissions: vec![],
+            ca_fingerprint: Some(fp.clone()),
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(v["ca_fingerprint"], fp);
+    }
+
+    #[test]
+    fn auth_status_output_null_when_no_ca() {
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "Alice".into(),
+            last_name: "B".into(),
+            email: "alice@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            permissions: vec![],
+            ca_fingerprint: None,
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(v["ca_fingerprint"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn auth_status_human_output_shows_ca_trust() {
+        let fp = "e".repeat(64);
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "A".into(),
+            last_name: "B".into(),
+            email: "a@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            permissions: vec![],
+            ca_fingerprint: Some(fp.clone()),
+        };
+        let s = output.to_human_string();
+        assert!(s.contains(&fp), "fingerprint missing from human output");
+    }
+
+    #[test]
+    fn auth_status_human_output_shows_system_roots_when_no_ca() {
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "A".into(),
+            last_name: "B".into(),
+            email: "a@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            permissions: vec![],
+            ca_fingerprint: None,
+        };
+        let s = output.to_human_string();
+        assert!(s.contains("system roots"), "system roots line missing");
     }
 
     #[test]
