@@ -1,5 +1,3 @@
-#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
-
 use std::sync::Arc;
 use std::time::Duration;
 

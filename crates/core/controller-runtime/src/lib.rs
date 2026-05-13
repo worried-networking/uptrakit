@@ -456,8 +456,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
             )
         )]
-        let mut sources =
-            uptrakit_web_api::ServiceCredentialSources::new(Some(db_url), None, master_key_hex);
+        let mut sources = uptrakit_web_api::ServiceCredentialSources::new(
+            Some(db_url.clone()),
+            None,
+            master_key_hex,
+        );
         #[cfg(feature = "nats")]
         if let Some(ref url) = reconciled.nats_url {
             sources.nats_url = Some(url.clone());
@@ -514,7 +517,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
-        .db(db_conn)
+        .db(db_conn.clone())
         .settings(settings)
         .cert_signer(cert_signer)
         .service_connections(service_connections.clone())
@@ -542,7 +545,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
-        .audit_log_dispatcher(audit_dispatcher)
+        .audit_log_dispatcher(audit_dispatcher.clone())
         .audit_emitter(audit_emitter)
         .plugin_ops(plugin_ops)
         .surface_registry(surface_registry)
@@ -552,13 +555,93 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .reject_dangerous_commands(!args.allow_dangerous_commands);
 
     // Wire config-reload coordinator and receivers when boot_config succeeded.
-    let builder = if let Some(b) = booted {
-        builder
-            .coordinator_handle(b.coordinator_handle)
-            .settings_version_cache(b.settings_version_cache)
-            .config_receivers(b.receivers)
+    //
+    // Build each Reloadable from the loaded RuntimeConfig + available subsystem
+    // handles, extend the coordinator (which was not yet spawned), extract a
+    // handle, then spawn coordinator + reconciler.
+    let (coordinator_handle_opt, settings_version_cache_opt, receivers_opt) = if let Some(mut b) =
+        booted
+    {
+        // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
+        let db_reloadable = reload::db_pool::DbPoolReloadable::new(db_conn.clone(), db_url.clone());
+        let (tls_reloadable, _tls_rx) =
+            reload::tls_snapshot::TlsSnapshotReloadable::new(b.runtime.tls.clone());
+        let (https_reloadable, _https_rx) =
+            reload::https_listener::HttpsListenerReloadable::new(b.runtime.network.https.clone());
+        let (pki_reloadable, _pki_rx) =
+            reload::pki_listener::PkiListenerReloadable::new(b.runtime.network.pki.clone());
+        let (audit_reloadable, _audit_rx) = reload::audit::AuditDispatcherReloadable::new(
+            audit_dispatcher.clone(),
+            b.runtime.audit.clone(),
+        );
+        let (zeroconf_reloadable, _zeroconf_rx) =
+            reload::zeroconf::ZeroconfReloadable::new(b.runtime.zeroconf.clone());
+        let (plugin_reloadable, _plugin_rx) =
+            uptrakit_web_api_queries::reload::plugin_registry::PluginCatalogReloadable::new(
+                uptrakit_config_reload::config::PluginsConfig::default(),
+            );
+        let (embedded_reloadable, _embedded_rx) =
+            reload::embedded::EmbeddedServicesReloadable::new(b.runtime.embedded_services.clone());
+
+        #[cfg_attr(
+            not(feature = "nats"),
+            expect(
+                unused_mut,
+                reason = "only pushed inside the #[cfg(feature = \"nats\")] block below"
+            )
+        )]
+        let mut reloadables: Vec<
+            std::sync::Arc<dyn uptrakit_config_reload::ReloadableErased>,
+        > = vec![
+            Arc::new(db_reloadable),
+            Arc::new(tls_reloadable),
+            Arc::new(https_reloadable),
+            Arc::new(pki_reloadable),
+            Arc::new(audit_reloadable),
+            Arc::new(zeroconf_reloadable),
+            Arc::new(plugin_reloadable),
+            Arc::new(embedded_reloadable),
+        ];
+
+        #[cfg(feature = "nats")]
+        if let (Some(nats), Some(url)) = (&nats_transport, &reconciled.nats_url) {
+            reloadables.push(Arc::new(reload::nats::NatsReloadable::new(
+                nats.nats_client(),
+                url.clone(),
+            )));
+        }
+
+        b.coordinator.extend_reloadables(reloadables);
+        let coordinator_handle = b.coordinator.handle();
+
+        let _reconciler = reload::reconciler::spawn_config_reconciler(
+            db_conn.clone(),
+            coordinator_handle.sender(),
+            b.settings_version_cache.clone(),
+            shutdown_token.clone(),
+        );
+
+        tokio::spawn(b.coordinator.run());
+
+        (
+            Some(coordinator_handle),
+            Some(b.settings_version_cache),
+            Some(b.receivers),
+        )
     } else {
-        builder
+        (None, None, None)
+    };
+
+    let builder = match (
+        coordinator_handle_opt,
+        settings_version_cache_opt,
+        receivers_opt,
+    ) {
+        (Some(handle), Some(cache), Some(receivers)) => builder
+            .coordinator_handle(handle)
+            .settings_version_cache(cache)
+            .config_receivers(receivers),
+        _ => builder,
     };
 
     #[cfg(feature = "oidc")]

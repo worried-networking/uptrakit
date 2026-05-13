@@ -210,6 +210,6 @@ mod tests {
     #[test]
     fn nats_validate_accepts_valid_url() {
         let cfg = NatsConfig::new("nats://localhost:4222");
-        assert!(cfg.validate().is_ok());
+        cfg.validate().unwrap();
     }
 }
