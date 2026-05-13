@@ -39,7 +39,8 @@ mod tests {
         assert!(args.max_tenants.is_none());
         assert!(args.common.enrollment_token.is_none());
         assert!(args.common.friendly_name.is_none());
-        assert!(!args.common.tofu);
+        assert!(!args.common.tofu_insecure);
+        assert!(args.common.tofu_fingerprint.is_none());
     }
 
     #[test]
@@ -58,7 +59,7 @@ mod tests {
             "secret-token-123",
             "--friendly-name",
             "Production MQTT Node 1",
-            "--tofu",
+            "--tofu-insecure",
         ])
         .unwrap();
         assert_eq!(
@@ -82,7 +83,7 @@ mod tests {
             args.common.friendly_name.as_deref(),
             Some("Production MQTT Node 1")
         );
-        assert!(args.common.tofu);
+        assert!(args.common.tofu_insecure);
     }
 
     #[test]
