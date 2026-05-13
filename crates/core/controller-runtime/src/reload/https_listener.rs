@@ -1,3 +1,5 @@
+#![allow(dead_code, reason = "items wired into coordinator in Task 14")]
+
 //! HTTPS listener reloadable subsystem.
 //!
 //! [`HttpsListenerReloadable`] distributes updated [`HttpsConfig`] values to
