@@ -34,16 +34,17 @@ fn emit_device_auth_decision_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(state.default_tenant_id)
-        .actor(actor_type, actor_id)
-        .target("device_flow", device_flow_id, None)
-        .outcome(outcome)
-        .details(details)
-        .build();
+    let entry =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(state.default_tenant_id)
+            .actor(actor_type, actor_id)
+            .target("device_flow", device_flow_id, None)
+            .outcome(outcome)
+            .details(details)
+            .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

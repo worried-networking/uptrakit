@@ -161,16 +161,18 @@ fn emit_service_credentials_audit_event(
         details["reason_code"] = serde_json::Value::String(reason_code.to_string());
     }
 
-    let mut builder = AuditEntry::builder(AuditActionType::SERVICE_CREDENTIALS_DELIVER)
-        .actor_service(service_id)
-        .actor_display_opt(service_app_name.map(str::to_string))
-        .target(
-            "service",
-            service_id.to_string(),
-            service_app_name.map(str::to_string),
-        )
-        .outcome(outcome)
-        .details(details);
+    let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::SERVICE_CREDENTIALS_DELIVER,
+    )
+    .actor_service(service_id)
+    .actor_display_opt(service_app_name.map(str::to_string))
+    .target(
+        "service",
+        service_id.to_string(),
+        service_app_name.map(str::to_string),
+    )
+    .outcome(outcome)
+    .details(details);
     builder = if !is_system {
         builder.tenant_scope(
             service_tenant_id.expect("tenant service credential delivery requires tenant scope"),
@@ -180,7 +182,7 @@ fn emit_service_credentials_audit_event(
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             error = %error,
             %service_id,

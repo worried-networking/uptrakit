@@ -19,16 +19,18 @@ pub fn emit_api_token_auth_audit(
     outcome: AuditOutcome,
     reason_code: &'static str,
 ) {
-    let entry = AuditEntry::builder(AuditActionType::AUTH_API_TOKEN_AUTHENTICATE)
-        .tenant_scope(default_tenant_id)
-        .actor(AuditActorType::ApiToken, None)
-        .outcome(outcome)
-        .details(serde_json::json!({ "reason_code": reason_code }))
-        .request_id_opt(request_id)
-        .build();
+    let entry = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
+    )
+    .tenant_scope(default_tenant_id)
+    .actor(AuditActorType::ApiToken, None)
+    .outcome(outcome)
+    .details(serde_json::json!({ "reason_code": reason_code }))
+    .request_id_opt(request_id)
+    .build();
 
     match entry {
-        Ok(e) => audit_emitter.emit_best_effort(e),
+        Ok(e) => audit_emitter.emit_event(e),
         Err(e) => tracing::warn!(err = %e, "failed to build audit entry for api token auth"),
     }
 }

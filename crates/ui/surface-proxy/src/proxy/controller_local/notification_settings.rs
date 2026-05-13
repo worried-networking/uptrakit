@@ -169,20 +169,21 @@ pub(crate) fn emit_notification_settings_audit_event(
     if let Some(reason_code) = reason_code {
         details["reason_code"] = serde_json::json!(reason_code);
     }
-    let builder =
-        uptrakit_audit_log::AuditEntry::builder(notification_settings_audit_action_type(action))
-            .tenant_scope(tenant_id)
-            .actor(
-                uptrakit_audit_log::AuditActorType::User,
-                Some(caller_user_id),
-            )
-            .target(
-                target_type,
-                target_id.to_string(),
-                Some(target_id.to_string()),
-            );
+    let builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        notification_settings_audit_action_type(action),
+    )
+    .tenant_scope(tenant_id)
+    .actor(
+        uptrakit_audit_log::AuditActorType::User,
+        Some(caller_user_id),
+    )
+    .target(
+        target_type,
+        target_id.to_string(),
+        Some(target_id.to_string()),
+    );
 
     if let Ok(entry) = builder.outcome(outcome).details(details).build() {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }

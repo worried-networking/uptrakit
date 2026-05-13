@@ -111,7 +111,7 @@ fn emit_device_start_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START,
     )
     .tenant_scope(state.default_tenant_id)
@@ -124,6 +124,6 @@ fn emit_device_start_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }

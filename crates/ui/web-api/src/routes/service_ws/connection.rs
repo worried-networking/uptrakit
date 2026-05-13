@@ -939,7 +939,7 @@ fn emit_service_enrollment_failure_audit(
     reason_code: &'static str,
     message: &str,
 ) {
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
     )
     .actor(uptrakit_audit_log::AuditActorType::Service, None)
@@ -961,7 +961,7 @@ fn emit_service_enrollment_failure_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -1058,16 +1058,18 @@ async fn emit_service_authentication_failure_audit(
         details["client_ip"] = serde_json::Value::String(client_ip.to_string());
     }
 
-    let mut builder = AuditEntry::builder(AuditActionType::AUTH_SERVICE_AUTHENTICATE)
-        .actor_service(service_id)
-        .actor_display_opt(resolved.service_app_name.clone())
-        .target(
-            "service",
-            service_id.to_string(),
-            resolved.service_app_name.clone(),
-        )
-        .outcome(outcome)
-        .details(details);
+    let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+    )
+    .actor_service(service_id)
+    .actor_display_opt(resolved.service_app_name.clone())
+    .target(
+        "service",
+        service_id.to_string(),
+        resolved.service_app_name.clone(),
+    )
+    .outcome(outcome)
+    .details(details);
     builder = if let Some(tenant_id) = resolved.tenant_id {
         builder.tenant_scope(tenant_id)
     } else {
@@ -1075,7 +1077,7 @@ async fn emit_service_authentication_failure_audit(
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             error = %error,
             %service_id,
@@ -1276,7 +1278,7 @@ mod tests {
                     .ok()
                     .flatten()
                     .map(|service| {
-                        uptrakit_audit_log::AuditEntry::builder(
+                        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                             uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
                         )
                         .system_scope()
@@ -1298,7 +1300,7 @@ mod tests {
                 .ok()
                 .flatten()
                 .map(|service| {
-                    uptrakit_audit_log::AuditEntry::builder(
+                    uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
                         uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
                     )
                     .tenant_scope(service.tenant_id)
@@ -1316,7 +1318,7 @@ mod tests {
         };
 
         if let Some(Ok(entry)) = entry {
-            state.audit_emitter.emit_best_effort(entry);
+            state.audit_emitter.emit_event(entry);
         }
     }
 

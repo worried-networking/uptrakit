@@ -64,19 +64,20 @@ fn emit_auth_login_audit(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let mut builder =
-        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::AUTH_LOGIN)
-            .tenant_scope(state.default_tenant_id)
-            .actor(uptrakit_audit_log::AuditActorType::User, actor_id)
-            .outcome(outcome)
-            .details(serde_json::Value::Object(details));
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::AUTH_LOGIN,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(uptrakit_audit_log::AuditActorType::User, actor_id)
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details));
 
     if let Some(actor_id) = actor_id {
         builder = builder.target("user", actor_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -97,7 +98,7 @@ fn emit_auth_token_refresh_audit(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::AUTH_TOKEN_REFRESH,
     )
     .tenant_scope(state.default_tenant_id)
@@ -111,7 +112,7 @@ fn emit_auth_token_refresh_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -131,19 +132,20 @@ fn emit_auth_logout_audit(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let mut builder =
-        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::AUTH_LOGOUT)
-            .tenant_scope(state.default_tenant_id)
-            .actor(uptrakit_audit_log::AuditActorType::User, Some(actor_id))
-            .outcome(outcome)
-            .details(serde_json::Value::Object(details));
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(uptrakit_audit_log::AuditActorType::User, Some(actor_id))
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details));
 
     if let Some(target_user_id) = target_user_id {
         builder = builder.target("user", target_user_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 
@@ -166,19 +168,20 @@ fn emit_user_register_audit(
         );
     }
 
-    let mut builder =
-        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_CREATE)
-            .tenant_scope(state.default_tenant_id)
-            .actor(uptrakit_audit_log::AuditActorType::User, user_id)
-            .outcome(outcome)
-            .details(serde_json::Value::Object(details));
+    let mut builder = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::USER_CREATE,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(uptrakit_audit_log::AuditActorType::User, user_id)
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details));
 
     if let Some(user_id) = user_id {
         builder = builder.target("user", user_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        state.audit_emitter.emit_event(entry);
     }
 }
 

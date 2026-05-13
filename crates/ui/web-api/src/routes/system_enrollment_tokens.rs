@@ -34,18 +34,19 @@ fn emit_system_enrollment_token_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .system_scope()
-        .actor(actor_type, actor_id)
-        .outcome(outcome)
-        .details(details);
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .system_scope()
+            .actor(actor_type, actor_id)
+            .outcome(outcome)
+            .details(details);
 
     if let Some(token_id) = target_token_id {
         builder = builder.target("system_enrollment_token", token_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }
 

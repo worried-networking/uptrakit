@@ -60,16 +60,17 @@ fn emit_notification_audit(
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target(target_type, target_id, target_display)
-        .outcome(outcome)
-        .details(details)
-        .build();
+    let entry =
+        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
+            .tenant_scope(ctx.tenant_id)
+            .actor(actor_type, actor_id)
+            .target(target_type, target_id, target_display)
+            .outcome(outcome)
+            .details(details)
+            .build();
 
     if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_event(entry);
     }
 }
 
@@ -88,7 +89,7 @@ fn emit_notification_callback_audit(
         details.insert("reason_code".to_string(), serde_json::json!(reason_code));
     }
 
-    let entry = uptrakit_audit_log::AuditEntry::builder(
+    let entry = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::NOTIFICATION_CALLBACK,
     )
     .tenant_scope(tenant_id)
@@ -103,7 +104,7 @@ fn emit_notification_callback_audit(
     .build();
 
     if let Ok(entry) = entry {
-        audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_event(entry);
     }
 }
 
