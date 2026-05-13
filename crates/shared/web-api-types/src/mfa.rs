@@ -62,6 +62,15 @@ pub struct MfaChallengeResponse {
     pub mfa_methods: Vec<MfaMethod>,
 }
 
+impl MfaChallengeResponse {
+    pub fn new(mfa_token: String, mfa_methods: Vec<MfaMethod>) -> Self {
+        Self {
+            mfa_token,
+            mfa_methods,
+        }
+    }
+}
+
 /// Body for `POST /api/v1/auth/mfa/verify`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfaVerifyRequest {
