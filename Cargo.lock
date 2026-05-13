@@ -7657,6 +7657,7 @@ name = "uptrakit-mcp"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "jsonwebtoken",
  "rmcp",
  "schemars 1.2.1",
  "sea-orm",
@@ -8607,6 +8608,7 @@ dependencies = [
  "hostname",
  "http",
  "http-body-util",
+ "httpmock",
  "ipnet",
  "jsonwebtoken",
  "metrics",
@@ -8737,10 +8739,12 @@ dependencies = [
 name = "uptrakit-web-api-types"
 version = "0.0.2"
 dependencies = [
+ "jsonwebtoken",
  "rootcause",
  "sea-orm",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "strum",
  "thiserror 2.0.18",
  "time",
