@@ -16,6 +16,7 @@ pub mod host_software_item_plugin;
 pub mod host_tag;
 pub mod host_tag_assignment;
 pub mod instance_plugin_setting;
+pub mod mfa_challenge;
 pub mod notification_channel;
 pub mod notification_log;
 pub mod notification_rule;
@@ -59,7 +60,9 @@ pub mod update_history;
 pub mod update_output_line;
 pub mod user;
 pub mod user_oidc_link;
+pub mod user_recovery_code;
 pub mod user_role;
+pub mod user_totp;
 
 pub mod prelude;
 pub mod tenant_scoped;
