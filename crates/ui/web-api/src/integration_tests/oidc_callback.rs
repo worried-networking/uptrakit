@@ -8,12 +8,12 @@
 //! Token-exchange paths (requiring a real JWT / PKCE flow) are deferred to a
 //! future task.
 
-#[cfg(feature = "oidc")]
+#![cfg(feature = "oidc")]
+
 use crate::test_harness::TestApp;
 
 /// Helper: extract the `Location` header from a response and return it as a
 /// `String`.  Panics if the header is absent.
-#[cfg(feature = "oidc")]
 #[expect(
     clippy::panic,
     clippy::expect_used,
@@ -32,7 +32,6 @@ fn location(resp: &http::Response<axum::body::Body>) -> String {
 
 /// When the OIDC provider returns an `error` query parameter (e.g. the user
 /// denied consent), the handler must redirect to `/login?error=oidc_denied`.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_provider_error_redirects_to_oidc_denied() {
     let app = TestApp::new().await;
@@ -51,7 +50,6 @@ async fn oidc_callback_provider_error_redirects_to_oidc_denied() {
 
 /// When neither `code` nor `state` are present the handler redirects to
 /// `/login?error=oidc_missing_params`.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_missing_code_redirects_to_oidc_missing_params() {
     let app = TestApp::new().await;
@@ -70,7 +68,6 @@ async fn oidc_callback_missing_code_redirects_to_oidc_missing_params() {
 
 /// When `code` is present but `state` is absent the handler redirects to
 /// `/login?error=oidc_missing_params`.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_missing_state_redirects_to_oidc_missing_params() {
     let app = TestApp::new().await;
@@ -90,7 +87,6 @@ async fn oidc_callback_missing_state_redirects_to_oidc_missing_params() {
 /// When both `code` and `state` are present but the `state` token does not
 /// exist in the `pending_oidc_flows` table (expired or never issued), the
 /// handler redirects to `/login?error=oidc_state_expired`.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_unknown_state_redirects_to_oidc_state_expired() {
     let app = TestApp::new().await;
@@ -111,7 +107,6 @@ async fn oidc_callback_unknown_state_redirects_to_oidc_state_expired() {
 /// When a valid CSRF state entry exists in the DB but the referenced OIDC
 /// provider has been deleted (or deactivated), the handler redirects to
 /// `/login?error=oidc_provider_gone`.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
     use openidconnect::{Nonce, PkceCodeVerifier};
@@ -127,7 +122,8 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
     // Use the OidcFlowStore to insert a real pending flow entry.
     // PkceCodeVerifier and Nonce are constructed from raw strings — the token
     // exchange never happens so their exact values do not matter.
-    app.state
+    let insert_result = app
+        .state
         .oidc
         .oidc_flow_store
         .insert(
@@ -136,8 +132,11 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
             &PkceCodeVerifier::new("test_pkce_verifier".to_string()),
             &Nonce::new("test_nonce".to_string()),
         )
-        .await
-        .expect("insert pending OIDC flow");
+        .await;
+    assert!(
+        insert_result.is_ok(),
+        "insert pending OIDC flow: {insert_result:?}"
+    );
 
     // The flow exists but the provider does not — expect oidc_provider_gone.
     // The Host header is required for `base_url_from_headers` to succeed.
@@ -174,7 +173,6 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
 
 /// A completely empty callback (no query params) also redirects to
 /// `oidc_missing_params` since both `code` and `state` are absent.
-#[cfg(feature = "oidc")]
 #[tokio::test]
 async fn oidc_callback_no_params_redirects_to_oidc_missing_params() {
     let app = TestApp::new().await;

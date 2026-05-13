@@ -84,6 +84,8 @@ jobs:
       - run: cargo clippy --all-targets --no-default-features --features db-sqlite -- -D warnings
       - name: Check legacy error-match patterns
         run: ./scripts/check_legacy_error_matches.sh
+      - name: Audit coverage check
+        run: cargo run -p audit-coverage-check
 
   backend-test:
     runs-on:
