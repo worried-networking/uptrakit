@@ -14,8 +14,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::Deserialize;
 use std::sync::Arc;
+use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, SurfaceActionContext};
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
@@ -198,14 +200,16 @@ pub async fn create_channel(
     Json(body): Json<CreateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if let Err(e) = body.validate() {
+        let audit_ctx = AuditContext {
+            audit_emitter: &state.audit_emitter,
+            tenant_id,
+            user: &user,
+            api_token_id,
+        };
         emit_notification_audit(
             &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
@@ -213,18 +217,43 @@ pub async fn create_channel(
             "pending".to_string(),
             body.name.clone().into(),
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
+            serde_json::json!({ "reason_code": "invalid_request" }),
         );
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let resp =
-        match notif_queries::create_channel(&tenant_db, &body, &*state.plugin.plugin_ops).await {
-            Ok(resp) => resp,
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification channel create: {e}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let model =
+        match notif_queries::create_channel_in_tx(&tx, tenant_id, &body, &*state.plugin.plugin_ops)
+            .await
+        {
+            Ok(m) => m,
             Err(err) => {
+                drop(tx);
                 let (outcome, reason_code) = err.current_context().audit_classification();
+                let audit_ctx = AuditContext {
+                    audit_emitter: &state.audit_emitter,
+                    tenant_id,
+                    user: &user,
+                    api_token_id,
+                };
                 emit_notification_audit(
                     &audit_ctx,
                     uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
@@ -232,25 +261,62 @@ pub async fn create_channel(
                     "pending".to_string(),
                     body.name.clone().into(),
                     outcome,
-                    serde_json::json!({
-                        "reason_code": reason_code,
-                    }),
+                    serde_json::json!({ "reason_code": reason_code }),
                 );
                 return Err(err.into());
             }
         };
-    emit_notification_audit(
-        &audit_ctx,
-        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
-        "notification_channel",
-        resp.id.to_string(),
-        Some(resp.name.clone()),
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "channel_type": resp.channel_type,
-            "enabled": resp.enabled,
-        }),
-    );
+
+    let after_view = notif_queries::NotificationChannelView::from(&model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::notification_channel_create(
+        &AbsentView(&after_view),
+        &after_view,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({
+        "channel_type": model.channel_type,
+        "enabled": model.enabled,
+    }))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for notification channel create: {e}");
+            drop(tx);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification channel create: {e}");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification channel create: {e}");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    let masked_config = notif_queries::mask_channel_config(&model, &*state.plugin.plugin_ops);
+    let resp = notif_queries::channel_to_response(model, masked_config);
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
@@ -350,14 +416,16 @@ pub async fn update_channel(
     Json(body): Json<UpdateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &state.audit_emitter,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
-    };
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
 
     if let Err(e) = body.validate() {
+        let audit_ctx = AuditContext {
+            audit_emitter: &state.audit_emitter,
+            tenant_id,
+            user: &user,
+            api_token_id,
+        };
         emit_notification_audit(
             &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
@@ -365,18 +433,48 @@ pub async fn update_channel(
             channel_id.to_string(),
             None,
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            serde_json::json!({
-                "reason_code": "invalid_request",
-            }),
+            serde_json::json!({ "reason_code": "invalid_request" }),
         );
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin.plugin_ops)
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
         .await
     {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification channel update: {e}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let pair = match notif_queries::update_channel_in_tx(
+        &tx,
+        tenant_id,
+        channel_id,
+        &body,
+        &*state.plugin.plugin_ops,
+    )
+    .await
+    {
+        Ok(p) => p,
         Err(err) => {
+            drop(tx);
             let (outcome, reason_code) = err.current_context().audit_classification();
+            let audit_ctx = AuditContext {
+                audit_emitter: &state.audit_emitter,
+                tenant_id,
+                user: &user,
+                api_token_id,
+            };
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
@@ -384,45 +482,86 @@ pub async fn update_channel(
                 channel_id.to_string(),
                 None,
                 outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                }),
+                serde_json::json!({ "reason_code": reason_code }),
             );
-            Err(err.into())
+            return Err(err.into());
         }
-        Ok(Some(resp)) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
-                "notification_channel",
-                resp.id.to_string(),
-                Some(resp.name.clone()),
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({
-                    "channel_type": resp.channel_type,
-                    "enabled": resp.enabled,
-                    "name_changed": body.name.is_some(),
-                    "config_changed": body.config.is_some(),
-                    "enabled_changed": body.enabled.is_some(),
-                }),
-            );
-            Ok((StatusCode::OK, Json(resp)).into_response())
-        }
-        Ok(None) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
-                "notification_channel",
-                channel_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "channel_not_found",
-                }),
-            );
-            Ok(error_response(StatusCode::NOT_FOUND, "Channel not found"))
-        }
+    };
+
+    let Some((before_model, after_model)) = pair else {
+        drop(tx);
+        let audit_ctx = AuditContext {
+            audit_emitter: &state.audit_emitter,
+            tenant_id,
+            user: &user,
+            api_token_id,
+        };
+        emit_notification_audit(
+            &audit_ctx,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+            "notification_channel",
+            channel_id.to_string(),
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({ "reason_code": "channel_not_found" }),
+        );
+        return Ok(error_response(StatusCode::NOT_FOUND, "Channel not found"));
+    };
+
+    let before_view = notif_queries::NotificationChannelView::from(&before_model);
+    let after_view = notif_queries::NotificationChannelView::from(&after_model);
+
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry =
+        match AuditEntry::<Stateful>::notification_channel_update(&before_view, &after_view)
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::Success)
+            .details(serde_json::json!({
+                "channel_type": after_model.channel_type,
+                "enabled": after_model.enabled,
+                "name_changed": body.name.is_some(),
+                "config_changed": body.config.is_some(),
+                "enabled_changed": body.enabled.is_some(),
+            }))
+            .build()
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::error!("Failed to build audit entry for notification channel update: {e}");
+                drop(tx);
+                return Ok(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
+            }
+        };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification channel update: {e}");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification channel update: {e}");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    let masked_config = notif_queries::mask_channel_config(&after_model, &*state.plugin.plugin_ops);
+    let resp = notif_queries::channel_to_response(after_model, masked_config);
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Delete a notification channel
@@ -444,34 +583,41 @@ pub async fn update_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_channel(
-    State(audit): State<AuditEmitterState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &user,
-        api_token_id,
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+    let tenant_id = tenant_db.tenant_id();
+
+    let tx = match state
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for notification channel delete: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
 
-    match notif_queries::delete_channel(&tenant_db, channel_id).await {
-        Ok(true) => {
-            emit_notification_audit(
-                &audit_ctx,
-                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
-                "notification_channel",
-                channel_id.to_string(),
-                None,
-                uptrakit_audit_log::AuditOutcome::Success,
-                serde_json::json!({}),
-            );
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(false) => {
+    let before_model = match notif_queries::delete_channel_in_tx(&tx, tenant_id, channel_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            drop(tx);
+            let audit_ctx = AuditContext {
+                audit_emitter: &state.audit_emitter,
+                tenant_id,
+                user: &user,
+                api_token_id,
+            };
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
@@ -479,14 +625,19 @@ pub async fn delete_channel(
                 channel_id.to_string(),
                 None,
                 uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "reason_code": "channel_not_found",
-                }),
+                serde_json::json!({ "reason_code": "channel_not_found" }),
             );
-            error_response(StatusCode::NOT_FOUND, "Channel not found")
+            return error_response(StatusCode::NOT_FOUND, "Channel not found");
         }
         Err(e) => {
+            drop(tx);
             tracing::error!(error = ?e, "failed to delete notification channel");
+            let audit_ctx = AuditContext {
+                audit_emitter: &state.audit_emitter,
+                tenant_id,
+                user: &user,
+                api_token_id,
+            };
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
@@ -494,13 +645,49 @@ pub async fn delete_channel(
                 channel_id.to_string(),
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
-                serde_json::json!({
-                    "reason_code": "channel_delete_failed",
-                }),
+                serde_json::json!({ "reason_code": "channel_delete_failed" }),
             );
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    let before_view = notif_queries::NotificationChannelView::from(&before_model);
+    let hook = state.audit_emitter.commit_hook();
+    let audit_entry = match AuditEntry::<Stateful>::notification_channel_delete(
+        &before_view,
+        &AbsentView(&before_view),
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(AuditOutcome::Success)
+    .details(serde_json::json!({}))
+    .build()
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for notification channel delete: {e}");
+            drop(tx);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for notification channel delete: {e}");
+        drop(tx);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit notification channel delete: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+    hook.flush_after_commit().await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Send a test notification through a channel

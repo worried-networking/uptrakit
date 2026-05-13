@@ -18,6 +18,194 @@ use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
 use crate::tenant_db::TenantDb;
 
+// -- Audit snapshot -----------------------------------------------------------
+
+/// Audit snapshot for a `notification_channel` entity.
+///
+/// `config` is explicitly excluded: it contains encrypted channel credentials
+/// (tokens, passwords, webhook URLs) and must never appear in audit log
+/// snapshots.  `tenant_id` is excluded because it is redundant with the
+/// tenant-scoped audit entry itself.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "notification_channel")]
+pub struct NotificationChannelView {
+    pub id: Uuid,
+    #[audit(skip)]
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub channel_type: String,
+    #[audit(skip)]
+    pub config: uptrakit_crypto::EncryptedString,
+    pub enabled: bool,
+}
+
+impl From<&notification_channel::Model> for NotificationChannelView {
+    fn from(m: &notification_channel::Model) -> Self {
+        Self {
+            id: m.id,
+            tenant_id: m.tenant_id,
+            name: m.name.clone(),
+            channel_type: m.channel_type.clone(),
+            config: m.config.clone(),
+            enabled: m.enabled,
+        }
+    }
+}
+
+// -- Transaction-aware mutation helpers (for emit_stateful callers) -----------
+
+/// Insert a new notification channel inside a caller-managed `BEGIN IMMEDIATE`
+/// transaction.
+///
+/// Validates and encrypts the config before inserting.  Returns the inserted
+/// [`notification_channel::Model`] so the caller can build both the audit
+/// snapshot and the HTTP response without a second DB round-trip.
+///
+/// # Errors
+///
+/// Returns [`ChannelQueryError`] if the channel type is unsupported, the config
+/// fails validation, encryption fails, or the DB insert fails.
+pub async fn create_channel_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
+    plugin_ops: &dyn PluginOps,
+) -> ChannelResult<notification_channel::Model> {
+    use uptrakit_shared_types::PluginTypeId;
+    let channel_type_id = PluginTypeId::new(&req.channel_type);
+    let config = req
+        .config
+        .to_object_map()
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+    let config_value = json_object_map_to_value(&config);
+
+    if plugin_ops.transport(&channel_type_id).is_none() {
+        return Err(report!(ChannelQueryError::UnsupportedType(
+            req.channel_type.clone()
+        )));
+    }
+
+    plugin_ops
+        .validate_config(&channel_type_id, &config_value)
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+
+    let config_str = serde_json::to_string(&config_value)
+        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+
+    let now = OffsetDateTime::now_utc();
+    let id = Uuid::now_v7();
+
+    let encrypted_config =
+        uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
+            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+
+    let model = notification_channel::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        name: Set(req.name.clone()),
+        channel_type: Set(req.channel_type.clone()),
+        config: Set(encrypted_config),
+        enabled: Set(req.enabled),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    model.insert(tx).await.context_to()
+}
+
+/// Update an existing notification channel inside a caller-managed `BEGIN
+/// IMMEDIATE` transaction.
+///
+/// Returns `None` when the channel does not exist (tenant-scoped lookup).
+/// Returns `Some((before, after))` on success — `before` is the pre-update
+/// snapshot and `after` is the result of the update.
+///
+/// # Errors
+///
+/// Returns [`ChannelQueryError`] if config validation, encryption, or the DB
+/// read/write fails.
+pub async fn update_channel_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    channel_id: Uuid,
+    req: &uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest,
+    plugin_ops: &dyn PluginOps,
+) -> ChannelResult<Option<(notification_channel::Model, notification_channel::Model)>> {
+    let Some(existing) = notification_channel::Entity::find_by_id(channel_id)
+        .filter(notification_channel::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    let before = existing.clone();
+    let mut active: notification_channel::ActiveModel = existing.into();
+    active.updated_at = Set(OffsetDateTime::now_utc());
+
+    if let Some(name) = &req.name {
+        active.name = Set(name.clone());
+    }
+    if let Some(config) = &req.config {
+        let config = config
+            .to_object_map()
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+        let config_value = json_object_map_to_value(&config);
+
+        let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&before.channel_type);
+        plugin_ops
+            .validate_config(&channel_type_id, &config_value)
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+        let config_str = serde_json::to_string(&config_value)
+            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+        let encrypted_config = uptrakit_crypto::EncryptedString::new(
+            config_str,
+            "uptrakit:notification_channels:config",
+        )
+        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+        active.config = Set(encrypted_config);
+    }
+    if let Some(enabled) = req.enabled {
+        active.enabled = Set(enabled);
+    }
+
+    let after = active.update(tx).await.context_to()?;
+    Ok(Some((before, after)))
+}
+
+/// Read then delete a notification channel inside a caller-managed `BEGIN
+/// IMMEDIATE` transaction.
+///
+/// Returns `None` when the channel does not exist (tenant-scoped lookup).
+/// Returns `Some(before)` — the pre-deletion model — on success, so the caller
+/// can build the audit snapshot.
+///
+/// # Errors
+///
+/// Returns [`ChannelQueryError`] if the DB read or delete fails.
+pub async fn delete_channel_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    channel_id: Uuid,
+) -> ChannelResult<Option<notification_channel::Model>> {
+    let Some(existing) = notification_channel::Entity::find_by_id(channel_id)
+        .filter(notification_channel::Column::TenantId.eq(tenant_id))
+        .one(tx)
+        .await
+        .context_to()?
+    else {
+        return Ok(None);
+    };
+
+    notification_channel::Entity::delete_by_id(channel_id)
+        .exec(tx)
+        .await
+        .context_to()?;
+
+    Ok(Some(existing))
+}
+
 // -- Channels -----------------------------------------------------------------
 
 #[tracing::instrument(skip_all)]
@@ -479,7 +667,7 @@ impl RuleQueryError {
 
 // -- Helpers ------------------------------------------------------------------
 
-fn channel_to_response(
+pub fn channel_to_response(
     model: notification_channel::Model,
     masked_config: JsonObjectMap,
 ) -> NotificationChannelResponse {
@@ -494,7 +682,7 @@ fn channel_to_response(
     }
 }
 
-fn mask_channel_config(
+pub fn mask_channel_config(
     channel: &notification_channel::Model,
     plugin_ops: &dyn PluginOps,
 ) -> JsonObjectMap {
