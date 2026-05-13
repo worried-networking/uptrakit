@@ -154,7 +154,7 @@ pub async fn interactive_ws(
         }
     } else {
         match authenticate_jwt(&state, &token).await {
-            Ok(user) => (user, None),
+            Ok((user, _setup_required)) => (user, None),
             Err(e) => {
                 if let Some((actor, outcome, reason_code)) =
                     classify_interactive_auth_failure(&token, &e)

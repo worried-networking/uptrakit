@@ -296,7 +296,7 @@ mod tests {
             .map(str::to_owned);
 
         if let Some(token) = token
-            && let Ok(user) = authenticate_jwt(&state, &token).await
+            && let Ok((user, _setup_required)) = authenticate_jwt(&state, &token).await
         {
             req.extensions_mut().insert(user);
         }
