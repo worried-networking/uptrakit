@@ -2892,4 +2892,67 @@ mod tests {
         assert_eq!(details["deleted_count"], serde_json::json!(0));
         assert_eq!(details["failed_count"], serde_json::json!(1));
     }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn create_plugin_config_config_json_absent_from_audit_snapshots() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let secret_config_value = "my-very-secret-api-key-for-snapshot-test";
+        let response = create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser::new(
+                actor_user_id,
+                AuthMethod::ApiToken,
+                vec![Permission::ManageCommands],
+                None,
+            )),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: "Snapshot Secret Config".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({
+                    "version_command": secret_config_value
+                }),
+                enabled: true,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+
+        let before = row.before_snapshot.expect("before_snapshot");
+        let after = row.after_snapshot.expect("after_snapshot");
+
+        assert!(
+            before.get("config").is_none(),
+            "config key must not appear in before_snapshot"
+        );
+        assert!(
+            after.get("config").is_none(),
+            "config key must not appear in after_snapshot"
+        );
+        assert!(
+            !before.to_string().contains(secret_config_value),
+            "secret config value must not appear in before_snapshot JSON"
+        );
+        assert!(
+            !after.to_string().contains(secret_config_value),
+            "secret config value must not appear in after_snapshot JSON"
+        );
+    }
 }
