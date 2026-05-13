@@ -1474,6 +1474,24 @@ mod audit_tests {
             !details.to_string().contains(client_secret),
             "client secret must never be present in audit details"
         );
+        let before = row.before_snapshot.expect("before_snapshot");
+        let after = row.after_snapshot.expect("after_snapshot");
+        assert!(
+            before.get("client_secret").is_none(),
+            "client_secret key must not appear in before_snapshot"
+        );
+        assert!(
+            after.get("client_secret").is_none(),
+            "client_secret key must not appear in after_snapshot"
+        );
+        assert!(
+            !before.to_string().contains(client_secret),
+            "client_secret plaintext must not appear in before_snapshot JSON"
+        );
+        assert!(
+            !after.to_string().contains(client_secret),
+            "client_secret plaintext must not appear in after_snapshot JSON"
+        );
     }
 
     #[tokio::test]
@@ -1582,6 +1600,24 @@ mod audit_tests {
         assert!(
             !update_details.to_string().contains(updated_secret),
             "updated client secret must never be present in audit details"
+        );
+        let update_before = update_row.before_snapshot.expect("update before_snapshot");
+        let update_after = update_row.after_snapshot.expect("update after_snapshot");
+        assert!(
+            update_before.get("client_secret").is_none(),
+            "client_secret key must not appear in update before_snapshot"
+        );
+        assert!(
+            update_after.get("client_secret").is_none(),
+            "client_secret key must not appear in update after_snapshot"
+        );
+        assert!(
+            !update_before.to_string().contains(updated_secret),
+            "updated client_secret must not appear in before_snapshot JSON"
+        );
+        assert!(
+            !update_after.to_string().contains(updated_secret),
+            "updated client_secret must not appear in after_snapshot JSON"
         );
 
         let delete_status = client

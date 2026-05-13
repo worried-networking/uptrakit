@@ -1805,3 +1805,93 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod snapshot_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use uptrakit_shared_db::entity::audit_log;
+
+    async fn latest_notification_channel_audit_row(
+        db: &sea_orm::DatabaseConnection,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query notification channel audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected notification channel audit row for {action_type}");
+    }
+
+    #[tokio::test]
+    async fn create_channel_config_absent_from_audit_snapshots() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let token = fixtures::register_and_get_token(&client).await;
+        let secret_signing_key = "super-secret-webhook-signing-key";
+
+        let (status, _): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/notifications/channels",
+                &serde_json::json!({
+                    "name": "Snapshot Test Channel",
+                    "channel_type": "webhook",
+                    "config": {
+                        "url": "https://hooks.example.com/notify",
+                        "secret": secret_signing_key
+                    },
+                    "enabled": true
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+
+        assert_eq!(status, http::StatusCode::CREATED);
+
+        let row = latest_notification_channel_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+
+        let before = row.before_snapshot.expect("before_snapshot");
+        let after = row.after_snapshot.expect("after_snapshot");
+
+        assert!(
+            before.get("config").is_none(),
+            "config key must not appear in before_snapshot"
+        );
+        assert!(
+            after.get("config").is_none(),
+            "config key must not appear in after_snapshot"
+        );
+        assert!(
+            !before.to_string().contains(secret_signing_key),
+            "webhook secret must not appear in before_snapshot JSON"
+        );
+        assert!(
+            !after.to_string().contains(secret_signing_key),
+            "webhook secret must not appear in after_snapshot JSON"
+        );
+    }
+}

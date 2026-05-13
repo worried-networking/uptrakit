@@ -1358,7 +1358,7 @@ mod tests {
         Set,
     };
     use uptrakit_shared_db::entity::audit_log;
-    use uptrakit_shared_types::MaskedEmail;
+    use uptrakit_shared_types::{MaskedEmail, SecretString};
 
     async fn latest_user_update_audit_row_for_target(
         db: &DatabaseConnection,
@@ -1533,6 +1533,64 @@ mod tests {
         assert_eq!(
             details["reason_code"],
             serde_json::json!("self_deactivation_blocked")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_user_active_password_hash_absent_from_audit_snapshots() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+
+        let target_user = {
+            let now = OffsetDateTime::now_utc();
+            user::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                email: Set(MaskedEmail::new("hash-check@test.local".to_string())),
+                first_name: Set("Hash".to_string()),
+                last_name: Set("Check".to_string()),
+                password_hash: Set(Some(SecretString::new("$argon2id$known-secret-hash-value"))),
+                is_active: Set(true),
+                deactivated_at: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&app.db)
+            .await
+            .expect("insert target user with hash")
+        };
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/active", target_user.id),
+                &UpdateUserActiveRequest { is_active: false },
+            )
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        let known_hash = "$argon2id$known-secret-hash-value";
+
+        let before = row.before_snapshot.expect("before_snapshot");
+        let after = row.after_snapshot.expect("after_snapshot");
+
+        assert!(
+            before.get("password_hash").is_none(),
+            "password_hash key must not appear in before_snapshot"
+        );
+        assert!(
+            after.get("password_hash").is_none(),
+            "password_hash key must not appear in after_snapshot"
+        );
+        assert!(
+            !before.to_string().contains(known_hash),
+            "known password hash value must not appear in before_snapshot JSON"
+        );
+        assert!(
+            !after.to_string().contains(known_hash),
+            "known password hash value must not appear in after_snapshot JSON"
         );
     }
 }
