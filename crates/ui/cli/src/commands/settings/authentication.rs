@@ -51,6 +51,7 @@ pub async fn authentication_update(
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateAuthenticationSettingsRequest {
         password_auth_enabled,
+        two_factor_required: None,
     };
     client
         .update_authentication_settings(&req)
@@ -68,6 +69,7 @@ mod tests {
     fn authentication_settings_human_output() {
         let resp = AuthenticationSettingsResponse {
             password_auth_enabled: false,
+            two_factor_required: false,
         };
         let s = resp.to_human_string();
         assert!(s.contains("false"), "password_auth_enabled missing");

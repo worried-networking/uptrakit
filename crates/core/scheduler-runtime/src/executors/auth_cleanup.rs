@@ -3,7 +3,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Transac
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{
-    api_rate_limit, email_change_request, pending_device_flow, scheduled_task,
+    api_rate_limit, email_change_request, mfa_challenge, pending_device_flow, scheduled_task,
 };
 
 use crate::executor::TaskExecutor;
@@ -81,6 +81,14 @@ impl TaskExecutor for AuthCleanupExecutor {
 
         EmailChangeRequest::delete_many()
             .filter(email_change_request::Column::ExpiresAt.lt(now))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        // Keep expired MFA challenges for 1 day after expiry to allow debugging,
+        // then delete them.
+        MfaChallenge::delete_many()
+            .filter(mfa_challenge::Column::ExpiresAt.lt(now - time::Duration::days(1)))
             .exec(&txn)
             .await
             .context_to()?;

@@ -96,6 +96,7 @@ pub async fn get_authentication_settings(
     let auth_settings = state.settings.authentication();
     let response = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
+        two_factor_required: auth_settings.two_factor_required,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -225,9 +226,23 @@ pub async fn update_authentication_settings(
         );
     }
 
+    if let Some(two_factor_required) = req.two_factor_required {
+        let mut auth_settings = state.settings.authentication();
+        auth_settings.two_factor_required = two_factor_required;
+        if let Err(e) = auth_settings
+            .save(state.db(), state.default_tenant_id)
+            .await
+        {
+            tracing::error!("Failed to save authentication settings: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        state.settings.set_authentication(auth_settings).await;
+    }
+
     let auth_settings = state.settings.authentication();
     let response = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
+        two_factor_required: auth_settings.two_factor_required,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
