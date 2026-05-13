@@ -31,9 +31,7 @@ use sea_orm::{ActiveValue, EntityTrait};
 use tokio_util::sync::CancellationToken;
 use uptrakit_shared_db::entity::embedded_service_runtime_state;
 use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
-use uptrakit_wire::{
-    Capability, ControllerMessage, ReportPageLimits, payloads::ServiceSettingsPayload,
-};
+use uptrakit_wire::{Capability, ControllerMessage, payloads::ServiceSettingsPayload};
 use uuid::Uuid;
 
 use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
@@ -111,17 +109,14 @@ fn controller_capabilities_for_embedded() -> std::collections::BTreeSet<Capabili
 }
 
 fn embedded_service_settings(tenant_id: Option<Uuid>) -> ServiceSettingsPayload {
-    ServiceSettingsPayload {
-        capabilities: controller_capabilities_for_embedded(),
-        tenant_id,
-        // Non-zero: tokio::time::interval panics on Duration::ZERO.
-        // The embedded loop ignores the ping timer entirely.
-        ping_interval: std::time::Duration::from_secs(60),
-        renewal_window_hours: 0,
-        ca_bundle_hash: String::new(),
-        report_page_limits: ReportPageLimits::default(),
-        shutdown_timeout: None,
+    // Non-zero: tokio::time::interval panics on Duration::ZERO.
+    // The embedded loop ignores the ping timer entirely.
+    let mut settings = ServiceSettingsPayload::new(0, std::time::Duration::from_secs(60))
+        .with_capabilities(controller_capabilities_for_embedded());
+    if let Some(tid) = tenant_id {
+        settings = settings.with_tenant_id(tid);
     }
+    settings
 }
 
 // ---------------------------------------------------------------------------

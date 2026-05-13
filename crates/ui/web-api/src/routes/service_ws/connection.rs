@@ -484,16 +484,16 @@ async fn send_service_settings(
 
     let tenant_id = resolve_settings_tenant_id(service_status, state.default_tenant_id);
 
-    let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
-        renewal_window_hours,
-        ca_bundle_hash,
-        capabilities: controller_capabilities(),
-        report_page_limits: uptrakit_wire::ReportPageLimits::default(),
-        shutdown_timeout: shutdown_timeout
-            .map(|secs| std::time::Duration::from_secs(u64::from(secs))),
-        ping_interval,
-        tenant_id,
-    });
+    let mut settings = ServiceSettingsPayload::new(renewal_window_hours, ping_interval)
+        .with_ca_bundle_hash(ca_bundle_hash)
+        .with_capabilities(controller_capabilities());
+    if let Some(secs) = shutdown_timeout {
+        settings = settings.with_shutdown_timeout(std::time::Duration::from_secs(u64::from(secs)));
+    }
+    if let Some(tid) = tenant_id {
+        settings = settings.with_tenant_id(tid);
+    }
+    let settings_msg = ControllerMessage::ServiceSettings(settings);
 
     let json = serialize_controller_msg(out_seq, settings_msg).ok_or(())?;
     sink.send(Message::Text(json.into())).await.map_err(|_| ())

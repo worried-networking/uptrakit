@@ -193,7 +193,6 @@ fn map_runtime_outcome(outcome: MqttRuntimeLoopOutcome) -> LoopOutcome {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -276,17 +275,12 @@ mod tests {
         tenant_id: Option<Uuid>,
         extra_caps: impl IntoIterator<Item = Capability>,
     ) -> ServiceSettingsPayload {
-        let mut capabilities = BTreeSet::new();
-        capabilities.extend(extra_caps);
-        ServiceSettingsPayload {
-            capabilities,
-            tenant_id,
-            ping_interval: Duration::from_secs(60),
-            renewal_window_hours: 0,
-            ca_bundle_hash: String::new(),
-            report_page_limits: Default::default(),
-            shutdown_timeout: None,
+        let mut settings =
+            ServiceSettingsPayload::new(0, Duration::from_secs(60)).with_capabilities(extra_caps);
+        if let Some(tid) = tenant_id {
+            settings = settings.with_tenant_id(tid);
         }
+        settings
     }
 
     /// Generate a minimal ECIES identity for `MqttHandler::new_embedded`.

@@ -2060,6 +2060,14 @@ components:
           examples:
             - 120
             - 300
+        trust_domain:
+          type: string
+          default: ""
+          description: |
+            SPIFFE trust domain for Service identity URIs. Empty string indicates
+            no trust domain configured; Agent falls back to dialed hostname.
+          examples:
+            - controller.example.com
         tenant_id:
           type: string
           format: uuid

@@ -394,15 +394,7 @@ mod tests {
     }
 
     fn make_settings() -> ServiceSettingsPayload {
-        ServiceSettingsPayload {
-            capabilities: BTreeSet::new(),
-            tenant_id: None,
-            ping_interval: Duration::from_secs(60),
-            renewal_window_hours: 0,
-            ca_bundle_hash: String::new(),
-            report_page_limits: Default::default(),
-            shutdown_timeout: None,
-        }
+        ServiceSettingsPayload::new(0, Duration::from_secs(60))
     }
 
     #[tokio::test]

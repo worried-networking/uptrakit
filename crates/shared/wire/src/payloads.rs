@@ -174,6 +174,7 @@ pub struct CertificatePayload {
 ///
 /// Used for both agents and MQTT services. `shutdown_timeout` is
 /// present for agents and `None` for MQTT services.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceSettingsPayload {
     pub renewal_window_hours: u16,
@@ -215,6 +216,74 @@ pub struct ServiceSettingsPayload {
     /// (e.g. PVE API credential naming).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<Uuid>,
+    /// SPIFFE trust domain for Service identity URIs.
+    ///
+    /// Empty string when the Controller has no trust domain configured.
+    /// Agent falls back to the dialed hostname for SPIFFE SAN generation.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trust_domain: String,
+}
+
+impl ServiceSettingsPayload {
+    /// Creates a new [`ServiceSettingsPayload`] with the required fields.
+    ///
+    /// Optional fields default to: `ca_bundle_hash` = empty, `capabilities` = empty,
+    /// `report_page_limits` = default, `shutdown_timeout` = `None`,
+    /// `tenant_id` = `None`, `trust_domain` = empty.
+    pub fn new(renewal_window_hours: u16, ping_interval: std::time::Duration) -> Self {
+        Self {
+            renewal_window_hours,
+            ca_bundle_hash: String::new(),
+            capabilities: std::collections::BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
+            shutdown_timeout: None,
+            ping_interval,
+            tenant_id: None,
+            trust_domain: String::new(),
+        }
+    }
+
+    /// Sets the CA bundle hash.
+    #[must_use]
+    pub fn with_ca_bundle_hash(mut self, ca_bundle_hash: String) -> Self {
+        self.ca_bundle_hash = ca_bundle_hash;
+        self
+    }
+
+    /// Sets the controller capability set.
+    #[must_use]
+    pub fn with_capabilities(mut self, capabilities: impl IntoIterator<Item = Capability>) -> Self {
+        self.capabilities = capabilities.into_iter().collect();
+        self
+    }
+
+    /// Sets the report page limits.
+    #[must_use]
+    pub fn with_report_page_limits(mut self, report_page_limits: ReportPageLimits) -> Self {
+        self.report_page_limits = report_page_limits;
+        self
+    }
+
+    /// Sets the graceful-shutdown timeout for agent services.
+    #[must_use]
+    pub fn with_shutdown_timeout(mut self, shutdown_timeout: std::time::Duration) -> Self {
+        self.shutdown_timeout = Some(shutdown_timeout);
+        self
+    }
+
+    /// Sets the tenant UUID for tenant-scoped services.
+    #[must_use]
+    pub fn with_tenant_id(mut self, tenant_id: Uuid) -> Self {
+        self.tenant_id = Some(tenant_id);
+        self
+    }
+
+    /// Sets the SPIFFE trust domain advertised to connecting services.
+    #[must_use]
+    pub fn with_trust_domain(mut self, trust_domain: String) -> Self {
+        self.trust_domain = trust_domain;
+        self
+    }
 }
 
 /// Per-page item-count limits for paginated report payloads.
