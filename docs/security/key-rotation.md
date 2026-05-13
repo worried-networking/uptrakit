@@ -143,6 +143,24 @@ taken before the rotation.
   No manual scheduler restart is required (unless the scheduler is already
   running — in that case, restart it so it reconnects).
 
+## Pending-key memory hygiene
+
+In-flight CSR private keys held by the Agent between CSR generation and
+Certificate receipt are wrapped in `zeroize::Zeroizing<String>`. The
+construction site asserts `pem.len() == pem.capacity()` so the entire
+`String` allocation is wiped on drop — no spare capacity escapes the
+zeroize. Mutation of the wrapped value (push_str, format-into) is
+forbidden post-construction.
+
+## Atomic identity-file writes
+
+`save_identity` (Agent SDK) writes `service.json` and `service.key` via
+`tempfile::NamedTempFile::new_in` + `write_all` + `sync_all` + `persist`.
+Both files written to temp + fsync'd + atomically renamed. Crash between
+the two renames leaves the previous-version key paired with a new
+cert — detected at next startup, triggers re-enrollment. Orphan `.tmp`
+siblings are swept at startup.
+
 ## Related documentation
 
 - [Secrets and Encryption](secrets-and-encryption.md) — encryption model and
