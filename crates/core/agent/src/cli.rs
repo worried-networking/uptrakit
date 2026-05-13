@@ -22,7 +22,7 @@ mod tests {
             Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
                 .expect("should parse defaults");
         assert!(!args.common.version);
-        assert!(!args.common.tofu);
+        assert!(!args.common.tofu_insecure);
         assert!(args.common.ca_cert.is_none());
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
@@ -70,11 +70,14 @@ mod tests {
             "uptrakit-agent",
             "--url",
             "https://host:8443",
-            "--tofu",
+            "--tofu-insecure",
             "--ca-cert",
             "/some/path.pem",
         ]);
-        assert!(result.is_err(), "--tofu and --ca-cert should conflict");
+        assert!(
+            result.is_err(),
+            "--tofu-insecure and --ca-cert should conflict"
+        );
     }
 
     #[test]
@@ -83,11 +86,14 @@ mod tests {
             "uptrakit-agent",
             "--url",
             "https://host:8443",
-            "--tofu",
+            "--tofu-insecure",
             "--pki-addr",
             "http://pki.local:8080",
         ]);
-        assert!(result.is_err(), "--tofu and --pki-addr should conflict");
+        assert!(
+            result.is_err(),
+            "--tofu-insecure and --pki-addr should conflict"
+        );
     }
 
     #[test]

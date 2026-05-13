@@ -29,7 +29,7 @@ mod tests {
         ])
         .expect("should parse defaults");
         assert!(!args.common.version);
-        assert!(!args.common.tofu);
+        assert!(!args.common.tofu_insecure);
         assert!(args.common.ca_cert.is_none());
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
