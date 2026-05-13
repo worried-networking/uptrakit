@@ -41,9 +41,14 @@ impl ApiClient {
     /// Polls `GET /healthz` every 500ms until success or timeout.
     pub(crate) async fn wait_for_ready(&self, timeout: Duration) {
         let deadline = tokio::time::Instant::now() + timeout;
-        let unauthenticated =
-            UptrakitClient::new(&self.base_url, None, true, Some(Duration::from_secs(5)))
-                .expect("build unauthenticated client");
+        let unauthenticated = UptrakitClient::new(
+            &self.base_url,
+            None,
+            true,
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .expect("build unauthenticated client");
 
         loop {
             if tokio::time::Instant::now() >= deadline {
@@ -65,9 +70,14 @@ impl ApiClient {
     /// Retries on 500 to handle the SQLite BUSY window that occurs while embedded
     /// services complete their initial DB writes after the controller starts.
     pub(crate) async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
-        let unauthenticated =
-            UptrakitClient::new(&self.base_url, None, true, Some(Duration::from_secs(60)))
-                .expect("build unauthenticated client");
+        let unauthenticated = UptrakitClient::new(
+            &self.base_url,
+            None,
+            true,
+            None,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("build unauthenticated client");
 
         let register_req = RegisterRequest {
             email: "test@example.com".to_string(),
@@ -114,7 +124,7 @@ impl ApiClient {
 
         // Create an authenticated client using the registration token.
         self.client = Some(
-            UptrakitClient::with_token(&self.base_url, &token, true)
+            UptrakitClient::with_token(&self.base_url, &token, true, None)
                 .expect("build authenticated client"),
         );
     }
