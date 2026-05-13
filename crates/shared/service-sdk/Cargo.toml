@@ -50,6 +50,7 @@ uuid = { workspace = true, features = ["v4", "v7", "serde"] }
 sha2 = { workspace = true }
 socket2 = { workspace = true }
 webpki-roots = { workspace = true }
+rustls-native-certs = { workspace = true }
 x509-cert = { workspace = true }
 der = { workspace = true }
 const-oid = { workspace = true }
