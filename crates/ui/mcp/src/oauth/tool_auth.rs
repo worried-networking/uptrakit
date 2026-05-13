@@ -28,7 +28,10 @@ pub enum McpScopeError {
 /// Returns [`McpScopeError::Insufficient`] when an OAuth context is missing a
 /// required scope.
 pub fn require_scopes(ctx: &McpRequestContext, required: &[McpScope]) -> Result<(), McpScopeError> {
-    #[allow(unreachable_patterns)]
+    #[expect(
+        unreachable_patterns,
+        reason = "McpAuthMethod is #[non_exhaustive]; wildcard arm handles future variants"
+    )]
     match &ctx.auth_method {
         McpAuthMethod::ApiToken => Ok(()),
         McpAuthMethod::OAuth { scopes, .. } => {
