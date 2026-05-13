@@ -225,9 +225,12 @@ fn has_mutation_verb_utoipa_path(attrs: &[syn::Attribute]) -> bool {
         let Ok(meta_list) = attr.meta.require_list() else {
             return false;
         };
-        let parser =
-            |input: syn::parse::ParseStream<'_>| -> syn::Result<syn::Ident> { input.parse() };
-        if let Ok(ident) = syn::parse::Parser::parse2(parser, meta_list.tokens.clone()) {
+        // Iterate the token tree directly to get the first token — `parse2` requires
+        // consuming the entire stream, which fails when the remaining `path = "..."` args
+        // are still present.
+        if let Some(proc_macro2::TokenTree::Ident(ident)) =
+            meta_list.tokens.clone().into_iter().next()
+        {
             return matches!(
                 ident.to_string().as_str(),
                 "post" | "put" | "patch" | "delete"
