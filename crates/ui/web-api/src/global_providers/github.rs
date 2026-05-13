@@ -751,6 +751,7 @@ fn map_repository_tree_response(
             Ok(GitHubTreeEntry {
                 path: entry.path,
                 kind,
+                sha: entry.sha,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -986,6 +987,7 @@ fn default_test_tree() -> GitHubRepositoryTree {
         entries: vec![GitHubTreeEntry {
             path: "svg/nginx.svg".to_string(),
             kind: GitHubTreeEntryKind::Blob,
+            sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
         }],
     }
 }

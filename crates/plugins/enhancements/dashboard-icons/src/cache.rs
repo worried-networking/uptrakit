@@ -359,18 +359,22 @@ mod tests {
                         GitHubTreeEntry {
                             path: "svg/actual-budget.svg".to_string(),
                             kind: GitHubTreeEntryKind::Blob,
+                            sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                         },
                         GitHubTreeEntry {
                             path: "svg/actual-budget-light.svg".to_string(),
                             kind: GitHubTreeEntryKind::Blob,
+                            sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                         },
                         GitHubTreeEntry {
                             path: "svg/nginx-dark.svg".to_string(),
                             kind: GitHubTreeEntryKind::Blob,
+                            sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                         },
                         GitHubTreeEntry {
                             path: "svg/plain-only.svg".to_string(),
                             kind: GitHubTreeEntryKind::Blob,
+                            sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                         },
                     ],
                 })
@@ -420,10 +424,12 @@ mod tests {
                     GitHubTreeEntry {
                         path: "svg/nginx.svg".to_string(),
                         kind: GitHubTreeEntryKind::Blob,
+                        sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                     },
                     GitHubTreeEntry {
                         path: "svg/actual-budget-light.svg".to_string(),
                         kind: GitHubTreeEntryKind::Blob,
+                        sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                     },
                 ],
             })
