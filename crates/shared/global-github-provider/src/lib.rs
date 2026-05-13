@@ -24,6 +24,10 @@ impl GlobalProviderConsumerId {
 pub const DASHBOARD_ICONS: GlobalProviderConsumerId =
     GlobalProviderConsumerId::new("dashboard-icons");
 
+/// Global GitHub provider consumer used by the package-manager-skills plugin.
+pub const PACKAGE_MANAGER_SKILLS: GlobalProviderConsumerId =
+    GlobalProviderConsumerId::new("package-manager-skills");
+
 /// Shared error type for GitHub provider calls.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -68,6 +72,7 @@ pub struct GitHubRepositoryTree {
 pub struct GitHubTreeEntry {
     pub path: String,
     pub kind: GitHubTreeEntryKind,
+    pub sha: String,
 }
 
 /// Tree entry kind supported by the shared contract.
@@ -114,6 +119,11 @@ mod tests {
     #[test]
     fn dashboard_icons_consumer_id_is_stable() {
         assert_eq!(DASHBOARD_ICONS.as_str(), "dashboard-icons");
+    }
+
+    #[test]
+    fn package_manager_skills_consumer_id_is_stable() {
+        assert_eq!(PACKAGE_MANAGER_SKILLS.as_str(), "package-manager-skills");
     }
 
     #[test]

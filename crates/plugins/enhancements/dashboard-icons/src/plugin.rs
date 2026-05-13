@@ -140,6 +140,7 @@ mod tests {
                     entries: vec![GitHubTreeEntry {
                         path: "svg/nginx.svg".to_string(),
                         kind: GitHubTreeEntryKind::Blob,
+                        sha: "aabbcc1122334455667788aabbcc1122334455aa".to_string(),
                     }],
                 })
             }
