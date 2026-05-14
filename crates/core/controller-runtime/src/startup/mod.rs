@@ -81,6 +81,11 @@ pub(crate) struct BootedConfig {
     pub channels: uptrakit_config_reload::RuntimeConfigChannels,
     /// Watch channel receivers distributed to subsystems at startup.
     pub receivers: uptrakit_config_reload::RuntimeConfigReceivers,
+    /// Receiver for audit events emitted by the reload coordinator.
+    ///
+    /// Consumed by the bridge task in `run_server` to convert `ReloadAuditEvent`
+    /// values into `AuditEntry` rows via `AuditEmitter::emit_event`.
+    pub audit_rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
 }
 
 /// Load the TOML config file, seed per-section watch channels, and start the
@@ -100,7 +105,7 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     }
     let (channels, receivers) =
         uptrakit_config_reload::RuntimeConfigChannels::from_runtime(&loaded.config);
-    let (audit_tx, _audit_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (audit_tx, audit_rx) = tokio::sync::mpsc::unbounded_channel();
     let (coordinator, handle) =
         uptrakit_config_reload::ReloadCoordinator::new(Vec::new(), audit_tx);
     let _sighup = uptrakit_config_reload::triggers::sighup::spawn_sighup_task(handle.sender());
@@ -115,6 +120,7 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
         settings_version_cache,
         channels,
         receivers,
+        audit_rx,
     })
 }
 
