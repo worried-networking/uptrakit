@@ -1364,6 +1364,29 @@ Many Requests"`), which is more informative in logs than a bare integer. The `.a
 is approved only inside serde serialization helpers where JSON wire compatibility requires a
 numeric value.
 
+## Pinned-CA-only reqwest clients
+
+When building a reqwest client that must use a custom CA and exclude system roots, use
+`tls_certs_only`. Example:
+
+```rust
+let cert = reqwest::Certificate::from_pem(pem.as_bytes())?;
+builder = builder.tls_certs_only(std::iter::once(cert));
+```
+
+Do **not** use `add_root_certificate` — deprecated in reqwest 0.13 because it appends
+to system roots rather than replacing them.
+
+## CLI CA fingerprint helpers
+
+`parse_fingerprint(s: &str) -> Result<String>` — normalize a `--tofu` flag value to
+64-char lowercase hex. Located in `crates/ui/cli/src/commands/auth.rs`.
+
+`establish_ca_trust(server, fingerprint_hint, allow_rotation, config) -> Result<()>` —
+shared bootstrap function used by `auth login --tofu` and `auth ca trust`. Fetches
+`GET /api/v1/pki/ca.crt`, verifies SHA-256 fingerprint, persists PEM. Located in
+`crates/ui/cli/src/commands/auth.rs`.
+
 ## Constant-Time Secret Comparison
 
 Externally-provided secrets (webhook tokens, API keys, and similar short-lived credentials) must

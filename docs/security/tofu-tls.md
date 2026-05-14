@@ -86,6 +86,48 @@ Corporate internal CA Agent:
 uptrakit-agent --trust-native-roots
 ```
 
+## CLI CA Trust
+
+The `uptrakit` CLI uses a separate Trust-On-First-Use mechanism for connecting to Controllers
+with internally-generated (self-managed) CAs. This is distinct from TOFU mode, which is
+scoped to Services (Agents, MQTT, etc.).
+
+| Command                              | Purpose                                                 |
+| ------------------------------------ | ------------------------------------------------------- |
+| `uptrakit auth login --tofu`         | Bootstrap CA trust during first login                   |
+| `uptrakit auth login --tofu=<fp>`    | Non-interactive bootstrap with fingerprint verification |
+| `uptrakit auth ca trust`             | Establish or rotate CA trust independently of auth      |
+| `uptrakit auth ca trust --tofu=<fp>` | Non-interactive CA trust update                         |
+| `uptrakit auth ca status`            | Show stored CA fingerprint                              |
+| `uptrakit auth ca forget`            | Remove stored trust, revert to system roots             |
+
+### Fingerprint format
+
+SHA-256 of the CA certificate's DER bytes, encoded as 64-character lowercase hex.
+This matches the fingerprint shown in Dashboard → Global Settings. Accepts a `sha256:` prefix.
+Example: `e3676c6137dada24f41974e2fb62546dadc2c6d6b831e4bb2635393218c64ce4`
+
+### CA rotation recovery
+
+```sh
+# Interactive (fingerprint visible in Dashboard > Global Settings)
+uptrakit auth ca trust
+
+# Non-interactive (CI)
+uptrakit auth ca trust --tofu=<fingerprint>
+
+# Migration to public CA (Let's Encrypt)
+uptrakit auth ca forget
+```
+
+`auth login --tofu` deliberately fails when a stored CA differs from the fetched one,
+even when an explicit fingerprint is supplied. Use `auth ca trust` for rotation.
+
+### `--insecure` interaction
+
+`--insecure` overrides all stored CA trust. When `--insecure` is active, `ca_fingerprint`
+is `None` in `auth status` output.
+
 ## Removed: bare `--tofu`
 
 The historical bare `--tofu` flag is removed in this release. Operators using it must
