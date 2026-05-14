@@ -41,6 +41,9 @@ fn map_provider_error(e: GitHubProviderError) -> Report<PluginError> {
                 "GitHub rate limit exceeded".to_string()
             ))
         }
+        GitHubProviderError::AuthFailed(_) | GitHubProviderError::Misconfigured(_) => {
+            report!(PluginError::Configuration(format!("GitHub provider: {e}")))
+        }
         _ => report!(PluginError::PluginInternal(format!(
             "GitHub provider error: {e}"
         ))),
@@ -88,18 +91,13 @@ fn tree_to_release(
     owner: &str,
     repo: &str,
 ) -> Option<UpstreamRelease> {
-    let sha = if skill_dir.is_empty() {
-        // No sub-directory — represent the repo root; pick any tree entry or
-        // bail if the tree is empty (we have no SHA to use).
-        tree.entries.first().map(|e| e.sha.clone())?
-    } else {
-        tree.entries
-            .iter()
-            .find(|e| e.kind == GitHubTreeEntryKind::Tree && e.path == skill_dir)
-            .map(|e| e.sha.clone())?
-    };
+    let sha = tree
+        .entries
+        .iter()
+        .find(|e| e.kind == GitHubTreeEntryKind::Tree && e.path == skill_dir)
+        .map(|e| e.sha.clone())?;
 
-    let url = format!("https://github.com/{owner}/{repo}/tree/{sha}");
+    let url = format!("https://github.com/{owner}/{repo}/tree/HEAD/{skill_dir}");
     Some(UpstreamRelease::new(
         Version::new(sha.clone()),
         sha,
@@ -117,12 +115,15 @@ impl ReleaseFetcher for SkillsPlugin {
     /// A skill identifier has the form `<source_url>#<skill_path>`. The version
     /// is the SHA of the skill's subdirectory from the GitHub Trees API.
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        let provider = self.provider.as_ref().ok_or_else(|| {
-            report!(PluginError::Configuration(
-                "no GitHub provider available; skills release fetching requires the global GitHub provider"
-                    .to_string()
-            ))
-        })?;
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| {
+                report!(SkillsError::ProviderUnavailable(
+                    "skills release fetching requires the global GitHub provider".to_string()
+                ))
+            })
+            .context_to::<PluginError>()?;
 
         let (source_url, skill_path) = parse_skill_identifier(package_identifier).context_to()?;
 
@@ -175,12 +176,15 @@ impl ReleaseFetcher for SkillsPlugin {
             skill_dir: String,
         }
 
-        let provider = self.provider.as_ref().ok_or_else(|| {
-            report!(PluginError::Configuration(
-                "no GitHub provider available; skills release fetching requires the global GitHub provider"
-                    .to_string()
-            ))
-        })?;
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| {
+                report!(SkillsError::ProviderUnavailable(
+                    "skills release fetching requires the global GitHub provider".to_string()
+                ))
+            })
+            .context_to::<PluginError>()?;
 
         let mut resolved: Vec<std::result::Result<Resolved, (String, String)>> =
             Vec::with_capacity(items.len());
@@ -308,6 +312,7 @@ mod tests {
         GitHubProviderClient, GitHubProviderError, GitHubRepositoryTree, GitHubTreeEntry,
         GitHubTreeEntryKind, GlobalProviderConsumerId,
     };
+    use uptrakit_plugin_infrastructure_core::PluginError;
     use uptrakit_plugin_infrastructure_core::ReleaseFetcher as _;
     use uptrakit_plugin_infrastructure_core::batch_fetch::BatchFetchItem;
     use uptrakit_plugin_infrastructure_core::testing::test_runtime;
@@ -504,6 +509,70 @@ mod tests {
         assert!(
             msg.contains("rate limit"),
             "expected rate limit message, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_auth_failed_maps_to_configuration() {
+        struct AuthFailedProvider;
+
+        #[async_trait]
+        impl GitHubProviderClient for AuthFailedProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::AuthFailed("bad token".to_string()))
+            }
+        }
+
+        let plugin = make_plugin_with_provider(Arc::new(AuthFailedProvider));
+        let id = skill_id(
+            "https://github.com/obra/superpowers",
+            "skills/brainstorming/SKILL.md",
+        );
+        let result = plugin.fetch_releases(&id).await;
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), PluginError::Configuration(_)),
+            "AuthFailed must map to Configuration, got: {:?}",
+            err.current_context()
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_misconfigured_maps_to_configuration() {
+        struct MisconfiguredProvider;
+
+        #[async_trait]
+        impl GitHubProviderClient for MisconfiguredProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::Misconfigured("bad config".to_string()))
+            }
+        }
+
+        let plugin = make_plugin_with_provider(Arc::new(MisconfiguredProvider));
+        let id = skill_id(
+            "https://github.com/obra/superpowers",
+            "skills/brainstorming/SKILL.md",
+        );
+        let result = plugin.fetch_releases(&id).await;
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), PluginError::Configuration(_)),
+            "Misconfigured must map to Configuration, got: {:?}",
+            err.current_context()
         );
     }
 

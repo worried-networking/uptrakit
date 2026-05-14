@@ -107,7 +107,6 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
         create: create_release_fetcher_skills,
         host_requirements: HostRequirements::CONTROLLER_ONLY,
     },
-    global_provider_consumers: ["github"],
 });
 
 // ── Role implementations ──────────────────────────────────────────────────────
