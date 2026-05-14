@@ -1,4 +1,6 @@
-use crate::database_helpers::fixtures::{login_user, refresh_token, register_user};
+use crate::database_helpers::fixtures::{
+    get_settings_etag, login_user, refresh_token, register_user,
+};
 use crate::database_helpers::harness::TestHarness;
 use crate::database_helpers::macros::db_test;
 
@@ -29,12 +31,14 @@ async fn test_register_second_user_gets_viewer(harness: &TestHarness) {
     assert_eq!(s1, http::StatusCode::CREATED);
 
     // Re-open registration (initial setup closes it after first user).
+    let etag = get_settings_etag(&client, first.access_token.expose_secret()).await;
     let reopen_status = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
+        .header("if-match", &etag)
         .send_status()
         .await;
     assert_eq!(reopen_status, http::StatusCode::OK);
@@ -58,12 +62,14 @@ async fn test_register_duplicate_email_returns_409(harness: &TestHarness) {
     let (s1, first) = register_user(&client, "dup@test.local", "StrongPassword1!").await;
     assert_eq!(s1, http::StatusCode::CREATED);
 
+    let etag = get_settings_etag(&client, first.access_token.expose_secret()).await;
     client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
+        .header("if-match", &etag)
         .send_status()
         .await;
 
