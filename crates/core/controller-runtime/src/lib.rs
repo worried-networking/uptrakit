@@ -577,7 +577,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     };
 
     // Audit log backend and filter wiring.
-    let (audit_filter, audit_dispatcher) = build_audit_logger(runtime, &db_conn).await?;
+    let (_audit_filter, audit_dispatcher) = build_audit_logger(runtime, &db_conn).await?;
 
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
@@ -638,7 +638,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .event_broadcaster(event_broadcaster.clone())
         .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
-        .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher.clone())
         .audit_emitter(audit_emitter.clone())
         .plugin_ops(plugin_ops)
@@ -660,6 +659,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         reload_file_state_rx_opt,
         reload_last_reload_rx_opt,
         reload_recent_events_rx_opt,
+        audit_log_filter_rx_opt,
     ) = {
         let mut b = booted;
         // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
@@ -670,7 +670,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             reload::https_listener::HttpsListenerReloadable::new(b.runtime.network.https.clone());
         let (pki_reloadable, _pki_rx) =
             reload::pki_listener::PkiListenerReloadable::new(b.runtime.network.pki.clone());
-        let (audit_reloadable, _audit_rx) = reload::audit::AuditDispatcherReloadable::new(
+        let (audit_reloadable, audit_log_filter_rx) = reload::audit::AuditDispatcherReloadable::new(
             audit_dispatcher.clone(),
             b.runtime.audit.clone(),
         );
@@ -749,6 +749,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             Some(reload_file_state_rx),
             Some(reload_last_reload_rx),
             Some(reload_recent_events_rx),
+            Some(audit_log_filter_rx),
         )
     };
 
@@ -759,14 +760,22 @@ async fn run_server(args: cli::Args) -> Result<()> {
         reload_file_state_rx_opt,
         reload_last_reload_rx_opt,
         reload_recent_events_rx_opt,
+        audit_log_filter_rx_opt,
     ) {
-        (Some(handle), Some(cache), Some(receivers), Some(fs_rx), Some(lr_rx), Some(re_rx)) => {
-            builder
-                .coordinator_handle(handle)
-                .settings_version_cache(cache)
-                .config_receivers(receivers)
-                .config_reload_status_receivers(fs_rx, lr_rx, re_rx)
-        }
+        (
+            Some(handle),
+            Some(cache),
+            Some(receivers),
+            Some(fs_rx),
+            Some(lr_rx),
+            Some(re_rx),
+            Some(audit_filter_rx),
+        ) => builder
+            .coordinator_handle(handle)
+            .settings_version_cache(cache)
+            .config_receivers(receivers)
+            .config_reload_status_receivers(fs_rx, lr_rx, re_rx)
+            .audit_log_filter_rx(audit_filter_rx),
         _ => builder,
     };
 

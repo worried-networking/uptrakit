@@ -269,8 +269,11 @@ pub struct AppState {
     /// The WS handler calls methods on this trait at service connect/disconnect
     /// points so that embedded services can yield to external counterparts.
     pub embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
-    /// Audit log filter (global mode, per-tenant overrides checked at log time).
-    pub audit_log_filter: uptrakit_audit_log::AuditFilter,
+    /// Live audit config receiver — updated by [`AuditDispatcherReloadable`] on every
+    /// config reload cycle. Route handlers read `(*state.audit_log_filter_rx.borrow()).filter`
+    /// instead of a stale snapshot captured at boot.
+    pub audit_log_filter_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::AuditConfig>>,
     /// Audit log dispatcher for fire-and-forget entry persistence.
     pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
     /// Audit emitter used by semantic producers.
@@ -417,7 +420,9 @@ pub struct AppStateBuilder {
     batch_progress_broadcaster: Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
     embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
-    audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
+    audit_log_filter_rx: Option<
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::AuditConfig>>,
+    >,
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
     surface_registry: Option<Arc<SurfaceRegistry>>,
@@ -483,7 +488,7 @@ impl AppStateBuilder {
             batch_progress_broadcaster: None,
             shutdown_token: None,
             embedded_service_notifier: None,
-            audit_log_filter: None,
+            audit_log_filter_rx: None,
             audit_log_dispatcher: None,
             audit_emitter: None,
             surface_registry: None,
@@ -709,11 +714,19 @@ impl AppStateBuilder {
         self
     }
 
-    /// Set the audit log filter mode.
+    /// Set the live audit config watch receiver.
     ///
-    /// Optional — defaults to `AuditFilter::default()` (mode = All).
-    pub fn audit_log_filter(mut self, v: uptrakit_audit_log::AuditFilter) -> Self {
-        self.audit_log_filter = Some(v);
+    /// Optional — defaults to a channel seeded with `AuditConfig::default()`.
+    /// Production code should pass the receiver returned by
+    /// [`AuditDispatcherReloadable::new`] so that the filter updates atomically
+    /// after each config reload cycle.
+    pub fn audit_log_filter_rx(
+        mut self,
+        v: tokio::sync::watch::Receiver<
+            std::sync::Arc<uptrakit_config_reload::config::AuditConfig>,
+        >,
+    ) -> Self {
+        self.audit_log_filter_rx = Some(v);
         self
     }
 
@@ -1022,7 +1035,12 @@ impl AppStateBuilder {
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
             embedded_service_notifier: self.embedded_service_notifier,
-            audit_log_filter: self.audit_log_filter.unwrap_or_default(),
+            audit_log_filter_rx: self.audit_log_filter_rx.unwrap_or_else(|| {
+                tokio::sync::watch::channel(std::sync::Arc::new(
+                    uptrakit_config_reload::config::AuditConfig::default(),
+                ))
+                .1
+            }),
             audit_log_dispatcher,
             audit_emitter,
             surface_proxy_deps: SurfaceProxyDeps::new(
