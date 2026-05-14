@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 /// Full response body for `GET /api/v1/instance/config-state`.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct ConfigStateResponse {
     /// Current coordinator state: `"idle"`, `"reloading"`, or `"degraded"`.
     pub coordinator_state: String,
@@ -24,9 +25,31 @@ pub struct ConfigStateResponse {
     pub recent_events: Vec<serde_json::Value>,
 }
 
+impl ConfigStateResponse {
+    #[must_use]
+    pub fn new(
+        coordinator_state: String,
+        degraded: Option<DegradedInfoView>,
+        file: FileStateView,
+        last_reload: Option<LastReloadView>,
+        sections: serde_json::Value,
+        recent_events: Vec<serde_json::Value>,
+    ) -> Self {
+        Self {
+            coordinator_state,
+            degraded,
+            file,
+            last_reload,
+            sections,
+            recent_events,
+        }
+    }
+}
+
 /// Config file state view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct FileStateView {
     /// Absolute path to the TOML config file.
     pub path: String,
@@ -50,9 +73,29 @@ pub struct FileStateView {
     pub pending_detected_at: Option<OffsetDateTime>,
 }
 
+impl FileStateView {
+    #[must_use]
+    pub fn new(
+        path: String,
+        digest: String,
+        loaded_at: OffsetDateTime,
+        pending_digest: Option<String>,
+        pending_detected_at: Option<OffsetDateTime>,
+    ) -> Self {
+        Self {
+            path,
+            digest,
+            loaded_at,
+            pending_digest,
+            pending_detected_at,
+        }
+    }
+}
+
 /// Summary of the last successfully applied reload cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct LastReloadView {
     /// When the reload completed.
     #[serde(with = "time::serde::rfc3339")]
@@ -67,9 +110,25 @@ pub struct LastReloadView {
     pub per_subsystem_ms: BTreeMap<String, u64>,
 }
 
+impl LastReloadView {
+    #[must_use]
+    pub fn new(
+        completed_at: OffsetDateTime,
+        sections: Vec<String>,
+        per_subsystem_ms: BTreeMap<String, u64>,
+    ) -> Self {
+        Self {
+            completed_at,
+            sections,
+            per_subsystem_ms,
+        }
+    }
+}
+
 /// View of the coordinator's degraded state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct DegradedInfoView {
     /// When the coordinator entered the degraded state.
     #[serde(with = "time::serde::rfc3339")]
@@ -82,4 +141,15 @@ pub struct DegradedInfoView {
     pub failed_subsystems: Vec<String>,
     /// Human-readable description of what went wrong.
     pub reason: String,
+}
+
+impl DegradedInfoView {
+    #[must_use]
+    pub fn new(since: OffsetDateTime, failed_subsystems: Vec<String>, reason: String) -> Self {
+        Self {
+            since,
+            failed_subsystems,
+            reason,
+        }
+    }
 }

@@ -1,11 +1,13 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::header::IF_MATCH;
 use axum::http::request::Parts;
 use uptrakit_config_reload::config::Scope;
+use uptrakit_web_api_types::error::ErrorResponse;
 
 use crate::app_state::AppState;
 use crate::extractors::etag_source::EtagSource;
@@ -33,6 +35,7 @@ use crate::extractors::etag_source::EtagSource;
 ///     Json(body): Json<UpdateRequest>,
 /// ) -> impl IntoResponse { … }
 /// ```
+#[non_exhaustive]
 pub struct IfMatch<T: EtagSource> {
     /// The raw `If-Match` header value provided by the client.
     pub client_etag: String,
@@ -60,35 +63,50 @@ impl<T: EtagSource> IfMatch<T> {
 }
 
 impl<T: EtagSource> FromRequestParts<Arc<AppState>> for IfMatch<T> {
-    type Rejection = (StatusCode, String);
+    type Rejection = (StatusCode, Json<ErrorResponse>);
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        let header = parts.headers.get(IF_MATCH).ok_or((
-            StatusCode::PRECONDITION_REQUIRED,
-            "If-Match header is required".to_string(),
-        ))?;
+        let header = parts.headers.get(IF_MATCH).ok_or_else(|| {
+            (
+                StatusCode::PRECONDITION_REQUIRED,
+                Json(ErrorResponse {
+                    error: "if-match header is required".to_string(),
+                    code: Some("if_match.required".to_string()),
+                }),
+            )
+        })?;
         let client = header
             .to_str()
             .map_err(|e| {
                 (
                     StatusCode::BAD_REQUEST,
-                    format!("If-Match parse error: {e}"),
+                    Json(ErrorResponse {
+                        error: format!("if-match parse error: {e}"),
+                        code: Some("if_match.parse_error".to_string()),
+                    }),
                 )
             })?
             .to_string();
         let current = T::current_etag(parts, state).await.map_err(|e| {
+            tracing::error!(error = %e, "settings version etag lookup failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("etag lookup failed: {e}"),
+                Json(ErrorResponse {
+                    error: "etag lookup failed".to_string(),
+                    code: Some("if_match.lookup_failed".to_string()),
+                }),
             )
         })?;
         if Self::strip_etag(&client) != Self::strip_etag(&current) {
             return Err((
                 StatusCode::CONFLICT,
-                "ETag mismatch (stale settings_version)".to_string(),
+                Json(ErrorResponse {
+                    error: "etag mismatch (stale settings_version)".to_string(),
+                    code: Some("if_match.stale".to_string()),
+                }),
             ));
         }
         Ok(Self {

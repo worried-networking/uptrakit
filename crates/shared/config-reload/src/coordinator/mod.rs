@@ -235,6 +235,7 @@ pub enum CoordinatorState {
 #[non_exhaustive]
 pub struct DegradedInfo {
     /// When the coordinator entered the Degraded state.
+    #[serde(with = "time::serde::rfc3339")]
     pub since: OffsetDateTime,
     /// Names of the subsystems that failed to revert.
     pub failed_subsystems: Vec<String>,
