@@ -318,24 +318,49 @@ See [Notifications Development](docs/development/notifications.md), [Notificatio
 
 ## Audit log subsystem
 
-The controller uses a semantic, mutation-first audit subsystem. Instead of request-shaped rows, producers emit canonical action events
-(`action_type` + `outcome` + actor/target metadata) via `AuditEmitter`.
+The controller uses a semantic, mutation-first audit subsystem. V2 introduces two emit paths and compile-time
+action-kind enforcement.
 
-Persistence still uses fire-and-forget dispatch (`AuditLogDispatcher` over `mpsc::UnboundedSender`) and pluggable backends (`db`, `journald`, `none`).
-`JournaldBackend` emits structured events to `target: "uptrakit_audit"`.
+### V2 flow (Stateful actions)
 
-Two tables store events: `audit_logs` (tenant scope, no FK on `tenant_id` for compliance) and `system_audit_logs` (system scope). `DatabaseBackend`
-routes by `AuditEntry.tenant_id`. An optional separate database (`--audit-log-db-url`) can isolate audit storage.
+```text
+HTTP handler
+  └─ begin tx (BEGIN IMMEDIATE)
+       ├─ SELECT before snapshot
+       ├─ perform mutation
+       ├─ SELECT after snapshot
+       ├─ audit.emit_stateful(&tx, AuditEntry::<verb>(&before, &after)…build()?)
+       └─ tx.commit().await?
+  └─ hook.flush_after_commit().await   // post-commit journald mirror (best-effort)
+```
 
-Service daemons can forward runtime audit events over wire `AuditEventPayload`; controller-side validation enforces action/outcome validity and
-tenant/system scope rules before persistence.
+### V2 flow (Event actions and service-forwarded events)
 
-Retention cleanup is a scheduled task (`AuditLogCleanup`, default policy 90 days).
+```text
+Service → AuditEventPayload (wire) → controller-side ingress → action-kind check
+   ├─ Stateful action type → rejected with warning, dropped
+   └─ Event action type   → controller-side enrichment → emit_event → async dispatcher
+```
 
-`audit_log.filter` and `audit_log.retention_days` remain in settings for policy evolution. Per-tenant enforcement of those settings is a V2 follow-up.
+Direct event emission (HTTP handlers, scheduler executors):
 
-The `uptrakit-audit-log` crate (`crates/shared/audit-log/`) contains domain types, emitters, dispatcher, and backends. See
-[Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
+```text
+emit_event(AuditEntry::<verb>()…build()?) → AuditLogDispatcher → DatabaseBackend + JournaldBackend
+```
+
+### Kind taxonomy
+
+Every registered action is classified as **Stateful** (entity transition; snapshot pair required) or **Event**
+(workflow fact; snapshots forbidden). The typestate builder (`AuditEntry<K>`) enforces this at compile time;
+`emit_stateful` accepts only `AuditEntry<Stateful>` and `emit_event` accepts only `AuditEntry<Event>`.
+
+`correlation_id` ties multi-step workflows together: batch dispatch, OIDC flow chains, scheduler-spawned event
+chains. Single-step actions leave it null.
+
+Two tables: `audit_logs` (tenant-scoped, no FK on `tenant_id` for compliance) and `system_audit_logs` (global). An
+optional separate DB (`--audit-log-db-url`) isolates audit storage.
+
+See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
 
 ## Batch updates
 
