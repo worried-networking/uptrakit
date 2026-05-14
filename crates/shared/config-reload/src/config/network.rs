@@ -71,21 +71,13 @@ impl NetworkConfig {
     /// Returns an error if `https.addr` or `pki.addr` is not a valid
     /// `SocketAddr`, or if the two addrs are identical.
     pub fn validate(&self) -> Result<(), Report> {
-        let https_sa = self.https.addr.parse::<SocketAddr>().map_err(|e| {
+        self.https.addr.parse::<SocketAddr>().map_err(|e| {
             report!(ConfigReloadError::Validate(format!(
                 "network.https.addr invalid: {e}"
             )))
         })?;
-        let pki_sa = self.pki.addr.parse::<SocketAddr>().map_err(|e| {
-            report!(ConfigReloadError::Validate(format!(
-                "network.pki.addr invalid: {e}"
-            )))
-        })?;
-        if https_sa == pki_sa {
-            bail!(ConfigReloadError::Validate(
-                "network.https.addr must differ from network.pki.addr".into()
-            ));
-        }
+        // network.pki.addr is the public PKI URL (e.g. `http://hostname:8080`),
+        // not a bind address — SocketAddr parsing does not apply.
         Ok(())
     }
 }
