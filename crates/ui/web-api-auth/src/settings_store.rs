@@ -242,6 +242,22 @@ pub async fn load_global_setting(
     Ok(row.map(|r| r.value))
 }
 
+/// Load a single global setting by raw key string.
+///
+/// Unlike [`load_global_setting`], this function accepts a raw string key and
+/// does not require a [`SettingKey`] enum variant. This is used for settings
+/// whose enum variants have been removed (file-only keys moved to TOML config).
+pub async fn load_global_setting_raw(
+    db: &impl ConnectionTrait,
+    key: &str,
+) -> Result<Option<serde_json::Value>> {
+    let row = GlobalSetting::find_by_id(key.to_string())
+        .one(db)
+        .await
+        .context_to()?;
+    Ok(row.map(|r| r.value))
+}
+
 /// Delete a single global setting by key.
 pub async fn delete_global_setting(db: &impl ConnectionTrait, key: SettingKey) -> Result<()> {
     debug_assert!(
