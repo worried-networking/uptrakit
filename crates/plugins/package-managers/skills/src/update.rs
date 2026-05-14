@@ -18,6 +18,7 @@ use uptrakit_plugin_infrastructure_core::{
     UpdateOutputSender, execute_command_update,
 };
 
+use crate::error::SkillsError;
 use crate::lock::{parse_skill_identifier, parse_skill_lock};
 use crate::plugin::SkillsPlugin;
 
@@ -70,10 +71,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SkillsPlugin {
                 e.source_url.trim_end_matches('/') == source_url && e.skill_path == skill_path
             })
             .ok_or_else(|| {
-                report!(PluginError::PluginInternal(format!(
-                    "skill not found in lock file: {package_identifier}"
-                )))
-            })?;
+                report!(SkillsError::LockEntryNotFound(
+                    package_identifier.to_string()
+                ))
+            })
+            .context_to::<PluginError>()?;
 
         let skill_name = entry.name.clone();
         let skills_version = self.config.skills_version.clone();

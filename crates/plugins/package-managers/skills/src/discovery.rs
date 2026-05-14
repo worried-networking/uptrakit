@@ -69,6 +69,8 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for SkillsPlugin {
             let extra = serde_json::json!({
                 "source_url": entry.source_url,
                 "skill_path": entry.skill_path,
+                "agents": "~/.agents",
+                "lock_name": ".skill-lock.json",
             });
 
             discovered.push(DiscoveredSoftware {
