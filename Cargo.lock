@@ -8084,6 +8084,7 @@ dependencies = [
  "uptrakit-plugin-package-manager-npm",
  "uptrakit-plugin-package-manager-pacman",
  "uptrakit-plugin-package-manager-pkg",
+ "uptrakit-plugin-package-manager-skills",
  "uptrakit-plugin-package-manager-snap",
  "uptrakit-plugin-releases-docker",
  "uptrakit-plugin-releases-forgejo",
@@ -8250,6 +8251,23 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+]
+
+[[package]]
+name = "uptrakit-plugin-package-manager-skills"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-global-github-provider",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "url",
 ]
 
 [[package]]
