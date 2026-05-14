@@ -164,8 +164,10 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
         let plugin = make_plugin(SAMPLE_LOCK, 0);
-        let result = plugin.detect_installed_version("not-an-identifier").await;
-        assert!(result.is_err());
+        plugin
+            .detect_installed_version("not-an-identifier")
+            .await
+            .unwrap_err();
     }
 
     #[tokio::test]

@@ -55,9 +55,9 @@ fn lookup_github_provider_from_ctx(
     {
         let lookup = ctx.global_provider_lookup.as_ref()?;
         let handle = lookup.lookup("github")?;
-        return Arc::downcast::<GitHubProviderHandle>(handle)
+        Arc::downcast::<GitHubProviderHandle>(handle)
             .ok()
-            .map(|h| h.client());
+            .map(|h| h.client())
     }
     #[cfg(not(feature = "catalog"))]
     {

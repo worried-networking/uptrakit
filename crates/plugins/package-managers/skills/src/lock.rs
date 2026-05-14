@@ -61,14 +61,11 @@ pub(crate) fn parse_skill_identifier(id: &str) -> Result<(Url, String)> {
         )));
     }
 
-    let hash_pos = id.find('#').ok_or_else(|| {
+    let (url_part, path_part) = id.split_once('#').ok_or_else(|| {
         report!(SkillsError::InvalidIdentifier(
             "identifier must contain '#' separator between URL and skill path".to_string()
         ))
     })?;
-
-    let url_part = &id[..hash_pos];
-    let path_part = &id[hash_pos + 1..];
 
     if !url_part.starts_with("https://") && !url_part.starts_with("http://") {
         return Err(report!(SkillsError::InvalidIdentifier(
@@ -171,8 +168,7 @@ mod tests {
 
     #[test]
     fn parse_malformed_json_fails() {
-        let result = parse_skill_lock("not json");
-        assert!(result.is_err());
+        parse_skill_lock("not json").unwrap_err();
     }
 
     #[test]
@@ -194,27 +190,23 @@ mod tests {
 
     #[test]
     fn parse_identifier_rejects_no_hash() {
-        let result = parse_skill_identifier("https://github.com/owner/repo");
-        assert!(result.is_err());
+        parse_skill_identifier("https://github.com/owner/repo").unwrap_err();
     }
 
     #[test]
     fn parse_identifier_rejects_path_traversal() {
-        let result = parse_skill_identifier("https://github.com/owner/repo#skills/../etc/passwd");
-        assert!(result.is_err());
+        parse_skill_identifier("https://github.com/owner/repo#skills/../etc/passwd").unwrap_err();
     }
 
     #[test]
     fn parse_identifier_rejects_leading_slash_in_path() {
-        let result =
-            parse_skill_identifier("https://github.com/owner/repo#/skills/brainstorming/SKILL.md");
-        assert!(result.is_err());
+        parse_skill_identifier("https://github.com/owner/repo#/skills/brainstorming/SKILL.md")
+            .unwrap_err();
     }
 
     #[test]
     fn parse_identifier_rejects_empty_path() {
-        let result = parse_skill_identifier("https://github.com/owner/repo#");
-        assert!(result.is_err());
+        parse_skill_identifier("https://github.com/owner/repo#").unwrap_err();
     }
 
     #[test]
@@ -222,7 +214,6 @@ mod tests {
         let long_path = "a".repeat(1014);
         let id = format!("https://github.com/o/r#{long_path}");
         assert!(id.len() > 1024);
-        let result = parse_skill_identifier(&id);
-        assert!(result.is_err());
+        parse_skill_identifier(&id).unwrap_err();
     }
 }

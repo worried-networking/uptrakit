@@ -29,7 +29,7 @@ use crate::plugin::SkillsPlugin;
 fn derive_skill_dir(skill_path: &str) -> &str {
     skill_path
         .rfind('/')
-        .map(|i| &skill_path[..i])
+        .map(|i| skill_path.split_at(i).0)
         .unwrap_or("")
 }
 

@@ -112,11 +112,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SkillsPlugin {
 
 #[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::assertions_on_result_states,
-        reason = "test assertions — assert!(result.is_ok()) and assert!(result.is_err()) are idiomatic in tests"
-    )]
-
     use tokio::sync::mpsc;
     use uptrakit_plugin_infrastructure_core::{
         UpdateExecutor,
