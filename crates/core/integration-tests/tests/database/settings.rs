@@ -3,7 +3,7 @@
     reason = "integration test code: panics are acceptable in test helpers (db_test! macro means functions are not annotated #[test])"
 )]
 
-use crate::database_helpers::fixtures::register_and_get_token;
+use crate::database_helpers::fixtures::{get_settings_etag, register_and_get_token};
 use crate::database_helpers::harness::TestHarness;
 use crate::database_helpers::macros::db_test;
 
@@ -27,12 +27,14 @@ async fn test_update_registration_settings_persists(harness: &TestHarness) {
     let client = harness.client();
     let token = register_and_get_token(&client).await;
 
+    let etag = get_settings_etag(&client, &token).await;
     let (status, body): (_, serde_json::Value) = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
+        .header("if-match", &etag)
         .send_json()
         .await;
 
