@@ -125,11 +125,14 @@ Identifier shape mirrors the `proxmox-helper-scripts` pattern, which already ove
 `DiscoveryTarget.package_identifier` per target:
 
 - `DiscoveredSoftware.package_identifier` = Skill name (e.g. `brainstorming`). Clean for UI.
-- `DiscoveredSoftware.name` = Skill name (same value; UI display).
+- `DiscoveredSoftware.name` = `"LLM Skill: {skill_name}"` (e.g. `"LLM Skill: brainstorming"`). The
+  prefix provides clear UI visibility when Skills are listed alongside other software items.
 - `DiscoveryTarget.package_identifier` = `Some("{source_url}#{skill_path}")`.
   This is the value stored in `host_software_item_plugin.package_identifier` and the value passed back to
   the plugin for Detect/Fetch/Update.
 - `DiscoveredSoftware.extra` = `{ "source_url", "skill_path", "agents", "lock_name" }` for diagnostics.
+- `featured` = `true`. Skills are first-class software items; marking featured on first creation
+  gives them individual MQTT entities and prominent visibility without operator action.
 - `qualifier` = `None`; `installed_display_version` = `None`.
 
 Encoded identifier validator (`validate_identifier`):
@@ -344,7 +347,10 @@ Provider-error mapping mirrors dashboard-icons:
   `CommandExecutor::execute_quiet` and recover the Skill name (the JSON map key for the matching
   `sourceUrl + skillPath`). If the command fails or the entry is absent, return
   `Err(PluginError::PluginInternal("skill not installed"))`.
-- Run `npx skills@latest update -g <name> -y` through `execute_command_update`.
+- Run `DISABLE_TELEMETRY=1 npx skills@{skills_version} update -g <name> -y` through
+  `execute_command_update`, where `skills_version` comes from `SkillsConfig.skills_version`
+  (default `"latest"`). `DISABLE_TELEMETRY=1` is prepended to the shell command string so the
+  environment variable is set for the `npx` child process.
 - `privileged = false`. `to_version` is logged at `info` but not passed to the CLI (no pin support).
 - `ExecuteUpdateResult::new(output, false)`.
 
@@ -353,19 +359,23 @@ Batching at this layer is optional; the scheduler can interleave per-package cal
 
 ### 9. Configuration
 
-`SkillsConfig` is intentionally empty in v1 (mirrors `NpmConfig` minimal form): no fields, no auth,
-no registry URL. The GitHub Provider is the sole credential surface.
+`SkillsConfig` carries one user-facing field in v1:
 
-Future fields (e.g. a non-default branch toggle) are deferred to v2; they can be added without a
-schema migration because plugin config is stored as JSON and unknown fields are ignored. Operators
-configure the GitHub Provider once in Settings → GitHub Provider; the Skills plugin consumes it
-implicitly.
+- `skills_version: String` — the npm dist-tag or version string passed to `npx skills@<version>`.
+  Default `"latest"`. Operators may pin to a specific version (e.g. `"1.2.3"`) or a dist-tag
+  (e.g. `"next"`) if they want reproducible behaviour across updates. Stored per-tenant in the
+  plugin config JSON; no migration required when the default is accepted.
+
+No auth fields. The GitHub Provider is the sole credential surface. Operators configure it once
+in Settings → GitHub Provider; the Skills plugin consumes it implicitly.
 
 `PluginConfig` impl:
 
 - `validate_identifier` delegates to the encoded-identifier validator described in §2.
-- `form_schema` returns an empty schema (no user-facing fields in v1).
-- `validate()` returns `Ok(())` (no required fields).
+- `form_schema` returns one field: `skills_version` as a `FormFieldType::Text` field labelled
+  `"Skills Package Version"` with help text explaining the default and pinning semantics.
+- `validate()` returns `Ok(())` (non-empty `skills_version` is the only constraint; blank is
+  rejected by npm itself at update time, so no pre-validation is added in v1).
 - `with_secrets_masked()` is a no-op (no secrets).
 
 ### 10. Error handling
