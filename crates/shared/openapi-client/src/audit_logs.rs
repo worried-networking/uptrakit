@@ -31,18 +31,17 @@ mod tests {
     #[test]
     fn audit_log_list_params_serialization_with_semantic_filters() {
         let actor_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
-        let params = AuditLogListParams {
-            actor_type: Some("user".to_string()),
-            action_type: Some("plugin_config.create".to_string()),
-            outcome: Some("success".to_string()),
-            target_type: Some("plugin_config".to_string()),
-            target_id: Some("019semantic".to_string()),
-            from: Some("2025-01-01T00:00:00Z".to_string()),
-            to: Some("2025-12-31T23:59:59Z".to_string()),
-            actor_id: Some(actor_id),
-            page: Some(2),
-            per_page: Some(10),
-        };
+        let mut params = AuditLogListParams::default();
+        params.actor_type = Some("user".to_string());
+        params.action_type = Some("plugin_config.create".to_string());
+        params.outcome = Some("success".to_string());
+        params.target_type = Some("plugin_config".to_string());
+        params.target_id = Some("019semantic".to_string());
+        params.from = Some("2025-01-01T00:00:00Z".to_string());
+        params.to = Some("2025-12-31T23:59:59Z".to_string());
+        params.actor_id = Some(actor_id);
+        params.page = Some(2);
+        params.per_page = Some(10);
         let qs = serde_urlencoded::to_string(&params).expect("serialize");
         assert!(qs.contains("actor_type=user"));
         assert!(qs.contains("action_type=plugin_config.create"));

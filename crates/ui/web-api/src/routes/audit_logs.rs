@@ -42,7 +42,9 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
         ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
         ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
         ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
-        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID")
+        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID"),
+        ("correlation_id" = Option<uuid::Uuid>, Query, description = "Filter by correlation UUID"),
+        ("action_kind" = Option<String>, Query, description = "Filter by action kind: stateful, event")
     ),
     responses(
         (status = 200, description = "Paginated list of tenant audit log entries", body = PaginatedResponse<AuditLogResponse>),
@@ -78,7 +80,9 @@ pub async fn list_audit_logs(
         ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
         ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
         ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
-        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID")
+        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID"),
+        ("correlation_id" = Option<uuid::Uuid>, Query, description = "Filter by correlation UUID"),
+        ("action_kind" = Option<String>, Query, description = "Filter by action kind: stateful, event")
     ),
     responses(
         (status = 200, description = "Paginated list of system audit log entries", body = PaginatedResponse<SystemAuditLogResponse>),

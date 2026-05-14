@@ -8,7 +8,9 @@
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { Input, Select } from '$lib/components/forms';
+	import StateTab from './StateTab.svelte';
 	import {
 		Callout,
 		DataTable,
@@ -66,6 +68,9 @@
 	let filterTargetId: string = $state(page.url.searchParams.get('target_id') ?? '');
 	let filterFrom: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('from') ?? ''));
 	let filterTo: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('to') ?? ''));
+	let filterCorrelationId: string = $state(page.url.searchParams.get('correlation_id') ?? '');
+	let selected: AuditLogEntry | null = $state(null);
+	let detailTab: string = $state('details');
 
 	let items: AuditLogEntry[] = $state([]);
 	let totalPages: number = $state(1);
@@ -88,6 +93,7 @@
 		if (filterTargetId) parts.push(`target_id=${encodeURIComponent(filterTargetId)}`);
 		if (from) parts.push(`from=${encodeURIComponent(from)}`);
 		if (to) parts.push(`to=${encodeURIComponent(to)}`);
+		if (filterCorrelationId) parts.push(`correlation_id=${encodeURIComponent(filterCorrelationId)}`);
 		if (currentPage > 1) parts.push(`page=${currentPage}`);
 		const qs = parts.join('&');
 		goto(qs ? `${location.pathname}?${qs}` : location.pathname, {
@@ -116,7 +122,8 @@
 			target_type: filterTargetType || undefined,
 			target_id: filterTargetId || undefined,
 			from: toRfc3339(filterFrom),
-			to: toRfc3339(filterTo)
+			to: toRfc3339(filterTo),
+			correlation_id: filterCorrelationId || undefined
 		};
 		try {
 			const fn = activeTab === 'system' ? listSystemAuditLogs : listAuditLogs;
@@ -145,6 +152,7 @@
 		filterTargetId = '';
 		filterFrom = '';
 		filterTo = '';
+		filterCorrelationId = '';
 		currentPage = 1;
 		load(1);
 	}
@@ -160,6 +168,7 @@
 		filterTargetId = '';
 		filterFrom = '';
 		filterTo = '';
+		filterCorrelationId = '';
 		load(1);
 	}
 
@@ -187,6 +196,14 @@
 		{ id: 'tenant', label: 'Tenant Logs' },
 		{ id: 'system', label: 'System Logs' }
 	];
+
+	function detailTabs(entry: AuditLogEntry): TabStripItem[] {
+		return [
+			{ id: 'details', label: 'Details' },
+			...(entry.action_kind === 'stateful' ? [{ id: 'state', label: 'State' }] : []),
+			{ id: 'raw', label: 'Raw' }
+		];
+	}
 </script>
 
 {#if user}
@@ -269,6 +286,18 @@
 						<label for="filter-to" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">To</label>
 						<Input id="filter-to" type="datetime-local" bind:value={filterTo} />
 					</div>
+
+					<div>
+						<label for="filter-correlation-id" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Correlation ID</label
+						>
+						<Input
+							id="filter-correlation-id"
+							type="text"
+							placeholder="00000000-0000-0000-0000-000000000000"
+							bind:value={filterCorrelationId}
+						/>
+					</div>
 				</div>
 			</SectionCard>
 
@@ -310,7 +339,13 @@
 					{/snippet}
 					{#snippet row(rowValue, _index)}
 						{@const entry = rowValue as unknown as AuditLogEntry}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<tr
+							class="cursor-pointer border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)]"
+							onclick={() => {
+								selected = entry;
+								detailTab = 'details';
+							}}
+						>
 							<td class="table-cell-pad whitespace-nowrap text-table-body text-[var(--text-primary)]"
 								>{formatDate(entry.occurred_at)}</td
 							>
@@ -360,6 +395,51 @@
 					{/snippet}
 				</DataTable>
 			</SectionCard>
+
+			{#if selected}
+				<Modal
+					onclose={() => {
+						selected = null;
+					}}
+					title={selected.action_type}
+					maxWidth="max-w-3xl"
+				>
+					<div class="flex flex-col gap-4">
+						<TabStrip
+							items={detailTabs(selected)}
+							activeId={detailTab}
+							ariaLabel="Audit log detail"
+							idBase="detail"
+							onSelect={(id) => (detailTab = id)}
+						/>
+
+						{#if detailTab === 'state'}
+							<StateTab before={selected.before_snapshot} after={selected.after_snapshot} />
+						{:else if detailTab === 'raw'}
+							<pre
+								class="overflow-auto rounded-card bg-[var(--bg-raised)] p-4 text-xs text-[var(--text-primary)]">{JSON.stringify(
+									selected,
+									null,
+									2
+								)}</pre>
+						{:else}
+							<div class="flex flex-col gap-2">
+								{#each [['Action', selected.action_type], ['Outcome', selected.outcome], ['Actor', selected.actor_display ?? selected.actor_type], ['Target', selected.target_display ?? selected.target_type ?? '—'], ['Occurred at', selected.occurred_at], ['Correlation ID', selected.correlation_id ?? '—']] as [label, value] (label)}
+									<div class="flex gap-2 text-sm">
+										<span class="w-32 shrink-0 text-[var(--text-secondary)]">{label}</span>
+										<span class="text-[var(--text-primary)]">{value}</span>
+										{#if label === 'Correlation ID' && selected.correlation_id}
+											<Button variant="ghost" onclick={() => navigator.clipboard.writeText(selected!.correlation_id!)}
+												>Copy</Button
+											>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</Modal>
+			{/if}
 		{/if}
 	</PageShell>
 {/if}

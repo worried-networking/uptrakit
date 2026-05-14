@@ -32,6 +32,17 @@ pub struct AuditLogResponse {
     pub outcome: String,
     /// Optional curated structured metadata payload.
     pub details_json: Option<Value>,
+    /// Action kind: `"stateful"` (has before/after snapshots) or `"event"` (no state change).
+    pub action_kind: String,
+    /// State snapshot before the action (only present for `stateful` actions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_snapshot: Option<Value>,
+    /// State snapshot after the action (only present for `stateful` actions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_snapshot: Option<Value>,
+    /// Optional correlation UUID linking related audit entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<Uuid>,
     /// Optional request correlation id.
     pub request_id: Option<String>,
     /// Timestamp when the action occurred (RFC 3339).
@@ -65,6 +76,17 @@ pub struct SystemAuditLogResponse {
     pub outcome: String,
     /// Optional curated structured metadata payload.
     pub details_json: Option<Value>,
+    /// Action kind: `"stateful"` (has before/after snapshots) or `"event"` (no state change).
+    pub action_kind: String,
+    /// State snapshot before the action (only present for `stateful` actions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_snapshot: Option<Value>,
+    /// State snapshot after the action (only present for `stateful` actions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_snapshot: Option<Value>,
+    /// Optional correlation UUID linking related audit entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<Uuid>,
     /// Optional request correlation id.
     pub request_id: Option<String>,
     /// Timestamp when the action occurred (RFC 3339).
@@ -78,6 +100,7 @@ pub struct SystemAuditLogResponse {
 // ---------------------------------------------------------------------------
 
 /// Query parameters for listing audit log entries (tenant-scoped or system).
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct AuditLogListParams {
@@ -101,4 +124,8 @@ pub struct AuditLogListParams {
     pub to: Option<String>,
     /// Filter entries by a specific actor UUID.
     pub actor_id: Option<Uuid>,
+    /// Filter entries by correlation UUID.
+    pub correlation_id: Option<Uuid>,
+    /// Filter by action kind: `"stateful"` or `"event"`.
+    pub action_kind: Option<String>,
 }

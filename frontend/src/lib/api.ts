@@ -1047,6 +1047,8 @@ export async function listAuditLogs(params?: AuditLogListParams): Promise<Pagina
 	if (params?.from) p.set('from', params.from);
 	if (params?.to) p.set('to', params.to);
 	if (params?.actor_id) p.set('actor_id', params.actor_id);
+	if (params?.correlation_id) p.set('correlation_id', params.correlation_id);
+	if (params?.action_kind) p.set('action_kind', params.action_kind);
 	if (params?.page) p.set('page', String(params.page));
 	if (params?.per_page) p.set('per_page', String(params.per_page));
 	const qs = p.toString();
@@ -1063,6 +1065,8 @@ export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<
 	if (params?.from) p.set('from', params.from);
 	if (params?.to) p.set('to', params.to);
 	if (params?.actor_id) p.set('actor_id', params.actor_id);
+	if (params?.correlation_id) p.set('correlation_id', params.correlation_id);
+	if (params?.action_kind) p.set('action_kind', params.action_kind);
 	if (params?.page) p.set('page', String(params.page));
 	if (params?.per_page) p.set('per_page', String(params.per_page));
 	const qs = p.toString();

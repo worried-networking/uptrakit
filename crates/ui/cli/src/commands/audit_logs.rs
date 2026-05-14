@@ -38,6 +38,12 @@ pub enum AuditLogsCommands {
         /// Filter entries by a specific actor UUID
         #[arg(long)]
         actor_id: Option<Uuid>,
+        /// Filter by correlation UUID
+        #[arg(long)]
+        correlation_id: Option<Uuid>,
+        /// Filter by action kind (stateful or event)
+        #[arg(long)]
+        action_kind: Option<String>,
         /// Page number (1-indexed)
         #[arg(long)]
         page: Option<u64>,
@@ -80,6 +86,12 @@ pub enum AuditLogsSystemCommands {
         /// Filter entries by a specific actor UUID
         #[arg(long)]
         actor_id: Option<Uuid>,
+        /// Filter by correlation UUID
+        #[arg(long)]
+        correlation_id: Option<Uuid>,
+        /// Filter by action kind (stateful or event)
+        #[arg(long)]
+        action_kind: Option<String>,
         /// Page number (1-indexed)
         #[arg(long)]
         page: Option<u64>,
@@ -100,6 +112,8 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
             from,
             to,
             actor_id,
+            correlation_id,
+            action_kind,
             page,
             per_page,
         } => {
@@ -116,6 +130,8 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
                 from: from.as_deref(),
                 to: to.as_deref(),
                 actor_id,
+                correlation_id,
+                action_kind,
                 page,
                 per_page,
             })
@@ -132,6 +148,8 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
                 from,
                 to,
                 actor_id,
+                correlation_id,
+                action_kind,
                 page,
                 per_page,
             } => {
@@ -148,6 +166,8 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
                     from: from.as_deref(),
                     to: to.as_deref(),
                     actor_id,
+                    correlation_id,
+                    action_kind,
                     page,
                     per_page,
                 })
@@ -163,6 +183,64 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
 
 fn format_occurred_at(dt: &time::OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
+}
+
+fn render_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => "null".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn render_state_changes(out: &mut String, entry: &AuditLogResponse) {
+    if entry.action_kind != "stateful" {
+        return;
+    }
+    let (Some(before), Some(after)) = (&entry.before_snapshot, &entry.after_snapshot) else {
+        return;
+    };
+    let before_map = before.as_object();
+    let after_map = after.as_object();
+    let mut printed_header = false;
+
+    if let Some(after_map) = after_map {
+        for (key, after_value) in after_map {
+            match before_map.and_then(|m| m.get(key)) {
+                None => {
+                    if !printed_header {
+                        out.push_str("  State changes:\n");
+                        printed_header = true;
+                    }
+                    out.push_str(&format!("    + {key} = {}\n", render_value(after_value)));
+                }
+                Some(before_value) if before_value != after_value => {
+                    if !printed_header {
+                        out.push_str("  State changes:\n");
+                        printed_header = true;
+                    }
+                    out.push_str(&format!(
+                        "    ~ {key} = {} -> {}\n",
+                        render_value(before_value),
+                        render_value(after_value)
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    if let Some(before_map) = before_map {
+        for (key, before_value) in before_map {
+            if after_map.is_some_and(|m| m.contains_key(key)) {
+                continue;
+            }
+            if !printed_header {
+                out.push_str("  State changes:\n");
+                printed_header = true;
+            }
+            out.push_str(&format!("    - {key} = {}\n", render_value(before_value)));
+        }
+    }
 }
 
 impl HumanOutput for PaginatedResponse<AuditLogResponse> {
@@ -186,6 +264,7 @@ impl HumanOutput for PaginatedResponse<AuditLogResponse> {
                     .as_deref()
                     .unwrap_or(entry.actor_type.as_str()),
             ));
+            render_state_changes(&mut out, entry);
         }
         out.push_str(&format!(
             "\nPage {} of {} ({} total)\n",
@@ -241,6 +320,8 @@ pub struct ListParams<'a> {
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
     pub actor_id: Option<Uuid>,
+    pub correlation_id: Option<Uuid>,
+    pub action_kind: Option<String>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
 }
@@ -256,18 +337,19 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<AuditLogRe
         params.request_timeout,
     )?;
 
-    let query = AuditLogListParams {
-        actor_type: params.actor_type.map(|s| s.to_string()),
-        action_type: params.action_type.map(|s| s.to_string()),
-        outcome: params.outcome.map(|s| s.to_string()),
-        target_type: params.target_type.map(|s| s.to_string()),
-        target_id: params.target_id.map(|s| s.to_string()),
-        from: params.from.map(|s| s.to_string()),
-        to: params.to.map(|s| s.to_string()),
-        actor_id: params.actor_id,
-        page: params.page,
-        per_page: params.per_page,
-    };
+    let mut query = AuditLogListParams::default();
+    query.actor_type = params.actor_type.map(|s| s.to_string());
+    query.action_type = params.action_type.map(|s| s.to_string());
+    query.outcome = params.outcome.map(|s| s.to_string());
+    query.target_type = params.target_type.map(|s| s.to_string());
+    query.target_id = params.target_id.map(|s| s.to_string());
+    query.from = params.from.map(|s| s.to_string());
+    query.to = params.to.map(|s| s.to_string());
+    query.actor_id = params.actor_id;
+    query.correlation_id = params.correlation_id;
+    query.action_kind = params.action_kind.map(|s| s.to_string());
+    query.page = params.page;
+    query.per_page = params.per_page;
 
     use rootcause::prelude::*;
     client.list_audit_logs(&query).await.context_to()
@@ -284,18 +366,19 @@ pub async fn list_system(
         params.request_timeout,
     )?;
 
-    let query = AuditLogListParams {
-        actor_type: params.actor_type.map(|s| s.to_string()),
-        action_type: params.action_type.map(|s| s.to_string()),
-        outcome: params.outcome.map(|s| s.to_string()),
-        target_type: params.target_type.map(|s| s.to_string()),
-        target_id: params.target_id.map(|s| s.to_string()),
-        from: params.from.map(|s| s.to_string()),
-        to: params.to.map(|s| s.to_string()),
-        actor_id: params.actor_id,
-        page: params.page,
-        per_page: params.per_page,
-    };
+    let mut query = AuditLogListParams::default();
+    query.actor_type = params.actor_type.map(|s| s.to_string());
+    query.action_type = params.action_type.map(|s| s.to_string());
+    query.outcome = params.outcome.map(|s| s.to_string());
+    query.target_type = params.target_type.map(|s| s.to_string());
+    query.target_id = params.target_id.map(|s| s.to_string());
+    query.from = params.from.map(|s| s.to_string());
+    query.to = params.to.map(|s| s.to_string());
+    query.actor_id = params.actor_id;
+    query.correlation_id = params.correlation_id;
+    query.action_kind = params.action_kind.map(|s| s.to_string());
+    query.page = params.page;
+    query.per_page = params.per_page;
 
     use rootcause::prelude::*;
     client.list_system_audit_logs(&query).await.context_to()
@@ -328,6 +411,10 @@ mod tests {
             target_display: Some("APT Defaults".to_string()),
             outcome: "success".to_string(),
             details_json: Some(json!({ "plugin_type": "package_manager_apt" })),
+            action_kind: "event".to_string(),
+            before_snapshot: None,
+            after_snapshot: None,
+            correlation_id: None,
             request_id: Some("req-123".to_string()),
             occurred_at: datetime!(2025-01-01 12:00:00 UTC),
         }
@@ -351,6 +438,10 @@ mod tests {
             target_display: Some("Network Settings".to_string()),
             outcome: "success".to_string(),
             details_json: Some(json!({ "category": "network" })),
+            action_kind: "event".to_string(),
+            before_snapshot: None,
+            after_snapshot: None,
+            correlation_id: None,
             request_id: Some("req-system-123".to_string()),
             occurred_at: datetime!(2025-01-02 08:30:00 UTC),
         }
@@ -455,6 +546,10 @@ mod tests {
             target_display: Some("APT Defaults".into()),
             outcome: "success".into(),
             details_json: Some(json!({ "plugin_type": "package_manager_apt" })),
+            action_kind: "event".into(),
+            before_snapshot: None,
+            after_snapshot: None,
+            correlation_id: None,
             request_id: Some("req-123".into()),
             occurred_at: datetime!(2026-04-17 12:00:00 UTC),
         };
@@ -465,5 +560,48 @@ mod tests {
         assert!(rendered.contains("\"outcome\":\"success\""));
         assert!(!rendered.contains("\"method\""));
         assert!(!rendered.contains("\"path\""));
+    }
+
+    #[test]
+    fn audit_logs_json_output_includes_v2_fields() {
+        let entry = sample_tenant_entry();
+        // Override to stateful with snapshots
+        let entry = AuditLogResponse {
+            action_kind: "stateful".to_string(),
+            before_snapshot: Some(serde_json::json!({"enabled": false})),
+            after_snapshot: Some(serde_json::json!({"enabled": true})),
+            correlation_id: Some(
+                "00000000-0000-0000-0000-000000000abc"
+                    .parse::<Uuid>()
+                    .unwrap(),
+            ),
+            ..entry
+        };
+        let json = render_audit_logs_json(vec![entry]);
+        assert!(json.contains("\"action_kind\":\"stateful\""));
+        assert!(json.contains("\"before_snapshot\""));
+        assert!(json.contains("\"after_snapshot\""));
+        assert!(json.contains("\"correlation_id\""));
+    }
+
+    #[test]
+    fn render_state_changes_shows_diff_for_stateful_entry() {
+        let mut entry = sample_tenant_entry();
+        entry.action_kind = "stateful".to_string();
+        entry.before_snapshot = Some(serde_json::json!({"enabled": false, "name": "old"}));
+        entry.after_snapshot = Some(serde_json::json!({"enabled": true, "name": "old"}));
+        let mut out = String::new();
+        render_state_changes(&mut out, &entry);
+        assert!(out.contains("State changes:"));
+        assert!(out.contains("~ enabled = false -> true"));
+        assert!(!out.contains("name")); // unchanged, suppressed
+    }
+
+    #[test]
+    fn render_state_changes_silent_for_event_entry() {
+        let entry = sample_tenant_entry(); // action_kind = "event"
+        let mut out = String::new();
+        render_state_changes(&mut out, &entry);
+        assert!(out.is_empty());
     }
 }

@@ -864,6 +864,10 @@ export interface AuditLogEntry {
 	outcome: string;
 	details_json: Record<string, unknown> | null;
 	request_id: string | null;
+	action_kind: 'stateful' | 'event';
+	before_snapshot: Record<string, unknown> | null;
+	after_snapshot: Record<string, unknown> | null;
+	correlation_id: string | null;
 	occurred_at: string;
 }
 
@@ -878,6 +882,8 @@ export interface AuditLogListParams {
 	from?: string;
 	to?: string;
 	actor_id?: string;
+	correlation_id?: string;
+	action_kind?: 'stateful' | 'event';
 }
 
 export type AttestationStatus = 'Verified' | 'NotFound' | 'Unverified';

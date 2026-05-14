@@ -39,6 +39,10 @@ const sampleEntry: AuditLogEntry = {
 	outcome: 'success',
 	details_json: null,
 	request_id: 'req-1',
+	action_kind: 'event',
+	before_snapshot: null,
+	after_snapshot: null,
+	correlation_id: null,
 	occurred_at: '2026-04-19T08:00:00Z'
 };
 
