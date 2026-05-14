@@ -158,3 +158,109 @@ async fn weak_etag_prefix_stripped_before_comparison() {
 
     assert_eq!(status, http::StatusCode::OK);
 }
+
+/// Full GET→ETag→PUT round-trip: ETag from GET is accepted by PUT.
+#[tokio::test]
+async fn get_returns_etag_header() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .get("/api/v1/settings/registration")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present")
+        .to_str()
+        .expect("ETag is ASCII")
+        .to_string();
+    assert!(
+        etag.contains("settings-v0"),
+        "expected settings-v0 in ETag, got {etag:?}"
+    );
+}
+
+/// After a successful PUT, the ETag version increments so the old value is stale.
+#[tokio::test]
+async fn put_increments_etag_version() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // GET → current ETag (v0).
+    let resp0 = client
+        .get("/api/v1/settings/registration")
+        .bearer(&token)
+        .send()
+        .await;
+    let etag0 = resp0
+        .headers()
+        .get("etag")
+        .expect("ETag on first GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+
+    // PUT with current ETag → 200.
+    let (put_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            "/api/v1/settings/registration",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag0)
+        .send_json()
+        .await;
+    assert_eq!(put_status, http::StatusCode::OK);
+
+    // GET → ETag incremented to v1.
+    let resp1 = client
+        .get("/api/v1/settings/registration")
+        .bearer(&token)
+        .send()
+        .await;
+    let etag1 = resp1
+        .headers()
+        .get("etag")
+        .expect("ETag on second GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    assert!(
+        etag1.contains("settings-v1"),
+        "expected settings-v1 after PUT, got {etag1:?}"
+    );
+
+    // Old ETag is now stale → 409.
+    let stale_status = client
+        .put_json(
+            "/api/v1/settings/registration",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag0)
+        .send_status()
+        .await;
+    assert_eq!(stale_status, http::StatusCode::CONFLICT);
+
+    // New ETag → 200.
+    let (fresh_status, fresh_body): (_, serde_json::Value) = client
+        .put_json(
+            "/api/v1/settings/registration",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag1)
+        .send_json()
+        .await;
+    assert_eq!(fresh_status, http::StatusCode::OK);
+    assert_eq!(fresh_body["mode"], "open");
+}
