@@ -10,17 +10,16 @@
 
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use sea_orm::{EntityTrait, PaginatorTrait};
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 use uptrakit_shared_db::entity::oauth_client;
 use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::validation::Validate;
-
-use axum::Extension;
-use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 
 use crate::AppState;
 use crate::api_error::ApiError;
@@ -160,15 +159,17 @@ pub(crate) async fn manual_register_client(
     match svc.register_manual(body).await {
         Ok(resp) => {
             let client_id = resp.client_id.clone();
-            if let Ok(entry) =
-                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
-                    .tenant_scope(state.default_tenant_id)
-                    .actor(actor_type, actor_id)
-                    .target("oauth_client", client_id, None)
-                    .outcome(AuditOutcome::Success)
-                    .build()
+            match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
+                .tenant_scope(state.default_tenant_id)
+                .actor(actor_type, actor_id)
+                .target("oauth_client", client_id, None)
+                .outcome(AuditOutcome::Success)
+                .build()
             {
-                state.audit_emitter.emit_event(entry);
+                Ok(entry) => state.audit_emitter.emit_event(entry),
+                Err(err) => {
+                    tracing::warn!(error = %err, "dropping invalid oauth.client_registered audit entry")
+                }
             }
             (StatusCode::CREATED, axum::Json(resp)).into_response()
         }
@@ -204,8 +205,8 @@ pub(crate) async fn manual_register_client(
 pub(crate) async fn revoke_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(user): CanManageAuthSettings,
-    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(client_id): Path<String>,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
@@ -217,14 +218,17 @@ pub(crate) async fn revoke_client(
     let svc = build_client_service(&state);
     svc.revoke(&client_id).await?;
 
-    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
+    match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
         .tenant_scope(state.default_tenant_id)
         .actor(actor_type, actor_id)
         .target("oauth_client", client_id, None)
         .outcome(AuditOutcome::Success)
         .build()
     {
-        state.audit_emitter.emit_event(entry);
+        Ok(entry) => state.audit_emitter.emit_event(entry),
+        Err(err) => {
+            tracing::warn!(error = %err, "dropping invalid oauth.client_revoked audit entry")
+        }
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -255,8 +259,8 @@ pub(crate) async fn revoke_client(
 pub(crate) async fn trust_client(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(user): CanManageAuthSettings,
-    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(client_id): Path<String>,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
@@ -268,14 +272,17 @@ pub(crate) async fn trust_client(
     let svc = build_client_service(&state);
     svc.promote_trusted(&client_id).await?;
 
-    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_TRUSTED)
+    match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_TRUSTED)
         .tenant_scope(state.default_tenant_id)
         .actor(actor_type, actor_id)
         .target("oauth_client", client_id, None)
         .outcome(AuditOutcome::Success)
         .build()
     {
-        state.audit_emitter.emit_event(entry);
+        Ok(entry) => state.audit_emitter.emit_event(entry),
+        Err(err) => {
+            tracing::warn!(error = %err, "dropping invalid oauth.client_trusted audit entry")
+        }
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
