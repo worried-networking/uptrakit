@@ -6,10 +6,9 @@ use uptrakit_global_github_provider::GitHubProviderClient;
 #[cfg(feature = "catalog")]
 use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, DiscoveredSoftware, ExecuteUpdateResult, HostCompatibility, HostRequirements,
-    HostRuntime, PluginConfigValidationError, PluginError, PluginFamily, ReleaseFetcher,
-    ReleaseInfo, Result, UpdateOutputSender, UpstreamRelease, Version, VersionDetector,
-    declare_plugin, roles::ReleaseFetchContext,
+    ConfigModel, ExecuteUpdateResult, HostRequirements, HostRuntime, PluginConfigValidationError,
+    PluginError, PluginFamily, ReleaseFetcher, ReleaseInfo, Result, UpdateOutputSender,
+    UpstreamRelease, Version, VersionDetector, declare_plugin, roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
@@ -21,9 +20,8 @@ use crate::config::SkillsConfig;
 /// by [`crate::lock::parse_skill_identifier`].
 #[non_exhaustive]
 pub struct SkillsPlugin {
-    #[expect(dead_code, reason = "read by executor modules landing in Tasks 6–9")]
+    #[expect(dead_code, reason = "read by executor modules landing in Tasks 7–9")]
     pub(crate) config: SkillsConfig,
-    #[expect(dead_code, reason = "read by executor modules landing in Tasks 6–9")]
     pub(crate) executor: Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
     #[expect(dead_code, reason = "read by release-fetch module landing in Task 8")]
     pub(crate) provider: Option<Arc<dyn GitHubProviderClient>>,
@@ -117,18 +115,8 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
 });
 
 // ── Temporary role stubs ─────────────────────────────────────────────────────
-// Each stub will be replaced by a real implementation in Tasks 6–9.
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::Discoverer for SkillsPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Ok(vec![])
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Ok(HostCompatibility::Compatible)
-    }
-}
+// Discoverer is implemented in discovery.rs (Task 6).
+// VersionDetector, ReleaseFetcher, UpdateExecutor stubs will be replaced in Tasks 7–9.
 
 #[async_trait]
 impl VersionDetector for SkillsPlugin {
