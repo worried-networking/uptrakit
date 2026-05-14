@@ -1148,6 +1148,15 @@ pub(crate) fn build_rustls_server_config(
         root_store.add(ca_cert).context_to::<PkiError>()?;
     }
 
+    // Extract CA subject DNs before root_store is moved into the verifier builder.
+    // These are advertised in the TLS CertificateRequest so browsers (which hold
+    // no controller-issued certificate) skip the macOS Keychain cert-selection popup.
+    let hint_subjects: Vec<rustls::DistinguishedName> = root_store
+        .roots
+        .iter()
+        .map(|ta| rustls::DistinguishedName::in_sequence(ta.subject.as_ref()))
+        .collect();
+
     let initial_verifier: std::sync::Arc<dyn ClientCertVerifier> =
         WebPkiClientVerifier::builder(std::sync::Arc::new(root_store))
             .with_crls(crls)
@@ -1156,6 +1165,7 @@ pub(crate) fn build_rustls_server_config(
             .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
     let client_verifier = std::sync::Arc::new(crate::dynamic_verifier::DynamicClientVerifier::new(
         initial_verifier,
+        hint_subjects,
     ));
 
     let provider = rustls::crypto::CryptoProvider::get_default().ok_or_else(|| {
