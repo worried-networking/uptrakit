@@ -67,7 +67,15 @@ back or the caller returns an error, the hook is dropped without flushing — no
 is emitted for a failed mutation.
 
 ```rust
+// Obtain the hook before opening the transaction.
 let hook = audit.commit_hook();
+let tx = db.begin_with_options(TransactionOptions {
+    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+    ..Default::default()
+}).await?;
+let before = PluginConfig::find_by_id(id).one(&tx).await?...;
+// ... perform mutation ...
+let after = PluginConfig::find_by_id(id).one(&tx).await?...;
 audit.emit_stateful(&tx, AuditEntry::plugin_config_update(&before, &after)
     .actor_user(user_id, user_display)
     .outcome(AuditOutcome::Success)
@@ -96,15 +104,15 @@ The macro lives in `crates/shared/audit-log-derive/` and is re-exported through
 
 ### Attributes
 
-| Attribute                         | Scope             | Effect                                                                                                                                                                    |
-| --------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `#[audit(target_type = "...")]`   | Struct (required) | Sets `TARGET_TYPE`; becomes `target_type` on the audit row                                                                                                                |
-| `#[audit(skip)]`                  | Field             | Excludes the field entirely; use for internal rowids and denormalized join columns                                                                                        |
-| `#[audit(include)]`               | Field             | Overrides the auto-skip allowlist to include the field                                                                                                                    |
-| `#[audit(project_with = "<fn>")]` | Field             | Calls `<fn>(&FieldType) -> serde_json::Value` instead of the default `Serialize` output                                                                                   |
-| `#[audit(id_field = "...")]`      | Struct            | Overrides which field's `Display` becomes `audit_target_id` (default: `id`)                                                                                               |
-| `#[audit(display_field = "...")]` | Struct            | Overrides which field becomes `audit_target_display` (default: `name` if present)                                                                                         |
-| `#[audit(truncatable)]`           | Field             | Last-resort size cap: if the 16 KB snapshot cap is exceeded, this field is replaced with a sentinel before `.build()` fails; prefer `project_with` for known-large fields |
+| Attribute                         | Scope             | Effect                                                                                                                                                                                                                                                                   |
+| --------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `#[audit(target_type = "...")]`   | Struct (required) | Sets `TARGET_TYPE`; becomes `target_type` on the audit row                                                                                                                                                                                                               |
+| `#[audit(skip)]`                  | Field             | Excludes the field entirely; use for internal rowids and denormalized join columns                                                                                                                                                                                       |
+| `#[audit(include)]`               | Field             | Overrides the auto-skip allowlist to include the field                                                                                                                                                                                                                   |
+| `#[audit(project_with = "<fn>")]` | Field             | Calls `<fn>(&FieldType) -> serde_json::Value` instead of the default `Serialize` output                                                                                                                                                                                  |
+| `#[audit(id_field = "...")]`      | Struct            | Overrides which field's `Display` becomes `audit_target_id` (default: `id`)                                                                                                                                                                                              |
+| `#[audit(display_field = "...")]` | Struct            | Overrides which field becomes `audit_target_display` (default: `name` if present)                                                                                                                                                                                        |
+| `#[audit(truncatable)]`           | Field             | Last-resort size cap: if the 16 KB snapshot cap is exceeded after truncation, `.build()` returns `Err`; truncated fields are replaced with `{"truncated": true, "byte_count": <original>, "preview": "<first 256 bytes>"}`; prefer `project_with` for known-large fields |
 
 **Auto-skip allowlist:** the macro automatically skips fields named `created_at`, `updated_at`,
 `deleted_at`, and `deactivated_at`. Use `#[audit(include)]` to override. Other domain
@@ -128,6 +136,7 @@ struct Model {
     config_json: String,
     api_endpoint: MaskedUrl,        // self-masks via custom Serialize
     secret_value: EncryptedString,  // compile-excluded (no Serialize impl)
+    enabled: bool,                  // plain primitive — projects normally via Serialize
     #[audit(skip)]
     internal_rowid: i64,
     created_at: OffsetDateTime,     // auto-skipped
@@ -162,6 +171,25 @@ Examples: all `auth.*`, all `*.triggered`, `*.started`, `*.finalized`, `*.comple
   meaningful "before" state exists.
 - Batch facts (e.g. `software.update.triggered` batch): classify as **Event**. The individual
   per-item state transitions are each their own Stateful events.
+
+### `AuditActionKind` is intentionally closed
+
+`AuditActionKind` does **not** carry `#[non_exhaustive]`. Adding a third kind is a deliberate
+contract change, not an additive extension — every producer call site and the typestate builder
+would need to be updated. This is an explicit exception to the workspace-wide
+`#[non_exhaustive]` rule for public enums.
+
+### Registering a new action
+
+1. Add a constant to `crates/shared/audit-log/src/action_type.rs` via the `audit_actions!`
+   macro invocation, classifying it as `Stateful` or `Event`.
+2. Run `cargo build -p uptrakit-audit-log` — the macro generates the typed constructor
+   (`AuditEntry::my_new_action(...)` for Stateful or `AuditEntry::my_new_action()` for Event).
+3. Add a catalog entry to `crates/shared/audit-log/audit-catalog.toml`.
+4. Wire the constructor at the producer call site.
+
+The `audit-coverage-check` CI gate fails if a registered Stateful action has no `emit_stateful`
+call site, catching mis-registrations where the catalog entry exists but no emission was added.
 
 ## Catalog workflow
 
@@ -358,6 +386,11 @@ Controller flags are unchanged from V1:
 - `--audit-log-filter` (`all`, `mutations`, `none`)
 
 `journald` backend emits structured events to `target: "uptrakit_audit"`.
+
+`audit_log.retention_days` (setting key `AuditLogRetentionDays`) controls the retention period
+for both audit tables. The default is 90 days. Update via `PUT /api/v1/settings/audit_log.retention_days`
+or the equivalent CLI command. Lower values reduce storage; see `docs/security/audit-logs.md` for
+the storage sizing math.
 
 ## Read surface
 

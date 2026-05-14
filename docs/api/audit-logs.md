@@ -42,7 +42,7 @@ Lists tenant-scoped semantic audit entries.
       "actor_type": "user",
       "actor_id": "01958602-...",
       "actor_display": "admin@example.com",
-      "action_type": "plugin_config.create",
+      "action_type": "plugin_config.update",
       "action_kind": "stateful",
       "target_type": "plugin_config",
       "target_id": "0195ab10-...",
@@ -88,6 +88,10 @@ curl -H "Authorization: Bearer $TOKEN" \
 # Filter by time range (inclusive)
 curl -H "Authorization: Bearer $TOKEN" \
   "https://uptrakit.example.com/api/v1/audit-logs?from=2026-03-01T00:00:00Z&to=2026-03-03T23:59:59Z"
+
+# Fetch stateful rows to inspect before/after snapshots
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://uptrakit.example.com/api/v1/audit-logs?action_kind=stateful&per_page=1"
 
 # Filter by correlation ID
 curl -H "Authorization: Bearer $TOKEN" \
@@ -160,6 +164,12 @@ curl -H "Authorization: Bearer $TOKEN" \
   both present and non-null.
 - `"event"` — the action is a discrete workflow fact. `before_snapshot` and `after_snapshot` are
   both null.
+
+### System audit log schema difference
+
+`SystemAuditLogResponse` uses the same shape as `AuditLogResponse` minus `tenant_id`. System-scoped
+rows have no tenant context by design (they describe controller-level events). The `tenant_id` field
+is absent from system audit log responses.
 
 ---
 

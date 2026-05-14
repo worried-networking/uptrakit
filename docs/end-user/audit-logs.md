@@ -15,10 +15,10 @@ Each entry records:
 
 - **When**: timestamp
 - **Who**: actor type (`user`, `api_token`, `oidc`, `service`, `system`) and optional actor ID/display
-- **Action**: canonical `action_type`
+- **Action**: canonical `action_type` and `action_kind` (`stateful` or `event`)
 - **Target**: optional target type/ID/display
 - **Outcome**: `success`, `denied`, `validation_failed`, `failed`, or `partial`
-- **Context**: optional request ID and structured details metadata
+- **Context**: optional `correlation_id`, request ID, and structured details metadata
 
 ## Two log tables
 
@@ -101,8 +101,8 @@ Some audit entries are linked by a **correlation ID** — a shared UUID that tie
 multi-step workflow together (for example, a batch update trigger and the individual update
 completions it spawned, or an OIDC authorization flow and its callback).
 
-**Copy button:** In the row detail drawer, click the copy icon next to the correlation ID to copy
-the UUID to your clipboard.
+**Copy button:** Open the row detail drawer, then click the copy icon next to the correlation ID
+to copy the UUID to your clipboard. The copy button is in the detail drawer, not the list row.
 
 **Filtering by correlation ID:** Paste the UUID into the **Correlation ID** filter field in the
 filter bar and click **Apply**. The log list narrows to all rows that share that correlation ID.
@@ -178,5 +178,5 @@ Audit Logs nav link will not appear in the sidebar.
 
 ## See also
 
-- [Audit Logs API Reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
+- [Audit Logs API Reference](../api/audit-logs.md)
 - [Audit Logs Security](../security/audit-logs.md) — what is and is not logged, retention
