@@ -45,15 +45,17 @@ Users with access to only one log see that log directly with no tab bar.
 
 Apply filters to narrow results:
 
-| Filter      | Description                                                    |
-| ----------- | -------------------------------------------------------------- |
-| Actor Type  | `user`, `api_token`, `oidc`, `service`, `system`               |
-| Action      | Exact semantic action (for example `plugin_config.create`)     |
-| Outcome     | `success`, `denied`, `validation_failed`, `failed`, `partial`  |
-| Target Type | Semantic target category (for example `plugin_config`, `host`) |
-| Target ID   | Exact target identifier                                        |
-| From        | Lower time bound (inclusive). Use the date-time picker.        |
-| To          | Upper time bound (inclusive). Use the date-time picker.        |
+| Filter         | Description                                                    |
+| -------------- | -------------------------------------------------------------- |
+| Actor Type     | `user`, `api_token`, `oidc`, `service`, `system`               |
+| Action         | Exact semantic action (for example `plugin_config.create`)     |
+| Outcome        | `success`, `denied`, `validation_failed`, `failed`, `partial`  |
+| Target Type    | Semantic target category (for example `plugin_config`, `host`) |
+| Target ID      | Exact target identifier                                        |
+| From           | Lower time bound (inclusive). Use the date-time picker.        |
+| To             | Upper time bound (inclusive). Use the date-time picker.        |
+| Correlation ID | UUID shared by all events in a multi-step workflow             |
+| Action Kind    | `stateful` or `event`                                          |
 
 Click **Apply** to load results with the current filters. Click **Clear** to reset all filters.
 
@@ -68,6 +70,62 @@ Click **Apply** to load results with the current filters. Click **Clear** to res
 | Actor       | Actor display or actor type/ID fallback.   |
 
 Results are shown newest first and support pagination.
+
+## State changes
+
+Audit rows for stateful actions (service configuration changes, user updates, plugin config
+mutations, and others) include a **State tab** in the detail drawer.
+
+**When it appears:** Only on stateful rows. Event rows (auth events, workflow triggers,
+completions) do not have a State tab.
+
+**What it shows:** Side-by-side "Before" and "After" tables derived from the entity's snapshot
+at the time of the change. Fields are shown as key-value rows. The diff is computed client-side:
+
+| Highlight         | Meaning                                             |
+| ----------------- | --------------------------------------------------- |
+| Green background  | Field was added (present in After, not in Before)   |
+| Red background    | Field was removed (present in Before, not in After) |
+| Yellow background | Field value changed                                 |
+| Dimmed            | Field unchanged                                     |
+
+Nested object values are collapsible sub-tables. Primitive values display inline.
+
+**Reading Stateful vs Event rows:** In the audit log list, rows with a State tab have
+`action_kind = "stateful"`. Rows without a State tab are event-class entries. The detail drawer
+header shows the action kind.
+
+## Correlation ID
+
+Some audit entries are linked by a **correlation ID** — a shared UUID that ties all events in a
+multi-step workflow together (for example, a batch update trigger and the individual update
+completions it spawned, or an OIDC authorization flow and its callback).
+
+**Copy button:** In the row detail drawer, click the copy icon next to the correlation ID to copy
+the UUID to your clipboard.
+
+**Filtering by correlation ID:** Paste the UUID into the **Correlation ID** filter field in the
+filter bar and click **Apply**. The log list narrows to all rows that share that correlation ID.
+
+Single-step actions leave the correlation ID empty; it only appears on rows that are part of a
+multi-step workflow.
+
+## What's not shown
+
+V2 audit logs show state changes and workflow events for the current audit period. Some items are
+intentionally excluded:
+
+**By design:**
+
+- Read operations (viewing lists, fetching config, downloading files) are not audited.
+- Internal background bookkeeping (keepalive, cache refresh) is not audited.
+
+**Deferred to V3 (not yet available):**
+
+- Workflow timeline view: a grouped view of all events sharing a correlation ID, showing sequence
+  and timing.
+- Per-entity audit history: "show every audit row that ever touched this plugin config."
+- Analytics dashboards and time-series aggregation.
 
 ## Viewing audit logs via the CLI
 
@@ -87,6 +145,13 @@ uptrakit audit-logs list --target-type host --target-id 0193c9c5-4b3e-7b11-8ab2-
 # Filter by time range (RFC 3339 format)
 uptrakit audit-logs list --from 2026-03-01T00:00:00Z --to 2026-03-03T23:59:59Z
 
+# Filter by correlation ID
+uptrakit audit-logs list --correlation-id <uuid>
+
+# Filter by action kind
+uptrakit audit-logs list --action-kind stateful
+uptrakit audit-logs list --action-kind event
+
 # List system audit log entries (requires view_system_audit_logs)
 uptrakit audit-logs system list
 uptrakit audit-logs system list --action-type system.service.update_freeze.apply
@@ -97,6 +162,9 @@ Use `--output json` to get machine-readable output:
 ```sh
 uptrakit --output json audit-logs list --per-page 50
 ```
+
+For stateful entries, `uptrakit audit-logs show <id>` displays a compact diff (changed keys only,
+before → after on each line).
 
 ## Permissions required
 
