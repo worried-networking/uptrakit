@@ -30,6 +30,7 @@ mod mtls_acceptor;
 mod pki;
 mod reconcile;
 mod reencrypt;
+pub(crate) mod reexec;
 mod reload;
 #[cfg(feature = "embedded-scheduler")]
 mod scheduler;
@@ -851,6 +852,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Spawn PKI HTTP server if needed
     spawn_pki_http(&mut bg, &app_state, validated.pki_http_port);
+
+    // Notify the service manager (and stdout-based supervisors) that all
+    // servers are bound and the controller is ready to accept connections.
+    reexec::sd_notify::signal_ready();
 
     // Main event loop — wait for shutdown signal or server exit
     let mut server_task = server_task;
