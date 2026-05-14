@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use axum::{
@@ -91,6 +92,7 @@ pub async fn get_registration_settings(
 pub async fn update_registration_settings(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(user): CanManageAuthSettings,
+    _if_match: IfMatch<SettingsVersion>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateRegistrationSettingsRequest>,
 ) -> Response {
@@ -311,6 +313,7 @@ mod tests {
                 }),
             )
             .bearer(&access_token)
+            .header("if-match", "W/\"settings-v0\"")
             .send_status()
             .await;
         assert_eq!(status, StatusCode::OK);
@@ -356,6 +359,7 @@ mod tests {
                 }),
             )
             .bearer(&access_token)
+            .header("if-match", "W/\"settings-v0\"")
             .send_status()
             .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

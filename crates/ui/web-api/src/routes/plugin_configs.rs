@@ -13,6 +13,7 @@ use crate::auth::permissions::Permission;
 use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::{
     CanManageCommands, CanTestPluginConfigs, CanTriggerChecks, CanViewSoftware,
 };
@@ -353,6 +354,7 @@ pub async fn list_plugin_types(
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -624,6 +626,7 @@ pub async fn get_plugin_config(
 #[tracing::instrument(skip_all)]
 pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
@@ -849,6 +852,7 @@ pub async fn update_plugin_config(
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
@@ -1245,6 +1249,7 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(
     State(audit_emitter_state): State<AuditEmitterState>,
+    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -2206,6 +2211,7 @@ mod tests {
         let actor_token_id = uuid::Uuid::now_v7();
         let response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2253,6 +2259,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2315,6 +2322,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let create_response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2345,6 +2353,7 @@ mod tests {
 
         let update_response = update_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2396,6 +2405,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let create_response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2428,6 +2438,7 @@ mod tests {
 
         let delete_response = delete_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2473,6 +2484,7 @@ mod tests {
         let missing_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(missing_id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2516,6 +2528,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(uuid::Uuid::now_v7()),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2555,6 +2568,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let create_response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2591,6 +2605,7 @@ mod tests {
 
         let delete_response = delete_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser::new(
@@ -2630,6 +2645,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2674,6 +2690,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2717,6 +2734,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let create_response = create_plugin_config(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2772,6 +2790,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2822,6 +2841,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2863,6 +2883,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
             State(AuditEmitterState(state.audit_emitter.clone())),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
@@ -2905,6 +2926,7 @@ mod tests {
         let secret_config_value = "my-very-secret-api-key-for-snapshot-test";
         let response = create_plugin_config(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser::new(
                 actor_user_id,
