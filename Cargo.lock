@@ -7369,6 +7369,7 @@ dependencies = [
  "futures-util",
  "hostname",
  "httpmock",
+ "parking_lot",
  "rcgen",
  "reqwest",
  "rootcause",

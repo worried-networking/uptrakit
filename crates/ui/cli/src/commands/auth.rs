@@ -58,6 +58,10 @@ pub fn parse_fingerprint(s: &str) -> Result<String> {
 /// `allow_rotation` controls whether a stored-CA mismatch is an error (login)
 /// or a warning (ca trust).
 ///
+/// Returns `()` on success; the persisted PEM is available via `config.ca_pem`
+/// after the call. (The spec draft showed `-> Result<String>` but all call sites
+/// read `config.ca_pem` directly, so returning `()` avoids a `must_use` lint.)
+///
 /// # Errors
 ///
 /// Returns an error if the CA cannot be fetched, the PEM cannot be parsed,

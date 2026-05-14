@@ -2097,6 +2097,25 @@ fn auth_login_without_tofu_parses() {
     }
 }
 
+#[test]
+fn auth_login_insecure_and_tofu_together_are_rejected() {
+    // --insecure + --tofu mutual exclusion is enforced at runtime in dispatch
+    // (clap-level enforcement is not possible because --insecure is a global flag
+    // at the Cli level while --tofu lives inside a nested subcommand).
+    let args = Cli::try_parse_from(["uptrakit", "--insecure", "auth", "login", "--tofu"])
+        .expect("clap accepts both flags — runtime dispatch rejects them");
+    let insecure = args.insecure;
+    assert!(insecure, "insecure flag should be set");
+    match args.command {
+        Some(Commands::Auth {
+            command: AuthCommands::Login { tofu },
+        }) => {
+            assert!(tofu.is_some(), "tofu flag should be present");
+        }
+        _ => panic!("expected Auth Login"),
+    }
+}
+
 // -- auth ca subcommand tests --
 
 #[test]

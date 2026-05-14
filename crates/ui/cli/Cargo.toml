@@ -47,6 +47,7 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 rcgen = { workspace = true }
 httpmock = { workspace = true }
+parking_lot = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }
