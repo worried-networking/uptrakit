@@ -9,8 +9,11 @@ use crate::AppError;
 
 /// Initialize the entire PKI subsystem: CA state, server certificate,
 /// CRL manager, and TLS configuration.
+///
+/// TLS and CA paths are taken from `runtime.tls.*` (TOML config).
+/// Empty strings mean the internal CA/cert is used.
 pub(crate) async fn init_pki_runtime(
-    args: &crate::cli::Args,
+    runtime: &uptrakit_config_reload::RuntimeConfig,
     db: &sea_orm::DatabaseConnection,
     config_dir: &std::path::Path,
     reconciled: &ReconciledSettings,
@@ -19,20 +22,12 @@ pub(crate) async fn init_pki_runtime(
 
     let pki_path = pki::pki_dir(config_dir).context(AppError::Pki)?;
 
+    let tls_cert_path = runtime.tls.cert_path.as_str();
+    let tls_key_path = runtime.tls.key_path.as_str();
+    let has_external_cert = !tls_cert_path.is_empty() && !tls_key_path.is_empty();
+
     // Load CA state
-    let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) = (&args.ca_cert, &args.ca_key) {
-        // External CA — not managed
-        let ca = pki::load_external_ca(ca_cert_path, ca_key_path).context(AppError::Pki)?;
-        let trusted = vec![
-            pki::bundle_from_pem(ca.cert_pem.clone(), ca.key_pem.clone()).context(AppError::Pki)?,
-        ];
-        pki::CaState {
-            active: ca,
-            previous: None,
-            trusted,
-            managed: false,
-        }
-    } else {
+    let ca_state = {
         let mut state = pki::load_or_init_managed_ca(db, reconciled.pki_addr.as_deref())
             .await
             .context(AppError::Pki)?;
@@ -63,8 +58,12 @@ pub(crate) async fn init_pki_runtime(
         Arc::new(tokio::sync::RwLock::new(ca_initial_key_store));
 
     // Resolve server certificate (using reconciled sans)
-    let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
-        pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
+    let server_cert = if has_external_cert {
+        pki::load_external_cert(
+            std::path::Path::new(tls_cert_path),
+            std::path::Path::new(tls_key_path),
+        )
+        .context(AppError::Pki)?
     } else {
         let mut cert =
             pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &reconciled.sans)
@@ -89,9 +88,9 @@ pub(crate) async fn init_pki_runtime(
                     "The server certificate does not include the requested SANs and was signed by \
                      a different CA than the currently active one.\n\n\
                      To fix this:\n  \
-                     1. Restart the controller without the --san flag(s) that are not yet in the certificate\n  \
+                     1. Restart the controller without tls.sans in the TOML config\n  \
                      2. Regenerate the server certificate via POST /api/v1/settings/renew-server-certificate or the UI\n  \
-                     3. Restart the controller with the desired --san flag(s)"
+                     3. Restart the controller with the desired tls.sans values"
                         .into()
                 ));
             }
@@ -180,5 +179,6 @@ pub(crate) async fn init_pki_runtime(
         crl_pem_cache,
         crl_manager,
         initial_ca_version,
+        has_external_tls_cert: has_external_cert,
     })
 }

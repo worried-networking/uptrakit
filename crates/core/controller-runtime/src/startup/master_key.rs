@@ -4,24 +4,23 @@ use rootcause::prelude::*;
 
 use crate::AppError;
 
-/// Initialize the global master encryption key from `--master-key-file`.
+/// Initialize the global master encryption key from the `master_key_from` source spec.
+///
+/// The `master_key_from` argument supports three source URI forms:
+/// - `file:/path/to/key` — read the key from a file
+/// - `env:VAR_NAME` — read the key from an environment variable
+/// - any other value — treated as an inline hex string
 ///
 /// Returns the raw hex string wrapped in [`SecretString`] if a master key was
 /// loaded, `None` otherwise. The [`SecretString`] zeroes the hex on drop so
 /// the key material is not retained in memory beyond its needed lifetime.
 pub(crate) fn init_master_key(
-    args: &crate::cli::Args,
+    master_key_from: Option<&str>,
 ) -> crate::Result<Option<uptrakit_wire::SecretString>> {
-    let key_hex = read_master_key_hex(args.master_key_file.as_deref())?;
+    let key_hex = read_master_key_hex(master_key_from)?;
 
     match key_hex {
         Some(key_hex) => {
-            if args.allow_plaintext_secrets {
-                tracing::warn!(
-                    "--allow-plaintext-secrets is enabled. This flag is for development only; \
-                    encryption remains enabled because a master key was provided."
-                );
-            }
             let key_bytes = parse_master_key_hex(&key_hex)?;
             uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes)).context_to()?;
             tracing::info!("master encryption key initialized");
@@ -29,39 +28,42 @@ pub(crate) fn init_master_key(
             Ok(Some(uptrakit_wire::SecretString::new(hex_for_secret)))
         }
         None => {
-            if args.allow_plaintext_secrets {
-                tracing::warn!(
-                    "master encryption key not set; encryption at rest is disabled. \
-                    This is for development only and is NOT safe for production."
-                );
-                uptrakit_crypto::enable_plaintext_mode();
-            } else {
-                bail!(AppError::Config(
-                    "master encryption key is required: pass --master-key-file <path> \
-                     (64-char hex). For development only, pass --allow-plaintext-secrets \
-                     to run without encryption at rest."
-                        .into()
-                ));
-            }
-            Ok(None)
+            bail!(AppError::Config(
+                "master encryption key is required: pass --master-key-from file:/path/to/key, \
+                 env:VAR_NAME, or an inline hex string via UPTRAKIT_MASTER_KEY_FROM."
+                    .into()
+            ));
         }
     }
 }
 
 pub(crate) fn read_master_key_hex(
-    master_key_file: Option<&std::path::Path>,
+    master_key_from: Option<&str>,
 ) -> crate::Result<Option<zeroize::Zeroizing<String>>> {
-    if let Some(key_file) = master_key_file {
-        let contents = std::fs::read_to_string(key_file).map_err(|e| {
+    let Some(source) = master_key_from else {
+        return Ok(None);
+    };
+
+    if let Some(path) = source.strip_prefix("file:") {
+        let contents = std::fs::read_to_string(path).map_err(|e| {
             report!(AppError::Config(format!(
-                "failed to read --master-key-file {}: {e}",
-                key_file.display()
+                "failed to read master key file {path}: {e}"
             )))
         })?;
         return Ok(Some(zeroize::Zeroizing::new(contents.trim().to_string())));
     }
 
-    Ok(None)
+    if let Some(var_name) = source.strip_prefix("env:") {
+        let value = std::env::var(var_name).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to read master key from environment variable {var_name}: {e}"
+            )))
+        })?;
+        return Ok(Some(zeroize::Zeroizing::new(value.trim().to_string())));
+    }
+
+    // Inline hex string
+    Ok(Some(zeroize::Zeroizing::new(source.trim().to_string())))
 }
 
 pub(crate) fn parse_master_key_hex(key_hex: &str) -> crate::Result<[u8; 32]> {
@@ -104,27 +106,25 @@ mod tests {
             Err(_) => return,
         };
         assert!(file.write_all(b"  0123  ").is_ok());
-        let result = read_master_key_hex(Some(file.path()));
+        let path = format!("file:{}", file.path().display());
+        let result = read_master_key_hex(Some(&path));
         assert!(matches!(result, Ok(Some(ref value)) if value.as_str() == "0123"));
     }
 
     #[test]
-    fn missing_key_bail_message_does_not_mention_env_var() {
-        // Regression guard: the error message must point at --master-key-file
-        // and must not resurrect any UPTRAKIT_MASTER_KEY mention.
-        use clap::Parser;
-        let args = crate::cli::Args::try_parse_from(["uptrakit-controller"])
-            .expect("default args should parse");
-        assert!(args.master_key_file.is_none() && !args.allow_plaintext_secrets);
-        let err = super::init_master_key(&args).expect_err("missing key must error");
+    fn inline_hex_is_passed_through() {
+        let hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = read_master_key_hex(Some(hex));
+        assert!(matches!(result, Ok(Some(ref value)) if value.as_str() == hex));
+    }
+
+    #[test]
+    fn missing_key_errors_without_source() {
+        let err = super::init_master_key(None).expect_err("missing key must error");
         let rendered = format!("{err:?}");
         assert!(
-            rendered.contains("--master-key-file"),
-            "error must mention --master-key-file, got: {rendered}"
-        );
-        assert!(
-            !rendered.contains("UPTRAKIT_MASTER_KEY"),
-            "error must not mention the legacy env var, got: {rendered}"
+            rendered.contains("--master-key-from"),
+            "error must mention --master-key-from, got: {rendered}"
         );
     }
 

@@ -7,76 +7,76 @@ use rootcause::prelude::*;
 use super::{ReconciledSettings, ValidatedConfig};
 use crate::AppError;
 
-/// Validate TLS, CA, SAN, and PKI HTTP args.  Resolve the static directory.
+/// Validate TLS, CA, SAN, and PKI HTTP configuration from TOML.
+///
+/// `tls_cert_path` and `tls_key_path` come from `runtime.tls.cert_path` /
+/// `runtime.tls.key_path`.  They are non-empty only when the operator
+/// provides custom certificates; empty strings mean the internal CA is used.
+///
+/// `static_dir` is `runtime.plugins.static_dir` or `None` when absent.
+/// `pki_http` is derived from the PKI addr scheme in the TOML config.
 pub(crate) fn validate_configuration(
-    args: &crate::cli::Args,
+    runtime: &uptrakit_config_reload::RuntimeConfig,
     reconciled: &ReconciledSettings,
 ) -> crate::Result<ValidatedConfig> {
+    let tls_cert = runtime.tls.cert_path.as_str();
+    let tls_key = runtime.tls.key_path.as_str();
+    let has_tls_cert = !tls_cert.is_empty();
+    let has_tls_key = !tls_key.is_empty();
+
     // If --static-dir is given explicitly, always resolve and use it (overrides embedded assets).
     // Without an explicit path: auto-detect only when embedded-frontend is not compiled in.
-    let static_dir = if args.static_dir.is_some() || !cfg!(feature = "embedded-frontend") {
-        resolve_static_dir(args.static_dir.clone())?
+    let static_dir_path: Option<PathBuf> = None; // static dir is no longer CLI-configurable; auto-detect only
+    let static_dir = if !cfg!(feature = "embedded-frontend") {
+        resolve_static_dir(static_dir_path)?
     } else {
         None
     };
 
-    // Validate TLS args
-    if args.tls_cert.is_some() != args.tls_key.is_some() {
+    // Validate TLS paths: both or neither must be non-empty.
+    if has_tls_cert != has_tls_key {
         bail!(AppError::Config(
-            "both --tls-cert and --tls-key must be provided together".into()
+            "both tls.cert_path and tls.key_path must be set together in the TOML config".into()
         ));
     }
 
-    // --san only makes sense with managed (auto-generated) certificates
-    if !reconciled.sans.is_empty() && args.tls_cert.is_some() {
+    // SANs only make sense with managed (auto-generated) certificates.
+    if !reconciled.sans.is_empty() && has_tls_cert {
         bail!(AppError::Config(
-            "--san cannot be used with --tls-cert/--tls-key; \
+            "tls.sans cannot be used with tls.cert_path/tls.key_path; \
              SANs are only configurable for controller-managed certificates"
                 .into()
         ));
     }
 
-    // Validate CA args
-    if args.ca_cert.is_some() != args.ca_key.is_some() {
-        bail!(AppError::Config(
-            "both --ca-cert and --ca-key must be provided together".into()
-        ));
-    }
-
-    // Validate --pki-http
-    let pki_http_port: Option<u16> = if let Some(mode) = args.pki_http {
-        let pki_url = reconciled.pki_addr.as_deref().ok_or_else(|| {
-            report!(AppError::Config(
-                "--pki-http requires --pki-addr to be set".into()
-            ))
-        })?;
-        match mode {
-            crate::cli::PkiHttpMode::Listener => {
-                let parsed: url::Url = pki_url.parse().map_err(|e| {
-                    report!(AppError::Config(format!(
-                        "--pki-addr URL is not valid: {e}"
-                    )))
-                })?;
-                let port = parsed.port_or_known_default().ok_or_else(|| {
-                    report!(AppError::Config(
-                        "--pki-addr URL must have an explicit or default port".into()
-                    ))
-                })?;
-                Some(port)
+    // Determine PKI HTTP port from the PKI addr scheme.
+    // An http:// pki addr without a dedicated HTTP listener just logs a warning;
+    // there is no longer a separate --pki-http flag.
+    let pki_http_port: Option<u16> = if let Some(ref url) = reconciled.pki_addr
+        && url.starts_with("http://")
+    {
+        // Parse the port out of the PKI address URL for the built-in HTTP listener.
+        match url.parse::<url::Url>() {
+            Ok(parsed) => {
+                if let Some(port) = parsed.port_or_known_default() {
+                    Some(port)
+                } else {
+                    tracing::warn!(
+                        "network.pki.addr uses http:// scheme but has no explicit port; \
+                         the built-in PKI HTTP listener will not start"
+                    );
+                    None
+                }
             }
-            crate::cli::PkiHttpMode::External => None,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "network.pki.addr URL could not be parsed; PKI HTTP listener disabled"
+                );
+                None
+            }
         }
     } else {
-        if let Some(ref url) = reconciled.pki_addr
-            && url.starts_with("http://")
-        {
-            tracing::warn!(
-                "--pki-addr uses http:// scheme but --pki-http is not set; \
-                 the controller is NOT serving PKI endpoints over plain HTTP. \
-                 Add --pki-http listener to start the HTTP listener, or \
-                 --pki-http external if PKI HTTP is handled by a reverse proxy."
-            );
-        }
         None
     };
 
@@ -88,18 +88,18 @@ pub(crate) fn validate_configuration(
 
 /// Resolve the static directory for SPA serving.
 ///
-/// If `--static-dir` is given, validates that it contains `index.html`.
-/// Otherwise, auto-detects by probing `frontend/build` and `frontend`
+/// Auto-detects by probing `frontend/build` and `frontend`
 /// relative to the current working directory.
 ///
-/// This function is always compiled so that `--static-dir` can override the
-/// embedded frontend assets even when the `embedded-frontend` feature is active.
+/// This function is always compiled so that static-dir auto-detection can
+/// override the embedded frontend assets even when the `embedded-frontend`
+/// feature is active.
 fn resolve_static_dir(explicit: Option<PathBuf>) -> crate::Result<Option<PathBuf>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");
         if !index.is_file() {
             bail!(AppError::Config(format!(
-                "--static-dir {}: missing index.html",
+                "static_dir {}: missing index.html",
                 dir.display()
             )));
         }

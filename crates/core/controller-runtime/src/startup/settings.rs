@@ -51,25 +51,48 @@ async fn reconcile_nullable_string(
     Ok(if value.is_empty() { None } else { Some(value) })
 }
 
-/// Reconcile all DB-managed global settings with CLI values and update the
+/// Reconcile all DB-managed global settings with TOML config values and update the
 /// in-memory [`Settings`] object.
+///
+/// The `runtime` argument carries all network and NATS settings sourced from
+/// the TOML file (replacing the removed CLI flags). Settings in the DB always
+/// win over the TOML values on subsequent starts (TOML is the seed, DB is the
+/// authoritative store at runtime).
 pub(crate) async fn reconcile_all_settings(
     db: &sea_orm::DatabaseConnection,
-    args: &crate::cli::Args,
+    runtime: &uptrakit_config_reload::RuntimeConfig,
     settings: &Settings,
     global_raw: &RawSettings,
 ) -> crate::Result<ReconciledSettings> {
-    let force = args.force_settings_override;
+    // Settings sourced from TOML are treated as "CLI" inputs for reconcile
+    // purposes (they seed the DB on first run and can be overridden in the DB
+    // thereafter).  We use `force = false` so DB wins on subsequent starts.
+    let force = false;
 
-    // Network settings
+    // Trusted proxies: parse from TOML [network.https] trusted_proxies strings.
+    let toml_proxies: Vec<IpNet> = runtime
+        .network
+        .https
+        .trusted_proxies
+        .iter()
+        .filter_map(|s| {
+            s.parse::<IpNet>()
+                .or_else(|_| s.parse::<std::net::IpAddr>().map(IpNet::from))
+                .map_err(|e| {
+                    tracing::warn!(proxy = s, error = %e, "skipping unparseable trusted proxy CIDR");
+                })
+                .ok()
+        })
+        .collect();
+
     let trusted_proxies = reconcile_setting_vec::<IpNet>(crate::reconcile::ReconcileParams {
         db,
         key: "network.trusted_proxies",
         raw: global_raw,
-        cli_value: if args.trusted_proxies.is_empty() {
+        cli_value: if toml_proxies.is_empty() {
             None
         } else {
-            Some(args.trusted_proxies.clone())
+            Some(toml_proxies)
         },
         default_value: vec![],
         force,
@@ -91,11 +114,18 @@ pub(crate) async fn reconcile_all_settings(
         warn_broad_trusted_proxy(cidr);
     }
 
+    // real_ip_header: use TOML value when non-default.
+    let toml_real_ip = runtime.network.https.real_ip_header.clone();
+    let toml_real_ip_opt = if toml_real_ip == uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER {
+        None
+    } else {
+        Some(toml_real_ip)
+    };
     let real_ip_header = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
         key: "network.real_ip_header",
         raw: global_raw,
-        cli_value: args.real_ip_header.clone(),
+        cli_value: toml_real_ip_opt,
         default_value: uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
         force,
         convert: crate::reconcile::JsonConvert {
@@ -107,11 +137,13 @@ pub(crate) async fn reconcile_all_settings(
     .context(AppError::Settings)?;
     settings.set_real_ip_header(real_ip_header).await;
 
+    // Forwarded client cert headers from TOML.
+    let toml_fcc_info = &runtime.network.https.forwarded_client_cert_info_header;
     let forwarded_cert_info_opt = reconcile_nullable_string(
         db,
         "network.forwarded_client_cert_info_header",
         global_raw,
-        args.forwarded_client_cert_info_header.clone(),
+        Some(toml_fcc_info.clone()).filter(|s| !s.is_empty()),
         force,
     )
     .await?;
@@ -119,11 +151,12 @@ pub(crate) async fn reconcile_all_settings(
         .set_forwarded_client_cert_info_header(forwarded_cert_info_opt.clone())
         .await;
 
+    let toml_fcc_pem = &runtime.network.https.forwarded_client_cert_pem_header;
     let forwarded_cert_pem_opt = reconcile_nullable_string(
         db,
         "network.forwarded_client_cert_pem_header",
         global_raw,
-        args.forwarded_client_cert_pem_header.clone(),
+        Some(toml_fcc_pem.clone()).filter(|s| !s.is_empty()),
         force,
     )
     .await?;
@@ -131,11 +164,13 @@ pub(crate) async fn reconcile_all_settings(
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
+    // PKI addr from TOML [network.pki].
+    let toml_pki_addr = runtime.network.pki.addr.clone();
     let pki_addr_opt = reconcile_nullable_string(
         db,
         "network.pki_addr",
         global_raw,
-        args.pki_addr.clone(),
+        Some(toml_pki_addr).filter(|s| !s.is_empty()),
         force,
     )
     .await?;
@@ -146,23 +181,24 @@ pub(crate) async fn reconcile_all_settings(
         && trusted_proxies.is_empty()
     {
         tracing::warn!(
-            "forwarded client cert header(s) configured but no --trusted-proxy set; \
+            "forwarded client cert header(s) configured but no trusted_proxies set; \
              cert headers will be stripped from all requests"
         );
     }
 
     // SANs reconciliation: full-list semantics (not additive)
     //
-    // 1. --san provided         -> standard 5-case reconcile (CLI is canonical)
-    // 2. --san absent, DB has   -> use DB value (no auto-detection)
-    // 3. --san absent, DB empty -> first start: auto-detect and save to DB
-    let sans = if !args.sans.is_empty() {
-        // Case 1: --san provided — standard reconcile
+    // 1. [tls].sans provided         -> standard 5-case reconcile (TOML is canonical)
+    // 2. [tls].sans absent, DB has   -> use DB value (no auto-detection)
+    // 3. [tls].sans absent, DB empty -> first start: auto-detect and save to DB
+    let toml_sans = runtime.tls.sans.clone();
+    let sans = if !toml_sans.is_empty() {
+        // Case 1: [tls].sans provided — standard reconcile
         reconcile_setting_vec::<String>(crate::reconcile::ReconcileParams {
             db,
             key: "network.sans",
             raw: global_raw,
-            cli_value: Some(args.sans.clone()),
+            cli_value: Some(toml_sans),
             default_value: vec![],
             force,
             convert: crate::reconcile::JsonConvert {
@@ -179,7 +215,7 @@ pub(crate) async fn reconcile_all_settings(
         .await
         .context(AppError::Settings)?
     } else {
-        // No --san: check if DB has a value
+        // No [tls].sans: check if DB has a value
         let db_sans = global_raw.get("network.sans").and_then(|v| {
             v.as_array().map(|arr| {
                 arr.iter()
@@ -219,11 +255,25 @@ pub(crate) async fn reconcile_all_settings(
     };
     settings.set_sans(sans.clone()).await;
 
+    // HTTPS addr from TOML [network.https].
+    let toml_https_addr: Option<SocketAddr> = if runtime.network.https.addr.is_empty() {
+        None
+    } else {
+        runtime
+            .network
+            .https
+            .addr
+            .parse::<SocketAddr>()
+            .ok()
+            .inspect(|a| {
+                tracing::debug!(addr = %a, "HTTPS addr from TOML");
+            })
+    };
     let https_addr = reconcile_socket_addr(
         db,
         "network.https_addr",
         global_raw,
-        args.https_addr,
+        toml_https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
             .parse()
             .map_err(|e| {
@@ -239,11 +289,17 @@ pub(crate) async fn reconcile_all_settings(
     // NATS URL reconciliation (only when nats feature is enabled)
     #[cfg(feature = "nats")]
     let nats_url = {
+        let toml_nats_url = runtime.nats.url.clone();
+        let toml_nats_opt = if toml_nats_url.is_empty() {
+            None
+        } else {
+            Some(toml_nats_url)
+        };
         let nats_url_raw = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
             db,
             key: "nats.url",
             raw: global_raw,
-            cli_value: args.nats_url.clone(),
+            cli_value: toml_nats_opt,
             default_value: String::new(),
             force,
             convert: crate::reconcile::JsonConvert {
@@ -286,12 +342,17 @@ pub(crate) async fn reconcile_all_settings(
     // Zeroconf settings reconciliation (only when zeroconf feature is enabled)
     #[cfg(feature = "zeroconf")]
     {
+        let toml_zeroconf_enabled = runtime.zeroconf.enabled;
         let zeroconf_enabled =
             crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
                 db,
                 key: "zeroconf.enabled",
                 raw: global_raw,
-                cli_value: if args.zeroconf { Some(true) } else { None },
+                cli_value: if toml_zeroconf_enabled {
+                    Some(true)
+                } else {
+                    None
+                },
                 default_value: false,
                 force,
                 convert: crate::reconcile::JsonConvert {
@@ -302,19 +363,20 @@ pub(crate) async fn reconcile_all_settings(
             .await
             .context(AppError::Settings)?;
 
+        let toml_zeroconf_url = runtime.zeroconf.url.clone();
         let zeroconf_url_opt = reconcile_nullable_string(
             db,
             "zeroconf.url",
             global_raw,
-            args.zeroconf_url.clone(),
+            Some(toml_zeroconf_url).filter(|s| !s.is_empty()),
             force,
         )
         .await?;
 
         // Fall back to reconciled pki_addr if no explicit zeroconf_pki_addr
-        let zeroconf_pki_addr_cli = args
-            .zeroconf_pki_addr
-            .clone()
+        let toml_zeroconf_pki_addr = runtime.zeroconf.pki_addr.clone();
+        let zeroconf_pki_addr_cli = Some(toml_zeroconf_pki_addr)
+            .filter(|s| !s.is_empty())
             .or_else(|| pki_addr_opt.clone());
         let zeroconf_pki_addr_opt = reconcile_nullable_string(
             db,
@@ -413,7 +475,7 @@ where
     match (db_value, cli_value) {
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
-                tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
+                tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with TOML value");
                 uptrakit_web_api::settings_store::upsert_global_setting_raw(
                     db,
                     key,
@@ -426,11 +488,11 @@ where
                 })?;
                 Ok(cli_val)
             } else {
-                tracing::warn!(
+                tracing::debug!(
                     key,
-                    cli = %DisplayVec(&cli_val),
+                    toml = %DisplayVec(&cli_val),
                     db = %DisplayVec(&db_val),
-                    "CLI value differs from DB; using DB value (pass --force-settings-override to overwrite)"
+                    "TOML value differs from DB; using DB value"
                 );
                 Ok(db_val)
             }
@@ -440,7 +502,7 @@ where
             Ok(db_val)
         }
         (None, Some(cli_val)) => {
-            tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
+            tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from TOML");
             uptrakit_web_api::settings_store::upsert_global_setting_raw(
                 db,
                 key,
