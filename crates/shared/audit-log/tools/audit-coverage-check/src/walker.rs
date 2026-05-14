@@ -26,6 +26,7 @@ use crate::{catalog::Catalog, registry::Registry};
 
 /// Results from scanning the source tree for audit call-site coverage.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct WalkReport {
     /// Call sites that were detected but have no catalog entry.
     pub missing_catalog_entry: Vec<String>,

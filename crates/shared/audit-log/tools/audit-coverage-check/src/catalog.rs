@@ -9,6 +9,7 @@ use std::path::Path;
 
 /// The top-level structure of `audit-catalog.toml`.
 #[derive(Deserialize, Debug)]
+#[non_exhaustive]
 pub struct Catalog {
     /// All catalog entries, one per call-site decision.
     pub entries: Vec<Entry>,
@@ -16,6 +17,7 @@ pub struct Catalog {
 
 /// A single call-site decision in the catalog.
 #[derive(Deserialize, Debug)]
+#[non_exhaustive]
 pub struct Entry {
     /// Fully-qualified Rust path, e.g. `"uptrakit_web_api::routes::plugin_configs::create"`.
     pub site: String,
