@@ -58,6 +58,10 @@ fn audit_log_to_response(m: audit_log::Model) -> AuditLogResponse {
         target_display: m.target_display,
         outcome: m.outcome,
         details_json: m.details_json,
+        action_kind: m.action_kind,
+        before_snapshot: m.before_snapshot,
+        after_snapshot: m.after_snapshot,
+        correlation_id: m.correlation_id,
         request_id: m.request_id,
         occurred_at: m.occurred_at,
     }
@@ -75,6 +79,10 @@ fn system_audit_log_to_response(m: system_audit_log::Model) -> SystemAuditLogRes
         target_display: m.target_display,
         outcome: m.outcome,
         details_json: m.details_json,
+        action_kind: m.action_kind,
+        before_snapshot: m.before_snapshot,
+        after_snapshot: m.after_snapshot,
+        correlation_id: m.correlation_id,
         request_id: m.request_id,
         occurred_at: m.occurred_at,
     }
@@ -131,6 +139,12 @@ pub async fn list_tenant_audit_logs(
     }
     if let Some(actor_id) = params.actor_id {
         q = q.filter(audit_log::Column::ActorId.eq(actor_id));
+    }
+    if let Some(correlation_id) = params.correlation_id {
+        q = q.filter(audit_log::Column::CorrelationId.eq(correlation_id));
+    }
+    if let Some(ref action_kind) = params.action_kind {
+        q = q.filter(audit_log::Column::ActionKind.eq(action_kind.as_str()));
     }
 
     let base_query = q.order_by_desc(audit_log::Column::OccurredAt);
@@ -201,6 +215,12 @@ pub async fn list_system_audit_logs(
     }
     if let Some(actor_id) = params.actor_id {
         q = q.filter(system_audit_log::Column::ActorId.eq(actor_id));
+    }
+    if let Some(correlation_id) = params.correlation_id {
+        q = q.filter(system_audit_log::Column::CorrelationId.eq(correlation_id));
+    }
+    if let Some(ref action_kind) = params.action_kind {
+        q = q.filter(system_audit_log::Column::ActionKind.eq(action_kind.as_str()));
     }
 
     let base_query = q.order_by_desc(system_audit_log::Column::OccurredAt);
