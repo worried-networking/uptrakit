@@ -69,7 +69,7 @@ pub fn authenticated_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// Serialize env-mutating tests so parallel test threads do not race on HOME.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -78,12 +78,12 @@ mod tests {
     /// original value.  This prevents the test from reading real on-disk
     /// config/credentials left by a logged-in developer session.
     fn with_empty_home<F: FnOnce()>(f: F) {
-        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        let _guard = ENV_LOCK.lock();
         let tmp = std::env::temp_dir().join(format!(
             "uptrakit-cli-test-home-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos())
+                .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
         std::fs::create_dir_all(&tmp).expect("create temp home");
