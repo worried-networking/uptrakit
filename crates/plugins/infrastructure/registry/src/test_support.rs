@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
@@ -8,6 +9,19 @@ use uptrakit_plugin_infrastructure_core::{
     descriptor::ReleaseFetcherSlot, form_schema::FormFieldDescriptor, roles::ReleaseFetchContext,
 };
 use uptrakit_shared_types::PluginTypeId;
+
+/// Whether the last `create_ctx_capture_fetcher` call received a non-`None` lookup.
+static CTX_CAPTURE_HAD_LOOKUP: AtomicBool = AtomicBool::new(false);
+
+/// Reset the context-capture flag. Call before executing the test.
+pub fn reset_ctx_capture_had_lookup() {
+    CTX_CAPTURE_HAD_LOOKUP.store(false, Ordering::SeqCst);
+}
+
+/// Returns whether the last `create_ctx_capture_fetcher` call saw a non-`None` lookup.
+pub fn ctx_capture_had_lookup() -> bool {
+    CTX_CAPTURE_HAD_LOOKUP.load(Ordering::SeqCst)
+}
 
 const BATCH_LEVEL_FETCH_FAILURE: &str = "test: batch-level fetch failure";
 const PER_ITEM_FETCH_FAILURE: &str = "test: per-item fetch failure";
@@ -113,10 +127,10 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     roles: RoleCreators {
         discoverer: None,
         version_detector: None,
-        release_fetcher: Some(ReleaseFetcherSlot {
-            create: create_release_fetcher,
-            host_requirements: HostRequirements::CONTROLLER_ONLY,
-        }),
+        release_fetcher: Some(ReleaseFetcherSlot::new(
+            create_release_fetcher,
+            HostRequirements::CONTROLLER_ONLY,
+        )),
         package_indexer: None,
         update_executor: None,
         lifecycle_hook: None,
@@ -157,10 +171,84 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     roles: RoleCreators {
         discoverer: None,
         version_detector: None,
-        release_fetcher: Some(ReleaseFetcherSlot {
-            create: create_per_item_fail_release_fetcher,
-            host_requirements: HostRequirements::CONTROLLER_ONLY,
-        }),
+        release_fetcher: Some(ReleaseFetcherSlot::new(
+            create_per_item_fail_release_fetcher,
+            HostRequirements::CONTROLLER_ONLY,
+        )),
+        package_indexer: None,
+        update_executor: None,
+        lifecycle_hook: None,
+        notification_transport: None,
+        software_item_lifecycle: None,
+        controller_update_protection: None,
+        controller_update_hook: None,
+        infra: None,
+    },
+    surface_actions: None,
+    surfaces: None,
+    type_settings: None,
+    config_test: None,
+    sudo: None,
+    raw_settings_keys: &[],
+    migrations: None,
+    reset_tenant_data: None,
+    db_migrate_tables: None,
+    global_provider_consumers: &[],
+};
+
+// ── Context-capture plugin ────────────────────────────────────────────────────
+
+pub struct TestCtxCapturePlugin;
+
+impl PluginMeta for TestCtxCapturePlugin {
+    fn plugin_type_id(&self) -> PluginTypeId {
+        PluginTypeId::from_static("__test_ctx_capture")
+    }
+}
+
+#[async_trait]
+impl ReleaseFetcher for TestCtxCapturePlugin {
+    async fn fetch_releases(&self, _package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        Ok(vec![])
+    }
+
+    async fn batch_fetch(&self, _items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
+        Ok(vec![])
+    }
+}
+
+fn create_ctx_capture_fetcher(
+    _cfg: &serde_json::Value,
+    _runtime: Arc<dyn HostRuntime>,
+    ctx: &ReleaseFetchContext,
+) -> Result<Box<dyn ReleaseFetcher>> {
+    CTX_CAPTURE_HAD_LOOKUP.store(ctx.global_provider_lookup.is_some(), Ordering::SeqCst);
+    Ok(Box::new(TestCtxCapturePlugin))
+}
+
+pub static CTX_CAPTURE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+    type_id: "__test_ctx_capture",
+    display_name: "Test Context Capture (test-only)",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::None,
+    capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
+    scope: PluginScope::Tenant,
+    instance_config: None,
+    config: ConfigOps {
+        validate,
+        mask_secrets,
+        restore_secrets,
+        sample,
+        form_schema,
+        validate_identifier,
+    },
+    roles: RoleCreators {
+        discoverer: None,
+        version_detector: None,
+        release_fetcher: Some(ReleaseFetcherSlot::new(
+            create_ctx_capture_fetcher,
+            HostRequirements::CONTROLLER_ONLY,
+        )),
         package_indexer: None,
         update_executor: None,
         lifecycle_hook: None,

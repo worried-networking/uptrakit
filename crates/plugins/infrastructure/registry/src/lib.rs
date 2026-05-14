@@ -58,7 +58,7 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 // --- Additive re-exports (DESIGN-0001 / ST-0015) ---
 
 pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
-pub use uptrakit_plugin_infrastructure_core::roles::ReleaseFetcher;
+pub use uptrakit_plugin_infrastructure_core::roles::{ReleaseFetchContext, ReleaseFetcher};
 pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, ExecuteUpdateResult,
     HostCapabilities, HostCompatibility, InfraBundle, PluginError, RouterOsExecutor,

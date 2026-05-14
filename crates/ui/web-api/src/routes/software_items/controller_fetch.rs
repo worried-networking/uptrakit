@@ -11,7 +11,7 @@ use std::sync::Arc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Expr};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
-    ControllerRuntime, PluginCapability, PluginTypeId, get_descriptor,
+    ControllerRuntime, PluginCapability, PluginTypeId, ReleaseFetchContext, get_descriptor,
 };
 use uptrakit_shared_db::entity::{host_software_item, software_item};
 use uptrakit_web_api_types::events::AdminEvent;
@@ -107,18 +107,20 @@ pub(super) async fn run_controller_fetch_jobs(
             }
         };
 
-        let fetcher = match (slot.create)(&job.merged_config, controller_runtime.clone()) {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!(
-                    plugin_type = type_str,
-                    package = %job.package_identifier,
-                    error = %e,
-                    "controller-side fetch: failed to create release fetcher"
-                );
-                continue;
-            }
-        };
+        let fetch_ctx = ReleaseFetchContext::none();
+        let fetcher =
+            match (slot.create)(&job.merged_config, controller_runtime.clone(), &fetch_ctx) {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::warn!(
+                        plugin_type = type_str,
+                        package = %job.package_identifier,
+                        error = %e,
+                        "controller-side fetch: failed to create release fetcher"
+                    );
+                    continue;
+                }
+            };
 
         let releases = match fetcher.fetch_releases(&job.package_identifier).await {
             Ok(r) => r,

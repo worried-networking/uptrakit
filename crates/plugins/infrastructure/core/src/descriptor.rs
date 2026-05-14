@@ -257,9 +257,19 @@ pub type CreateReleaseFetcherFn = fn(
 ///
 /// Separate from `RoleSlot` because the factory takes 3 arguments (config,
 /// runtime, context) rather than the standard 2.
+#[non_exhaustive]
 pub struct ReleaseFetcherSlot {
     pub create: CreateReleaseFetcherFn,
     pub host_requirements: HostRequirements,
+}
+
+impl ReleaseFetcherSlot {
+    pub const fn new(create: CreateReleaseFetcherFn, host_requirements: HostRequirements) -> Self {
+        Self {
+            create,
+            host_requirements,
+        }
+    }
 }
 
 /// Creation for a notification transport (singleton).

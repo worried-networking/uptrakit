@@ -264,10 +264,10 @@ macro_rules! declare_plugin {
                     }
                 )?
                 $(
-                    rc.release_fetcher = Some($crate::ReleaseFetcherSlot {
-                        create: $rf_create_fn,
-                        host_requirements: $rf_hr,
-                    });
+                    rc.release_fetcher = Some($crate::ReleaseFetcherSlot::new(
+                        $rf_create_fn,
+                        $rf_hr,
+                    ));
                 )?
                 rc
             },
@@ -511,10 +511,10 @@ macro_rules! __set_role_field {
         });
     };
     ($rc:ident, ReleaseFetcher, $hr:expr) => {
-        $rc.release_fetcher = Some($crate::ReleaseFetcherSlot {
-            create: __descriptor_impl::create_release_fetcher,
-            host_requirements: $hr,
-        });
+        $rc.release_fetcher = Some($crate::ReleaseFetcherSlot::new(
+            __descriptor_impl::create_release_fetcher,
+            $hr,
+        ));
     };
     ($rc:ident, PackageIndexer, $hr:expr) => {
         $rc.package_indexer = Some($crate::RoleSlot {
