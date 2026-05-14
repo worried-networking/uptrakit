@@ -177,14 +177,14 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        // 34 after AccessMcp added; Other(String) excluded via #[strum(disabled)]
-        assert_eq!(Permission::iter().count(), 34);
+        // 36 after ViewInstanceConfigState + ManageInstanceConfigState added
+        assert_eq!(Permission::iter().count(), 36);
     }
 
     #[test]
     fn permission_iter_covers_all_variants_with_access_mcp() {
-        // 34 after AccessMcp added; Other(String) excluded via #[strum(disabled)]
-        assert_eq!(Permission::iter().count(), 34);
+        // 36 after ViewInstanceConfigState + ManageInstanceConfigState added
+        assert_eq!(Permission::iter().count(), 36);
     }
 
     #[test]
