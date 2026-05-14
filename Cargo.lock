@@ -3243,6 +3243,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "listenfd"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b87bc54a4629b4294d0b3ef041b64c40c611097a677d9dc07b2c67739fe39dba"
+dependencies = [
+ "libc",
+ "uuid",
+ "winapi",
+]
+
+[[package]]
 name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5352,6 +5363,15 @@ dependencies = [
  "pbkdf2 0.13.0",
  "salsa20",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "sd-notify"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b943eadf71d8b69e661330cb0e2656e31040acf21ee7708e2c238a0ec6af2bf4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -7500,6 +7520,7 @@ dependencies = [
  "der 0.7.10",
  "hostname",
  "ipnet",
+ "listenfd",
  "mdns-sd",
  "nix 0.31.3",
  "parking_lot",
@@ -7507,6 +7528,7 @@ dependencies = [
  "reqwest",
  "rootcause",
  "rustls",
+ "sd-notify",
  "sea-orm",
  "sea-orm-migration",
  "serde_json",

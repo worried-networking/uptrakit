@@ -74,6 +74,8 @@ sha2 = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 nix = { workspace = true, features = ["signal", "process"] }
+listenfd = { workspace = true }
+sd-notify = { workspace = true }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 arc-swap = { workspace = true }
