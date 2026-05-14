@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::error_response::error_response;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 #[cfg(feature = "oidc")]
@@ -119,6 +120,7 @@ pub async fn get_authentication_settings(
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(user): CanManageAuthSettings,
+    _if_match: IfMatch<SettingsVersion>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
@@ -400,6 +402,7 @@ mod tests {
                 }),
             )
             .bearer(&access_token)
+            .header("if-match", "W/\"settings-v0\"")
             .send_status()
             .await;
         assert_eq!(status, StatusCode::CONFLICT);
@@ -441,6 +444,7 @@ mod tests {
                 }),
             )
             .bearer(&access_token)
+            .header("if-match", "W/\"settings-v0\"")
             .send_status()
             .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);

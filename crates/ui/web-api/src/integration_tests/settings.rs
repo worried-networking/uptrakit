@@ -54,6 +54,7 @@ async fn update_registration_settings_returns_200() {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -149,6 +150,7 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status_set, http::StatusCode::OK);
@@ -164,6 +166,7 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status_keep, http::StatusCode::OK);
@@ -180,6 +183,7 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status_clear, http::StatusCode::OK);
@@ -220,6 +224,7 @@ async fn github_provider_settings_update_invalidates_runtime() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status, http::StatusCode::OK);
@@ -247,6 +252,7 @@ async fn github_provider_settings_invalid_update_returns_400_without_persisting_
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
@@ -276,6 +282,7 @@ async fn github_provider_settings_trims_whitespace_only_auth_token_to_clear() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 

@@ -170,6 +170,7 @@ async fn create_config_returns_201() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -218,6 +219,7 @@ async fn update_config_returns_200_and_writes_audit_event() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -231,6 +233,7 @@ async fn update_config_returns_200_and_writes_audit_event() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -283,6 +286,7 @@ async fn delete_config_returns_204() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -291,6 +295,7 @@ async fn delete_config_returns_204() {
     let status = client
         .delete(&format!("/api/v1/plugin-configs/{id}"))
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
 
@@ -471,6 +476,7 @@ async fn create_config_rejects_config_model_none_plugin_type() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -499,6 +505,7 @@ async fn update_config_rejects_existing_config_model_none_plugin_type() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -595,6 +602,7 @@ async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&admin_token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
     assert_eq!(

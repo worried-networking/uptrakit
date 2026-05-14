@@ -4,12 +4,12 @@
 )]
 
 use crate::AppState;
-use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
-use crate::settings_store::upsert_global_setting;
+use crate::settings_store::upsert_global_setting_raw;
 use axum::{
     Extension, Json,
     extract::State,
@@ -77,14 +77,16 @@ impl NetworkSettingsUpdateError {
 /// on failure. The `setting_name` is used only for the error log message.
 async fn persist_setting(
     db: &impl ConnectionTrait,
-    key: SettingKey,
+    key: &'static str,
     value: serde_json::Value,
     setting_name: &str,
 ) -> Result<(), Response> {
-    upsert_global_setting(db, key, value).await.map_err(|e| {
-        tracing::error!(error = ?e, setting_name = setting_name, "Failed to save setting");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-    })
+    upsert_global_setting_raw(db, key, value)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = ?e, setting_name = setting_name, "Failed to save setting");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })
 }
 
 /// Convert an empty string to `None`, preserving non-empty values.
@@ -197,6 +199,7 @@ pub async fn get_network_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNetworkSettingsRequest>,
@@ -206,25 +209,25 @@ pub async fn update_network_settings(
 
     let mut requested_keys = Vec::new();
     if req.trusted_proxies.is_some() {
-        requested_keys.push(SettingKey::TrustedProxies.as_str());
+        requested_keys.push("network.trusted_proxies");
     }
     if req.real_ip_header.is_some() {
-        requested_keys.push(SettingKey::RealIpHeader.as_str());
+        requested_keys.push("network.real_ip_header");
     }
     if req.sans.is_some() {
-        requested_keys.push(SettingKey::Sans.as_str());
+        requested_keys.push("network.sans");
     }
     if req.https_addr.is_some() {
-        requested_keys.push(SettingKey::HttpsAddr.as_str());
+        requested_keys.push("network.https_addr");
     }
     if req.forwarded_client_cert_info_header.is_some() {
-        requested_keys.push(SettingKey::ForwardedClientCertInfoHeader.as_str());
+        requested_keys.push("network.forwarded_client_cert_info_header");
     }
     if req.forwarded_client_cert_pem_header.is_some() {
-        requested_keys.push(SettingKey::ForwardedClientCertPemHeader.as_str());
+        requested_keys.push("network.forwarded_client_cert_pem_header");
     }
     if req.pki_addr.is_some() {
-        requested_keys.push(SettingKey::PkiAddr.as_str());
+        requested_keys.push("network.pki_addr");
     }
     let regenerate_cert_requested = req.regenerate_cert == Some(true);
 
@@ -367,7 +370,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::validation(
                 serde_json::json!({
                     "reason_code": "trusted_proxies_invalid",
-                    "setting_key": SettingKey::TrustedProxies.as_str(),
+                    "setting_key": "network.trusted_proxies",
                     "provided_trusted_proxies": proxies,
                     "validation_error": msg,
                 }),
@@ -375,13 +378,13 @@ async fn update_network_settings_inner(
             )
         })?;
         let json_val = serde_json::json!(parsed.iter().map(|n| n.to_string()).collect::<Vec<_>>());
-        persist_setting(db, SettingKey::TrustedProxies, json_val, "trusted_proxies")
+        persist_setting(db, "network.trusted_proxies", json_val, "trusted_proxies")
             .await
             .map_err(|response| {
                 NetworkSettingsUpdateError::failed(
                     serde_json::json!({
                         "reason_code": "trusted_proxies_upsert_failed",
-                        "setting_key": SettingKey::TrustedProxies.as_str(),
+                        "setting_key": "network.trusted_proxies",
                     }),
                     response,
                 )
@@ -393,7 +396,7 @@ async fn update_network_settings_inner(
     if let Some(ref header) = req.real_ip_header {
         persist_setting(
             db,
-            SettingKey::RealIpHeader,
+            "network.real_ip_header",
             serde_json::json!(header),
             "real_ip_header",
         )
@@ -402,7 +405,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::failed(
                 serde_json::json!({
                     "reason_code": "real_ip_header_upsert_failed",
-                    "setting_key": SettingKey::RealIpHeader.as_str(),
+                    "setting_key": "network.real_ip_header",
                 }),
                 response,
             )
@@ -413,13 +416,13 @@ async fn update_network_settings_inner(
     // Validate and apply sans (runtime-changeable)
     let sans_updated = req.sans.is_some();
     if let Some(ref sans) = req.sans {
-        persist_setting(db, SettingKey::Sans, serde_json::json!(sans), "sans")
+        persist_setting(db, "network.sans", serde_json::json!(sans), "sans")
             .await
             .map_err(|response| {
                 NetworkSettingsUpdateError::failed(
                     serde_json::json!({
                         "reason_code": "sans_upsert_failed",
-                        "setting_key": SettingKey::Sans.as_str(),
+                        "setting_key": "network.sans",
                     }),
                     response,
                 )
@@ -432,7 +435,7 @@ async fn update_network_settings_inner(
         let value = empty_to_none(header);
         persist_setting(
             db,
-            SettingKey::ForwardedClientCertInfoHeader,
+            "network.forwarded_client_cert_info_header",
             option_to_json(&value),
             "forwarded_client_cert_info_header",
         )
@@ -441,7 +444,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::failed(
                 serde_json::json!({
                     "reason_code": "forwarded_client_cert_info_header_upsert_failed",
-                    "setting_key": SettingKey::ForwardedClientCertInfoHeader.as_str(),
+                    "setting_key": "network.forwarded_client_cert_info_header",
                 }),
                 response,
             )
@@ -457,7 +460,7 @@ async fn update_network_settings_inner(
         let value = empty_to_none(header);
         persist_setting(
             db,
-            SettingKey::ForwardedClientCertPemHeader,
+            "network.forwarded_client_cert_pem_header",
             option_to_json(&value),
             "forwarded_client_cert_pem_header",
         )
@@ -466,7 +469,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::failed(
                 serde_json::json!({
                     "reason_code": "forwarded_client_cert_pem_header_upsert_failed",
-                    "setting_key": SettingKey::ForwardedClientCertPemHeader.as_str(),
+                    "setting_key": "network.forwarded_client_cert_pem_header",
                 }),
                 response,
             )
@@ -483,7 +486,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::validation(
                 serde_json::json!({
                     "reason_code": "pki_addr_invalid",
-                    "setting_key": SettingKey::PkiAddr.as_str(),
+                    "setting_key": "network.pki_addr",
                     "provided_pki_addr": url_str,
                     "validation_error": msg,
                 }),
@@ -491,13 +494,13 @@ async fn update_network_settings_inner(
             )
         })?;
         let changed = state.settings.pki_addr() != value;
-        persist_setting(db, SettingKey::PkiAddr, option_to_json(&value), "pki_addr")
+        persist_setting(db, "network.pki_addr", option_to_json(&value), "pki_addr")
             .await
             .map_err(|response| {
                 NetworkSettingsUpdateError::failed(
                     serde_json::json!({
                         "reason_code": "pki_addr_upsert_failed",
-                        "setting_key": SettingKey::PkiAddr.as_str(),
+                        "setting_key": "network.pki_addr",
                     }),
                     response,
                 )
@@ -514,7 +517,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::validation(
                 serde_json::json!({
                     "reason_code": "https_addr_invalid",
-                    "setting_key": SettingKey::HttpsAddr.as_str(),
+                    "setting_key": "network.https_addr",
                     "provided_https_addr": addr_str,
                 }),
                 error_response(
@@ -525,7 +528,7 @@ async fn update_network_settings_inner(
         })?;
         persist_setting(
             db,
-            SettingKey::HttpsAddr,
+            "network.https_addr",
             serde_json::json!(addr.to_string()),
             "https_addr",
         )
@@ -534,7 +537,7 @@ async fn update_network_settings_inner(
             NetworkSettingsUpdateError::failed(
                 serde_json::json!({
                     "reason_code": "https_addr_upsert_failed",
-                    "setting_key": SettingKey::HttpsAddr.as_str(),
+                    "setting_key": "network.https_addr",
                 }),
                 response,
             )
@@ -556,7 +559,7 @@ async fn update_network_settings_inner(
                 return Err(NetworkSettingsUpdateError::failed(
                     serde_json::json!({
                         "reason_code": "server_certificate_regeneration_failed",
-                        "setting_key": SettingKey::Sans.as_str(),
+                        "setting_key": "network.sans",
                     }),
                     error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -667,6 +670,7 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
@@ -706,7 +710,7 @@ mod tests {
         );
         assert_eq!(
             details["setting_key"],
-            serde_json::json!(SettingKey::TrustedProxies.as_str())
+            serde_json::json!("network.trusted_proxies")
         );
     }
 
@@ -724,6 +728,7 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
@@ -763,7 +768,7 @@ mod tests {
         );
         assert_eq!(
             details["setting_key"],
-            serde_json::json!(SettingKey::RealIpHeader.as_str())
+            serde_json::json!("network.real_ip_header")
         );
     }
 }

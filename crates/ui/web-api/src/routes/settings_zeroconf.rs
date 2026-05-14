@@ -21,13 +21,13 @@ pub use uptrakit_web_api_types::settings_zeroconf::{
 };
 
 use crate::AppState;
-use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings::ZeroconfSnapshot;
-use crate::settings_store::{load_global_setting, upsert_global_setting};
+use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
 
 /// Emit a failed zeroconf settings audit event (no DB write).
 fn emit_zeroconf_failed_event(
@@ -111,6 +111,7 @@ pub async fn get_zeroconf_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_zeroconf_settings(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateZeroconfSettingsRequest>,
@@ -137,21 +138,21 @@ pub async fn update_zeroconf_settings(
     // Read current DB values for each key that will be updated, before opening
     // the transaction, so we can build accurate before-snapshots.
     let before_enabled = if req.enabled.is_some() {
-        load_global_setting(state.db(), SettingKey::ZeroconfEnabled)
+        load_global_setting_raw(state.db(), "zeroconf.enabled")
             .await
             .unwrap_or(None)
     } else {
         None
     };
     let before_url = if req.url.is_some() {
-        load_global_setting(state.db(), SettingKey::ZeroconfUrl)
+        load_global_setting_raw(state.db(), "zeroconf.url")
             .await
             .unwrap_or(None)
     } else {
         None
     };
     let before_pki_addr = if req.pki_addr.is_some() {
-        load_global_setting(state.db(), SettingKey::ZeroconfPkiAddr)
+        load_global_setting_raw(state.db(), "zeroconf.pki_addr")
             .await
             .unwrap_or(None)
     } else {
@@ -178,8 +179,7 @@ pub async fn update_zeroconf_settings(
     // --- enabled ---
     if let Some(val) = req.enabled {
         let new_value = serde_json::json!(val);
-        if let Err(e) =
-            upsert_global_setting(&tx, SettingKey::ZeroconfEnabled, new_value.clone()).await
+        if let Err(e) = upsert_global_setting_raw(&tx, "zeroconf.enabled", new_value.clone()).await
         {
             tracing::error!("Failed to save zeroconf.enabled: {e:?}");
             drop(tx);
@@ -190,14 +190,14 @@ pub async fn update_zeroconf_settings(
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_enabled_upsert_failed",
-                    "setting_key": SettingKey::ZeroconfEnabled.as_str(),
+                    "setting_key": "zeroconf.enabled",
                     "requested_enabled": val,
                 }),
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
 
-        let key_str = SettingKey::ZeroconfEnabled.as_str().to_string();
+        let key_str = "zeroconf.enabled".to_string();
         let after_view = GlobalSettingView {
             key: key_str.clone(),
             value: new_value,
@@ -219,7 +219,7 @@ pub async fn update_zeroconf_settings(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "setting_area": "zeroconf",
-            "changed_keys": [SettingKey::ZeroconfEnabled.as_str()],
+            "changed_keys": ["zeroconf.enabled"],
         }))
         .build();
 
@@ -252,8 +252,7 @@ pub async fn update_zeroconf_settings(
         } else {
             (serde_json::json!(trimmed), Some(trimmed.to_string()))
         };
-        if let Err(e) = upsert_global_setting(&tx, SettingKey::ZeroconfUrl, db_value.clone()).await
-        {
+        if let Err(e) = upsert_global_setting_raw(&tx, "zeroconf.url", db_value.clone()).await {
             tracing::error!("Failed to save zeroconf.url: {e:?}");
             drop(tx);
             emit_zeroconf_failed_event(
@@ -263,14 +262,14 @@ pub async fn update_zeroconf_settings(
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_url_upsert_failed",
-                    "setting_key": SettingKey::ZeroconfUrl.as_str(),
+                    "setting_key": "zeroconf.url",
                     "requested_url_cleared": trimmed.is_empty(),
                 }),
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
 
-        let key_str = SettingKey::ZeroconfUrl.as_str().to_string();
+        let key_str = "zeroconf.url".to_string();
         let after_view = GlobalSettingView {
             key: key_str.clone(),
             value: db_value,
@@ -292,7 +291,7 @@ pub async fn update_zeroconf_settings(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "setting_area": "zeroconf",
-            "changed_keys": [SettingKey::ZeroconfUrl.as_str()],
+            "changed_keys": ["zeroconf.url"],
         }))
         .build();
 
@@ -325,8 +324,7 @@ pub async fn update_zeroconf_settings(
         } else {
             (serde_json::json!(trimmed), Some(trimmed.to_string()))
         };
-        if let Err(e) =
-            upsert_global_setting(&tx, SettingKey::ZeroconfPkiAddr, db_value.clone()).await
+        if let Err(e) = upsert_global_setting_raw(&tx, "zeroconf.pki_addr", db_value.clone()).await
         {
             tracing::error!("Failed to save zeroconf.pki_addr: {e:?}");
             drop(tx);
@@ -337,14 +335,14 @@ pub async fn update_zeroconf_settings(
                 serde_json::json!({
                     "setting_area": "zeroconf",
                     "reason_code": "zeroconf_pki_addr_upsert_failed",
-                    "setting_key": SettingKey::ZeroconfPkiAddr.as_str(),
+                    "setting_key": "zeroconf.pki_addr",
                     "requested_pki_addr_cleared": trimmed.is_empty(),
                 }),
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
 
-        let key_str = SettingKey::ZeroconfPkiAddr.as_str().to_string();
+        let key_str = "zeroconf.pki_addr".to_string();
         let after_view = GlobalSettingView {
             key: key_str.clone(),
             value: db_value,
@@ -366,7 +364,7 @@ pub async fn update_zeroconf_settings(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "setting_area": "zeroconf",
-            "changed_keys": [SettingKey::ZeroconfPkiAddr.as_str()],
+            "changed_keys": ["zeroconf.pki_addr"],
         }))
         .build();
 
@@ -479,6 +477,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_zeroconf_settings(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
