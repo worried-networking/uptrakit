@@ -11,6 +11,6 @@ fn registry_load_finds_known_actions() {
         .get("plugin_config.update")
         .expect("plugin_config.update");
     assert_eq!(pcu.kind, registry::Kind::Stateful);
-    // Total should be 128 actions
-    assert_eq!(reg.actions.len(), 128);
+    // Total should be 127 actions (user.delete removed — no handler exists)
+    assert_eq!(reg.actions.len(), 127);
 }
