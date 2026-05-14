@@ -732,6 +732,42 @@ Plugin crates should avoid unnecessary direct dependencies. The `uptrakit-plugin
 
 See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
+## Consuming global providers in `ReleaseFetcher`
+
+`ReleaseFetcher` factory functions receive a third argument — `&ReleaseFetchContext` — alongside
+the config JSON and `HostRuntime`. Existing plugins ignore this context via
+`_ctx: &ReleaseFetchContext`. The `package_manager_skills` plugin is the reference implementation
+for reading from it.
+
+To access the global GitHub provider in a controller-side `ReleaseFetcher`:
+
+```rust
+use uptrakit_global_github_provider::{GitHubProviderHandle, GitHubProviderClient};
+use uptrakit_plugin_infrastructure_core::roles::ReleaseFetchContext;
+
+fn get_github_provider(ctx: &ReleaseFetchContext) -> Option<Arc<dyn GitHubProviderClient>> {
+    #[cfg(feature = "catalog")]
+    {
+        let lookup = ctx.global_provider_lookup.as_ref()?;
+        let handle = lookup.lookup("github")?;
+        return Arc::downcast::<GitHubProviderHandle>(handle).ok().map(|h| h.client());
+    }
+    None
+}
+```
+
+Register the factory via `release_fetcher_create` in `declare_plugin!`:
+
+```rust
+declare_plugin!(MyPlugin, MyConfig, "my_plugin_id", {
+    // ... other fields ...
+    release_fetcher_create: {
+        create: my_create_release_fetcher_fn,
+        host_requirements: HostRequirements::CONTROLLER_ONLY,
+    },
+});
+```
+
 ## HTTP Client Requirements
 
 Controller-side plugins obtain a shared `reqwest::Client` from `ControllerRuntime` instead of building their own. This client is pre-configured with
