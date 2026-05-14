@@ -43,6 +43,7 @@ uptrakit-plugin-discovery-uptrakit-self-update = { workspace = true }
 uptrakit-plugin-package-manager-homebrew = { workspace = true }
 uptrakit-plugin-package-manager-apt = { workspace = true }
 uptrakit-plugin-package-manager-npm = { workspace = true }
+uptrakit-plugin-package-manager-skills = { workspace = true, features = ["catalog"] }
 uptrakit-plugin-package-manager-mas = { workspace = true }
 uptrakit-plugin-package-manager-dnf = { workspace = true }
 uptrakit-plugin-package-manager-pacman = { workspace = true }

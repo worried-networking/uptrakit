@@ -1,0 +1,32 @@
+[package]
+name = "uptrakit-plugin-package-manager-skills"
+description = "Uptrakit package-manager plugin for globally-installed LLM-agent Skills"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version = "0.0.1"
+
+[features]
+# Enables GlobalProviderLookup injection for release fetching via the GitHub Provider.
+# Must be enabled in the registry crate dependency to wire up provider access.
+catalog = ["uptrakit-plugin-infrastructure-core/catalog"]
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-global-github-provider = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "catalog"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

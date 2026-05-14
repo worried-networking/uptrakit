@@ -153,6 +153,7 @@ uptrakit-plugin-generic-shell = { path = "crates/plugins/generic/shell", version
 uptrakit-plugin-package-manager-homebrew = { path = "crates/plugins/package-managers/homebrew", version = "0.0.1" }
 uptrakit-plugin-package-manager-apt = { path = "crates/plugins/package-managers/apt", version = "0.0.1" }
 uptrakit-plugin-package-manager-npm = { path = "crates/plugins/package-managers/npm", version = "0.0.1" }
+uptrakit-plugin-package-manager-skills = { path = "crates/plugins/package-managers/skills", version = "0.0.1" }
 uptrakit-plugin-package-manager-mas = { path = "crates/plugins/package-managers/mas", version = "0.0.1" }
 uptrakit-plugin-package-manager-dnf = { path = "crates/plugins/package-managers/dnf", version = "0.0.1" }
 uptrakit-plugin-package-manager-pacman = { path = "crates/plugins/package-managers/pacman", version = "0.0.1" }
