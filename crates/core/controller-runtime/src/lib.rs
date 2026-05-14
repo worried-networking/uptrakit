@@ -1435,10 +1435,6 @@ fn spawn_pki_http(
 }
 
 #[doc(hidden)]
-#[expect(
-    clippy::expect_used,
-    reason = "infallible at startup: tokio runtime construction failures are unrecoverable and must abort process initialization"
-)]
 fn print_build_info() {
     let build_info = BuildInfo::current(
         env!("UPTRAKIT_RELEASE_NAME"),
@@ -1448,6 +1444,10 @@ fn print_build_info() {
     print!("{}", build_info.render_human());
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "infallible at startup: tokio runtime construction failures are unrecoverable and must abort process initialization"
+)]
 pub fn run() -> std::process::ExitCode {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
