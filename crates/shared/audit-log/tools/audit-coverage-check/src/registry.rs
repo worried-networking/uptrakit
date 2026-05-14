@@ -27,6 +27,7 @@ pub struct RegistryEntry {
 
 /// Classification of an audit action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kind {
     /// The action records a state transition (has before/after snapshots).
     Stateful,
@@ -95,10 +96,12 @@ fn parse_registered(const_ident: &str, expr: &Expr) -> Option<RegistryEntry> {
     let kind = match args.iter().nth(1)? {
         Expr::Path(p) => {
             let last = p.path.segments.last()?;
-            match last.ident.to_string().as_str() {
-                "Stateful" => Kind::Stateful,
-                "Event" => Kind::Event,
-                _ => return None,
+            if last.ident == "Stateful" {
+                Kind::Stateful
+            } else if last.ident == "Event" {
+                Kind::Event
+            } else {
+                return None;
             }
         }
         _ => return None,
