@@ -354,6 +354,14 @@ pub struct AppState {
     /// values; all `/oauth/*` route handlers must guard on `state.oauth.enabled`
     /// before doing any work.
     pub oauth: crate::oauth::OAuthState,
+    /// Config file state watch receiver — updated by the reload audit bridge
+    /// whenever a reload cycle applies a new file.
+    pub config_file_state: tokio::sync::watch::Receiver<uptrakit_config_reload::ConfigFileState>,
+    /// Last successful reload info — updated by the reload audit bridge after
+    /// each applied reload cycle.
+    pub last_reload: tokio::sync::watch::Receiver<Option<uptrakit_config_reload::LastReloadInfo>>,
+    /// Recent reload events (max 20) — updated by the reload audit bridge.
+    pub recent_reload_events: tokio::sync::watch::Receiver<Vec<serde_json::Value>>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -429,6 +437,11 @@ pub struct AppStateBuilder {
     settings_version_cache: Option<uptrakit_config_reload::SettingsVersionCache>,
     config_receivers: Option<uptrakit_config_reload::RuntimeConfigReceivers>,
     oauth: Option<crate::oauth::OAuthState>,
+    config_file_state_rx:
+        Option<tokio::sync::watch::Receiver<uptrakit_config_reload::ConfigFileState>>,
+    last_reload_rx:
+        Option<tokio::sync::watch::Receiver<Option<uptrakit_config_reload::LastReloadInfo>>>,
+    recent_reload_events_rx: Option<tokio::sync::watch::Receiver<Vec<serde_json::Value>>>,
 }
 
 impl AppStateBuilder {
@@ -484,6 +497,9 @@ impl AppStateBuilder {
             settings_version_cache: None,
             config_receivers: None,
             oauth: None,
+            config_file_state_rx: None,
+            last_reload_rx: None,
+            recent_reload_events_rx: None,
         }
     }
 
@@ -823,6 +839,22 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the config-reload status watch receivers.
+    ///
+    /// Optional — defaults to receivers seeded with empty/default values.
+    /// The controller wires in receivers backed by the `reload_audit_bridge` task.
+    pub fn config_reload_status_receivers(
+        mut self,
+        file_state: tokio::sync::watch::Receiver<uptrakit_config_reload::ConfigFileState>,
+        last_reload: tokio::sync::watch::Receiver<Option<uptrakit_config_reload::LastReloadInfo>>,
+        recent_events: tokio::sync::watch::Receiver<Vec<serde_json::Value>>,
+    ) -> Self {
+        self.config_file_state_rx = Some(file_state);
+        self.last_reload_rx = Some(last_reload);
+        self.recent_reload_events_rx = Some(recent_events);
+        self
+    }
+
     /// Set the MCP OAuth 2.1 authorization-server state.
     ///
     /// Optional — defaults to [`crate::oauth::OAuthState::disabled()`] (all
@@ -917,6 +949,17 @@ impl AppStateBuilder {
                 (handle, cache, receivers)
             }
         };
+
+        // Config-reload status receivers — default to empty state for tests.
+        let config_file_state = self.config_file_state_rx.unwrap_or_else(|| {
+            tokio::sync::watch::channel(uptrakit_config_reload::ConfigFileState::default()).1
+        });
+        let last_reload = self
+            .last_reload_rx
+            .unwrap_or_else(|| tokio::sync::watch::channel(None).1);
+        let recent_reload_events = self
+            .recent_reload_events_rx
+            .unwrap_or_else(|| tokio::sync::watch::channel(Vec::new()).1);
 
         Ok(AppState {
             db: DbState::new(db),
@@ -1038,6 +1081,9 @@ impl AppStateBuilder {
             oauth: self
                 .oauth
                 .unwrap_or_else(crate::oauth::OAuthState::disabled),
+            config_file_state,
+            last_reload,
+            recent_reload_events,
         })
     }
 }

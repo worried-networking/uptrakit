@@ -652,7 +652,14 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // Build each Reloadable from the loaded RuntimeConfig + available subsystem
     // handles, extend the coordinator (which was not yet spawned), extract a
     // handle, then spawn coordinator + reconciler.
-    let (coordinator_handle_opt, settings_version_cache_opt, receivers_opt) = {
+    let (
+        coordinator_handle_opt,
+        settings_version_cache_opt,
+        receivers_opt,
+        reload_file_state_rx_opt,
+        reload_last_reload_rx_opt,
+        reload_recent_events_rx_opt,
+    ) = {
         let mut b = booted;
         // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
         let db_reloadable = reload::db_pool::DbPoolReloadable::new(db_conn.clone(), db_url.clone());
@@ -720,12 +727,27 @@ async fn run_server(args: cli::Args) -> Result<()> {
         tokio::spawn(b.coordinator.run());
 
         let audit_rx = b.audit_rx;
-        tokio::spawn(reload_audit_bridge(audit_rx, audit_emitter));
+        let reload_file_state_tx = b.reload_file_state_tx;
+        let reload_file_state_rx = b.reload_file_state_rx;
+        let reload_last_reload_tx = b.reload_last_reload_tx;
+        let reload_last_reload_rx = b.reload_last_reload_rx;
+        let reload_recent_events_tx = b.reload_recent_events_tx;
+        let reload_recent_events_rx = b.reload_recent_events_rx;
+        tokio::spawn(reload_audit_bridge(
+            audit_rx,
+            audit_emitter,
+            reload_file_state_tx,
+            reload_last_reload_tx,
+            reload_recent_events_tx,
+        ));
 
         (
             Some(coordinator_handle),
             Some(b.settings_version_cache),
             Some(b.receivers),
+            Some(reload_file_state_rx),
+            Some(reload_last_reload_rx),
+            Some(reload_recent_events_rx),
         )
     };
 
@@ -733,11 +755,17 @@ async fn run_server(args: cli::Args) -> Result<()> {
         coordinator_handle_opt,
         settings_version_cache_opt,
         receivers_opt,
+        reload_file_state_rx_opt,
+        reload_last_reload_rx_opt,
+        reload_recent_events_rx_opt,
     ) {
-        (Some(handle), Some(cache), Some(receivers)) => builder
-            .coordinator_handle(handle)
-            .settings_version_cache(cache)
-            .config_receivers(receivers),
+        (Some(handle), Some(cache), Some(receivers), Some(fs_rx), Some(lr_rx), Some(re_rx)) => {
+            builder
+                .coordinator_handle(handle)
+                .settings_version_cache(cache)
+                .config_receivers(receivers)
+                .config_reload_status_receivers(fs_rx, lr_rx, re_rx)
+        }
         _ => builder,
     };
 
@@ -1223,14 +1251,87 @@ fn spawn_zeroconf(
 
 /// Bridge task: receive [`ReloadAuditEvent`]s from the coordinator and emit them as
 /// system-scoped [`AuditEntry`] rows via [`AuditEmitter::emit_event`].
+///
+/// Also maintains the three status watch channels consumed by the
+/// `GET /api/v1/instance/config-state` endpoint.
 async fn reload_audit_bridge(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
     emitter: uptrakit_audit_log::AuditEmitter,
+    _file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
+    last_reload_tx: tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
+    recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
 ) {
     use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
     use uptrakit_config_reload::ReloadAuditEvent;
 
     while let Some(event) = rx.recv().await {
+        // Update status watch channels.
+        match &event {
+            ReloadAuditEvent::Applied {
+                sections,
+                per_subsystem_ms,
+            } => {
+                let info = uptrakit_config_reload::LastReloadInfo {
+                    completed_at: time::OffsetDateTime::now_utc(),
+                    sections: sections.clone(),
+                    per_subsystem_ms: per_subsystem_ms.clone(),
+                };
+                // Receivers may have been dropped (e.g. tests); ignore send errors.
+                drop(last_reload_tx.send(Some(info)));
+                let event_json = serde_json::json!({
+                    "type": "applied",
+                    "at": time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_default(),
+                    "sections": sections,
+                });
+                recent_events_tx.send_modify(|v| {
+                    v.push(event_json);
+                    if v.len() > 20 {
+                        v.remove(0);
+                    }
+                });
+            }
+            ReloadAuditEvent::Failed {
+                phase,
+                subsystem,
+                error,
+            } => {
+                let event_json = serde_json::json!({
+                    "type": "failed",
+                    "at": time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_default(),
+                    "phase": phase.as_str(),
+                    "subsystem": subsystem,
+                    "error": error,
+                });
+                recent_events_tx.send_modify(|v| {
+                    v.push(event_json);
+                    if v.len() > 20 {
+                        v.remove(0);
+                    }
+                });
+            }
+            ReloadAuditEvent::Reverted { subsystem, reason } => {
+                let event_json = serde_json::json!({
+                    "type": "reverted",
+                    "at": time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_default(),
+                    "subsystem": subsystem,
+                    "reason": reason,
+                });
+                recent_events_tx.send_modify(|v| {
+                    v.push(event_json);
+                    if v.len() > 20 {
+                        v.remove(0);
+                    }
+                });
+            }
+            _ => {}
+        }
+
         let (action, outcome, details) = match &event {
             ReloadAuditEvent::Requested { source } => (
                 AuditActionType::SYSTEM_CONFIG_RELOAD_REQUESTED,

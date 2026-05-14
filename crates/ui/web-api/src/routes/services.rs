@@ -1619,6 +1619,12 @@ mod tests {
             embedded_services_config_rx: config_rx_for_services.embedded_services,
             zeroconf_config_rx: config_rx_for_services.zeroconf,
             oauth: crate::oauth::OAuthState::disabled(),
+            config_file_state: tokio::sync::watch::channel(
+                uptrakit_config_reload::ConfigFileState::default(),
+            )
+            .1,
+            last_reload: tokio::sync::watch::channel(None).1,
+            recent_reload_events: tokio::sync::watch::channel(Vec::new()).1,
         })
     }
 
