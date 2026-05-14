@@ -88,7 +88,8 @@ import type {
 	MergeSoftwareItemsExecuteResponse,
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse,
-	InstancePluginSummary
+	InstancePluginSummary,
+	ConfigStateResponse
 } from './types';
 import type {
 	InvokeSurfaceInteractionRequest,
@@ -1330,4 +1331,14 @@ export function changePassword(userId: string, data: ChangePasswordRequest): Pro
 
 export function confirmEmailChange(token: string): Promise<{ message: string }> {
 	return request<{ message: string }>(`/auth/email-change/confirm?token=${encodeURIComponent(token)}`);
+}
+
+// ── Instance Config State ─────────────────────────────────────────────
+
+export async function getConfigState(): Promise<ConfigStateResponse> {
+	return request<ConfigStateResponse>('/instance/config-state');
+}
+
+export async function clearCoordinatorDegraded(): Promise<ConfigStateResponse> {
+	return request<ConfigStateResponse>('/instance/config-reload/clear-degraded', { method: 'POST' });
 }
