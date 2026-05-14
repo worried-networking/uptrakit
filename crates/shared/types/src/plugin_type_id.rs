@@ -104,6 +104,8 @@ pub mod plugin_ids {
         PluginTypeId::from_static("package_manager_cargo");
     pub const PACKAGE_MANAGER_ROUTEROS: PluginTypeId =
         PluginTypeId::from_static("package_manager_routeros");
+    pub const PACKAGE_MANAGER_SKILLS: PluginTypeId =
+        PluginTypeId::from_static("package_manager_skills");
     pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic_shell");
     pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook_shell");
     pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook_systemd");
@@ -141,6 +143,7 @@ pub mod plugin_ids {
         PACKAGE_MANAGER_SNAP,
         PACKAGE_MANAGER_CARGO,
         PACKAGE_MANAGER_ROUTEROS,
+        PACKAGE_MANAGER_SKILLS,
         GENERIC_SHELL,
         HOOK_SHELL,
         HOOK_SYSTEMD,
@@ -225,9 +228,17 @@ mod tests {
     }
 
     #[test]
+    fn package_manager_skills_constant_is_correct() {
+        assert_eq!(
+            plugin_ids::PACKAGE_MANAGER_SKILLS.as_str(),
+            "package_manager_skills"
+        );
+    }
+
+    #[test]
     fn all_constants_count() {
         // Update this if you add a new well-known constant.
-        assert_eq!(plugin_ids::ALL.len(), 25);
+        assert_eq!(plugin_ids::ALL.len(), 26);
     }
 
     #[test]
