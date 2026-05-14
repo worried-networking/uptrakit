@@ -1,3 +1,12 @@
+//! Helpers for claiming inherited TCP sockets passed via `LISTEN_FDS`.
+//!
+//! This module is fully implemented but not yet wired into the startup path;
+//! the integration happens in a later graceful-reload task.
+#![expect(
+    dead_code,
+    reason = "wired into startup path in a later graceful-reload task"
+)]
+
 use listenfd::ListenFd;
 use rootcause::Report;
 use tokio::net::TcpListener;
@@ -8,7 +17,6 @@ use tokio::net::TcpListener;
 /// `ListenFd::take_tcp_listener(idx)`.  Variants must be kept in sync with
 /// [`INHERITED_SLOT_COUNT`].
 #[repr(usize)]
-#[non_exhaustive]
 pub(crate) enum ListenerSlot {
     Https = 0,
     Pki = 1,
@@ -25,7 +33,6 @@ const _: () = assert!(
 );
 
 /// Tokio TCP listeners claimed from `LISTEN_FDS` at process start.
-#[non_exhaustive]
 pub(crate) struct InheritedSockets {
     pub(crate) https: TcpListener,
     pub(crate) pki: TcpListener,
@@ -49,8 +56,8 @@ pub(crate) fn take_inherited_listeners() -> Result<Option<InheritedSockets>, Rep
     }
     let https = take_one(&mut lf, 0, slot_name(&ListenerSlot::Https))?;
     let pki = take_one(&mut lf, 1, slot_name(&ListenerSlot::Pki))?;
-    https.set_nonblocking(true).ok();
-    pki.set_nonblocking(true).ok();
+    drop(https.set_nonblocking(true));
+    drop(pki.set_nonblocking(true));
     let https = TcpListener::from_std(https)
         .map_err(|e| rootcause::report!("from_std failed for Https slot: {e}"))?;
     let pki = TcpListener::from_std(pki)
@@ -72,9 +79,5 @@ fn slot_name(slot: &ListenerSlot) -> &'static str {
     match slot {
         ListenerSlot::Https => "Https",
         ListenerSlot::Pki => "Pki",
-        _ => {
-            tracing::warn!("unknown ListenerSlot variant");
-            "unknown"
-        }
     }
 }
