@@ -7,6 +7,7 @@ use crate::context::{McpAuthMethod, McpRequestContext};
 ///
 /// The `required_scopes` slice holds only unit variants (`McpScope::Read`,
 /// `McpScope::Write`) and is valid in a `const` context.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct ToolAuth {
     pub required_scopes: &'static [McpScope],

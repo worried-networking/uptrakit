@@ -35,6 +35,7 @@ pub enum JwtError {
 /// the application-level claims `client_id`, `tenant_id`, and `jti` are non-empty.
 ///
 /// `DecodingKey` is not `Clone`, so wrap in `Arc<McpOAuthJwtVerifier>` for sharing.
+#[non_exhaustive]
 pub struct McpOAuthJwtVerifier {
     key: DecodingKey,
     expected_issuer: String,
