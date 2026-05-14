@@ -182,6 +182,12 @@ permission_extractor! {
     /// Grants ability to test plugin configurations against hosts
     /// (dry-run validation without saving).
     CanTestPluginConfigs => Permission::TestPluginConfigs,
+
+    // -- Instance config state --------------------------------------------
+    /// Extractor that requires [`Permission::ViewInstanceConfigState`].
+    CanViewInstanceConfigState => Permission::ViewInstanceConfigState,
+    /// Extractor that requires [`Permission::ManageInstanceConfigState`].
+    CanManageInstanceConfigState => Permission::ManageInstanceConfigState,
 }
 
 // ---------------------------------------------------------------------------

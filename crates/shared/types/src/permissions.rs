@@ -114,6 +114,12 @@ pub enum Permission {
     /// fine-grained permission checks (`ViewSoftware`, `TriggerUpdates`).
     AccessMcp,
 
+    // ── Instance config state ─────────────────────────────────────────────
+    /// View the current config-reload coordinator state.
+    ViewInstanceConfigState,
+    /// Manage (clear-degraded) the config-reload coordinator state.
+    ManageInstanceConfigState,
+
     /// An unknown permission received from a newer build.
     ///
     /// Preserved on the wire instead of being dropped, so old binaries
@@ -166,6 +172,8 @@ impl Permission {
             Permission::ManageIgnores => "manage_ignores",
             Permission::TestPluginConfigs => "test_plugin_configs",
             Permission::AccessMcp => "access_mcp",
+            Permission::ViewInstanceConfigState => "view_instance_config_state",
+            Permission::ManageInstanceConfigState => "manage_instance_config_state",
             Permission::Other(s) => s.as_str(),
         }
     }
@@ -213,6 +221,10 @@ impl Permission {
             Permission::ManageIgnores => "Manage autodiscovery ignore rules",
             Permission::TestPluginConfigs => "Test plugin configurations against hosts",
             Permission::AccessMcp => "Access the MCP server endpoint",
+            Permission::ViewInstanceConfigState => "View instance config reload state",
+            Permission::ManageInstanceConfigState => {
+                "Manage instance config reload state (clear degraded)"
+            }
             Permission::Other(_) => "(unknown permission)",
         }
     }
@@ -267,6 +279,8 @@ impl From<String> for Permission {
             "manage_ignores" => Self::ManageIgnores,
             "test_plugin_configs" => Self::TestPluginConfigs,
             "access_mcp" => Self::AccessMcp,
+            "view_instance_config_state" => Self::ViewInstanceConfigState,
+            "manage_instance_config_state" => Self::ManageInstanceConfigState,
             _ => Self::Other(s),
         }
     }
