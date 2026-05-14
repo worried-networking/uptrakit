@@ -3,6 +3,7 @@
 use rootcause::prelude::*;
 
 use crate::AppError;
+use crate::cli::{EnrollmentBootstrapArgs, OidcBootstrapArgs};
 
 fn resolve_bootstrap_allow_private_network_issuers(
     requested: Option<bool>,
@@ -18,13 +19,12 @@ fn resolve_bootstrap_allow_private_network_issuers(
     }
 }
 
-/// Bootstrap an OIDC provider from CLI flags if all required flags are present.
+/// Bootstrap an OIDC provider from environment-variable-driven bootstrap args.
 pub(crate) async fn bootstrap_oidc(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
-    args: &crate::cli::Args,
+    oidc: &OidcBootstrapArgs,
 ) -> crate::Result<()> {
-    let oidc = &args.oidc_bootstrap;
     let any_set = oidc.oidc_issuer_url.is_some()
         || oidc.oidc_client_id.is_some()
         || oidc.oidc_client_secret.is_some();
@@ -66,8 +66,6 @@ pub(crate) async fn bootstrap_oidc(
         oidc.oidc_allow_private_network_issuers,
         multi_tenancy_enabled,
     )?;
-
-    let force = args.force_settings_override;
 
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uptrakit_shared_db::entity::{oidc_provider, prelude::OidcProvider};
@@ -116,35 +114,10 @@ pub(crate) async fn bootstrap_oidc(
             provider.insert(db).await.context(AppError::Database)?;
             tracing::info!(slug = slug, name = name, "bootstrapped OIDC provider");
         }
-        Some(existing_provider) if force => {
-            use sea_orm::Set;
-            use sea_orm::{ActiveModelTrait, IntoActiveModel};
-            use time::OffsetDateTime;
-
-            let encrypted_secret = uptrakit_crypto::EncryptedString::new(
-                client_secret.to_string(),
-                "uptrakit:oidc_providers:client_secret",
-            )
-            .context_to()?;
-            let mut model = existing_provider.into_active_model();
-            model.issuer_url = Set(issuer_url.to_string());
-            model.client_id = Set(client_id.to_string());
-            model.client_secret = Set(encrypted_secret);
-            model.is_active = Set(true);
-            model.allow_private_network_issuers = Set(allow_private_network_issuers);
-            model.updated_at = Set(OffsetDateTime::now_utc());
-            model.update(db).await.context(AppError::Database)?;
-            tracing::info!(
-                slug = slug,
-                name = name,
-                "force-updated bootstrapped OIDC provider"
-            );
-        }
         Some(_) => {
             tracing::info!(
                 slug = slug,
-                "OIDC provider already exists, skipping bootstrap \
-                 (pass --force-settings-override to overwrite)"
+                "OIDC provider already exists, skipping bootstrap"
             );
         }
     }
@@ -160,10 +133,8 @@ pub(crate) async fn bootstrap_oidc(
 pub(crate) async fn bootstrap_enrollment_tokens(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
-    args: &crate::cli::Args,
+    eb: &EnrollmentBootstrapArgs,
 ) -> crate::Result<()> {
-    let eb = &args.enrollment_bootstrap;
-
     // Tenant enrollment token
     if let Some(ref token_value) = eb.bootstrap_enrollment_token {
         bootstrap_tenant_enrollment_token(db, tenant_id, token_value, eb).await?;
@@ -182,7 +153,7 @@ async fn bootstrap_tenant_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
     token_value: &str,
-    eb: &crate::cli::EnrollmentBootstrapArgs,
+    eb: &EnrollmentBootstrapArgs,
 ) -> crate::Result<()> {
     use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, sea_query::Expr};
     use uptrakit_shared_db::entity::enrollment_token;
@@ -251,7 +222,7 @@ async fn bootstrap_tenant_enrollment_token(
 async fn bootstrap_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     token_value: &str,
-    eb: &crate::cli::EnrollmentBootstrapArgs,
+    eb: &EnrollmentBootstrapArgs,
 ) -> crate::Result<()> {
     use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, sea_query::Expr};
     use uptrakit_shared_db::entity::system_enrollment_token;

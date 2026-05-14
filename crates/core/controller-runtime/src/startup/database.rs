@@ -13,13 +13,24 @@ pub(crate) struct DatabaseInit {
 }
 
 /// Connect to the database, run migrations, and load the default tenant.
+///
+/// `db_url` is taken directly from `runtime.db.url` (TOML config).
+/// `pool_size` is taken from `runtime.db.pool_size`.
 pub(crate) async fn init_database(
-    args: &crate::cli::Args,
+    db_url: &str,
+    pool_size: u32,
     state_dir: &std::path::Path,
 ) -> crate::Result<DatabaseInit> {
-    let db_config =
-        crate::db::DbConfig::from_args(args.db_url.clone(), state_dir, args.db_max_connections)
-            .context(AppError::Database)?;
+    let db_config = crate::db::DbConfig::from_args(
+        if db_url.is_empty() {
+            None
+        } else {
+            Some(db_url.to_owned())
+        },
+        state_dir,
+        pool_size,
+    )
+    .context(AppError::Database)?;
     tracing::info!(
         max_connections = db_config.max_connections,
         "connecting to database: {}",
@@ -53,35 +64,4 @@ pub(crate) async fn init_database(
         default_tenant,
         url: db_config.url,
     })
-}
-
-/// Initialize a separate database connection for audit log storage.
-///
-/// Connects to the provided URL, runs the standard migrations (extra
-/// empty application tables in the audit database are harmless), and
-/// returns the connection for use by the audit log backend.
-pub(crate) async fn init_audit_database(
-    url: &str,
-    max_connections: u32,
-) -> crate::Result<sea_orm::DatabaseConnection> {
-    let db_config = crate::db::DbConfig {
-        url: url.to_string(),
-        max_connections,
-    };
-    tracing::info!(
-        max_connections,
-        "connecting to audit log database: {}",
-        crate::db::sanitize_url(url)
-    );
-    let conn = crate::db::connect(&db_config)
-        .await
-        .context(AppError::Database)?;
-
-    tracing::info!("running audit log database migrations");
-    crate::migration::run_migrations(&conn)
-        .await
-        .context(AppError::Database)?;
-    tracing::info!("audit log database initialized");
-
-    Ok(conn)
 }

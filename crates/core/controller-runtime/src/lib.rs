@@ -57,7 +57,6 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "journald")]
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
-use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -91,10 +90,6 @@ impl_report_conversion!(
 
 async fn async_main() -> std::process::ExitCode {
     let args = cli::Args::parse();
-    if args.version {
-        print_build_info();
-        return std::process::ExitCode::SUCCESS;
-    }
 
     if args.check_config {
         if let Err(e) = uptrakit_config_reload::TomlConfigLoader::validate_only(&args.config) {
@@ -104,6 +99,104 @@ async fn async_main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
+    // Dispatch optional subcommands before entering the normal server path.
+    if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {
+        // Tracing is needed for db-migrate (master key init emits info).
+        uptrakit_tracing_init::TracingBuilder::new().init();
+        if let Err(report) = db_migrate::run(&args, db_args).await {
+            eprintln!("db-migrate error: {report:?}");
+            return std::process::ExitCode::FAILURE;
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
+
+    if let Err(report) = Box::pin(run_server(args)).await {
+        eprintln!("Error:\n{report}");
+        std::process::ExitCode::FAILURE
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
+}
+
+async fn run_server(args: cli::Args) -> Result<()> {
+    // Phase 0: Load TOML config — must happen before all other phases so that
+    // all configuration comes from the file rather than CLI flags.
+    let booted = startup::boot_config(args.config.clone())
+        .await
+        .map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to load TOML config {}: {e}",
+                args.config.display()
+            )))
+        })?;
+    let runtime = &booted.runtime;
+
+    // Parse bootstrap args from environment variables (no CLI flags; env only).
+    let oidc_bootstrap = cli::OidcBootstrapArgs::try_parse_from(["uptrakit-controller"])
+        .unwrap_or_else(|_| {
+            // Fallback: construct with all None/default values.
+            // env vars are picked up by clap's env attribute when try_parse_from
+            // is called with a minimal argv — the env attributes on each field
+            // still apply, so env vars take effect here.
+            cli::OidcBootstrapArgs {
+                oidc_issuer_url: std::env::var("UPTRAKIT_OIDC_ISSUER_URL").ok(),
+                oidc_client_id: std::env::var("UPTRAKIT_OIDC_CLIENT_ID").ok(),
+                oidc_client_secret: std::env::var("UPTRAKIT_OIDC_CLIENT_SECRET").ok(),
+                oidc_provider_name: std::env::var("UPTRAKIT_OIDC_PROVIDER_NAME")
+                    .ok()
+                    .or_else(|| Some("SSO".to_string())),
+                oidc_provider_slug: std::env::var("UPTRAKIT_OIDC_PROVIDER_SLUG")
+                    .ok()
+                    .or_else(|| Some("sso".to_string())),
+                oidc_scopes: std::env::var("UPTRAKIT_OIDC_SCOPES")
+                    .ok()
+                    .or_else(|| Some("openid email profile groups".to_string())),
+                oidc_allow_private_network_issuers: std::env::var(
+                    "UPTRAKIT_OIDC_ALLOW_PRIVATE_NETWORK_ISSUERS",
+                )
+                .ok()
+                .and_then(|v| v.parse().ok()),
+            }
+        });
+
+    let enrollment_bootstrap =
+        cli::EnrollmentBootstrapArgs::try_parse_from(["uptrakit-controller"]).unwrap_or_else(
+            |_| cli::EnrollmentBootstrapArgs {
+                bootstrap_enrollment_token: std::env::var("UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN")
+                    .ok(),
+                bootstrap_enrollment_token_max_uses: std::env::var(
+                    "UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_MAX_USES",
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1),
+                bootstrap_enrollment_token_ttl: std::env::var(
+                    "UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_TTL",
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+                bootstrap_system_enrollment_token: std::env::var(
+                    "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN",
+                )
+                .ok(),
+                bootstrap_system_enrollment_token_max_uses: std::env::var(
+                    "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_MAX_USES",
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1),
+                bootstrap_system_enrollment_token_ttl: std::env::var(
+                    "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_TTL",
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            },
+        );
+
+    // Initialise tracing now that we have the TOML config (log level comes from
+    // runtime.log; no verbosity flag any more).
     #[expect(
         clippy::allow_attributes,
         clippy::allow_attributes_without_reason,
@@ -111,7 +204,7 @@ async fn async_main() -> std::process::ExitCode {
     )]
     #[allow(unused_mut)]
     let mut builder = uptrakit_tracing_init::TracingBuilder::new()
-        .verbosity(args.verbose)
+        .verbosity(0)
         .max_verbosity(3)
         .directives_for_verbosity(
             0,
@@ -134,9 +227,6 @@ async fn async_main() -> std::process::ExitCode {
     // tracing layer filtered to the `uptrakit_audit` target so that structured
     // audit events reach the system journal alongside normal stdout logging.
     #[cfg(feature = "journald")]
-    if args
-        .audit_log_backend
-        .contains(&cli::AuditLogBackendArg::Journald)
     {
         #[expect(
             clippy::expect_used,
@@ -150,43 +240,37 @@ async fn async_main() -> std::process::ExitCode {
 
     builder.init();
 
-    // Dispatch optional subcommands before entering the normal server path.
-    if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {
-        if let Err(report) = db_migrate::run(&args, db_args).await {
-            eprintln!("db-migrate error: {report:?}");
-            return std::process::ExitCode::FAILURE;
+    // Phase 1: Master key initialization — reads from --master-key-from or TOML
+    // master_key.path as a fallback.
+    let master_key_source = args.master_key_from.as_deref().or_else(|| {
+        let p = runtime.master_key.path.as_str();
+        if p.is_empty() { None } else { Some(p) }
+    });
+    // Build a `file:` prefixed source if we got a bare path from TOML.
+    let master_key_from_toml_buf;
+    let master_key_source = if let Some(src) = master_key_source {
+        if !src.starts_with("file:")
+            && !src.starts_with("env:")
+            && !runtime.master_key.path.is_empty()
+            && src == runtime.master_key.path.as_str()
+        {
+            master_key_from_toml_buf = format!("file:{src}");
+            Some(master_key_from_toml_buf.as_str())
+        } else {
+            Some(src)
         }
-        return std::process::ExitCode::SUCCESS;
-    }
-
-    if let Err(report) = Box::pin(run_server(args)).await {
-        eprintln!("Error:\n{report}");
-        std::process::ExitCode::FAILURE
     } else {
-        std::process::ExitCode::SUCCESS
-    }
-}
+        None
+    };
+    let master_key_hex = startup::init_master_key(master_key_source)?;
 
-fn print_build_info() {
-    let build_info = BuildInfo::current(
-        env!("UPTRAKIT_RELEASE_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-    );
-    let output = build_info.render_human();
-    print!("{output}");
-}
-
-async fn run_server(args: cli::Args) -> Result<()> {
-    // Phase 1: Master key initialization
-    let master_key_hex = startup::init_master_key(&args)?;
-
-    // Phase 2: Application directories
-    let app_dirs = args.resolve_dirs().map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to resolve directories: {e}"
-        )))
-    })?;
+    // Phase 2: Application directories — use platform defaults (no CLI overrides).
+    let app_dirs =
+        uptrakit_directories::AppDirs::resolve("controller", None, None).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to resolve directories: {e}"
+            )))
+        })?;
     app_dirs.ensure_dirs().await.map_err(|e| {
         report!(AppError::Config(format!(
             "failed to create directories: {e}"
@@ -196,8 +280,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
     let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
-    // Phase 3: Database
-    let db_init = startup::init_database(&args, app_dirs.state_dir()).await?;
+    // Phase 3: Database — URL and pool size from TOML [db].
+    let db_init =
+        startup::init_database(&runtime.db.url, runtime.db.pool_size, app_dirs.state_dir()).await?;
     let db_conn = db_init.conn;
     let db_url = db_init.url;
     let default_tenant_id = db_init.default_tenant.id;
@@ -215,11 +300,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // Phase 4d: Migrate all encrypted values to ENC:v3 (automatic)
     reencrypt::reencrypt_to_v3(&db_conn).await;
 
-    // Phase 4e: Master key rotation (operator-triggered)
-    if let Some(ref new_key_path) = args.rotate_master_key_file {
-        startup::rotate_master_key(&db_conn, new_key_path).await?;
-    }
-
     // Phase 5: Load settings
     let (settings, global_raw, _tenant_raw, reg_token) =
         Settings::load(&db_conn, default_tenant_id)
@@ -232,25 +312,26 @@ async fn run_server(args: cli::Args) -> Result<()> {
         eprintln!("==========================================================");
     }
 
-    // Phase 6: Reconcile settings
+    // Phase 6: Reconcile settings — use TOML values as seeds
     let reconciled =
-        startup::reconcile_all_settings(&db_conn, &args, &settings, &global_raw).await?;
+        startup::reconcile_all_settings(&db_conn, runtime, &settings, &global_raw).await?;
 
     // Phase 7: OIDC bootstrap
-    startup::bootstrap_oidc(&db_conn, default_tenant_id, &args).await?;
+    startup::bootstrap_oidc(&db_conn, default_tenant_id, &oidc_bootstrap).await?;
 
     // Phase 7b: Enrollment token bootstrap
-    startup::bootstrap_enrollment_tokens(&db_conn, default_tenant_id, &args).await?;
+    startup::bootstrap_enrollment_tokens(&db_conn, default_tenant_id, &enrollment_bootstrap)
+        .await?;
 
     // Phase 7c: OAuth settings defaults
     startup::seed_oauth_defaults(&db_conn).await?;
 
     // Phase 8: Validate configuration
-    let validated = startup::validate_configuration(&args, &reconciled)?;
+    let validated = startup::validate_configuration(runtime, &reconciled)?;
 
-    // Phase 9: PKI + TLS
+    // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
     let pki =
-        startup::init_pki_runtime(&args, &db_conn, app_dirs.config_dir(), &reconciled).await?;
+        startup::init_pki_runtime(runtime, &db_conn, app_dirs.config_dir(), &reconciled).await?;
 
     // Phase 10: JWT
     let jwt_manager = startup::init_jwt(&db_conn, app_dirs.state_dir()).await?;
@@ -269,23 +350,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         crl_pem_cache,
         crl_manager,
         initial_ca_version,
+        has_external_tls_cert,
     } = pki;
-
-    // Load TOML config at boot. `args.config` carries the value from
-    // `--config` / `UPTRAKIT_CONFIG` env-var / default path.
-    // Loaded here (before cert_signer construction) so that trust_domain
-    // from [tls] can be wired into the signer at boot time.
-    let booted = match startup::boot_config(args.config.clone()).await {
-        Ok(b) => Some(b),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "TOML config not loaded (file may not exist yet); \
-                 using defaults for config-reload channels"
-            );
-            None
-        }
-    };
 
     // Build shared application state
     // Two-step: clone as concrete type then coerce to Arc<dyn IssuerSource>.
@@ -297,15 +363,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
     };
     // Resolve the effective trust domain: explicit tls.trust_domain wins;
     // falls back to tls.sans[0] (legacy derivation); empty = SPIFFE disabled.
-    let effective_trust_domain = booted
-        .as_ref()
-        .map(|b| {
-            b.runtime
-                .tls
-                .effective_trust_domain(&b.runtime.tls.sans)
-                .to_owned()
-        })
-        .unwrap_or_default();
+    let effective_trust_domain = runtime
+        .tls
+        .effective_trust_domain(&runtime.tls.sans)
+        .to_owned();
     let cert_signer = {
         let signer = cert_signer::RcgenAgentCertSigner::new(ca_rx.clone(), issuer_source);
         if effective_trust_domain.is_empty() {
@@ -351,7 +412,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .with_claim_registry(Arc::clone(&workload_claim_registry));
 
     // NATS transport (optional, feature-gated)
-    // Uses the reconciled NATS URL (DB value wins over CLI; CLI seeds DB on first run).
+    // Uses the reconciled NATS URL (DB value wins over TOML; TOML seeds DB on first run).
     #[cfg(feature = "nats")]
     let nats_transport = if let Some(ref url) = reconciled.nats_url {
         let nats = uptrakit_web_api::nats_transport::NatsTransport::connect(url, controller_id)
@@ -446,8 +507,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Build the plugin catalog from all compiled-in descriptors.
     // The catalog replaces the old PluginRegistry and provides PluginOps.
+    // allow_private_urls defaults to false (SSRF-safe by default).
     let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
-        allow_private_urls: args.allow_private_notification_urls,
+        allow_private_urls: false,
         http_client: Some(
             build_plugin_http_client(PluginHttpClientConfig {
                 user_agent: "uptrakit-controller",
@@ -502,7 +564,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     };
 
     // Audit log backend and filter wiring.
-    let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
+    let (audit_filter, audit_dispatcher) = build_audit_logger(runtime, &db_conn).await?;
 
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
@@ -571,16 +633,15 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)
         .instance_plugin_snapshot(std::sync::Arc::clone(&instance_plugin_snapshot_handle))
-        .reject_dangerous_commands(!args.allow_dangerous_commands);
+        .reject_dangerous_commands(true);
 
-    // Wire config-reload coordinator and receivers when boot_config succeeded.
+    // Wire config-reload coordinator and receivers.
     //
     // Build each Reloadable from the loaded RuntimeConfig + available subsystem
     // handles, extend the coordinator (which was not yet spawned), extract a
     // handle, then spawn coordinator + reconciler.
-    let (coordinator_handle_opt, settings_version_cache_opt, receivers_opt) = if let Some(mut b) =
-        booted
-    {
+    let (coordinator_handle_opt, settings_version_cache_opt, receivers_opt) = {
+        let mut b = booted;
         // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
         let db_reloadable = reload::db_pool::DbPoolReloadable::new(db_conn.clone(), db_url.clone());
         let (tls_reloadable, _tls_rx) =
@@ -650,8 +711,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
             Some(b.settings_version_cache),
             Some(b.receivers),
         )
-    } else {
-        (None, None, None)
     };
 
     let builder = match (
@@ -821,11 +880,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
         initial_ca_version,
         controller_id,
         controller_installation_id,
-        args.tls_cert.is_some(),
+        has_external_tls_cert,
         &service_connections,
         &builtin_host,
         app_dirs.state_dir().to_path_buf(),
-        args.pid_file.clone(),
         #[cfg(feature = "nats")]
         &nats_transport,
     )
@@ -889,9 +947,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
         }
     };
 
-    // Graceful shutdown
+    // Graceful shutdown — 30 second default timeout
     tracing::info!(reason = shutdown_reason, "shutdown signal received");
-    let shutdown_timeout = Duration::from_secs(args.shutdown_timeout_secs);
+    let shutdown_timeout = Duration::from_secs(30);
     bg.shutdown(server_handle, service_connections, shutdown_timeout)
         .await;
 
@@ -902,34 +960,24 @@ async fn run_server(args: cli::Args) -> Result<()> {
 // Extracted helper functions
 // ---------------------------------------------------------------------------
 
-/// Build the audit log filter and dispatcher from CLI arguments.
+/// Build the audit log filter and dispatcher from TOML configuration.
 ///
-/// Configures the audit backend (database, journald, or noop) and the
-/// event filter (all, mutations-only, or none).
+/// Configures the audit backend (database or noop) and the event filter
+/// (all, mutations-only, or none). Backend defaults to database; filter
+/// comes from `runtime.audit.filter`.
 async fn build_audit_logger(
-    args: &cli::Args,
+    runtime: &uptrakit_config_reload::RuntimeConfig,
     db_conn: &DatabaseConnection,
 ) -> Result<(AuditFilter, AuditLogDispatcher)> {
     use uptrakit_audit_log::{FilterMode, NoopBackend};
 
-    let filter_mode = match args.audit_log_filter {
-        cli::AuditLogFilterArg::All => FilterMode::All,
-        cli::AuditLogFilterArg::Mutations => FilterMode::Mutations,
-        cli::AuditLogFilterArg::None => FilterMode::None,
+    let filter_mode = match runtime.audit.filter.as_str() {
+        "mutations" => FilterMode::Mutations,
+        "none" => FilterMode::None,
+        _ => FilterMode::All,
     };
 
-    // Validate mutual exclusivity: `none` cannot be combined with other backends.
-    let has_none = args
-        .audit_log_backend
-        .contains(&cli::AuditLogBackendArg::None);
-    if has_none && args.audit_log_backend.len() > 1 {
-        tracing::warn!(
-            "--audit-log-backend=none is mutually exclusive with other backends; \
-             disabling all audit logging"
-        );
-    }
-
-    if has_none || filter_mode == FilterMode::None {
+    if filter_mode == FilterMode::None {
         let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
             std::sync::Arc::new(NoopBackend);
         return Ok((
@@ -938,49 +986,12 @@ async fn build_audit_logger(
         ));
     }
 
-    // Build the database connection for the audit log backend.
-    // Use the separate audit DB URL if provided, otherwise the main DB.
-    let audit_db = if let Some(ref url) = args.audit_log_db_url {
-        startup::init_audit_database(url, args.db_max_connections).await?
-    } else {
-        db_conn.clone()
-    };
-
-    let mut backends: Vec<std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>> = Vec::new();
-
-    for backend_arg in &args.audit_log_backend {
-        match backend_arg {
-            cli::AuditLogBackendArg::Db => {
-                backends.push(std::sync::Arc::new(
-                    uptrakit_audit_log::DatabaseBackend::new(audit_db.clone()),
-                ));
-            }
-            #[cfg(feature = "journald")]
-            cli::AuditLogBackendArg::Journald => {
-                backends.push(std::sync::Arc::new(uptrakit_audit_log::JournaldBackend));
-            }
-            cli::AuditLogBackendArg::None => {
-                // Already handled above (has_none guard).
-            }
-        }
-    }
-
-    let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> = match backends.len() {
-        0 => std::sync::Arc::new(NoopBackend),
-        1 => {
-            #[expect(
-                clippy::expect_used,
-                reason = "guaranteed by match arm: `backends.len() == 1` ensures the iterator yields exactly one element"
-            )]
-            let only = backends.into_iter().next().expect("one backend");
-            only
-        }
-        _ => std::sync::Arc::new(uptrakit_audit_log::MultiplexBackend::new(backends)),
-    };
+    // Default: database backend using the main DB connection.
+    let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
+        std::sync::Arc::new(uptrakit_audit_log::DatabaseBackend::new(db_conn.clone()));
 
     tracing::info!(
         filter = %filter_mode,
-        backends = args.audit_log_backend.len(),
         "audit logging configured"
     );
 
@@ -1020,14 +1031,6 @@ async fn spawn_background_tasks(
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     builtin_host: &service_host::BuiltinServiceHost,
     state_dir: std::path::PathBuf,
-    #[cfg_attr(
-        not(feature = "embedded-agent"),
-        expect(
-            unused_variables,
-            reason = "only used inside the #[cfg(feature = \"embedded-agent\")] block"
-        )
-    )]
-    pid_file: Option<std::path::PathBuf>,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
@@ -1093,7 +1096,7 @@ async fn spawn_background_tasks(
             bg,
             controller_installation_id,
             state_dir.clone(),
-            pid_file.clone(),
+            None, // pid_file removed from CLI
         )
         .await
         {
