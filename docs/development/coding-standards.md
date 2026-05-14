@@ -1929,6 +1929,61 @@ pub(crate) fn parse_semver_tag(tag: &str) -> Option<semver::Version> { … }
 - [Security](../../security/README.md) — avoid leaking internal types through `pub` that
   could expose security-sensitive implementation details.
 
+## Reloadable Trait
+
+Every long-lived subsystem that participates in config reload must implement `Reloadable` (in
+`uptrakit_config_reload::reloadable`). Use the `reloadable_erased_impl!` macro to generate the `ReloadableErased`
+adapter for dynamic dispatch:
+
+```rust
+uptrakit_config_reload::reloadable_erased_impl!(MyReloadable, RuntimeConfigDelta::MySection);
+```
+
+Rules:
+
+- `validate()` is pure — no side effects, only check invariants.
+- `apply()` takes an `Arc<Config>` snapshot and saves the pre-apply state internally for `revert()`.
+- `revert()` restores the pre-apply state without calling external services.
+- `health_check()` verifies the subsystem accepted the new config and is operating normally.
+- `rollback_window()` returns the maximum duration the watchdog waits for `health_check()`.
+
+## Per-Section Watch Pattern
+
+Config changes flow through `tokio::sync::watch<Arc<SectionConfig>>` channels. Inject receivers at
+construction time; never pass config values directly through function arguments for long-lived subsystems:
+
+```rust
+// In constructor:
+let (tx, rx) = watch::channel(Arc::new(initial_config));
+// Consumer holds rx and calls:
+let config = rx.borrow().clone();
+```
+
+Consumers that react to changes (instead of reading on each request) use `rx.changed().await`.
+
+## No Static-Init Config
+
+Do **not** use `lazy_static!` or `OnceLock`/`OnceCell` for configuration values. All config that can
+change at runtime must flow through watch channels. Static init for config creates a stale snapshot that
+bypasses the reload path.
+
+## Plugin Constructor Budget
+
+Plugin `from_config()` constructors are called every time the plugin's config changes
+(drop-and-recreate model). Constructors must be O(small):
+
+- Allocate only cheap state (`String`, `Vec<String>`, parsed scalar values).
+- Move expensive resources (`reqwest::Client`, SMTP sessions, compiled regexes) into `Arc`/`OnceLock`
+  outside the plugin struct so they survive plugin replacement.
+- See `crates/plugins/notifications/email/src/plugin.rs` for the reference implementation.
+
+## File vs. DB Section Assignment
+
+Config key ownership: TOML file owns structural config (listen addresses, DB pool URL, TLS, NATS, zeroconf).
+The `global_settings` DB table owns runtime-tuneable values (audit filter, retention). Per-tenant settings
+remain in the `settings` DB table. The migration `m20260512_000001_drop_file_keys` removes the DB rows that
+moved to TOML.
+
 ## Service Binary/Runtime Boundary
 
 Every Service binary crate (`agent-ssh`, `mqtt`, `scheduler`, …) is a **thin launch shell**.
