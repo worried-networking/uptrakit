@@ -53,6 +53,64 @@ SQLite database for SSH host credentials and an ephemeral ECIES P-256 key pair f
 - Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md) (includes StdioTunnel for Docker-over-SSH
   proxy)
 
+## Configuration & Graceful Reload
+
+### TOML file location and structure
+
+The controller's primary configuration source is a single TOML file at
+`/etc/uptrakit/controller.toml`. The path can be overridden with the `--config` CLI flag or the
+`UPTRAKIT_CONFIG` environment variable. Top-level sections are: `[db]`, `[network]`, `[tls]`,
+`[audit]`, `[zeroconf]`, `[embedded]`. See the graceful-reload spec for the full schema and key
+inventory.
+
+### Per-section watch propagation
+
+Each section's parsed value is wrapped in `Arc<…>` and placed into a `tokio::sync::watch` channel.
+Subsystems hold `Receiver`s injected at construction time. A subsystem that reacts to changes
+lazily (on the next request) calls `receiver.borrow()`; one that needs to act immediately calls
+`receiver.changed().await`. No subsystem polls the TOML file directly.
+
+### Reload triggers
+
+Three independent sources can initiate a reload cycle:
+
+1. **`SIGHUP` signal** — the process signal handler notifies the coordinator.
+2. **File-watch event** — `notify-debouncer-full` watches the TOML file path and delivers a
+   debounced event after 500 ms of filesystem quiet.
+3. **`ConfigReconciler`** — a background task that polls `settings_version` in the DB every 2 s
+   and triggers a reload when the version increases. This replaces the former 30 s
+   `spawn_settings_reload` task and bridges DB-side settings mutations to the TOML-driven reload
+   path.
+
+### Coordinator state machine
+
+`ReloadCoordinator` (in `crates/shared/config-reload/`) manages a simple state machine:
+
+- **`Idle`** — no reload in progress; the running config is authoritative.
+- **`Reloading`** — a reload cycle is in progress: parse → validate-all → apply-all →
+  health-check-all (within each subsystem's `rollback_window()`) → commit or revert-all.
+- **`Idle`** (on success) — all subsystems passed their health checks; new config is committed.
+- **`Degraded`** (on failure) — at least one health check failed; all subsystems have been
+  reverted to their pre-reload snapshots. The coordinator stays in `Degraded` until an operator
+  clears it via `POST /api/v1/instance/config-reload/clear-degraded`. New reload triggers are
+  suppressed while `Degraded`.
+
+### Reexec criteria
+
+If any changed config key belongs to the irreversibly-bound set — currently: listen addresses, DB
+pool URL, and TLS trust domain — the coordinator calls `exec()` instead of running an in-process
+reload cycle. The OS replaces the process image while the kernel preserves listening socket file
+descriptors via `listenfd`/`sd_notify`. Accepted TCP connections are reset; the service-sdk
+reconnect loops and browser SSE/WebSocket clients reconnect transparently.
+
+Adding a key to or removing one from the irreversibly-bound set is an ADR amendment, not a silent
+code change.
+
+### Cross-references
+
+- ADR: `docs/adr/0008-graceful-reload-architecture.md`
+- Operator runbook: `docs/end-user/operator-runbook-reload.md`
+
 ## Project layout
 
 - Rust workspace (`resolver = "3"`) under `crates/*/*` for controller, agent, SSH agent, MQTT service, plugins, shared libraries, and CLI/web API.
