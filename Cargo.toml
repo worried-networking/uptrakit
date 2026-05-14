@@ -199,7 +199,7 @@ testcontainers = { version = "0.27", default-features = false, features = ["aws-
 tracing-test = { version = "0.2", default-features = false }
 testcontainers-modules = { version = "0.15", default-features = false, features = ["aws-lc-rs", "postgres"] }
 paste = "1"
-sha1 = "0.10"
+sha1 = "0.11"
 httpmock = "0.8"
 tame-index = "0.26"
 serde_urlencoded = "0.7"
