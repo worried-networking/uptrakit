@@ -13,6 +13,7 @@ pub mod error_response;
 pub mod event_broadcaster;
 pub mod event_delivery;
 pub mod extract;
+pub mod extractors;
 pub mod global_providers;
 pub mod middleware;
 #[cfg(feature = "nats")]
