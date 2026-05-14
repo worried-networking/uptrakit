@@ -51,6 +51,18 @@ pub fn parse_fingerprint(s: &str) -> Result<String> {
     Ok(hex_part.to_string())
 }
 
+/// Decode a PEM-encoded certificate and return its SHA-256 fingerprint as 64-char lowercase hex.
+fn pem_fingerprint(pem: &str) -> Result<String> {
+    let der = CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|e| {
+        report!(CliError::Other(format!(
+            "failed to parse CA certificate PEM: {e:?}"
+        )))
+    })?;
+    let mut h = Sha256::new();
+    h.update(der.as_ref());
+    Ok(uptrakit_shared_types::hex::encode(h.finalize()))
+}
+
 /// Fetch the controller CA, optionally verify its fingerprint, prompt for
 /// interactive confirmation, and persist the PEM to config.
 ///
@@ -99,21 +111,10 @@ pub async fn establish_ca_trust(
         .await
         .context_to()?;
 
-    let der = CertificateDer::from_pem_slice(fetched_pem.as_bytes())
-        .map_err(|_e| report!(CliError::Other("failed to parse CA certificate PEM".into())))?;
-    let mut hasher = Sha256::new();
-    hasher.update(der.as_ref());
-    let fetched_fp = uptrakit_shared_types::hex::encode(hasher.finalize());
+    let fetched_fp = pem_fingerprint(&fetched_pem)?;
 
     if let Some(stored_pem) = &config.ca_pem {
-        let stored_der = CertificateDer::from_pem_slice(stored_pem.as_bytes()).map_err(|_e| {
-            report!(CliError::Other(
-                "failed to parse stored CA certificate PEM".into()
-            ))
-        })?;
-        let mut h = Sha256::new();
-        h.update(stored_der.as_ref());
-        let stored_fp = uptrakit_shared_types::hex::encode(h.finalize());
+        let stored_fp = pem_fingerprint(stored_pem)?;
 
         if stored_fp != fetched_fp {
             if !allow_rotation {
@@ -635,17 +636,11 @@ pub async fn status(
     } else {
         match config.ca_pem.as_deref() {
             None => None,
-            Some(pem) => {
-                let der = CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|_e| {
-                    report!(CliError::Other(
-                        "stored CA PEM is unparseable; run 'uptrakit auth ca trust' to re-establish"
-                            .into(),
-                    ))
-                })?;
-                let mut h = Sha256::new();
-                h.update(der.as_ref());
-                Some(uptrakit_shared_types::hex::encode(h.finalize()))
-            }
+            Some(pem) => Some(pem_fingerprint(pem).map_err(|e| {
+                e.attach(
+                    "stored CA PEM is unparseable; run 'uptrakit auth ca trust' to re-establish",
+                )
+            })?),
         }
     };
 
@@ -792,11 +787,7 @@ pub fn ca_status() -> Result<()> {
     match &config.ca_pem {
         None => println!("CA trust:    system roots"),
         Some(pem) => {
-            let der = CertificateDer::from_pem_slice(pem.as_bytes())
-                .map_err(|_e| report!(CliError::Other("stored CA PEM is unparseable".into())))?;
-            let mut h = Sha256::new();
-            h.update(der.as_ref());
-            let fp = uptrakit_shared_types::hex::encode(h.finalize());
+            let fp = pem_fingerprint(pem)?;
             println!("CA trust:    {fp}");
         }
     }
@@ -1241,10 +1232,7 @@ mod ca_trust_tests {
     }
 
     fn fingerprint_of_pem(pem: &str) -> String {
-        let der = CertificateDer::from_pem_slice(pem.as_bytes()).expect("parse pem");
-        let mut h = Sha256::new();
-        h.update(der.as_ref());
-        uptrakit_shared_types::hex::encode(h.finalize())
+        super::pem_fingerprint(pem).expect("parse pem")
     }
 
     #[tokio::test]
