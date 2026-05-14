@@ -8,6 +8,8 @@
 use std::sync::Arc;
 
 use tokio::sync::Notify;
+#[cfg(feature = "embedded-scheduler")]
+use uptrakit_plugin_infrastructure_registry::GlobalProviderLookup;
 use uptrakit_scheduler_runtime::{SchedulerNotifier, TaskExecutor};
 use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_wire::{ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload};
@@ -28,6 +30,9 @@ pub(crate) struct EmbeddedSchedulerConfig {
     #[cfg(feature = "plugin-ops")]
     pub controller_update_hook:
         Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>>,
+    /// Global provider lookup forwarded to [`FetchReleasesExecutor`] so that
+    /// controller-side fetch plugins can reach the shared GitHub provider.
+    pub global_provider_lookup: Option<Arc<dyn GlobalProviderLookup>>,
 }
 
 #[cfg(feature = "embedded-scheduler")]
@@ -62,7 +67,8 @@ pub(crate) async fn run_embedded_scheduler(
             config.controller_id,
             notifier,
             config.should_yield,
-        ),
+        )
+        .with_global_provider_lookup(config.global_provider_lookup),
         drain,
         abort,
         move |scheduler| {

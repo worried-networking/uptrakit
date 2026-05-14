@@ -10,6 +10,7 @@ use crate::{Scheduler, SchedulerConfig, SchedulerNotifier, TASK_EXECUTION_TIMEOU
 use sea_orm::DatabaseConnection;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use uptrakit_plugin_infrastructure_registry::GlobalProviderLookup;
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
 
@@ -28,6 +29,12 @@ pub struct SchedulerRunConfig {
     pub notifier: Arc<dyn SchedulerNotifier>,
     pub should_yield: Box<dyn Fn() -> bool + Send + Sync>,
     pub poll_interval: Duration,
+    /// Global provider lookup passed through to `FetchReleasesExecutor`.
+    ///
+    /// `Some` in embedded-controller deployments (wraps `GlobalProviders`);
+    /// `None` in standalone-scheduler deployments where no in-process provider
+    /// is available.
+    pub global_provider_lookup: Option<Arc<dyn GlobalProviderLookup>>,
 }
 
 pub struct ManagedSchedulerRuntime {
@@ -53,11 +60,22 @@ impl SchedulerRunConfig {
             notifier,
             should_yield,
             poll_interval: DEFAULT_POLL_INTERVAL,
+            global_provider_lookup: None,
         }
     }
 
     pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
         self.poll_interval = poll_interval;
+        self
+    }
+
+    /// Attach a global provider lookup so that controller-side fetch executors
+    /// can reach in-process providers (e.g. the shared GitHub client).
+    pub fn with_global_provider_lookup(
+        mut self,
+        lookup: Option<Arc<dyn GlobalProviderLookup>>,
+    ) -> Self {
+        self.global_provider_lookup = lookup;
         self
     }
 }
@@ -125,6 +143,7 @@ where
         notifier,
         should_yield,
         poll_interval,
+        global_provider_lookup,
     } = config;
 
     let mut scheduler = Scheduler::new(
@@ -147,10 +166,10 @@ where
     );
     scheduler.register(
         ScheduledTaskType::FetchReleases,
-        Box::new(FetchReleasesExecutor::new(
-            db.clone(),
-            Arc::clone(&notifier),
-        )),
+        Box::new(
+            FetchReleasesExecutor::new(db.clone(), Arc::clone(&notifier))
+                .with_global_provider_lookup(global_provider_lookup),
+        ),
     );
     scheduler.register(
         ScheduledTaskType::DetectVersion,
