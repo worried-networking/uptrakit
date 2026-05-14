@@ -231,10 +231,7 @@ fn has_mutation_verb_utoipa_path(attrs: &[syn::Attribute]) -> bool {
         if let Some(proc_macro2::TokenTree::Ident(ident)) =
             meta_list.tokens.clone().into_iter().next()
         {
-            return matches!(
-                ident.to_string().as_str(),
-                "post" | "put" | "patch" | "delete"
-            );
+            return ident == "post" || ident == "put" || ident == "patch" || ident == "delete";
         }
         false
     })
@@ -277,10 +274,8 @@ impl<'ast> Visit<'ast> for UtoipaHandlerCollector {
 /// `patch`, or `delete`).
 fn is_mutation_verb(path: &syn::Path) -> bool {
     path.segments.last().is_some_and(|s| {
-        matches!(
-            s.ident.to_string().as_str(),
-            "post" | "put" | "patch" | "delete"
-        )
+        let ident = &s.ident;
+        ident == "post" || ident == "put" || ident == "patch" || ident == "delete"
     })
 }
 
