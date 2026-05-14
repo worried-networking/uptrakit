@@ -96,7 +96,14 @@ async fn async_main() -> std::process::ExitCode {
     }
 
     if args.check_config {
-        if let Err(e) = uptrakit_config_reload::TomlConfigLoader::validate_only(&args.config) {
+        let config_path = match args.find_config_path() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Failed to resolve config directory: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
+        if let Err(e) = uptrakit_config_reload::TomlConfigLoader::validate_only(&config_path) {
             eprintln!("Config validation failed: {e}");
             return std::process::ExitCode::FAILURE;
         }
@@ -270,11 +277,13 @@ async fn run_server(args: cli::Args) -> Result<()> {
         initial_ca_version,
     } = pki;
 
-    // Load TOML config at boot. `args.config` carries the value from
-    // `--config` / `UPTRAKIT_CONFIG` env-var / default path.
+    // Probe platform config dir then /etc/uptrakit for controller.toml.
+    // Reuses app_dirs from Phase 2 — no second resolve_dirs() call.
     // Loaded here (before cert_signer construction) so that trust_domain
     // from [tls] can be wired into the signer at boot time.
-    let booted = match startup::boot_config(args.config.clone()).await {
+    let config_path = cli::probe_config_path(app_dirs.config_dir(), args.config.as_ref());
+    tracing::info!("toml config path: {}", config_path.display());
+    let booted = match startup::boot_config(config_path).await {
         Ok(b) => Some(b),
         Err(e) => {
             tracing::warn!(
