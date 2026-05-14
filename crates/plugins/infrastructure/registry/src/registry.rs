@@ -43,6 +43,7 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
         &uptrakit_plugin_package_manager_apt::DESCRIPTOR,
         &uptrakit_plugin_package_manager_dnf::DESCRIPTOR,
         &uptrakit_plugin_package_manager_npm::DESCRIPTOR,
+        &uptrakit_plugin_package_manager_skills::DESCRIPTOR,
         &uptrakit_plugin_package_manager_mas::DESCRIPTOR,
         &uptrakit_plugin_package_manager_pacman::DESCRIPTOR,
         &uptrakit_plugin_package_manager_pkg::DESCRIPTOR,
@@ -96,6 +97,7 @@ pub fn is_package_manager_plugin(plugin_type_id: &PluginTypeId) -> bool {
         plugin_ids::PACKAGE_MANAGER_HOMEBREW,
         plugin_ids::PACKAGE_MANAGER_DNF,
         plugin_ids::PACKAGE_MANAGER_NPM,
+        plugin_ids::PACKAGE_MANAGER_SKILLS,
         plugin_ids::PACKAGE_MANAGER_MAS,
         plugin_ids::PACKAGE_MANAGER_PACMAN,
         plugin_ids::PACKAGE_MANAGER_PKG,
@@ -269,6 +271,7 @@ mod tests {
             &plugin_ids::PACKAGE_MANAGER_HOMEBREW,
             &plugin_ids::PACKAGE_MANAGER_DNF,
             &plugin_ids::PACKAGE_MANAGER_NPM,
+            &plugin_ids::PACKAGE_MANAGER_SKILLS,
             &plugin_ids::PACKAGE_MANAGER_MAS,
             &plugin_ids::PACKAGE_MANAGER_PACMAN,
             &plugin_ids::PACKAGE_MANAGER_PKG,
@@ -306,6 +309,7 @@ mod tests {
             plugin_ids::PACKAGE_MANAGER_HOMEBREW,
             plugin_ids::PACKAGE_MANAGER_DNF,
             plugin_ids::PACKAGE_MANAGER_NPM,
+            plugin_ids::PACKAGE_MANAGER_SKILLS,
             plugin_ids::PACKAGE_MANAGER_MAS,
             plugin_ids::PACKAGE_MANAGER_PACMAN,
             plugin_ids::PACKAGE_MANAGER_PKG,
@@ -355,6 +359,22 @@ mod tests {
         assert_eq!(
             actual, expected,
             "explicit package-manager table drifted from descriptor type_id prefix signal"
+        );
+    }
+
+    #[test]
+    fn package_manager_skills_is_registered() {
+        use uptrakit_shared_types::plugin_ids;
+        let descs = all_descriptors();
+        assert!(
+            descs
+                .iter()
+                .any(|d| plugin_ids::PACKAGE_MANAGER_SKILLS == d.type_id),
+            "PACKAGE_MANAGER_SKILLS must be in all_descriptors()"
+        );
+        assert!(
+            is_package_manager_plugin(&plugin_ids::PACKAGE_MANAGER_SKILLS),
+            "PACKAGE_MANAGER_SKILLS must be in is_package_manager_plugin"
         );
     }
 
