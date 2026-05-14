@@ -7833,7 +7833,7 @@ name = "uptrakit-notification-plugin-webhook"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "reqwest",
  "rootcause",
  "sea-orm",
