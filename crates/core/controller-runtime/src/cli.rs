@@ -59,6 +59,14 @@ pub(crate) struct DbMigrateArgs {
 #[command(name = "uptrakit-controller")]
 #[command(disable_version_flag = true)]
 pub(crate) struct Args {
+    /// Show crate version and build metadata.
+    #[arg(long)]
+    pub version: bool,
+
+    /// Increase log verbosity (-v for own-crate debug, -vv for uptrakit=debug, -vvv for uptrakit=trace).
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
     /// Path to the TOML configuration file.
     ///
     /// When not set, probes the platform config directory
@@ -312,6 +320,22 @@ mod tests {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
         assert!(args.master_key_from.is_none());
+        assert!(!args.version);
+        assert_eq!(args.verbose, 0);
+    }
+
+    #[test]
+    fn version_flag_parses() {
+        let args = super::Args::try_parse_from(["uptrakit-controller", "--version"])
+            .expect("should parse");
+        assert!(args.version);
+    }
+
+    #[test]
+    fn verbose_flag_counts_occurrences() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "-v", "-v"]).expect("should parse");
+        assert_eq!(args.verbose, 2);
     }
 
     #[test]

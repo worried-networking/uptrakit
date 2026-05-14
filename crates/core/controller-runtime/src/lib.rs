@@ -57,6 +57,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "journald")]
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
+use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -90,6 +91,11 @@ impl_report_conversion!(
 
 async fn async_main() -> std::process::ExitCode {
     let args = cli::Args::parse();
+
+    if args.version {
+        print_build_info();
+        return std::process::ExitCode::SUCCESS;
+    }
 
     if args.check_config {
         let config_path = match args.find_config_path() {
@@ -203,8 +209,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             },
         );
 
-    // Initialise tracing now that we have the TOML config (log level comes from
-    // runtime.log; no verbosity flag any more).
+    // Initialise tracing. Log level from runtime.log in TOML; -v/-vv/-vvv on CLI overrides.
     #[expect(
         clippy::allow_attributes,
         clippy::allow_attributes_without_reason,
@@ -212,7 +217,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     )]
     #[allow(unused_mut)]
     let mut builder = uptrakit_tracing_init::TracingBuilder::new()
-        .verbosity(0)
+        .verbosity(args.verbose)
         .max_verbosity(3)
         .directives_for_verbosity(
             0,
@@ -1425,6 +1430,15 @@ fn spawn_pki_http(
     clippy::expect_used,
     reason = "infallible at startup: tokio runtime construction failures are unrecoverable and must abort process initialization"
 )]
+fn print_build_info() {
+    let build_info = BuildInfo::current(
+        env!("UPTRAKIT_RELEASE_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+    );
+    print!("{}", build_info.render_human());
+}
+
 pub fn run() -> std::process::ExitCode {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
