@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_global_github_provider::GitHubProviderClient;
 #[cfg(feature = "catalog")]
 use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ExecuteUpdateResult, HostRequirements, HostRuntime, PluginConfigValidationError,
-    PluginError, PluginFamily, ReleaseFetcher, ReleaseInfo, Result, UpdateOutputSender,
-    declare_plugin, roles::ReleaseFetchContext,
+    ConfigModel, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
+    PluginFamily, ReleaseFetcher, Result, declare_plugin, roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
@@ -20,7 +18,6 @@ use crate::config::SkillsConfig;
 /// by [`crate::lock::parse_skill_identifier`].
 #[non_exhaustive]
 pub struct SkillsPlugin {
-    #[expect(dead_code, reason = "read by executor modules landing in Tasks 7–9")]
     pub(crate) config: SkillsConfig,
     pub(crate) executor: Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
     pub(crate) provider: Option<Arc<dyn GitHubProviderClient>>,
@@ -113,23 +110,11 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
     global_provider_consumers: ["github"],
 });
 
-// ── Temporary role stubs ─────────────────────────────────────────────────────
+// ── Role implementations ──────────────────────────────────────────────────────
 // Discoverer is implemented in discovery.rs (Task 6).
+// VersionDetector is implemented in detection.rs (Task 7).
 // ReleaseFetcher is implemented in releases.rs (Task 8).
-// VersionDetector, UpdateExecutor stubs will be replaced in Tasks 7 and 9.
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SkillsPlugin {
-    async fn execute_update(
-        &self,
-        _id: &str,
-        _ver: &str,
-        _release_info: Option<&ReleaseInfo>,
-        _tx: &UpdateOutputSender,
-    ) -> Result<ExecuteUpdateResult> {
-        Ok(ExecuteUpdateResult::new(String::new(), false))
-    }
-}
+// UpdateExecutor is implemented in update.rs (Task 9).
 
 #[cfg(test)]
 mod tests {
