@@ -3,6 +3,7 @@ use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
 use clap::Subcommand;
+use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::audit_logs::{
@@ -351,7 +352,6 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<AuditLogRe
     query.page = params.page;
     query.per_page = params.per_page;
 
-    use rootcause::prelude::*;
     client.list_audit_logs(&query).await.context_to()
 }
 
@@ -380,7 +380,6 @@ pub async fn list_system(
     query.page = params.page;
     query.per_page = params.per_page;
 
-    use rootcause::prelude::*;
     client.list_system_audit_logs(&query).await.context_to()
 }
 

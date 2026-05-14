@@ -10,6 +10,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { Input, Select } from '$lib/components/forms';
+	import { showSuccess } from '$lib/notifications.svelte';
 	import StateTab from './StateTab.svelte';
 	import {
 		Callout,
@@ -69,6 +70,7 @@
 	let filterFrom: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('from') ?? ''));
 	let filterTo: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('to') ?? ''));
 	let filterCorrelationId: string = $state(page.url.searchParams.get('correlation_id') ?? '');
+	let filterActionKind: string = $state(page.url.searchParams.get('action_kind') ?? '');
 	let selected: AuditLogEntry | null = $state(null);
 	let detailTab: string = $state('details');
 
@@ -94,6 +96,7 @@
 		if (from) parts.push(`from=${encodeURIComponent(from)}`);
 		if (to) parts.push(`to=${encodeURIComponent(to)}`);
 		if (filterCorrelationId) parts.push(`correlation_id=${encodeURIComponent(filterCorrelationId)}`);
+		if (filterActionKind) parts.push(`action_kind=${encodeURIComponent(filterActionKind)}`);
 		if (currentPage > 1) parts.push(`page=${currentPage}`);
 		const qs = parts.join('&');
 		goto(qs ? `${location.pathname}?${qs}` : location.pathname, {
@@ -123,7 +126,8 @@
 			target_id: filterTargetId || undefined,
 			from: toRfc3339(filterFrom),
 			to: toRfc3339(filterTo),
-			correlation_id: filterCorrelationId || undefined
+			correlation_id: filterCorrelationId || undefined,
+			action_kind: (filterActionKind as 'stateful' | 'event') || undefined
 		};
 		try {
 			const fn = activeTab === 'system' ? listSystemAuditLogs : listAuditLogs;
@@ -153,6 +157,7 @@
 		filterFrom = '';
 		filterTo = '';
 		filterCorrelationId = '';
+		filterActionKind = '';
 		currentPage = 1;
 		load(1);
 	}
@@ -169,6 +174,7 @@
 		filterFrom = '';
 		filterTo = '';
 		filterCorrelationId = '';
+		filterActionKind = '';
 		load(1);
 	}
 
@@ -296,6 +302,21 @@
 							type="text"
 							placeholder="00000000-0000-0000-0000-000000000000"
 							bind:value={filterCorrelationId}
+						/>
+					</div>
+
+					<div>
+						<label for="filter-action-kind" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Action Kind</label
+						>
+						<Select
+							id="filter-action-kind"
+							bind:value={filterActionKind}
+							options={[
+								{ value: '', label: 'All' },
+								{ value: 'stateful', label: 'stateful' },
+								{ value: 'event', label: 'event' }
+							]}
 						/>
 					</div>
 				</div>
@@ -429,8 +450,12 @@
 										<span class="w-32 shrink-0 text-[var(--text-secondary)]">{label}</span>
 										<span class="text-[var(--text-primary)]">{value}</span>
 										{#if label === 'Correlation ID' && selected.correlation_id}
-											<Button variant="ghost" onclick={() => navigator.clipboard.writeText(selected!.correlation_id!)}
-												>Copy</Button
+											<Button
+												variant="ghost"
+												onclick={() => {
+													navigator.clipboard.writeText(selected!.correlation_id!);
+													showSuccess('Copied to clipboard');
+												}}>Copy</Button
 											>
 										{/if}
 									</div>
