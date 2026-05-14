@@ -13,17 +13,29 @@ use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 /// so that concurrent readers pay only a reader lock acquisition, and a caller can
 /// `swap` in a fresh verifier after a CA rotation without blocking ongoing TLS
 /// handshakes for more than the duration of the lock.
+///
+/// `hint_subjects` is set at construction and not updated on [`swap`].  The
+/// subjects are advisory — TLS clients MAY ignore them — so stale hints after a
+/// CA rotation are acceptable: agents still present their certs and verification
+/// succeeds via the new inner verifier.  The main purpose of the hints is to
+/// prevent browsers (which hold no controller-issued certificate) from displaying
+/// a certificate-selection dialog on every HTTPS request.
 #[derive(Debug)]
 pub(crate) struct DynamicClientVerifier {
     inner: RwLock<Arc<dyn ClientCertVerifier>>,
-    empty_subjects: Vec<DistinguishedName>,
+    /// CA subject DNs advertised in the TLS `CertificateRequest` message.
+    /// Scoped to the controller CA so browsers skip the cert-selection popup.
+    hint_subjects: Vec<DistinguishedName>,
 }
 
 impl DynamicClientVerifier {
-    pub(crate) fn new(initial: Arc<dyn ClientCertVerifier>) -> Self {
+    pub(crate) fn new(
+        initial: Arc<dyn ClientCertVerifier>,
+        hint_subjects: Vec<DistinguishedName>,
+    ) -> Self {
         Self {
             inner: RwLock::new(initial),
-            empty_subjects: Vec::new(),
+            hint_subjects,
         }
     }
 
@@ -42,7 +54,7 @@ impl ClientCertVerifier for DynamicClientVerifier {
     }
 
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
-        &self.empty_subjects
+        &self.hint_subjects
     }
 
     fn verify_client_cert(
@@ -145,16 +157,43 @@ mod tests {
         )
     }
 
+    fn subjects_from_roots(roots: &[CertificateDer<'static>]) -> Vec<DistinguishedName> {
+        let mut store = rustls::RootCertStore::empty();
+        for cert in roots {
+            store.add(cert.clone()).expect("add root");
+        }
+        store
+            .roots
+            .iter()
+            .map(|ta| DistinguishedName::in_sequence(ta.subject.as_ref()))
+            .collect()
+    }
+
     #[test]
-    fn root_hint_subjects_is_empty() {
+    fn root_hint_subjects_mirrors_ca_subjects() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_a_der, _ca_b_der, _leaf_der) = build_two_root_fixtures();
+        let subjects = subjects_from_roots(&[ca_a_der.clone()]);
+        let verifier = build_verifier_from_roots(&[ca_a_der]);
+        let dynamic = DynamicClientVerifier::new(verifier, subjects);
+        assert_eq!(
+            dynamic.root_hint_subjects().len(),
+            1,
+            "one CA root → one hint subject"
+        );
+    }
+
+    #[test]
+    fn root_hint_subjects_empty_when_no_cas_provided() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (ca_a_der, _ca_b_der, _leaf_der) = build_two_root_fixtures();
         let verifier = build_verifier_from_roots(&[ca_a_der]);
-        let dynamic = DynamicClientVerifier::new(verifier);
+        let dynamic = DynamicClientVerifier::new(verifier, Vec::new());
         assert!(
             dynamic.root_hint_subjects().is_empty(),
-            "root_hint_subjects should always be empty"
+            "empty subjects passed → empty hint subjects"
         );
     }
 
@@ -168,7 +207,7 @@ mod tests {
         let verifier_a = build_verifier_from_roots(&[ca_a_der]);
         let verifier_b = build_verifier_from_roots(&[ca_b_der]);
 
-        let dynamic = DynamicClientVerifier::new(verifier_a);
+        let dynamic = DynamicClientVerifier::new(verifier_a, Vec::new());
 
         let now = UnixTime::now();
 
@@ -200,7 +239,7 @@ mod tests {
         let v_a = build_verifier_from_roots(std::slice::from_ref(&ca_a_der));
         let v_b = build_verifier_from_roots(std::slice::from_ref(&ca_b_der));
 
-        let dynamic = std::sync::Arc::new(DynamicClientVerifier::new(v_a.clone()));
+        let dynamic = std::sync::Arc::new(DynamicClientVerifier::new(v_a.clone(), Vec::new()));
         let stop = std::sync::Arc::new(AtomicBool::new(false));
 
         let mut handles = Vec::new();
@@ -244,9 +283,10 @@ mod tests {
 
         let (ca_a_der, ca_b_der, _leaf_der) = build_two_root_fixtures();
 
-        let dynamic = Arc::new(DynamicClientVerifier::new(build_verifier_from_roots(
-            std::slice::from_ref(&ca_a_der),
-        )));
+        let dynamic = Arc::new(DynamicClientVerifier::new(
+            build_verifier_from_roots(std::slice::from_ref(&ca_a_der)),
+            Vec::new(),
+        ));
 
         let verifier_a = build_verifier_from_roots(std::slice::from_ref(&ca_a_der));
         let verifier_b = build_verifier_from_roots(std::slice::from_ref(&ca_b_der));
