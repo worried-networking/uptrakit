@@ -109,7 +109,7 @@ fn nats_validates_url() {
 
 #[test]
 fn tls_requires_both_paths() {
-    let bad: TlsConfig = toml::from_str(
+    let cert_only: TlsConfig = toml::from_str(
         r#"
 cert_path = "/etc/tls/cert.pem"
 key_path = ""
@@ -117,7 +117,38 @@ sans = []
 "#,
     )
     .unwrap();
-    assert!(bad.validate().is_err());
+    assert!(cert_only.validate().is_err());
+
+    let key_only: TlsConfig = toml::from_str(
+        r#"
+cert_path = ""
+key_path = "/etc/tls/key.pem"
+sans = []
+"#,
+    )
+    .unwrap();
+    assert!(key_only.validate().is_err());
+}
+
+#[test]
+fn tls_both_empty_is_managed_ca_mode() {
+    TlsConfig::default().validate().unwrap();
+}
+
+#[test]
+fn runtime_config_without_tls_paths_validates() {
+    let toml_str = minimal_toml()
+        .replace(
+            "cert_path = \"/etc/uptrakit/tls/cert.pem\"",
+            "cert_path = \"\"",
+        )
+        .replace(
+            "key_path  = \"/etc/uptrakit/tls/key.pem\"",
+            "key_path  = \"\"",
+        );
+    let cfg: RuntimeConfig = toml::from_str(&toml_str).expect("parse");
+    cfg.validate()
+        .expect("managed CA mode (both paths empty) must validate");
 }
 
 // ── EmbeddedServicesConfig tests ────────────────────────────────────────────

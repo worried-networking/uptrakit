@@ -59,14 +59,16 @@ impl TlsConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if `cert_path` or `key_path` is empty, or if
-    /// `trust_domain` contains characters outside `[a-z0-9.-]`.
+    /// Returns an error if exactly one of `cert_path` / `key_path` is set (both
+    /// must be provided together, or both left empty for controller-managed certs),
+    /// or if `trust_domain` contains characters outside `[a-z0-9.-]`.
     pub fn validate(&self) -> Result<(), Report> {
-        if self.cert_path.is_empty() {
-            bail!(ConfigReloadError::Validate("tls.cert_path is empty".into()));
-        }
-        if self.key_path.is_empty() {
-            bail!(ConfigReloadError::Validate("tls.key_path is empty".into()));
+        let has_cert = !self.cert_path.is_empty();
+        let has_key = !self.key_path.is_empty();
+        if has_cert != has_key {
+            bail!(ConfigReloadError::Validate(
+                "tls.cert_path and tls.key_path must both be set or both be empty".into()
+            ));
         }
         if !self.trust_domain.is_empty()
             && !self

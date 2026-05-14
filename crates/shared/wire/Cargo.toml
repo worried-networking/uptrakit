@@ -24,6 +24,7 @@ uptrakit-surfaces = { workspace = true }
 [dev-dependencies]
 serde_yaml_ng = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
+uptrakit-audit-log = { workspace = true }
 
 [lints]
 workspace = true

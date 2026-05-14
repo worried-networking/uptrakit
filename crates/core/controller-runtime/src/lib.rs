@@ -136,11 +136,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     tracing::info!("toml config path: {}", config_path.display());
     let booted = startup::boot_config(config_path)
         .await
-        .map_err(|e| {
-            report!(AppError::Config(format!(
-                "failed to load TOML config: {e}"
-            )))
-        })?;
+        .map_err(|e| report!(AppError::Config(format!("failed to load TOML config: {e}"))))?;
     let runtime = &booted.runtime;
 
     // Parse bootstrap args from environment variables (no CLI flags; env only).
