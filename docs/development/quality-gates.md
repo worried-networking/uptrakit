@@ -119,6 +119,15 @@ cargo test -p uptrakit-integration-tests -- --ignored
 This requires Docker and covers end-to-end enrollment and communication between all binaries
 (controller, agent, agent-ssh, scheduler, mqtt).
 
+### Reload-mechanism changes (mandatory)
+
+If the change touches config reload, the `Reloadable` trait, the coordinator, or file-watch
+debouncing, you must also run the reload integration tests:
+
+```sh
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest . && cargo test -p uptrakit-integration-tests reexec -- --ignored
+```
+
 ## Frontend (SvelteKit)
 
 ```sh
