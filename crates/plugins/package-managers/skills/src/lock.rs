@@ -14,13 +14,6 @@ struct SkillEntryDto {
     skill_folder_hash: String,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "used by discovery/detection/update modules landing in Tasks 6–9"
-    )
-)]
 #[derive(Debug)]
 pub(crate) struct SkillLockEntry {
     pub(crate) name: String,
@@ -32,13 +25,6 @@ pub(crate) struct SkillLockEntry {
     pub(crate) skill_folder_hash: String,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called by discovery/detection/update modules landing in Tasks 6–9"
-    )
-)]
 pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
     let raw: std::collections::HashMap<String, serde_json::Value> = serde_json::from_str(json)
         .map_err(|e| report!(SkillsError::LockFileMalformed(e.to_string())))?;
@@ -64,10 +50,6 @@ pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
     Ok(entries)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "called by discovery module landing in Task 6")
-)]
 pub(crate) fn encode_skill_identifier(source_url: &str, skill_path: &str) -> String {
     format!("{source_url}#{skill_path}")
 }
