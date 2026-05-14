@@ -1622,6 +1622,16 @@ See also:
 - [Command Executor](command-executor.md) -- full `CommandExecutor` trait reference.
 - [Sudoers Management](../security/sudoers-management.md) -- security model for privileged commands.
 
+## Plugin constructor budget
+
+Plugin constructors (`from_config()`) are called every time the plugin's config changes
+(drop-and-recreate reload model). Constructors must therefore be O(small). Expensive
+resources — `reqwest::Client` with connection pool, SMTP sessions, JIT-compiled regexes — live
+in module-level `OnceLock` or `Arc<…>` _outside_ the plugin struct, so the plugin instance
+itself can be cheaply replaced without tearing down the resource pool.
+
+See `crates/plugins/notifications/email/src/plugin.rs` for a reference implementation.
+
 ## GitHub Releases plugin (`uptrakit-plugin-releases-github`)
 
 Fetches release metadata from the GitHub API and converts it into `UpstreamRelease` values.
