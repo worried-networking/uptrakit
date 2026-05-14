@@ -5,6 +5,10 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the Agent Skills plugin.
 #[derive(Debug, Error)]
+#[expect(
+    dead_code,
+    reason = "several variants are forward-declared for later tasks and not yet constructed"
+)]
 pub(crate) enum SkillsError {
     #[error("lock file malformed: {0}")]
     LockFileMalformed(String),
