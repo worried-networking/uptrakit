@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use ipnet::IpNet;
@@ -296,17 +296,18 @@ pub(crate) struct Args {
     pub verbose: u8,
 
     /// Path to TOML config file.
-    #[arg(
-        long,
-        env = "UPTRAKIT_CONFIG",
-        default_value = "/etc/uptrakit/controller.toml"
-    )]
-    pub config: std::path::PathBuf,
+    ///
+    /// When not set, probes the platform config directory
+    /// (e.g., `~/.config/uptrakit/controller/controller.toml` on Linux) then
+    /// `/etc/uptrakit/controller.toml`, using the first that exists.
+    #[arg(long, env = "UPTRAKIT_CONFIG")]
+    pub config: Option<PathBuf>,
 
     /// Validate config file and exit.
     ///
-    /// Reads the file at `--config`, validates it, and exits with code 0 on
-    /// success or 1 on failure. Does not start the server.
+    /// Reads the file at `--config` (or the probed default path), validates
+    /// it, and exits with code 0 on success or 1 on failure. Does not start
+    /// the server.
     #[arg(long)]
     pub check_config: bool,
 
@@ -500,6 +501,44 @@ impl Args {
             self.state_dir.as_deref(),
         )
     }
+
+    /// Find the TOML config file path for pre-startup validation (`--check-config`).
+    ///
+    /// For normal startup use `probe_config_path(app_dirs.config_dir(), args.config.as_ref())`
+    /// directly to reuse the already-resolved `AppDirs` from Phase 2.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `AppDirs::resolve` cannot determine the platform
+    /// config directory (e.g., no home directory in the environment).
+    pub(crate) fn find_config_path(&self) -> uptrakit_directories::Result<PathBuf> {
+        let dirs = self.resolve_dirs()?;
+        Ok(probe_config_path(dirs.config_dir(), self.config.as_ref()))
+    }
+}
+
+/// Probe candidate TOML config paths and return the first that is a regular file.
+///
+/// If `explicit` is `Some`, returns it unconditionally without probing.
+/// Otherwise checks in order:
+///   1. `config_dir.join("controller.toml")`
+///   2. `/etc/uptrakit/controller.toml`
+///
+/// Falls back to the platform path if neither exists so callers emit a
+/// sensible "not found" message rather than pointing at a confusing location.
+pub(crate) fn probe_config_path(config_dir: &Path, explicit: Option<&PathBuf>) -> PathBuf {
+    if let Some(p) = explicit {
+        return p.clone();
+    }
+    let platform = config_dir.join("controller.toml");
+    if platform.is_file() {
+        return platform;
+    }
+    let legacy = Path::new("/etc/uptrakit/controller.toml");
+    if legacy.is_file() {
+        return legacy.to_path_buf();
+    }
+    platform
 }
 
 #[cfg(test)]
@@ -510,6 +549,7 @@ mod tests {
     )]
 
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::path::Path;
 
     use clap::Parser;
     use ipnet::IpNet;
@@ -959,19 +999,20 @@ mod tests {
     }
 
     #[test]
-    fn config_default_path() {
+    fn config_field_is_none_by_default() {
         let args = super::Args::try_parse_from(["uptrakit-controller"]).unwrap();
-        assert_eq!(
-            args.config,
-            std::path::PathBuf::from("/etc/uptrakit/controller.toml")
-        );
+        assert!(args.config.is_none());
     }
 
     #[test]
-    fn config_custom_path() {
+    fn config_explicit_path_returned_directly() {
+        // Explicit --config bypasses probing; no filesystem access or resolve_dirs occurs.
         let args = super::Args::try_parse_from(["uptrakit-controller", "--config", "/tmp/my.toml"])
             .unwrap();
-        assert_eq!(args.config, std::path::PathBuf::from("/tmp/my.toml"));
+        assert_eq!(
+            super::probe_config_path(Path::new("/irrelevant"), args.config.as_ref()),
+            std::path::PathBuf::from("/tmp/my.toml")
+        );
     }
 
     #[test]
