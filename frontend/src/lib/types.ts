@@ -46,7 +46,10 @@ export enum Permission {
 	ManageUsers = 'manage_users',
 	ManageIgnores = 'manage_ignores',
 	// Plugin config testing
-	TestPluginConfigs = 'test_plugin_configs'
+	TestPluginConfigs = 'test_plugin_configs',
+	// Instance config state
+	ViewInstanceConfigState = 'view_instance_config_state',
+	ManageInstanceConfigState = 'manage_instance_config_state'
 }
 
 /** Returns true if the user holds at least one of the given permissions. */
@@ -1038,6 +1041,37 @@ export interface NotificationLogEntry {
 	error_message: string | null;
 	created_at: string;
 	delivered_at: string | null;
+}
+
+// ── Instance Config State ─────────────────────────────────────────────
+
+export interface ConfigStateFileView {
+	path: string;
+	digest: string;
+	loaded_at: string;
+	pending_digest: string | null;
+	pending_detected_at: string | null;
+}
+
+export interface ConfigStateLastReloadView {
+	completed_at: string;
+	sections: string[];
+	per_subsystem_ms: Record<string, number>;
+}
+
+export interface ConfigStateDegradedView {
+	since: string;
+	failed_subsystems: string[];
+	reason: string;
+}
+
+export interface ConfigStateResponse {
+	coordinator_state: string;
+	degraded: ConfigStateDegradedView | null;
+	file: ConfigStateFileView;
+	last_reload: ConfigStateLastReloadView | null;
+	sections: Record<string, unknown>;
+	recent_events: unknown[];
 }
 
 // ── Reset Data ────────────────────────────────────────────────────────
