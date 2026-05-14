@@ -146,33 +146,33 @@ SPIFFE URI SAN.
 _Avoid_: domain (overloaded), namespace (Kubernetes overload).
 
 **Config Section**:
-A named top-level block in `controller.toml` (e.g., `[db]`, `[network]`, `[tls]`) whose
-parsed value is distributed to subsystems via a `tokio::sync::watch` channel.
+Logical grouping of settings whose lifetime is bound together for reload; one `Arc<SectionConfig>`
+and one `watch::Sender` per section.
 
 **ConfigReconciler**:
-Background task (2 s poll) that reads the current `settings_version` from the DB and triggers
-a reload when it increases, bridging DB mutations to the TOML-driven reload path.
+Tokio task that polls `settings_version` for bumps and enqueues reload requests for affected DB
+sections.
 
 **Irreversibly-bound key**:
-A config value whose change cannot be applied in-process (e.g., listen address, DB pool URL).
-Changes to irreversibly-bound keys cause the coordinator to reexec the process via `exec()`.
+Configuration key whose change cannot be applied to a running process without compromising
+correctness, safety, or operability. Current set: `db.url`, `master_key.path`, `log.path`,
+embedded-services topology. Set membership changes are ADR amendments.
 
 **Reexec**:
-In-process replacement of the running binary image via `exec()`, preserving listening sockets
-(via `listenfd`/`sd_notify`) while resetting accepted TCP connections.
+In-place process replacement via `exec()` with inherited listening sockets; used for
+irreversibly-bound key changes. _Avoid_: "graceful restart".
 
 **Reloadable**:
-A trait (`validate`, `apply`, `revert`, `health_check`, `rollback_window`) implemented by each
-long-lived subsystem. The reload coordinator calls these methods atomically during a reload cycle.
+Long-lived subsystem implementing the `Reloadable` trait, participating in reload.
 
 **Reload Coordinator**:
-The component (`ReloadCoordinator` in `crates/shared/config-reload/`) that orchestrates a reload
-cycle: parse → validate-all → apply-all → health-check-all → commit or revert-all.
+Single Tokio task that serialises reload requests, runs two-phase validate-then-apply, drives the
+watchdog, commits or reverts. Exactly one per Controller process. _Avoid_: "config manager",
+"reload manager".
 
 **Watchdog window**:
-The `rollback_window()` duration returned by each `Reloadable`. If the subsystem's health check
-does not pass within this window after `apply`, the coordinator reverts all subsystems and enters
-the `Degraded` state.
+Per-subsystem time budget within which a newly-applied configuration must pass `health_check()`.
+Default values are constants in `uptrakit-config-reload::defaults`.
 
 ## Relationships
 

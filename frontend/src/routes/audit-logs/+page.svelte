@@ -461,15 +461,92 @@
 									</div>
 								{/each}
 								{#if selected.details_json}
-									<details class="mt-2">
-										<summary class="cursor-pointer text-xs text-[var(--text-secondary)]">Event details</summary>
-										<pre
-											class="mt-2 overflow-auto rounded-card bg-[var(--bg-raised)] p-4 text-xs text-[var(--text-primary)]">{JSON.stringify(
-												selected.details_json,
-												null,
-												2
-											)}</pre>
-									</details>
+									{#if selected.action_type === 'system_config_reload_requested'}
+										<div class="mt-2 flex flex-col gap-1 text-sm">
+											<div class="flex gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Source</span>
+												<span class="font-mono text-[var(--text-primary)]"
+													>{String(selected.details_json['source'] ?? '—')}</span
+												>
+											</div>
+										</div>
+									{:else if selected.action_type === 'system_config_reload_applied'}
+										{@const sectionList = selected.details_json['sections'] as string[] | undefined}
+										{@const perSubMs = selected.details_json['per_subsystem_ms'] as Record<string, number> | undefined}
+										<div class="mt-2 flex flex-col gap-1 text-sm">
+											{#if sectionList?.length}
+												<div class="flex gap-2">
+													<span class="w-32 shrink-0 text-[var(--text-secondary)]">Sections</span>
+													<span class="text-[var(--text-primary)]">{sectionList.join(', ')}</span>
+												</div>
+											{/if}
+											{#if perSubMs && Object.keys(perSubMs).length > 0}
+												<details class="mt-1">
+													<summary class="cursor-pointer text-xs text-[var(--text-secondary)]"
+														>Per-subsystem timing</summary
+													>
+													<dl class="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+														{#each Object.entries(perSubMs) as [name, ms] (name)}
+															<dt class="text-[var(--text-secondary)]">{name}</dt>
+															<dd class="font-mono text-[var(--text-primary)]">{ms} ms</dd>
+														{/each}
+													</dl>
+												</details>
+											{/if}
+										</div>
+									{:else if selected.action_type === 'system_config_reload_failed'}
+										<div class="mt-2 flex flex-col gap-1 text-sm">
+											<div class="flex items-center gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Severity</span>
+												<StatusBadge tone="danger" label="Error" />
+											</div>
+											<div class="flex gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Phase</span>
+												<span class="font-mono text-[var(--text-primary)]"
+													>{String(selected.details_json['phase'] ?? '—')}</span
+												>
+											</div>
+											{#if selected.details_json['subsystem']}
+												<div class="flex gap-2">
+													<span class="w-32 shrink-0 text-[var(--text-secondary)]">Subsystem</span>
+													<span class="font-mono text-[var(--text-primary)]"
+														>{String(selected.details_json['subsystem'])}</span
+													>
+												</div>
+											{/if}
+											<div class="flex gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Error</span>
+												<span class="text-[var(--text-primary)]">{String(selected.details_json['error'] ?? '—')}</span>
+											</div>
+										</div>
+									{:else if selected.action_type === 'system_config_reload_reverted'}
+										<div class="mt-2 flex flex-col gap-1 text-sm">
+											<div class="flex items-center gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Severity</span>
+												<StatusBadge tone="warning" label="Warning" />
+											</div>
+											<div class="flex gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Subsystem</span>
+												<span class="font-mono text-[var(--text-primary)]"
+													>{String(selected.details_json['subsystem'] ?? '—')}</span
+												>
+											</div>
+											<div class="flex gap-2">
+												<span class="w-32 shrink-0 text-[var(--text-secondary)]">Reason</span>
+												<span class="text-[var(--text-primary)]">{String(selected.details_json['reason'] ?? '—')}</span>
+											</div>
+										</div>
+									{:else}
+										<details class="mt-2">
+											<summary class="cursor-pointer text-xs text-[var(--text-secondary)]">Event details</summary>
+											<pre
+												class="mt-2 overflow-auto rounded-card bg-[var(--bg-raised)] p-4 text-xs text-[var(--text-primary)]">{JSON.stringify(
+													selected.details_json,
+													null,
+													2
+												)}</pre>
+										</details>
+									{/if}
 								{/if}
 							</div>
 						{/if}
