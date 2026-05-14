@@ -3,6 +3,7 @@ mod device_auth_oauth;
 mod enrollment_tokens;
 mod error_cases;
 mod hosts;
+mod if_match;
 mod instance_plugins;
 mod notifications;
 mod oauth_boot_validation;
