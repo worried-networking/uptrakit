@@ -4,6 +4,21 @@ use url::Url;
 
 use crate::error::{Result, SkillsError};
 
+/// Probe just the version field; remaining structure dispatched per-version below.
+#[derive(Deserialize)]
+struct SkillLockVersionProbe {
+    version: u32,
+}
+
+/// V3 format: `{ version: 3, skills: { <name>: <entry> }, dismissed: ..., lastSelectedAgents: ... }`
+///
+/// `skills` kept as `Value` map: typed `HashMap<String, SkillEntryDto>` would fail the entire
+/// parse on the first malformed entry; `Value` preserves per-entry warn-and-skip.
+#[derive(Deserialize)]
+struct SkillLockFileV3 {
+    skills: std::collections::HashMap<String, serde_json::Value>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillEntryDto {
@@ -17,7 +32,6 @@ struct SkillEntryDto {
 #[derive(Debug)]
 pub(crate) struct SkillLockEntry {
     pub(crate) name: String,
-    /// Stored from lock file for completeness; not read at runtime.
     pub(crate) _source: String,
     pub(crate) source_url: String,
     pub(crate) source_type: String,
@@ -26,11 +40,26 @@ pub(crate) struct SkillLockEntry {
 }
 
 pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
-    let raw: std::collections::HashMap<String, serde_json::Value> = serde_json::from_str(json)
+    let raw: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| report!(SkillsError::LockFileMalformed(e.to_string())))?;
 
-    let mut entries = Vec::with_capacity(raw.len());
-    for (name, value) in raw {
+    let probe: SkillLockVersionProbe = serde_json::from_value(raw.clone())
+        .map_err(|e| report!(SkillsError::LockFileMalformed(e.to_string())))?;
+
+    match probe.version {
+        3 => parse_v3(raw),
+        v => Err(report!(SkillsError::LockFileMalformed(format!(
+            "unsupported skill lock version {v}"
+        )))),
+    }
+}
+
+fn parse_v3(raw: serde_json::Value) -> Result<Vec<SkillLockEntry>> {
+    let wrapper: SkillLockFileV3 = serde_json::from_value(raw)
+        .map_err(|e| report!(SkillsError::LockFileMalformed(e.to_string())))?;
+
+    let mut entries = Vec::with_capacity(wrapper.skills.len());
+    for (name, value) in wrapper.skills {
         let dto: SkillEntryDto = match serde_json::from_value(value) {
             Ok(d) => d,
             Err(e) => {
@@ -112,33 +141,39 @@ mod tests {
     use super::*;
 
     const SAMPLE_LOCK: &str = r#"{
-      "brainstorming": {
-        "source": "obra/superpowers",
-        "sourceUrl": "https://github.com/obra/superpowers",
-        "sourceType": "github",
-        "skillPath": "skills/brainstorming/SKILL.md",
-        "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        "installedAt": "2025-01-01T00:00:00Z",
-        "updatedAt": "2025-01-02T00:00:00Z"
-      },
-      "spec": {
-        "source": "obra/superpowers",
-        "sourceUrl": "https://github.com/obra/superpowers",
-        "sourceType": "github",
-        "skillPath": "skills/spec/SKILL.md",
-        "skillFolderHash": "cafecafecafecafecafecafecafecafecafecafe",
-        "installedAt": "2025-01-01T00:00:00Z",
-        "updatedAt": "2025-01-02T00:00:00Z"
+      "version": 3,
+      "skills": {
+        "brainstorming": {
+          "source": "obra/superpowers",
+          "sourceUrl": "https://github.com/obra/superpowers",
+          "sourceType": "github",
+          "skillPath": "skills/brainstorming/SKILL.md",
+          "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "installedAt": "2025-01-01T00:00:00Z",
+          "updatedAt": "2025-01-02T00:00:00Z"
+        },
+        "spec": {
+          "source": "obra/superpowers",
+          "sourceUrl": "https://github.com/obra/superpowers",
+          "sourceType": "github",
+          "skillPath": "skills/spec/SKILL.md",
+          "skillFolderHash": "cafecafecafecafecafecafecafecafecafecafe",
+          "installedAt": "2025-01-01T00:00:00Z",
+          "updatedAt": "2025-01-02T00:00:00Z"
+        }
       }
     }"#;
 
     const NON_GITHUB_LOCK: &str = r#"{
-      "local-skill": {
-        "source": "local/source",
-        "sourceUrl": "https://gitlab.com/local/source",
-        "sourceType": "gitlab",
-        "skillPath": "skills/local-skill/SKILL.md",
-        "skillFolderHash": "aabbccddaabbccddaabbccddaabbccddaabbccdd"
+      "version": 3,
+      "skills": {
+        "local-skill": {
+          "source": "local/source",
+          "sourceUrl": "https://gitlab.com/local/source",
+          "sourceType": "gitlab",
+          "skillPath": "skills/local-skill/SKILL.md",
+          "skillFolderHash": "aabbccddaabbccddaabbccddaabbccddaabbccdd"
+        }
       }
     }"#;
 
@@ -172,9 +207,52 @@ mod tests {
     }
 
     #[test]
-    fn parse_empty_object_returns_empty_vec() {
-        let entries = parse_skill_lock("{}").expect("parse ok");
+    fn parse_missing_version_fails() {
+        parse_skill_lock("{}").unwrap_err();
+    }
+
+    #[test]
+    fn parse_v3_empty_skills_returns_empty_vec() {
+        let entries = parse_skill_lock(r#"{"version": 3, "skills": {}}"#).expect("parse ok");
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn parse_v3_with_extra_keys() {
+        let json = r#"{
+          "version": 3,
+          "skills": {
+            "brainstorming": {
+              "source": "obra/superpowers",
+              "sourceUrl": "https://github.com/obra/superpowers",
+              "sourceType": "github",
+              "skillPath": "skills/brainstorming/SKILL.md",
+              "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            }
+          },
+          "dismissed": { "findSkillsPrompt": true },
+          "lastSelectedAgents": ["amp", "cline", "cursor"]
+        }"#;
+        let entries = parse_skill_lock(json).expect("parse ok");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "brainstorming");
+    }
+
+    #[test]
+    fn parse_unknown_version_fails() {
+        let json = r#"{
+          "version": 99,
+          "skills": {
+            "brainstorming": {
+              "source": "obra/superpowers",
+              "sourceUrl": "https://github.com/obra/superpowers",
+              "sourceType": "github",
+              "skillPath": "skills/brainstorming/SKILL.md",
+              "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            }
+          }
+        }"#;
+        parse_skill_lock(json).unwrap_err();
     }
 
     #[test]

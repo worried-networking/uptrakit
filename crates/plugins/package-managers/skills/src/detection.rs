@@ -102,12 +102,15 @@ mod tests {
     use crate::plugin::SkillsPlugin;
 
     const SAMPLE_LOCK: &str = r#"{
-      "brainstorming": {
-        "source": "obra/superpowers",
-        "sourceUrl": "https://github.com/obra/superpowers",
-        "sourceType": "github",
-        "skillPath": "skills/brainstorming/SKILL.md",
-        "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+      "version": 3,
+      "skills": {
+        "brainstorming": {
+          "source": "obra/superpowers",
+          "sourceUrl": "https://github.com/obra/superpowers",
+          "sourceType": "github",
+          "skillPath": "skills/brainstorming/SKILL.md",
+          "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        }
       }
     }"#;
 
