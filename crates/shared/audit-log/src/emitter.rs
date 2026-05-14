@@ -98,6 +98,25 @@ impl AuditEmitter {
         AuditCommitHook::new(Arc::clone(&self.mirror_backend))
     }
 
+    /// Emits a system-level operational alert to the audit log.
+    ///
+    /// Writes a `system.alert.written` event scoped to the system actor
+    /// (no tenant) with `severity` and `message` stored in `details_json`.
+    /// Fire-and-forget — dispatch errors are silently ignored.
+    pub fn write_system_alert(&self, severity: &str, message: &str) {
+        let details = serde_json::json!({ "severity": severity, "message": message });
+        let entry = crate::entry::AuditEntry::<crate::entry::Event>::builder_event(
+            crate::action_type::AuditActionType::SYSTEM_ALERT_WRITTEN,
+        )
+        .system_scope()
+        .details(details)
+        .build();
+        match entry {
+            Ok(e) => self.emit_event(e),
+            Err(err) => tracing::warn!(error = %err, "dropping invalid system_alert audit entry"),
+        }
+    }
+
     /// Emits a discrete-event audit entry via the background dispatcher.
     ///
     /// If the entry does not carry a `correlation_id` and this emitter was

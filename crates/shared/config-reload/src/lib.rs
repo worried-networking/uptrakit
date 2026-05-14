@@ -2,6 +2,7 @@
 //!
 //! See `docs/superpowers/specs/2026-05-12-graceful-reload-design.md`.
 
+pub mod alerts;
 pub mod audit;
 pub mod channels;
 pub mod config;
@@ -14,6 +15,7 @@ pub mod reconciler;
 pub mod reloadable;
 pub mod triggers;
 
+pub use alerts::{AlertSeverity, NoopAlertWriter, SystemAlertWriter};
 pub use audit::ReloadAuditEvent;
 pub use channels::{RuntimeConfigChannels, RuntimeConfigReceivers};
 pub use config::{RuntimeConfig, Scope};

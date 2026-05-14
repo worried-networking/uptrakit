@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::alerts::{AlertSeverity, NoopAlertWriter, SystemAlertWriter};
 use crate::audit::ReloadAuditEvent;
 use crate::coordinator::{CoordinatorState, DegradedInfo, ReloadCoordinatorHandle, ReloadRequest};
 use crate::delta::RuntimeConfigDelta;
@@ -26,6 +27,7 @@ pub struct ReloadCoordinator {
     rx: mpsc::Receiver<ReloadRequest>,
     handle: ReloadCoordinatorHandle,
     audit_tx: mpsc::UnboundedSender<ReloadAuditEvent>,
+    alert_writer: Arc<dyn SystemAlertWriter>,
 }
 
 impl ReloadCoordinator {
@@ -37,6 +39,7 @@ impl ReloadCoordinator {
     pub fn new(
         reloadables: Vec<Arc<dyn ReloadableErased>>,
         audit_tx: mpsc::UnboundedSender<ReloadAuditEvent>,
+        alert_writer: Arc<dyn SystemAlertWriter>,
     ) -> (Self, ReloadCoordinatorHandle) {
         let state = Arc::new(ArcSwap::new(Arc::new(CoordinatorState::Idle)));
         let (tx, rx) = mpsc::channel(64);
@@ -50,6 +53,7 @@ impl ReloadCoordinator {
             rx,
             handle: handle.clone(),
             audit_tx,
+            alert_writer,
         };
         (coord, handle)
     }
@@ -66,6 +70,14 @@ impl ReloadCoordinator {
     /// after the run loop starts is not supported.
     pub fn extend_reloadables(&mut self, items: Vec<Arc<dyn ReloadableErased>>) {
         self.reloadables.extend(items);
+    }
+
+    /// Replace the alert writer before the coordinator is spawned.
+    ///
+    /// Called by the startup sequence after the `AuditEmitter` is available so
+    /// the real adapter can replace the [`NoopAlertWriter`] installed at construction.
+    pub fn set_alert_writer(&mut self, writer: Arc<dyn SystemAlertWriter>) {
+        self.alert_writer = writer;
     }
 
     /// Return a snapshot of the current coordinator state.
@@ -125,6 +137,7 @@ impl ReloadCoordinator {
             rx,
             handle,
             audit_tx,
+            alert_writer: Arc::new(NoopAlertWriter),
         }
     }
 
@@ -154,7 +167,15 @@ impl ReloadCoordinator {
         &self,
         deltas: Vec<RuntimeConfigDelta>,
     ) -> Result<BTreeMap<String, u64>, Report> {
-        self.validate_phase(&deltas)?;
+        if let Err(e) = self.validate_phase(&deltas) {
+            self.alert_writer
+                .write(
+                    AlertSeverity::Warning,
+                    format!("config validation failed: {e}"),
+                )
+                .await;
+            return Err(e);
+        }
         self.apply_and_watch_phase(deltas).await
     }
 
@@ -179,6 +200,9 @@ impl ReloadCoordinator {
         let (applied, per_ms) = match self.apply_phase(&deltas).await {
             Ok(pair) => pair,
             Err((partial, e)) => {
+                self.alert_writer
+                    .write(AlertSeverity::Error, format!("config apply failed: {e}"))
+                    .await;
                 self.revert_phase(&partial).await;
                 return Err(e);
             }
@@ -187,6 +211,12 @@ impl ReloadCoordinator {
         match self.watchdog_phase(&applied, per_ms).await {
             Ok(merged) => Ok(merged),
             Err((_timing, e)) => {
+                self.alert_writer
+                    .write(
+                        AlertSeverity::Error,
+                        format!("watchdog failed after apply: {e}"),
+                    )
+                    .await;
                 self.revert_phase(&applied).await;
                 Err(e)
             }
@@ -268,11 +298,21 @@ impl ReloadCoordinator {
                     error = %e,
                     "revert failed; coordinator entering Degraded"
                 );
+                let reason = format!("revert returned Err on {}: {e}", r.name());
+                self.alert_writer
+                    .write(
+                        AlertSeverity::Critical,
+                        format!(
+                            "coordinator entered Degraded: revert failed for '{}': {e}",
+                            r.name()
+                        ),
+                    )
+                    .await;
                 self.state
                     .store(Arc::new(CoordinatorState::Degraded(DegradedInfo::new(
                         OffsetDateTime::now_utc(),
                         vec![r.name().to_string()],
-                        format!("revert returned Err on {}: {e}", r.name()),
+                        reason,
                     ))));
             }
         }
@@ -316,5 +356,172 @@ impl ReloadCoordinator {
                 Err(err)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use super::*;
+
+    // ── Capturing alert writer ───────────────────────────────────────────────
+
+    #[derive(Default)]
+    struct CapturingAlertWriter {
+        captured: Mutex<Vec<(AlertSeverity, String)>>,
+    }
+
+    impl CapturingAlertWriter {
+        fn alerts(&self) -> Vec<(AlertSeverity, String)> {
+            self.captured.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SystemAlertWriter for CapturingAlertWriter {
+        async fn write(&self, severity: AlertSeverity, message: String) {
+            self.captured.lock().unwrap().push((severity, message));
+        }
+    }
+
+    // ── Always-fail reloadable ───────────────────────────────────────────────
+
+    struct FailsApply;
+
+    #[async_trait::async_trait]
+    impl ReloadableErased for FailsApply {
+        fn name(&self) -> &'static str {
+            "fails_apply"
+        }
+        fn validate(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn apply(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Err(rootcause::report!("intentional apply failure"))
+        }
+        async fn revert(&self) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn health_check(&self) -> Result<(), Report> {
+            Ok(())
+        }
+        fn rollback_window(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+    }
+
+    struct FailsValidate;
+
+    #[async_trait::async_trait]
+    impl ReloadableErased for FailsValidate {
+        fn name(&self) -> &'static str {
+            "fails_validate"
+        }
+        fn validate(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Err(rootcause::report!("intentional validate failure"))
+        }
+        async fn apply(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn revert(&self) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn health_check(&self) -> Result<(), Report> {
+            Ok(())
+        }
+        fn rollback_window(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+    }
+
+    /// Applies successfully but fails health_check (triggering revert), then fails revert.
+    struct AppliesHealthFailsRevertFails;
+
+    #[async_trait::async_trait]
+    impl ReloadableErased for AppliesHealthFailsRevertFails {
+        fn name(&self) -> &'static str {
+            "applies_health_fails_revert_fails"
+        }
+        fn validate(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn apply(&self, _: &RuntimeConfigDelta) -> Result<(), Report> {
+            Ok(())
+        }
+        async fn revert(&self) -> Result<(), Report> {
+            Err(rootcause::report!("intentional revert failure"))
+        }
+        async fn health_check(&self) -> Result<(), Report> {
+            Err(rootcause::report!("intentional health check failure"))
+        }
+        fn rollback_window(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+    }
+
+    fn make_delta() -> RuntimeConfigDelta {
+        use crate::config::DbConfig;
+        use std::sync::Arc;
+        RuntimeConfigDelta::Db(Arc::new(DbConfig::new("sqlite::memory:")))
+    }
+
+    fn coordinator_with_writer(
+        reloadable: Arc<dyn ReloadableErased>,
+        writer: Arc<dyn SystemAlertWriter>,
+    ) -> ReloadCoordinator {
+        let (audit_tx, _rx) = mpsc::unbounded_channel();
+        let state = Arc::new(ArcSwap::new(Arc::new(CoordinatorState::Idle)));
+        let (tx, rx) = mpsc::channel(64);
+        let handle = ReloadCoordinatorHandle {
+            state: state.clone(),
+            tx,
+        };
+        ReloadCoordinator {
+            state,
+            reloadables: vec![reloadable],
+            rx,
+            handle,
+            audit_tx,
+            alert_writer: writer,
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_failure_emits_warning_alert() {
+        let writer = Arc::new(CapturingAlertWriter::default());
+        let coord = coordinator_with_writer(Arc::new(FailsValidate), Arc::clone(&writer) as _);
+        drop(coord.run_cycle(vec![make_delta()]).await);
+        let alerts = writer.alerts();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].0, AlertSeverity::Warning);
+        assert!(alerts[0].1.contains("validation failed"));
+    }
+
+    #[tokio::test]
+    async fn apply_failure_emits_error_alert() {
+        let writer = Arc::new(CapturingAlertWriter::default());
+        let coord = coordinator_with_writer(Arc::new(FailsApply), Arc::clone(&writer) as _);
+        drop(coord.run_cycle(vec![make_delta()]).await);
+        let alerts = writer.alerts();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].0, AlertSeverity::Error);
+        assert!(alerts[0].1.contains("apply failed"));
+    }
+
+    #[tokio::test]
+    async fn revert_failure_emits_critical_alert_and_enters_degraded() {
+        let writer = Arc::new(CapturingAlertWriter::default());
+        let coord = coordinator_with_writer(
+            Arc::new(AppliesHealthFailsRevertFails),
+            Arc::clone(&writer) as _,
+        );
+        drop(coord.run_cycle(vec![make_delta()]).await);
+        let alerts = writer.alerts();
+        // watchdog fails → Error alert; then revert fails → Critical alert
+        assert!(alerts.iter().any(|(s, _)| *s == AlertSeverity::Error));
+        assert!(alerts.iter().any(|(s, _)| *s == AlertSeverity::Critical));
+        assert!(matches!(coord.state(), CoordinatorState::Degraded(_)));
     }
 }

@@ -704,6 +704,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
         }
 
         b.coordinator.extend_reloadables(reloadables);
+        b.coordinator
+            .set_alert_writer(std::sync::Arc::new(reload::audit::AuditAlertWriter::new(
+                audit_emitter.clone(),
+            )));
         let coordinator_handle = b.coordinator.handle();
 
         let _reconciler = reload::reconciler::spawn_config_reconciler(
