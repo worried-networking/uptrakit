@@ -32,25 +32,36 @@ pub(crate) struct ReexecPlan {
 /// Replace the current process image with a new instance of the same binary.
 ///
 /// This function:
-/// 1. Constructs a `Command` equivalent to the original invocation.
-/// 2. Forwards `LISTEN_FDS` / `LISTEN_PID` so the new process can inherit
+/// 1. Clears `FD_CLOEXEC` on each entry in `listener_fds` so the descriptors
+///    survive `exec()` and the new process image can claim them via `LISTEN_FDS`.
+/// 2. Constructs a `Command` equivalent to the original invocation.
+/// 3. Forwards `LISTEN_FDS` / `LISTEN_PID` so the new process can inherit
 ///    the already-bound TCP sockets.
-/// 3. Sets `UPTRAKIT_REEXEC_GENERATION` so observability tooling can track
+/// 4. Sets `UPTRAKIT_REEXEC_GENERATION` so observability tooling can track
 ///    how many times the process has re-execed.
-/// 4. Calls `exec()` which, on success, replaces the process image and never
+/// 5. Calls `exec()` which, on success, replaces the process image and never
 ///    returns.  On failure the OS error is wrapped and returned.
 ///
 /// # Errors
 ///
-/// Returns an error if `exec()` fails (e.g. the binary path is no longer
-/// accessible).  The error is always non-fatal from the caller's perspective
-/// because the original process is still running.
+/// Returns an error if clearing `FD_CLOEXEC` fails or if `exec()` fails
+/// (e.g. the binary path is no longer accessible).  The error is always
+/// non-fatal from the caller's perspective because the original process is
+/// still running.
 #[expect(
     dead_code,
     reason = "wired into the coordinator pre-apply hook in a future graceful-reload task"
 )]
-pub(crate) fn perform_reexec(plan: &ReexecPlan) -> Result<std::convert::Infallible, Report> {
+pub(crate) fn perform_reexec(
+    plan: &ReexecPlan,
+    listener_fds: &[std::os::unix::io::RawFd],
+) -> Result<std::convert::Infallible, Report> {
     use std::os::unix::process::CommandExt as _;
+
+    // Clear FD_CLOEXEC on each listener so it survives exec().
+    for &fd in listener_fds {
+        listenfd::clear_cloexec_raw(fd)?;
+    }
 
     let mut cmd = std::process::Command::new(&plan.current_exe);
     cmd.arg("--config").arg(&plan.config_path);
