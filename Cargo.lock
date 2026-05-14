@@ -7191,7 +7191,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uptrakit-agent"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "clap",
@@ -7239,7 +7239,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-runtime"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7258,7 +7258,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "rootcause",
@@ -7282,7 +7282,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7374,7 +7374,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -7450,7 +7450,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "uptrakit-controller-runtime",
 ]
@@ -7556,7 +7556,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-standalone"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "uptrakit-controller-runtime",
 ]
@@ -7593,7 +7593,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-frontend"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "rust-embed",
 ]
@@ -7696,7 +7696,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mqtt"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "tokio",
@@ -7709,7 +7709,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mqtt-runtime"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8382,7 +8382,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-scheduler"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "clap",
@@ -8408,7 +8408,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-scheduler-runtime"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "const-oid 0.9.6",

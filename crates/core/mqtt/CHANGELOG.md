@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.2...uptrakit-mqtt-v0.0.3) - 2026-05-14
+
+### Added
+
+- *(wire)* add ServiceSettingsPayload.trust_domain + #[non_exhaustive]
+- *(mqtt-runtime)* add MqttHandler::new_embedded() for embedded controller use
+- *(mqtt-runtime)* re-export MqttHandler from crate root and move base64 to regular dependencies
+- *(mqtt-runtime)* add MqttHandler ServiceHandler impl
+
+### Fixed
+
+- *(mqtt)* update cli tests to use --tofu-insecure after TOFU flag rename
+- *(mqtt-runtime)* use drop() for must_use sender results in test transport
+- *(mqtt-runtime)* collapse nested if-let into if-let chain for clippy
+
+### Other
+
+- *(mqtt)* thin-shell main.rs; move StandaloneMqttHandler to mqtt-runtime as MqttHandler
+- *(mqtt)* migrate StandaloneMqttHandler to dyn ServiceTransport
+- *(mqtt-runtime)* port embedded integration tests from controller-runtime
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.1...uptrakit-mqtt-v0.0.2) - 2026-05-05
 
 ### Added
