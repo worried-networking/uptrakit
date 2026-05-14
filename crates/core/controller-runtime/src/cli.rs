@@ -224,8 +224,6 @@ mod tests {
 
     use clap::Parser;
 
-    use super::parse_proxy;
-
     #[test]
     fn bare_ipv4_parsed_as_host() {
         let net = parse_proxy("192.168.1.1").unwrap();
@@ -343,21 +341,20 @@ mod tests {
         assert_eq!(eb.bootstrap_system_enrollment_token_max_uses, 1);
         assert_eq!(eb.bootstrap_system_enrollment_token_ttl, 300);
     }
-}
 
-/// Parse a trusted proxy argument. Accepts:
-/// - Bare IP: `192.168.1.1` -> `192.168.1.1/32`
-/// - Bare IPv6: `::1` -> `::1/128`
-/// - CIDR: `10.0.0.0/8`, `fd00::/8`
-#[cfg(test)]
-fn parse_proxy(s: &str) -> Result<ipnet::IpNet, String> {
-    // Try CIDR first
-    if let Ok(net) = s.parse::<ipnet::IpNet>() {
-        return Ok(net);
+    /// Parse a trusted proxy argument. Accepts:
+    /// - Bare IP: `192.168.1.1` -> `192.168.1.1/32`
+    /// - Bare IPv6: `::1` -> `::1/128`
+    /// - CIDR: `10.0.0.0/8`, `fd00::/8`
+    fn parse_proxy(s: &str) -> Result<ipnet::IpNet, String> {
+        // Try CIDR first
+        if let Ok(net) = s.parse::<ipnet::IpNet>() {
+            return Ok(net);
+        }
+        // Try bare IP -> host network
+        if let Ok(ip) = s.parse::<std::net::IpAddr>() {
+            return Ok(ipnet::IpNet::from(ip));
+        }
+        Err(format!("invalid IP or CIDR: {s}"))
     }
-    // Try bare IP -> host network
-    if let Ok(ip) = s.parse::<std::net::IpAddr>() {
-        return Ok(ipnet::IpNet::from(ip));
-    }
-    Err(format!("invalid IP or CIDR: {s}"))
 }
