@@ -8,7 +8,7 @@ use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ExecuteUpdateResult, HostRequirements, HostRuntime, PluginConfigValidationError,
     PluginError, PluginFamily, ReleaseFetcher, ReleaseInfo, Result, UpdateOutputSender,
-    UpstreamRelease, Version, VersionDetector, declare_plugin, roles::ReleaseFetchContext,
+    UpstreamRelease, declare_plugin, roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
@@ -117,13 +117,6 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
 // ── Temporary role stubs ─────────────────────────────────────────────────────
 // Discoverer is implemented in discovery.rs (Task 6).
 // VersionDetector, ReleaseFetcher, UpdateExecutor stubs will be replaced in Tasks 7–9.
-
-#[async_trait]
-impl VersionDetector for SkillsPlugin {
-    async fn detect_installed_version(&self, _id: &str) -> Result<Option<Version>> {
-        Ok(None)
-    }
-}
 
 #[async_trait]
 impl ReleaseFetcher for SkillsPlugin {
