@@ -565,7 +565,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher.clone())
-        .audit_emitter(audit_emitter)
+        .audit_emitter(audit_emitter.clone())
         .plugin_ops(plugin_ops)
         .surface_registry(surface_registry)
         .surface_proxy(surface_proxy)
@@ -641,6 +641,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
         );
 
         tokio::spawn(b.coordinator.run());
+
+        let audit_rx = b.audit_rx;
+        tokio::spawn(reload_audit_bridge(audit_rx, audit_emitter));
 
         (
             Some(coordinator_handle),
@@ -1196,6 +1199,62 @@ fn spawn_zeroconf(
             zeroconf_settings,
         ));
         bg.track("zeroconf-advertiser", handle);
+    }
+}
+
+/// Bridge task: receive [`ReloadAuditEvent`]s from the coordinator and emit them as
+/// system-scoped [`AuditEntry`] rows via [`AuditEmitter::emit_event`].
+async fn reload_audit_bridge(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
+    emitter: uptrakit_audit_log::AuditEmitter,
+) {
+    use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
+    use uptrakit_config_reload::ReloadAuditEvent;
+
+    while let Some(event) = rx.recv().await {
+        let (action, outcome, details) = match &event {
+            ReloadAuditEvent::Requested { source } => (
+                AuditActionType::SYSTEM_CONFIG_RELOAD_REQUESTED,
+                AuditOutcome::Success,
+                serde_json::json!({ "source": source }),
+            ),
+            ReloadAuditEvent::Refused { source, reason } => (
+                AuditActionType::SYSTEM_CONFIG_RELOAD_REFUSED,
+                AuditOutcome::Failed,
+                serde_json::json!({ "source": source, "reason": reason }),
+            ),
+            ReloadAuditEvent::Applied {
+                sections,
+                per_subsystem_ms,
+            } => (
+                AuditActionType::SYSTEM_CONFIG_RELOAD_APPLIED,
+                AuditOutcome::Success,
+                serde_json::json!({ "sections": sections, "per_subsystem_ms": per_subsystem_ms }),
+            ),
+            ReloadAuditEvent::Failed {
+                phase,
+                subsystem,
+                error,
+            } => (
+                AuditActionType::SYSTEM_CONFIG_RELOAD_FAILED,
+                AuditOutcome::Failed,
+                serde_json::json!({ "phase": phase, "subsystem": subsystem, "error": error }),
+            ),
+            ReloadAuditEvent::Reverted { subsystem, reason } => (
+                AuditActionType::SYSTEM_CONFIG_RELOAD_REVERTED,
+                AuditOutcome::Failed,
+                serde_json::json!({ "subsystem": subsystem, "reason": reason }),
+            ),
+            _ => continue,
+        };
+        if let Ok(entry) = AuditEntry::<Event>::builder_event(action)
+            .system_scope()
+            .outcome(outcome)
+            .details(details)
+            .build()
+        {
+            emitter.emit_event(entry);
+        }
     }
 }
 
