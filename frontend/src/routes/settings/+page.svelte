@@ -38,6 +38,7 @@
 	import NotificationRulesSettings from './NotificationRulesSettings.svelte';
 	import NotificationLogView from './NotificationLogView.svelte';
 	import DangerZone from './DangerZone.svelte';
+	import InstanceConfigTab from './InstanceConfigTab.svelte';
 
 	// Maintenance: keep in sync with the {#if activeTab === '...'} chain below.
 	// Surfaces with a matching tab_group append to these existing tabs instead of creating new ones.
@@ -47,7 +48,8 @@
 		'scheduler',
 		'global-settings',
 		'notification-rules',
-		'notification-log'
+		'notification-log',
+		'instance-config'
 	]);
 
 	// ── Permissions ─────────────────────────────────────────────────────
@@ -76,13 +78,15 @@
 	);
 	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.ViewNotifications) ?? false);
+	const canViewInstanceConfig = $derived(getUser()?.permissions.includes(Permission.ViewInstanceConfigState) ?? false);
 	const hasAnyTabPermission = $derived(
 		canManageSettings ||
 			canViewSoftware ||
 			canViewTypeSettings ||
 			canManageSoftware ||
 			canManageGlobalSettings ||
-			canViewNotifications
+			canViewNotifications ||
+			canViewInstanceConfig
 	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
@@ -139,6 +143,9 @@
 			items.push({ id: 'notification-rules', label: 'Notification Rules' });
 			items.push({ id: 'notification-log', label: 'Notification Log' });
 		}
+		if (canViewInstanceConfig) {
+			items.push({ id: 'instance-config', label: 'Instance Configuration' });
+		}
 		if (showSurfaceSettingsTabs) {
 			for (const group of slotTabGroups) {
 				if (!BUILTIN_TAB_IDS.has(group.id)) {
@@ -170,7 +177,8 @@
 			(activeTab === 'scheduler' && canManageSoftware) ||
 			(activeTab === 'global-settings' && canManageGlobalSettings) ||
 			(activeTab === 'notification-rules' && canViewNotifications) ||
-			(activeTab === 'notification-log' && canViewNotifications);
+			(activeTab === 'notification-log' && canViewNotifications) ||
+			(activeTab === 'instance-config' && canViewInstanceConfig);
 		const isSurfaceAccessible =
 			showSurfaceSettingsTabs && slotTabGroups.some((g) => g.id === activeTab && !BUILTIN_TAB_IDS.has(g.id));
 		const activeGroup = !BUILTIN_TAB_IDS.has(activeTab) ? slotTabGroupsByTabId.get(activeTab) : undefined;
@@ -194,6 +202,7 @@
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
+			else if (canViewInstanceConfig) activeTab = 'instance-config';
 			else if (showSurfaceSettingsTabs) {
 				const firstNewGroup = slotTabGroups.find((g) => !BUILTIN_TAB_IDS.has(g.id));
 				if (firstNewGroup) activeTab = firstNewGroup.id;
@@ -365,6 +374,10 @@
 			<!-- Notification Log tab -->
 		{:else if activeTab === 'notification-log'}
 			<NotificationLogView />
+
+			<!-- Instance Configuration tab -->
+		{:else if activeTab === 'instance-config'}
+			<InstanceConfigTab />
 		{:else if showSurfaceSettingsTabs}
 			{#each slotTabGroups as group (group.id)}
 				{#if activeTab === group.id && !BUILTIN_TAB_IDS.has(group.id)}
