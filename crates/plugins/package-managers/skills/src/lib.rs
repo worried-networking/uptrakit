@@ -1,1 +1,1 @@
-// placeholder — modules added in subsequent tasks
+pub(crate) mod error;
