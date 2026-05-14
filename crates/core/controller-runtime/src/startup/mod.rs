@@ -71,10 +71,11 @@ pub(crate) struct BootedConfig {
     pub settings_version_cache: uptrakit_config_reload::SettingsVersionCache,
     /// Watch channel senders held by the coordinator for publishing live updates.
     ///
-    /// Plan 3 wires these into the run loop; unused until then.
+    /// The per-section senders are not yet consumed by the run loop; the status
+    /// senders (`reload_file_state_tx` etc.) serve the config-state endpoint.
     #[expect(
         dead_code,
-        reason = "consumed by Plan 3 coordinator fan-out; unused until then"
+        reason = "per-section senders consumed by coordinator fan-out (future plan); unused until then"
     )]
     pub channels: uptrakit_config_reload::RuntimeConfigChannels,
     /// Watch channel receivers distributed to subsystems at startup.
@@ -84,6 +85,23 @@ pub(crate) struct BootedConfig {
     /// Consumed by the bridge task in `run_server` to convert `ReloadAuditEvent`
     /// values into `AuditEntry` rows via `AuditEmitter::emit_event`.
     pub audit_rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
+    /// Config file state sender — held by the `reload_audit_bridge` task.
+    ///
+    /// Updated at boot with the initial file state; updated again whenever a
+    /// reload cycle successfully applies a new config file.
+    pub reload_file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
+    /// Config file state receiver — distributed to `AppState`.
+    pub reload_file_state_rx: tokio::sync::watch::Receiver<uptrakit_config_reload::ConfigFileState>,
+    /// Last successful reload info sender — held by the `reload_audit_bridge` task.
+    pub reload_last_reload_tx:
+        tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
+    /// Last successful reload info receiver — distributed to `AppState`.
+    pub reload_last_reload_rx:
+        tokio::sync::watch::Receiver<Option<uptrakit_config_reload::LastReloadInfo>>,
+    /// Recent reload events sender (max 20 items) — held by the `reload_audit_bridge` task.
+    pub reload_recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
+    /// Recent reload events receiver — distributed to `AppState`.
+    pub reload_recent_events_rx: tokio::sync::watch::Receiver<Vec<serde_json::Value>>,
 }
 
 /// Load the TOML config file, seed per-section watch channels, and start the
@@ -111,10 +129,29 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     );
     let _sighup = uptrakit_config_reload::triggers::sighup::spawn_sighup_task(handle.sender());
     let _watch = uptrakit_config_reload::triggers::file_watch::spawn_file_watch_task(
-        config_path,
+        config_path.clone(),
         handle.sender(),
     );
     let settings_version_cache = uptrakit_config_reload::SettingsVersionCache::new();
+
+    // Compute initial file state. Use file size as a digest stub — a proper
+    // SHA-256 would require adding sha2 to the workspace deps; the stub is
+    // sufficient for the status endpoint's change-detection use-case.
+    let file_bytes = std::fs::read(&config_path).unwrap_or_default();
+    let digest = format!("size:{}", file_bytes.len());
+    let initial_file_state = uptrakit_config_reload::ConfigFileState {
+        path: config_path.display().to_string(),
+        digest,
+        loaded_at: time::OffsetDateTime::now_utc(),
+        pending_digest: None,
+        pending_detected_at: None,
+    };
+    let (reload_file_state_tx, reload_file_state_rx) =
+        tokio::sync::watch::channel(initial_file_state);
+    let (reload_last_reload_tx, reload_last_reload_rx) = tokio::sync::watch::channel(None);
+    let (reload_recent_events_tx, reload_recent_events_rx) =
+        tokio::sync::watch::channel(Vec::new());
+
     Ok(BootedConfig {
         runtime: loaded.config,
         coordinator,
@@ -122,6 +159,12 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
         channels,
         receivers,
         audit_rx,
+        reload_file_state_tx,
+        reload_file_state_rx,
+        reload_last_reload_tx,
+        reload_last_reload_rx,
+        reload_recent_events_tx,
+        reload_recent_events_rx,
     })
 }
 

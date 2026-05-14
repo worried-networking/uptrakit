@@ -21,6 +21,7 @@ pub mod error;
 pub mod events;
 pub mod host_tags;
 pub mod hosts;
+pub mod instance_config_state;
 pub mod instance_plugins;
 pub mod masked_url;
 pub mod mfa;

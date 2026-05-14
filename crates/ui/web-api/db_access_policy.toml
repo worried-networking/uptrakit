@@ -99,6 +99,10 @@ deactivate_host = "full-state"
 discover_host = "full-state"
 batch_hosts = "full-state"
 
+[routes."instance_config_state.rs"]
+get_config_state = "full-state"
+clear_coordinator_degraded = "full-state"
+
 [routes."instance_plugins.rs"]
 list_instance_plugins = "full-state"
 get_instance_plugin = "full-state"
