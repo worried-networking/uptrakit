@@ -1618,84 +1618,63 @@ See [Notifications Development](docs/development/notifications.md) for full deta
 
 ## Audit log subsystem
 
-The controller uses a semantic, mutation-first audit log subsystem. Producers emit canonical action events
-(`action_type` + `outcome`) instead of request-shaped records.
+V2 semantic audit log subsystem. Producers emit kind-typed entries via `AuditEmitter`.
 
-`AuditLogDispatcher` intentionally uses `mpsc::UnboundedSender` so entries are not dropped due to queue
-backpressure. Writes remain fire-and-forget.
+### Action kinds
 
-### Key crates and modules
+Two compile-time-enforced classes:
 
-| Crate/module                                                             | Purpose                                                                                                                |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `crates/shared/audit-log/`                                               | `AuditActionType`, `AuditEntry`, `AuditOutcome`, `AuditEmitter`, `RuntimeAuditEmitter`, `AuditLogDispatcher`, backends |
-| `crates/shared/db/src/entity/audit_log.rs`                               | SeaORM entity for `audit_logs` table (tenant-scoped, no FK on `tenant_id`)                                             |
-| `crates/shared/db/src/entity/system_audit_log.rs`                        | SeaORM entity for `system_audit_logs` table (global)                                                                   |
-| `crates/shared/db/src/migration/m20260417_000001_semantic_audit_logs.rs` | Semantic schema migration for both audit tables                                                                        |
-| `crates/ui/web-api/src/middleware/audit_log.rs`                          | Request-context helper + legacy no-op middleware (no direct persistence)                                               |
-| `crates/ui/web-api/src/routes/*`                                         | HTTP mutation producers building semantic entries                                                                      |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`                 | Service-forwarded `AuditEventPayload` validation and ingestion                                                         |
-| `crates/ui/web-api-queries/src/queries/audit_logs.rs`                    | `list_tenant_audit_logs` + `list_system_audit_logs` with filter/pagination support                                     |
-| `crates/ui/web-api/src/routes/audit_logs.rs`                             | `GET /api/v1/audit-logs` (`CanViewAuditLogs`) and `GET /api/v1/system-audit-logs` (`CanViewSystemAuditLogs`)           |
-| `crates/shared/web-api-types/src/audit_logs.rs`                          | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams`                                                     |
-| `crates/shared/openapi-client/src/audit_logs.rs`                         | `list_audit_logs` + `list_system_audit_logs` client methods                                                            |
-| `crates/ui/cli/src/commands/audit_logs.rs`                               | `audit-logs list` (tenant) and `audit-logs system list` (system) CLI subcommands                                       |
-| `crates/ui/web-api-auth/src/setting_key.rs`                              | `AuditLogFilter` + `AuditLogRetentionDays` setting keys                                                                |
-| `crates/ui/web-api/src/app_state.rs`                                     | Holds `audit_log_dispatcher` and canonical `audit_emitter` used by semantic producers                                  |
-| `crates/core/controller/src/cli.rs`                                      | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags                                                            |
-| `crates/core/controller/src/main.rs`                                     | Backend construction + AppState wiring                                                                                 |
-| `crates/core/controller/src/startup.rs`                                  | `init_audit_database()` for separate audit DB                                                                          |
-| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs`      | Retention cleanup (90-day default)                                                                                     |
+- **Stateful** — entity transition. Requires a `before`/`after` snapshot pair (enforced by typestate builder).
+  Written inside the mutation's `DatabaseTransaction`; commits or rolls back atomically.
+- **Event** — discrete workflow fact. Snapshots forbidden. Fire-and-forget through `AuditLogDispatcher`.
 
-### Feature flags
+### Emit paths
 
-| Feature    | Crate      | Default | Notes                                           |
-| ---------- | ---------- | ------- | ----------------------------------------------- |
-| `db`       | audit-log  | no      | Enables `DatabaseBackend` (sea-orm + shared-db) |
-| `journald` | audit-log  | no      | Enables `JournaldBackend` (tracing-journald)    |
-| `journald` | controller | no      | Propagated; adds `tracing-journald` dep         |
+- `audit.emit_stateful(&tx, entry)` — Stateful actions only. Synchronous DB INSERT inside the caller's transaction.
+  Requires `BEGIN IMMEDIATE`. Call `AuditCommitHook::flush_after_commit()` after `tx.commit()` for journald mirror.
+- `audit.emit_event(entry)` — Event actions only. Async fire-and-forget dispatcher (unchanged from V1).
 
-### Scope routing
+### `AuditView` derive macro
 
-`DatabaseBackend` routes by `AuditEntry.tenant_id`:
+Domain entities that are snapshot targets derive `AuditView`. The macro generates a deterministic, secret-safe JSON
+projection (`EncryptedString` excluded at compile time; `MaskedUrl`/`MaskedEmail` self-mask). Attributes:
+`#[audit(target_type)]`, `#[audit(skip)]`, `#[audit(include)]`, `#[audit(project_with = "<fn>")]`.
 
-- `Some(tenant_id)` writes to `audit_logs`
-- `None` writes to `system_audit_logs`
+### Coverage gate
 
-HTTP route handlers and service WS ingestion choose scope explicitly via
-`tenant_scope(...)` / `system_scope()`.
+`crates/shared/audit-log/audit-catalog.toml` catalogs every state-changing site with either an `action` or a `skip`
+reason. `cargo run -p audit-coverage-check` runs in CI and fails on uncatalogued sites or dead registered actions.
 
-### Setting keys
+### Key crates
 
-`AuditLogFilter` (`audit_log.filter`) — retained setting key for per-tenant policy (V2 enforcement target).
-`AuditLogRetentionDays` (`audit_log.retention_days`) — retained setting key for per-tenant retention policy (V2).
+| Crate/module                                                        | Purpose                                                                                              |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `crates/shared/audit-log/`                                          | `AuditActionType`, `AuditEntry<K>`, `AuditEmitter`, dispatcher, backends                             |
+| `crates/shared/audit-log-derive/`                                   | `AuditView` derive, `audit_actions!` proc-macro                                                      |
+| `crates/shared/audit-log/audit-catalog.toml`                        | Action coverage catalog                                                                              |
+| `crates/shared/audit-log/tools/audit-coverage-check/`               | Static-analysis CI gate                                                                              |
+| `crates/shared/db/src/entity/audit_log.rs`                          | SeaORM entity for `audit_logs` (tenant-scoped)                                                       |
+| `crates/shared/db/src/entity/system_audit_log.rs`                   | SeaORM entity for `system_audit_logs`                                                                |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`            | Service-forwarded event ingestion (Event-class only; Stateful forwarding rejected)                   |
+| `crates/ui/web-api-queries/src/queries/audit_logs.rs`               | `list_tenant_audit_logs` + `list_system_audit_logs`                                                  |
+| `crates/ui/web-api/src/routes/audit_logs.rs`                        | `GET /api/v1/audit-logs` + `GET /api/v1/system-audit-logs`                                           |
+| `crates/shared/web-api-types/src/audit_logs.rs`                     | `AuditLogResponse` (V2 fields: `action_kind`, `before_snapshot`, `after_snapshot`, `correlation_id`) |
+| `crates/ui/cli/src/commands/audit_logs.rs`                          | `audit-logs list`, `audit-logs show`, `audit-logs system list`                                       |
+| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup (default 90 days)                                                                  |
 
-### Default `NoopBackend` in tests
+### V3 deferred
 
-`AppState` uses `unwrap_or_else` defaults: `AuditFilter::default()` and
-`AuditLogDispatcher::new(Arc::new(NoopBackend))`. Existing tests require zero changes.
+Workflow timeline view, per-entity audit history, analytics dashboards, per-action-kind retention, legal-hold archive,
+agent-side stateful emit.
 
-### `reject_dangerous_commands` flag
+### Banned patterns
 
-`AppState.reject_dangerous_commands: bool` — dangerous command rejection is **enabled by
-default**. Plugin config create/update requests containing dangerous command patterns are
-rejected with HTTP 400. Operators can disable this with the `--allow-dangerous-commands` CLI
-flag or `UPTRAKIT_ALLOW_DANGEROUS_COMMANDS` env var, which sets the internal flag to `false`.
-The CLI flag inversion happens in `crates/core/controller/src/main.rs`:
-`reject_dangerous_commands(!args.allow_dangerous_commands)`.
+- No `target: "security_audit"` tracing producers (V1 CI gate still active).
+- No raw `action_type` string literals outside registry, tests, fixtures, migrations.
+- No service-forwarded Stateful events (rejected at controller ingress).
+- No `emit_best_effort` (removed in V2).
 
-### Design decisions
-
-- **No FK on `audit_logs.tenant_id`** — audit records are immutable and must survive tenant deletion for compliance.
-- **`AuditActorType` is internal-only** — follows `ActorType`/`BatchType` pattern: `Copy`, `as_str()` + `Display`,
-  not `#[non_exhaustive]`, no `Other(String)`.
-- **Multiple backends via repeatable CLI flag** — `--audit-log-backend db --audit-log-backend journald` fans out
-  concurrently via `MultiplexBackend`.
-- **No request/response body logging** — semantic metadata only.
-- **No parallel `security_audit` contract** — new audit producers must use canonical semantic emitters.
-
-See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md)
-for full details.
+See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
 
 ## Shared Surface Runtime
 
