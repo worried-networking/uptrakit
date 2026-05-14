@@ -12,8 +12,8 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
 use uptrakit_plugin_infrastructure_registry::{
-    BatchFetchItem, BatchFetchResult, HostCapabilities, PluginCapability, PluginResult,
-    ReleaseFetcher, construct_host_runtime, get_descriptor,
+    BatchFetchItem, BatchFetchResult, GlobalProviderLookup, HostCapabilities, PluginCapability,
+    PluginResult, ReleaseFetchContext, ReleaseFetcher, construct_host_runtime, get_descriptor,
 };
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
@@ -58,11 +58,30 @@ use crate::notifier::SchedulerNotifier;
 pub struct FetchReleasesExecutor {
     db: DatabaseConnection,
     notifier: Arc<dyn SchedulerNotifier>,
+    provider_lookup: Option<Arc<dyn GlobalProviderLookup>>,
 }
 
 impl FetchReleasesExecutor {
     pub fn new(db: DatabaseConnection, notifier: Arc<dyn SchedulerNotifier>) -> Self {
-        Self { db, notifier }
+        Self {
+            db,
+            notifier,
+            provider_lookup: None,
+        }
+    }
+
+    /// Set the global provider lookup for controller-side fetch contexts.
+    ///
+    /// When `Some`, passes the lookup through to [`ReleaseFetchContext`] so that
+    /// plugins such as `package_manager_skills` can reach the global GitHub
+    /// provider. `None` (the default) produces a standalone/test context with no
+    /// provider lookup.
+    pub fn with_global_provider_lookup(
+        mut self,
+        lookup: Option<Arc<dyn GlobalProviderLookup>>,
+    ) -> Self {
+        self.provider_lookup = lookup;
+        self
     }
 }
 
@@ -285,11 +304,13 @@ impl FetchReleasesExecutor {
 
             let runtime =
                 construct_host_runtime(noop_executor.clone(), HostCapabilities::default());
-            let fetcher = (slot.create)(&group.merged_config, runtime).map_err(|e| {
-                report!(SchedulerError::Execution(format!(
-                    "failed to create plugin {plugin_type}: {e}"
-                )))
-            })?;
+            let fetch_ctx = ReleaseFetchContext::with_lookup_opt(self.provider_lookup.clone());
+            let fetcher =
+                (slot.create)(&group.merged_config, runtime, &fetch_ctx).map_err(|e| {
+                    report!(SchedulerError::Execution(format!(
+                        "failed to create plugin {plugin_type}: {e}"
+                    )))
+                })?;
 
             jobs.push(FetchJob {
                 packages: group.packages,

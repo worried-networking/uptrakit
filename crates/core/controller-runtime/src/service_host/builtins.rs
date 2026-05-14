@@ -198,6 +198,7 @@ pub(crate) async fn register_scheduler(
     let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
     let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
     let ca_tx_sub = ca_tx.subscribe();
+    let global_providers = app_state.global_providers();
     #[cfg(feature = "plugin-ops")]
     let controller_update_hook = app_state.controller_update_hook();
 
@@ -233,6 +234,7 @@ pub(crate) async fn register_scheduler(
                             revocation_notify,
                             #[cfg(feature = "plugin-ops")]
                             controller_update_hook,
+                            global_provider_lookup: Some(global_providers),
                         },
                         tokens.drain,
                         tokens.abort,
