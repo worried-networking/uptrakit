@@ -12,12 +12,11 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use sea_orm::{ActiveModelTrait, Set};
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 use uptrakit_shared_db::entity::oauth_client;
 use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
 use uptrakit_web_api_types::validation::Validate;
-
-use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 
 use crate::AppState;
 use crate::extract::ClientIp;
@@ -142,15 +141,17 @@ pub async fn register(
     match client_svc.register_dcr(req, source_ip, &[]).await {
         Ok(resp) => {
             let client_id = resp.client_id.clone();
-            if let Ok(entry) =
-                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
-                    .tenant_scope(state.default_tenant_id)
-                    .actor_system()
-                    .target("oauth_client", client_id, None)
-                    .outcome(AuditOutcome::Success)
-                    .build()
+            match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
+                .tenant_scope(state.default_tenant_id)
+                .actor_system()
+                .target("oauth_client", client_id, None)
+                .outcome(AuditOutcome::Success)
+                .build()
             {
-                state.audit_emitter.emit_event(entry);
+                Ok(entry) => state.audit_emitter.emit_event(entry),
+                Err(err) => {
+                    tracing::warn!(error = %err, "dropping invalid oauth.client_registered audit entry")
+                }
             }
             (StatusCode::CREATED, Json(resp)).into_response()
         }
@@ -397,15 +398,17 @@ pub async fn delete_client_registration(
 
     match client_svc.revoke(&client_id).await {
         Ok(()) => {
-            if let Ok(entry) =
-                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
-                    .tenant_scope(state.default_tenant_id)
-                    .actor_system()
-                    .target("oauth_client", client_id, None)
-                    .outcome(AuditOutcome::Success)
-                    .build()
+            match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
+                .tenant_scope(state.default_tenant_id)
+                .actor_system()
+                .target("oauth_client", client_id, None)
+                .outcome(AuditOutcome::Success)
+                .build()
             {
-                state.audit_emitter.emit_event(entry);
+                Ok(entry) => state.audit_emitter.emit_event(entry),
+                Err(err) => {
+                    tracing::warn!(error = %err, "dropping invalid oauth.client_revoked audit entry")
+                }
             }
             StatusCode::NO_CONTENT.into_response()
         }

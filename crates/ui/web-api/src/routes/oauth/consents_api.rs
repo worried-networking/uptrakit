@@ -13,10 +13,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 use uptrakit_shared_db::entity::oauth_consent;
 use uuid::Uuid;
-
-use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 
 use crate::AppState;
 use crate::api_error::ApiError;
@@ -106,8 +105,8 @@ pub(crate) async fn list_consents(
 pub(crate) async fn revoke_consent(
     State(state): State<Arc<AppState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
-    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(id): Path<Uuid>,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
@@ -134,14 +133,17 @@ pub(crate) async fn revoke_consent(
     let svc = OAuthConsentService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
     svc.revoke(id, auth_user.user_id).await?;
 
-    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CONSENT_REVOKE)
+    match AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CONSENT_REVOKE)
         .tenant_scope(state.default_tenant_id)
         .actor(actor_type, actor_id)
         .target("oauth_consent", id.to_string(), None)
         .outcome(AuditOutcome::Success)
         .build()
     {
-        state.audit_emitter.emit_event(entry);
+        Ok(entry) => state.audit_emitter.emit_event(entry),
+        Err(err) => {
+            tracing::warn!(error = %err, "dropping invalid oauth.consent_revoke audit entry")
+        }
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
