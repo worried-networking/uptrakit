@@ -9,11 +9,13 @@
     reason = "integration test infrastructure: panics are acceptable in container test helpers"
 )]
 
+use std::io::Write as _;
+
+use tempfile::NamedTempFile;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;
-use testcontainers::core::IntoContainerPort;
-use testcontainers::core::WaitFor;
 use testcontainers::core::wait::LogWaitStrategy;
+use testcontainers::core::{AccessMode, IntoContainerPort, Mount, WaitFor};
 use testcontainers::runners::AsyncRunner;
 
 /// Docker image name for the multi-binary test image.
@@ -21,6 +23,9 @@ const TEST_IMAGE: &str = "uptrakit-test";
 
 /// Docker image tag.
 const TEST_IMAGE_TAG: &str = "latest";
+
+/// 32-byte test-only master key (hex-encoded). Never used in production.
+const TEST_MASTER_KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
 /// Enrollment token for agent and agent-ssh services.
 const ENROLLMENT_TOKEN: &str = "test-enrollment-token-do-not-use-in-prod";
@@ -39,6 +44,8 @@ pub(crate) struct ControllerContainer {
     _nats_container: testcontainers::ContainerAsync<GenericImage>,
     /// The underlying testcontainers handle. Dropping this stops the container.
     _controller_container: testcontainers::ContainerAsync<GenericImage>,
+    /// Temp TOML config file — must outlive the container.
+    _config_file: NamedTempFile,
     /// Host port mapped to the controller's HTTPS port.
     host_port: u16,
     /// Container name used for DNS resolution on the Docker network.
@@ -50,11 +57,10 @@ pub(crate) struct ControllerContainer {
 impl ControllerContainer {
     /// Start a controller container on the given Docker network.
     ///
-    /// The controller is configured with:
-    /// - `--allow-plaintext-secrets` (no master key required)
-    /// - `--https-addr [::]:8443`
-    /// - A JetStream-enabled NATS sidecar for system services
-    /// - Bootstrap enrollment tokens with high max-uses and long TTL
+    /// The controller is configured via a TOML config file bind-mounted into the
+    /// container. Bootstrap enrollment tokens are passed via env vars. A
+    /// JetStream-enabled NATS sidecar is started first so its hostname is known
+    /// before the TOML is written.
     ///
     /// Waits for the "HTTPS server listening on" log message before returning.
     pub(crate) async fn start(network: &str) -> Self {
@@ -73,8 +79,38 @@ impl ControllerContainer {
 
         let container_name = format!("controller-{}", uuid::Uuid::now_v7());
 
+        let mut config_file = NamedTempFile::new().expect("create temp config file");
+        write!(
+            config_file,
+            r#"
+[db]
+url = "sqlite:///data/state/controller.db"
+
+[master_key]
+path = "/tmp/dummy-overridden-by-cli"
+
+[network.https]
+addr = "[::]:8443"
+
+[network.pki]
+addr = "[::]:8444"
+
+[nats]
+url = "nats://{nats_name}:{NATS_PORT}"
+
+[audit]
+filter = "all"
+retention_days = 90
+
+[log]
+path = "/data/state/controller.log"
+level = "info"
+"#
+        )
+        .expect("write config file");
+
         // GenericImage methods (with_exposed_port, with_wait_for) must be called
-        // before ImageExt methods (with_cmd, with_network, etc.) because
+        // before ImageExt methods (with_cmd, with_mount, with_network, etc.) because
         // ImageExt methods consume GenericImage into ContainerRequest.
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_exposed_port(CONTROLLER_PORT.tcp())
@@ -83,24 +119,26 @@ impl ControllerContainer {
             ))
             .with_cmd(vec![
                 "uptrakit-controller-standalone".to_string(),
-                "--allow-plaintext-secrets".to_string(),
-                "--https-addr".to_string(),
-                "[::]:8443".to_string(),
-                "--nats-url".to_string(),
-                format!("nats://{nats_name}:{NATS_PORT}"),
-                "--bootstrap-enrollment-token".to_string(),
-                ENROLLMENT_TOKEN.to_string(),
-                "--bootstrap-enrollment-token-max-uses".to_string(),
-                "100".to_string(),
-                "--bootstrap-enrollment-token-ttl".to_string(),
-                "3600".to_string(),
-                "--bootstrap-system-enrollment-token".to_string(),
-                SYSTEM_ENROLLMENT_TOKEN.to_string(),
-                "--bootstrap-system-enrollment-token-max-uses".to_string(),
-                "100".to_string(),
-                "--bootstrap-system-enrollment-token-ttl".to_string(),
-                "3600".to_string(),
+                "--master-key-from".to_string(),
+                "env:UPTRAKIT_TEST_MASTER_KEY".to_string(),
             ])
+            .with_mount(
+                Mount::bind_mount(
+                    config_file.path().to_str().expect("config path"),
+                    "/etc/uptrakit/controller.toml",
+                )
+                .with_access_mode(AccessMode::ReadOnly),
+            )
+            .with_env_var("UPTRAKIT_TEST_MASTER_KEY", TEST_MASTER_KEY)
+            .with_env_var("UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN", ENROLLMENT_TOKEN)
+            .with_env_var("UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_MAX_USES", "100")
+            .with_env_var("UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_TTL", "3600")
+            .with_env_var(
+                "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN",
+                SYSTEM_ENROLLMENT_TOKEN,
+            )
+            .with_env_var("UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_MAX_USES", "100")
+            .with_env_var("UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_TTL", "3600")
             .with_network(network)
             .with_container_name(&container_name)
             .with_hostname(&container_name)
@@ -121,6 +159,7 @@ impl ControllerContainer {
         Self {
             _nats_container: nats_container,
             _controller_container: container,
+            _config_file: config_file,
             host_port,
             container_name,
             registration_token,

@@ -7,6 +7,8 @@ use std::collections::{BTreeSet, HashSet};
 use time::UtcDateTime;
 use uuid::Uuid;
 
+use uptrakit_audit_log::AuditActionType;
+
 use crate::limits::{MAX_SHORT_STRING_LEN, WireValidate};
 
 use super::*;
@@ -224,7 +226,7 @@ fn renew_certificate_serialization_roundtrip() {
 #[test]
 fn audit_event_serialization_roundtrip() {
     let msg = ServiceMessage::AuditEvent(AuditEventPayload {
-        action_type: "software.update.started".to_string(),
+        action_type: AuditActionType::SOFTWARE_UPDATE_STARTED.to_string(),
         tenant_id: Some(TEST_UUID_1.to_string()),
         target_type: Some("update_history".to_string()),
         target_id: Some(TEST_UUID_2.to_string()),
@@ -250,7 +252,7 @@ fn audit_event_serialization_roundtrip() {
 fn audit_event_payload_round_trips_correlation_id() {
     let id = uuid::Uuid::new_v4();
     let payload = AuditEventPayload {
-        action_type: "software.update.finalized".to_string(),
+        action_type: AuditActionType::SOFTWARE_UPDATE_FINALIZED.to_string(),
         tenant_id: None,
         target_type: None,
         target_id: None,

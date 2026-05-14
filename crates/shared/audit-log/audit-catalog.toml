@@ -215,6 +215,14 @@ site = "uptrakit_web_api::routes::instance_plugins::upsert_instance_plugin_confi
 action = "instance_plugin.config_upserted"
 
 # ---------------------------------------------------------------------------
+# Instance config state
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::instance_config_state::clear_coordinator_degraded"
+skip = "operational coordinator state reset; no domain entity mutation, no AuditEntry emitted"
+
+# ---------------------------------------------------------------------------
 # MFA self-service (me/2fa)
 # ---------------------------------------------------------------------------
 

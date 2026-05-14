@@ -255,7 +255,6 @@ pub(crate) fn probe_config_path(config_dir: &Path, explicit: Option<&PathBuf>) -
     platform
 }
 
-
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -264,7 +263,6 @@ mod tests {
     )]
 
     use std::path::Path;
-
 
     use clap::Parser;
 
