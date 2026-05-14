@@ -502,14 +502,11 @@ fn generate_ca(pki_addr: Option<&str>) -> Result<CaBundle> {
     })
 }
 
-fn load_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
-    let cert_pem = fs::read_to_string(cert_path).context_to::<PkiError>()?;
-    let key_pem = fs::read_to_string(key_path).context_to::<PkiError>()?;
-
+/// Build a [`CaBundle`] from raw PEM strings (test helper only).
+#[cfg(test)]
+pub(crate) fn bundle_from_pem(cert_pem: String, key_pem: String) -> Result<CaBundle> {
     let key_pair = KeyPair::from_pem(&key_pem).context_to::<PkiError>()?;
     let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair).context_to::<PkiError>()?;
-
-    tracing::info!("loaded existing CA from {}", cert_path.display());
     Ok(CaBundle {
         cert_pem,
         key_pem,
@@ -524,16 +521,6 @@ fn bundle_from_model(model: ca_certificate::Model) -> Result<CaBundle> {
     Ok(CaBundle {
         cert_pem: model.cert_pem,
         key_pem: key_pem_str,
-        issuer,
-    })
-}
-
-pub(crate) fn bundle_from_pem(cert_pem: String, key_pem: String) -> Result<CaBundle> {
-    let key_pair = KeyPair::from_pem(&key_pem).context_to::<PkiError>()?;
-    let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair).context_to::<PkiError>()?;
-    Ok(CaBundle {
-        cert_pem,
-        key_pem,
         issuer,
     })
 }
@@ -658,13 +645,6 @@ pub(crate) async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
         .await
         .context_to::<PkiError>()?;
     Ok(row.and_then(|r| r.value.as_i64()).unwrap_or(0))
-}
-
-/// Load a CA from user-provided (external) paths.
-pub(crate) fn load_external_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
-    let bundle = load_ca(cert_path, key_path)?;
-    tracing::info!("using external CA certificate from {}", cert_path.display());
-    Ok(bundle)
 }
 
 /// Load a server certificate from user-provided paths.

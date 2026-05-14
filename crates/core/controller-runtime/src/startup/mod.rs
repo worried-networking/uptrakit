@@ -10,7 +10,6 @@ mod database;
 mod encryption;
 mod installation_id;
 mod jwt;
-mod key_rotation;
 mod master_key;
 mod oauth;
 mod pki_init;
@@ -22,11 +21,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub(crate) use bootstrap::{bootstrap_enrollment_tokens, bootstrap_oidc};
-pub(crate) use database::{init_audit_database, init_database};
+pub(crate) use database::init_database;
 pub(crate) use encryption::{init_data_key_ring, verify_master_key};
 pub(crate) use installation_id::init_installation_id;
 pub(crate) use jwt::init_jwt;
-pub(crate) use key_rotation::rotate_master_key;
 pub(crate) use master_key::init_master_key;
 pub(crate) use oauth::seed_oauth_defaults;
 pub(crate) use pki_init::init_pki_runtime;
@@ -145,4 +143,7 @@ pub(crate) struct PkiRuntime {
     pub crl_pem_cache: Arc<parking_lot::RwLock<String>>,
     pub crl_manager: Arc<crate::crl_manager::CrlManager>,
     pub initial_ca_version: i64,
+    /// `true` when `tls.cert_path` and `tls.key_path` were set in TOML config,
+    /// meaning the server certificate is externally managed.
+    pub has_external_tls_cert: bool,
 }

@@ -37,7 +37,7 @@ pub(crate) async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()>
     let started = Instant::now();
 
     // ── 1. Master key ────────────────────────────────────────────────────────
-    crate::startup::init_master_key(args)
+    crate::startup::init_master_key(args.master_key_from.as_deref())
         .map_err(|e| report!(DbMigrateError::Connection(format!("master key: {e}"))))?;
 
     // ── 2. Connect ───────────────────────────────────────────────────────────
