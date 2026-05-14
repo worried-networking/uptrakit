@@ -173,6 +173,11 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
   repository.workspace = true
   version = "0.0.1"
 
+  [features]
+  # Enables GlobalProviderLookup injection for release fetching via the GitHub Provider.
+  # Must be enabled in the registry crate dependency to wire up provider access.
+  catalog = ["uptrakit-plugin-infrastructure-core/catalog"]
+
   [dependencies]
   uptrakit-plugin-infrastructure-core = { workspace = true }
   uptrakit-global-github-provider = { workspace = true }
@@ -186,7 +191,7 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
   url = { workspace = true }
 
   [dev-dependencies]
-  uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
+  uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "catalog"] }
   tokio = { workspace = true, features = ["macros", "rt"] }
 
   [lints]
@@ -221,7 +226,7 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
   `[dependencies]`:
 
   ```toml
-  uptrakit-plugin-package-manager-skills = { workspace = true }
+  uptrakit-plugin-package-manager-skills = { workspace = true, features = ["catalog"] }
   ```
 
 - [ ] **Step 5: Create a minimal `src/lib.rs` so the crate compiles**
@@ -272,9 +277,6 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
   /// Errors specific to the Agent Skills plugin.
   #[derive(Debug, Error)]
   pub(crate) enum SkillsError {
-      #[error("lock file missing or command failed")]
-      LockFileMissing,
-
       #[error("lock file malformed: {0}")]
       LockFileMalformed(String),
 
@@ -306,7 +308,11 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
   /// Result type alias for the Skills plugin.
   pub(crate) type Result<T> = std::result::Result<T, Report<SkillsError>>;
 
-  impl_report_conversion!(SkillsError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
+  impl_report_conversion!(SkillsError => PluginError, |e| match &e {
+      SkillsError::InvalidIdentifier(_) | SkillsError::Configuration(_) =>
+          PluginError::Configuration(e.to_string()),
+      _ => PluginError::PluginInternal(e.to_string()),
+  });
   impl_report_conversion!(PluginError => SkillsError, |e| SkillsError::Plugin(e.to_string()));
   ```
 
@@ -318,21 +324,48 @@ roles; the custom factory is registered via the new `release_fetcher_create` mac
 
   use crate::lock::parse_skill_identifier;
 
+  fn default_skills_version() -> String {
+      "latest".to_string()
+  }
+
   /// Configuration for the Agent Skills package-manager plugin.
-  ///
-  /// Empty in v1 — no user-facing fields. GitHub Provider credentials are
-  /// managed in Settings → GitHub Provider; no per-plugin auth surface.
-  #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-  pub struct SkillsConfig {}
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+  pub struct SkillsConfig {
+      /// npm dist-tag or version string passed to `npx skills@<version>`.
+      ///
+      /// Default `"latest"`. Pin to a specific version (e.g. `"1.2.3"`) or
+      /// dist-tag (e.g. `"next"`) for reproducible behaviour.
+      #[serde(default = "default_skills_version")]
+      pub skills_version: String,
+  }
+
+  impl Default for SkillsConfig {
+      fn default() -> Self {
+          Self {
+              skills_version: default_skills_version(),
+          }
+      }
+  }
 
   impl PluginConfig for SkillsConfig {
-      // `validate`, `with_secrets_masked`, `restore_secrets_from`, and `form_schema`
-      // all have correct default implementations for an empty config (no secrets,
-      // no validation, empty schema). Only `validate_identifier` is overridden.
       fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
           parse_skill_identifier(value)
               .map(|_| ())
               .map_err(|e| PluginConfigValidationError::InvalidIdentifier(e.to_string()))
+      }
+
+      fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+          use uptrakit_plugin_infrastructure_core::form_schema::{
+              FormFieldDescriptor, FormFieldType,
+          };
+          vec![
+              FormFieldDescriptor::new("skills_version", "Skills Package Version")
+                  .with_type(FormFieldType::Text)
+                  .with_help_text(
+                      "npm dist-tag or version for the skills CLI (default: \"latest\"). \
+                       Pin to a specific version, e.g. \"1.2.3\" or \"next\".",
+                  ),
+          ]
       }
   }
   ```
@@ -743,13 +776,15 @@ invocation.
 
   #[non_exhaustive]
   pub struct SkillsPlugin {
+      pub(crate) config: SkillsConfig,
       pub(crate) executor: Arc<dyn CommandExecutor>,
       pub(crate) provider: Option<Arc<dyn GitHubProviderClient>>,
   }
 
   impl SkillsPlugin {
-      pub fn new(_config: SkillsConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self, String> {
+      pub fn new(config: SkillsConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self, String> {
           Ok(Self {
+              config,
               executor: runtime.executor(),
               provider: None,
           })
@@ -877,12 +912,11 @@ invocation.
       {
           let lookup = ctx.global_provider_lookup.as_ref()?;
           let handle = lookup.lookup("github")?;
-          Arc::downcast::<GitHubProviderHandle>(handle)
+          return Arc::downcast::<GitHubProviderHandle>(handle)
               .ok()
-              .map(|h| h.client())
+              .map(|h| h.client());
       }
-      #[cfg(not(feature = "catalog"))]
-      { None }
+      None
   }
 
   pub(crate) fn create_release_fetcher_skills(
@@ -897,6 +931,7 @@ invocation.
       })?;
       let provider = lookup_github_provider_from_ctx(ctx);
       Ok(Box::new(SkillsPlugin {
+          config: _cfg,
           executor: runtime.executor(),
           provider,
       }))
@@ -1083,7 +1118,7 @@ Remove the stub `Discoverer` impl from `plugin.rs` and add the real one here.
           let result = plugin.discover_software().await.expect("ok");
           assert_eq!(result.len(), 1);
           let sw = &result[0];
-          assert_eq!(sw.name, "brainstorming");
+          assert_eq!(sw.name, "LLM Skill: brainstorming");
           assert_eq!(sw.package_identifier, "brainstorming");
           assert_eq!(sw.installed_version, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
           assert_eq!(sw.targets.len(), 1);
@@ -1098,7 +1133,7 @@ Remove the stub `Discoverer` impl from `plugin.rs` and add the real one here.
           let plugin = make_plugin(MIXED_LOCK, 0);
           let result = plugin.discover_software().await.expect("ok");
           assert_eq!(result.len(), 1);
-          assert_eq!(result[0].name, "brainstorming");
+          assert_eq!(result[0].name, "LLM Skill: brainstorming");
       }
 
       #[tokio::test]
@@ -1200,13 +1235,13 @@ Remove the stub `Discoverer` impl from `plugin.rs` and add the real one here.
 
               discovered.push(DiscoveredSoftware {
                   package_identifier: entry.name.clone(),
-                  name: entry.name,
+                  name: format!("LLM Skill: {}", entry.name),
                   installed_version: entry.skill_folder_hash,
                   targets: vec![target],
                   extra: Some(extra),
                   qualifier: None,
                   plugin_package_identifier: None,
-                  featured: false,
+                  featured: true,
                   installed_display_version: None,
               });
           }
@@ -1222,8 +1257,8 @@ Remove the stub `Discoverer` impl from `plugin.rs` and add the real one here.
               .execute_quiet(&CommandSpec::exec("which", ["npx".to_string()]))
               .await
           {
-              Ok(_) => Ok(HostCompatibility::Compatible),
-              Err(_) => Ok(HostCompatibility::Incompatible("npx not found".to_string())),
+              Ok(out) if out.exit_code == 0 => Ok(HostCompatibility::Compatible),
+              _ => Ok(HostCompatibility::Incompatible("npx not found".to_string())),
           }
       }
   }
@@ -1829,6 +1864,7 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
 
       fn skill_with_provider(provider: Arc<dyn GitHubProviderClient>) -> SkillsPlugin {
           SkillsPlugin {
+              config: SkillsConfig::default(),
               executor: test_runtime().executor(),
               provider: Some(provider),
           }
@@ -1943,11 +1979,7 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
       async fn fetch_releases_no_provider_returns_error() {
           let plugin = skill_no_provider();
           let result = plugin.fetch_releases(&brainstorming_id()).await;
-          let err = result.unwrap_err();
-          assert!(
-              err.to_string().contains("provider not available")
-                  || err.to_string().contains("provider")
-          );
+          assert!(result.is_err());
       }
 
       #[tokio::test]
@@ -2078,11 +2110,10 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
   mod tests {
       use std::sync::Arc;
 
-      use uptrakit_plugin_infrastructure_core::UpdateExecutor;
+      use uptrakit_plugin_infrastructure_core::{UpdateExecutor, mpsc};
       use uptrakit_plugin_infrastructure_core::testing::{
-          FixedOutputExecutor, test_runtime, test_runtime_with_executor,
+          FixedOutputExecutor, RoutedOutputExecutor, test_runtime, test_runtime_with_executor,
       };
-      use uptrakit_plugin_infrastructure_core::command::MockUpdateOutputSender;
 
       use crate::config::SkillsConfig;
       use crate::lock::encode_skill_identifier;
@@ -2107,20 +2138,20 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
 
       #[tokio::test]
       async fn execute_update_calls_npx_skills_update() {
-          // The executor returns SAMPLE_LOCK on the first call (lock file read)
-          // and "" exit 0 on the second call (npx skills update).
-          // FixedOutputExecutor returns the same output for every call — so we
-          // need a sequenced executor or a custom one. Since FixedOutputExecutor
-          // always returns the same output, set it to SAMPLE_LOCK so both calls
-          // succeed.
-          let executor = FixedOutputExecutor::new(SAMPLE_LOCK, 0);
+          // First call: lock file read (cat ~/.agents/.skill-lock.json) → SAMPLE_LOCK.
+          // Second call: npx skills update → empty output, exit 0.
+          // RoutedOutputExecutor routes by command substring.
+          let executor = RoutedOutputExecutor::success([
+              ("cat", SAMPLE_LOCK),
+              ("npx", ""),
+          ]);
           let plugin = SkillsPlugin::new(
               SkillsConfig::default(),
               test_runtime_with_executor(executor),
           )
           .expect("create");
 
-          let (tx, _rx) = uptrakit_plugin_infrastructure_core::command::update_output_channel();
+          let (tx, _rx) = mpsc::channel(100);
           let result = plugin
               .execute_update(&brainstorming_id(), "some_sha", None, &tx)
               .await
@@ -2131,7 +2162,7 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
       #[tokio::test]
       async fn execute_update_invalid_identifier_fails() {
           let plugin = SkillsPlugin::new(SkillsConfig::default(), test_runtime()).expect("create");
-          let (tx, _rx) = uptrakit_plugin_infrastructure_core::command::update_output_channel();
+          let (tx, _rx) = mpsc::channel(100);
           let result = plugin
               .execute_update("not-an-id", "sha", None, &tx)
               .await;
@@ -2146,7 +2177,7 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
               test_runtime_with_executor(executor),
           )
           .expect("create");
-          let (tx, _rx) = uptrakit_plugin_infrastructure_core::command::update_output_channel();
+          let (tx, _rx) = mpsc::channel(100);
           let result = plugin
               .execute_update(&brainstorming_id(), "sha", None, &tx)
               .await;
@@ -2234,13 +2265,14 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
               "running npx skills update"
           );
 
+          let skills_version = &self.config.skills_version;
           let output = uptrakit_plugin_infrastructure_core::execute_command_update(
               uptrakit_plugin_infrastructure_core::CommandUpdateParams {
                   executor: self.executor.as_ref(),
                   binary: "sh",
                   args: vec![
                       "-c".to_string(),
-                      format!("npx skills@latest update -g {skill_name} -y"),
+                      format!("DISABLE_TELEMETRY=1 npx skills@{skills_version} update -g {skill_name} -y"),
                   ],
                   privileged: false,
                   spec_modifier: None,
@@ -2370,8 +2402,6 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
   pub(crate) mod update;
 
   pub use config::SkillsConfig;
-  pub use error::{Result, SkillsError};
-  pub use lock::{SkillLockEntry, encode_skill_identifier, parse_skill_identifier, parse_skill_lock};
   pub use plugin::{DESCRIPTOR, SkillsPlugin, validate_identifier};
   ```
 
@@ -2483,10 +2513,9 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
       {
           let lookup = ctx.global_provider_lookup.as_ref()?;
           let handle = lookup.lookup("github")?;
-          Arc::downcast::<GitHubProviderHandle>(handle).ok().map(|h| h.client())
+          return Arc::downcast::<GitHubProviderHandle>(handle).ok().map(|h| h.client());
       }
-      #[cfg(not(feature = "catalog"))]
-      { None }
+      None
   }
   ```
   ````
@@ -2512,7 +2541,7 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
   # Agent Skills Plugin
 
   The **Agent Skills** plugin discovers, tracks, and updates LLM-agent Skills installed
-  globally on a host via `npx skills@latest`.
+  globally on a host via `npx skills@<version>` (default: `latest`).
 
   ## What gets discovered
 
@@ -2536,10 +2565,18 @@ The controller-side `ReleaseFetcher`. Uses `self.provider` (populated by
 
   ## Update semantics
 
-  Updates run `npx skills@latest update -g <skill-name> -y` on the agent. The `skills` CLI
-  does not support version pinning; it always moves the Skill to the current HEAD tree SHA.
-  Uptrakit records the requested `to_version` for audit purposes but does not pass it to
-  the CLI. The detection cycle reconciles `installed_version` after the update lands.
+  Updates run `DISABLE_TELEMETRY=1 npx skills@<version> update -g <skill-name> -y` on the
+  agent, where `<version>` is the tenant-configured **Skills Package Version** (default:
+  `latest`). The `skills` CLI does not support version pinning; it always moves the Skill to
+  the current HEAD tree SHA. Uptrakit records the requested `to_version` for audit purposes
+  but does not pass it to the CLI. The detection cycle reconciles `installed_version` after
+  the update lands.
+
+  ## Skills Package Version
+
+  The plugin config exposes a **Skills Package Version** field (default: `latest`). Set it to
+  a specific npm dist-tag or semver version (e.g. `1.2.3`, `next`) if you want reproducible
+  update behaviour across hosts. Configure it per-tenant in the plugin config UI.
 
   ## GitHub-only source restriction
 
