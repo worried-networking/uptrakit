@@ -19,9 +19,13 @@ use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegist
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::validation::Validate;
 
+use axum::Extension;
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
+
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::middleware::permission::CanManageAuthSettings;
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::services::client::OAuthClientService;
 
@@ -136,7 +140,8 @@ pub(crate) async fn list_clients(
 #[tracing::instrument(skip_all)]
 pub(crate) async fn manual_register_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     axum::Json(body): axum::Json<DcrRegistrationRequest>,
 ) -> Response {
     if !state.oauth.enabled {
@@ -147,10 +152,26 @@ pub(crate) async fn manual_register_client(
         return oauth_400("invalid_request", &e.message);
     }
 
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
     let svc = build_client_service(&state);
 
     match svc.register_manual(body).await {
-        Ok(resp) => (StatusCode::CREATED, axum::Json(resp)).into_response(),
+        Ok(resp) => {
+            let client_id = resp.client_id.clone();
+            if let Ok(entry) =
+                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
+                    .tenant_scope(state.default_tenant_id)
+                    .actor(actor_type, actor_id)
+                    .target("oauth_client", client_id, None)
+                    .outcome(AuditOutcome::Success)
+                    .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            (StatusCode::CREATED, axum::Json(resp)).into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "manual register failed");
             oauth_500()
@@ -182,15 +203,30 @@ pub(crate) async fn manual_register_client(
 #[tracing::instrument(skip_all)]
 pub(crate) async fn revoke_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(client_id): Path<String>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
     let svc = build_client_service(&state);
     svc.revoke(&client_id).await?;
+
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor_type, actor_id)
+        .target("oauth_client", client_id, None)
+        .outcome(AuditOutcome::Success)
+        .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -218,15 +254,30 @@ pub(crate) async fn revoke_client(
 #[tracing::instrument(skip_all)]
 pub(crate) async fn trust_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(client_id): Path<String>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
     let svc = build_client_service(&state);
     svc.promote_trusted(&client_id).await?;
+
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_TRUSTED)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor_type, actor_id)
+        .target("oauth_client", client_id, None)
+        .outcome(AuditOutcome::Success)
+        .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

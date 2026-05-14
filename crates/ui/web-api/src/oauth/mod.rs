@@ -5,7 +5,6 @@
 //! live in `crates/ui/web-api/src/routes/oauth/` and delegate to the types
 //! defined here.
 
-pub mod audit;
 pub mod boot;
 pub mod canonical_url;
 pub mod cimd;

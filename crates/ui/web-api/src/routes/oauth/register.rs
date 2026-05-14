@@ -17,6 +17,8 @@ use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
 use uptrakit_web_api_types::validation::Validate;
 
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
+
 use crate::AppState;
 use crate::extract::ClientIp;
 use crate::oauth::http_responses::{oauth_400, oauth_403, oauth_500};
@@ -138,7 +140,20 @@ pub async fn register(
     );
 
     match client_svc.register_dcr(req, source_ip, &[]).await {
-        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
+        Ok(resp) => {
+            let client_id = resp.client_id.clone();
+            if let Ok(entry) =
+                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REGISTERED)
+                    .tenant_scope(state.default_tenant_id)
+                    .actor_system()
+                    .target("oauth_client", client_id, None)
+                    .outcome(AuditOutcome::Success)
+                    .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            (StatusCode::CREATED, Json(resp)).into_response()
+        }
         Err(e) => registration_error_to_response(&e),
     }
 }
@@ -217,6 +232,7 @@ pub async fn get_client_registration(
 /// RFC 7592 client configuration endpoint — update.
 ///
 /// Returns 200 with the updated registration metadata.
+// TODO(audit): wire oauth.client_updated — needs new action type
 #[utoipa::path(
     put,
     path = "/oauth/register/{client_id}",
@@ -380,7 +396,19 @@ pub async fn delete_client_registration(
     }
 
     match client_svc.revoke(&client_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            if let Ok(entry) =
+                AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CLIENT_REVOKED)
+                    .tenant_scope(state.default_tenant_id)
+                    .actor_system()
+                    .target("oauth_client", client_id, None)
+                    .outcome(AuditOutcome::Success)
+                    .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "client revocation failed");
             oauth_500()
