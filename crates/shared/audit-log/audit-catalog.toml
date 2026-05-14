@@ -36,7 +36,7 @@ action = "surface_action.invoke"
 
 [[entries]]
 site = "uptrakit_web_api::router::manual_register_client"
-skip = "delegates to OAuthClientService; no direct AuditEntry emit in handler"
+skip = "router:: alias for routes::oauth::clients_api::manual_register_client; audit emitted by handler"
 
 [[entries]]
 site = "uptrakit_web_api::router::notification_callback"
@@ -48,15 +48,15 @@ skip = "OCSP certificate status responder; no user-driven state change"
 
 [[entries]]
 site = "uptrakit_web_api::router::revoke_client"
-skip = "delegates to OAuthClientService.revoke; no direct AuditEntry emit in handler"
+skip = "router:: alias for routes::oauth::clients_api::revoke_client; audit emitted by handler"
 
 [[entries]]
 site = "uptrakit_web_api::router::revoke_consent"
-skip = "delegates to OAuthConsentService.revoke; no direct AuditEntry emit in handler"
+skip = "router:: alias for routes::oauth::consents_api::revoke_consent; audit emitted by handler"
 
 [[entries]]
 site = "uptrakit_web_api::router::trust_client"
-skip = "delegates to OAuthClientService.promote_trusted; no direct AuditEntry emit in handler"
+skip = "router:: alias for routes::oauth::clients_api::trust_client; audit emitted by handler"
 
 # ---------------------------------------------------------------------------
 # Access presets
@@ -289,15 +289,15 @@ action = "oauth.consent_grant"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::clients_api::manual_register_client"
-skip = "delegates to OAuthClientService; no direct AuditEntry emit in handler"
+action = "oauth.client_registered"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::clients_api::revoke_client"
-skip = "delegates to OAuthClientService.revoke; no direct AuditEntry emit in handler"
+action = "oauth.client_revoked"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::clients_api::trust_client"
-skip = "delegates to OAuthClientService.promote_trusted; no direct AuditEntry emit in handler"
+action = "oauth.client_trusted"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::consent::approve_consent"
@@ -309,11 +309,11 @@ action = "oauth.consent_deny"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::consents_api::revoke_consent"
-skip = "delegates to OAuthConsentService.revoke; no direct AuditEntry emit in handler"
+action = "oauth.consent_revoke"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::delete_client_registration"
-skip = "walker alias for routes::oauth::register::delete_client_registration; no direct AuditEntry emit"
+skip = "walker alias for routes::oauth::register::delete_client_registration; audit emitted by handler"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::deny_consent"
@@ -329,15 +329,15 @@ action = "oauth.token_issued"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::register"
-skip = "walker alias for routes::oauth::register::register (DCR); audit emitted by OAuthClientService on rate-limit only"
+skip = "walker alias for routes::oauth::register::register (DCR); audit emitted by handler"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::register::delete_client_registration"
-skip = "DCR client deletion (RFC 7592); delegates to OAuthClientService; no direct AuditEntry emit in handler"
+action = "oauth.client_revoked"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::register::register"
-skip = "DCR registration (RFC 7591); OAuthClientService emits rate-limited audit only; no success emit in handler"
+action = "oauth.client_registered"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::register::update_client_registration"
@@ -353,7 +353,7 @@ action = "auth.device.poll"
 
 [[entries]]
 site = "uptrakit_web_api::routes::oauth::update_client_registration"
-skip = "walker alias for routes::oauth::register::update_client_registration; no direct AuditEntry emit"
+skip = "walker alias for routes::oauth::register::update_client_registration; no direct AuditEntry emit — pending new action type"
 
 # ---------------------------------------------------------------------------
 # OIDC auth flow

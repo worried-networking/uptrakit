@@ -16,9 +16,13 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uptrakit_shared_db::entity::oauth_consent;
 use uuid::Uuid;
 
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
+
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::oauth::http_responses::oauth_500;
 use crate::oauth::services::consent::OAuthConsentService;
 
@@ -102,11 +106,15 @@ pub(crate) async fn list_consents(
 pub(crate) async fn revoke_consent(
     State(state): State<Arc<AppState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     if !state.oauth.enabled {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
+
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&auth_user, api_token_id);
 
     // Pre-flight ownership check — gives a clean 403 before delegating to the service.
     let row = match oauth_consent::Entity::find_by_id(id).one(state.db()).await {
@@ -125,6 +133,17 @@ pub(crate) async fn revoke_consent(
     // Delegate to the service — it enforces ownership internally and cascades to refresh tokens.
     let svc = OAuthConsentService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
     svc.revoke(id, auth_user.user_id).await?;
+
+    if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::OAUTH_CONSENT_REVOKE)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor_type, actor_id)
+        .target("oauth_consent", id.to_string(), None)
+        .outcome(AuditOutcome::Success)
+        .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

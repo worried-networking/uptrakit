@@ -91,6 +91,7 @@ impl OAuthClientService {
     /// Enforces a lifetime cap of 20 total DCR registrations. On cap-exceeded
     /// an `OAUTH_CLIENT_REGISTRATION_RATE_LIMITED` audit entry is emitted and
     /// [`OAuthClientError::RegistrationCapExceeded`] is returned.
+    // No success audit emit here — actor context unavailable at service layer; handler emits.
     pub async fn register_dcr(
         &self,
         req: DcrRegistrationRequest,
@@ -113,6 +114,7 @@ impl OAuthClientService {
     }
 
     /// Register a new client by an operator (no cap check).
+    // No audit emit here — actor context unavailable at service layer; handler emits.
     pub async fn register_manual(
         &self,
         req: DcrRegistrationRequest,
@@ -132,6 +134,7 @@ impl OAuthClientService {
     /// Revoke a client and cascade-revoke all its active consents and refresh tokens.
     ///
     /// Multi-statement atomic per §10.5: wrapped in a single transaction.
+    // No audit emit here — actor context unavailable at service layer; handler emits.
     pub async fn revoke(&self, client_id: &str) -> Result<()> {
         let now = (self.clock)();
 
@@ -181,6 +184,7 @@ impl OAuthClientService {
     /// Promote a client to trusted status by setting `trusted_at = now`.
     ///
     /// Returns [`OAuthClientError::NotFound`] when no rows were updated.
+    // No audit emit here — actor context unavailable at service layer; handler emits.
     pub async fn promote_trusted(&self, client_id: &str) -> Result<()> {
         let now = (self.clock)();
 
