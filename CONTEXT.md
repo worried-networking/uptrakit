@@ -131,6 +131,14 @@ via a mutually-exclusive CLI flag. Determines how the Service verifies the Contr
 TLS certificate during bootstrap and on reconnects when no CA bundle has been persisted.
 _Avoid_: TOFU enabled (ambiguous — every mode is "enabled" in some sense).
 
+**CLI CA Trust**:
+The mechanism by which the `uptrakit` CLI establishes and persists trust in a Controller's
+self-managed CA certificate. The CLI fetches the CA from `GET /api/v1/pki/ca.crt`, verifies
+the SHA-256 fingerprint interactively or against a supplied value, and stores the PEM in
+`config.json` as the sole TLS trust anchor for future connections.
+Entry points: `uptrakit auth login --tofu` (bootstrap) and `uptrakit auth ca trust` (rotation).
+_Avoid_: TOFU mode (reserved for Service bootstrap flags).
+
 **Trust Domain**:
 A string in the `[tls]` Config Section naming the Controller's SPIFFE namespace. Defaults
 to the first server-cert SAN. Must match the trust-domain segment of every Service's
