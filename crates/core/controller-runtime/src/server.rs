@@ -121,7 +121,13 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
         }
         None => {
             tracing::info!("HTTPS server listening on {}", cfg.https_addr);
-            std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?
+            let listener = std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?;
+            // axum-server 0.8 does not call set_nonblocking() (upstream bug
+            // #181). Without it, tokio runs the accept() syscall directly on
+            // a worker thread and graceful_shutdown cannot interrupt it,
+            // hanging Runtime::drop after `graceful shutdown complete`.
+            listener.set_nonblocking(true).map_err(ServerError::Io)?;
+            listener
         }
     };
     axum_server::from_tcp(listener)
