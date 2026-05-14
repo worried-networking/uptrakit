@@ -183,6 +183,16 @@ impl AuditActionType {
         RegisteredAuditAction::new("system.ca.rotate", AuditActionKind::Event);
     pub const SYSTEM_SERVER_CERTIFICATE_RENEW: RegisteredAuditAction =
         RegisteredAuditAction::new("system.server_certificate.renew", AuditActionKind::Event);
+    pub const SYSTEM_CONFIG_RELOAD_REQUESTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.config_reload.requested", AuditActionKind::Event);
+    pub const SYSTEM_CONFIG_RELOAD_APPLIED: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.config_reload.applied", AuditActionKind::Event);
+    pub const SYSTEM_CONFIG_RELOAD_FAILED: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.config_reload.failed", AuditActionKind::Event);
+    pub const SYSTEM_CONFIG_RELOAD_REVERTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.config_reload.reverted", AuditActionKind::Event);
+    pub const SYSTEM_CONFIG_RELOAD_REFUSED: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.config_reload.refused", AuditActionKind::Event);
     pub const SCHEDULED_TASK_UPDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("scheduled_task.update", AuditActionKind::Stateful);
     pub const SCHEDULED_TASK_TRIGGER: RegisteredAuditAction =
@@ -450,6 +460,11 @@ impl AuditActionType {
             AuditActionType::TENANT_DATA_RESET,
             AuditActionType::SYSTEM_CA_ROTATE,
             AuditActionType::SYSTEM_SERVER_CERTIFICATE_RENEW,
+            AuditActionType::SYSTEM_CONFIG_RELOAD_REQUESTED,
+            AuditActionType::SYSTEM_CONFIG_RELOAD_APPLIED,
+            AuditActionType::SYSTEM_CONFIG_RELOAD_FAILED,
+            AuditActionType::SYSTEM_CONFIG_RELOAD_REVERTED,
+            AuditActionType::SYSTEM_CONFIG_RELOAD_REFUSED,
             AuditActionType::SCHEDULED_TASK_UPDATE,
             AuditActionType::SCHEDULED_TASK_TRIGGER,
             AuditActionType::HOST_TAG_CREATE,
@@ -719,6 +734,13 @@ uptrakit_audit_log_derive::audit_actions! {
     // CA + server certificate
     system_ca_rotate => SYSTEM_CA_ROTATE, Event;
     system_server_certificate_renew => SYSTEM_SERVER_CERTIFICATE_RENEW, Event;
+
+    // config reload lifecycle
+    system_config_reload_requested => SYSTEM_CONFIG_RELOAD_REQUESTED, Event;
+    system_config_reload_applied => SYSTEM_CONFIG_RELOAD_APPLIED, Event;
+    system_config_reload_failed => SYSTEM_CONFIG_RELOAD_FAILED, Event;
+    system_config_reload_reverted => SYSTEM_CONFIG_RELOAD_REVERTED, Event;
+    system_config_reload_refused => SYSTEM_CONFIG_RELOAD_REFUSED, Event;
 
     // scheduled tasks
     scheduled_task_update => SCHEDULED_TASK_UPDATE, Stateful;
