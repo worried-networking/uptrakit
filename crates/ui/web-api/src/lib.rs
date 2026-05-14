@@ -255,7 +255,10 @@ mod tests {
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,
-            audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
+            audit_log_filter_rx: tokio::sync::watch::channel(std::sync::Arc::new(
+                uptrakit_config_reload::config::AuditConfig::default(),
+            ))
+            .1,
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
