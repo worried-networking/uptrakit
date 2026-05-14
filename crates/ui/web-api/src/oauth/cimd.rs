@@ -8,7 +8,7 @@
 //! excluded) so updates to display-only fields like `tos_uri` or
 //! `software_version` do not invalidate active consents.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +26,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use uptrakit_web_api_auth::auth::rate_limit::{RateLimitOutcome, RateLimitStore};
+use uptrakit_web_api_auth::{SettingKey, settings_store::load_global_setting};
 
 use crate::oauth::cimd_parser::{self, CimdDocument, CimdParseError};
 use crate::oauth::rate_limit::{EndpointKind, OAuthRateLimiter};
@@ -87,6 +88,9 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 ///
 /// Changes to these fields do not invalidate active consents.
 const COSMETIC_FIELDS: &[&str] = &["tos_uri", "policy_uri", "software_version", "software_id"];
+
+/// Draft version hint included in `OAUTH_CIMD_PARSE_FAILED` audit entries.
+const CIMD_DRAFT_VERSION_HINT: &str = "draft-ietf-oauth-client-id-metadata-document-00";
 
 // ---------------------------------------------------------------------------
 // Fetcher
@@ -205,6 +209,33 @@ impl CimdFetcher {
         }
 
         // -------------------------------------------------------------------
+        // Step 0b: Load operator-configured cosmetic field allowlist.
+        // -------------------------------------------------------------------
+        let extra_cosmetic: Vec<String> = match load_global_setting(
+            &self.db,
+            SettingKey::OauthCimdCosmeticFieldAllowlist,
+        )
+        .await
+        {
+            Ok(Some(v)) => v
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|e| e.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Ok(None) => vec![],
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to load oauth.cimd_cosmetic_field_allowlist; using defaults"
+                );
+                vec![]
+            }
+        };
+
+        // -------------------------------------------------------------------
         // Step 1: HTTP fetch
         // -------------------------------------------------------------------
         let response = self.client.get(url).send().await.context_to()?;
@@ -271,17 +302,49 @@ impl CimdFetcher {
                 // Material-change detection — compare normalised hashes.
                 let new_material_hash = parsed_value
                     .as_ref()
-                    .map(compute_material_hash)
+                    .map(|v| compute_material_hash(v, &extra_cosmetic))
                     .unwrap_or_default();
-                let previous_material_hash = existing
+                let previous_material_value: Option<serde_json::Value> = existing
                     .as_ref()
                     .and_then(|m| m.metadata_raw.as_deref())
-                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .and_then(|raw| serde_json::from_str(raw).ok());
+                let previous_material_hash = previous_material_value
                     .as_ref()
-                    .map(compute_material_hash);
+                    .map(|v| compute_material_hash(v, &extra_cosmetic));
                 let is_material_change = previous_material_hash
                     .as_deref()
                     .is_some_and(|prev| prev != new_material_hash);
+
+                // Build a per-field diff for the material-change audit entry
+                // (spec §14.1). Computed now so it is available after commit.
+                let material_diff = if is_material_change {
+                    let prev_obj = previous_material_value.as_ref().and_then(|v| v.as_object());
+                    let new_obj = parsed_value.as_ref().and_then(|v| v.as_object());
+                    let mut all_keys = BTreeSet::new();
+                    if let Some(m) = prev_obj {
+                        all_keys.extend(m.keys().map(String::as_str));
+                    }
+                    if let Some(m) = new_obj {
+                        all_keys.extend(m.keys().map(String::as_str));
+                    }
+                    let mut diff = serde_json::Map::new();
+                    for key in all_keys.into_iter().filter(|k| {
+                        !COSMETIC_FIELDS.contains(k)
+                            && !extra_cosmetic.iter().any(|e| e.as_str() == *k)
+                    }) {
+                        let before = prev_obj.and_then(|m| m.get(key));
+                        let after = new_obj.and_then(|m| m.get(key));
+                        if before != after {
+                            diff.insert(
+                                key.to_owned(),
+                                serde_json::json!({ "before": before, "after": after }),
+                            );
+                        }
+                    }
+                    serde_json::Value::Object(diff)
+                } else {
+                    serde_json::Value::Object(serde_json::Map::new())
+                };
 
                 if is_material_change {
                     oauth_consent::Entity::update_many()
@@ -298,7 +361,14 @@ impl CimdFetcher {
                 }
 
                 let redirect_uris_json =
-                    serde_json::to_string(&doc.redirect_uris).unwrap_or_else(|_| "[]".to_owned());
+                    serde_json::to_string(&doc.redirect_uris).unwrap_or_else(|e| {
+                        tracing::warn!(
+                            error = %e,
+                            client_id = %url,
+                            "failed to serialise redirect_uris; defaulting to empty array"
+                        );
+                        "[]".to_owned()
+                    });
 
                 // Upsert: prefer update over insert when row exists, since
                 // SeaORM's `save()` semantics depend on primary-key state and
@@ -365,7 +435,7 @@ impl CimdFetcher {
                     self.emit_audit_event(
                         AuditActionType::OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY,
                         AuditOutcome::Success,
-                        serde_json::json!({ "client_id": url }),
+                        serde_json::json!({ "client_id": url, "changed_fields": material_diff }),
                     );
                 }
 
@@ -395,6 +465,7 @@ impl CimdFetcher {
                             serde_json::json!({
                                 "client_id": url,
                                 "error": parse_err_str,
+                                "draft_version_hint": CIMD_DRAFT_VERSION_HINT,
                             }),
                         );
                         bail!(CimdFetchError::UnparseableFirstFetch);
@@ -407,6 +478,7 @@ impl CimdFetcher {
                     serde_json::json!({
                         "client_id": url,
                         "error": parse_err_str,
+                        "draft_version_hint": CIMD_DRAFT_VERSION_HINT,
                     }),
                 );
 
@@ -470,7 +542,7 @@ impl std::fmt::Display for CimdParseErrorRepr {
 /// fields stripped per spec §11.3.
 ///
 /// Returns an empty string if `value` is not a JSON object.
-fn compute_material_hash(value: &serde_json::Value) -> String {
+fn compute_material_hash(value: &serde_json::Value, extra_cosmetic: &[String]) -> String {
     let serde_json::Value::Object(map) = value else {
         return String::new();
     };
@@ -479,11 +551,20 @@ fn compute_material_hash(value: &serde_json::Value) -> String {
     // which serde_json::to_string preserves in turn.
     let filtered: BTreeMap<&str, &serde_json::Value> = map
         .iter()
-        .filter(|(k, _)| !COSMETIC_FIELDS.contains(&k.as_str()))
+        .filter(|(k, _)| {
+            !COSMETIC_FIELDS.contains(&k.as_str())
+                && !extra_cosmetic.iter().any(|e| e.as_str() == k.as_str())
+        })
         .map(|(k, v)| (k.as_str(), v))
         .collect();
 
-    let normalised = serde_json::to_string(&filtered).unwrap_or_default();
+    let normalised = match serde_json::to_string(&filtered) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialise material-hash input; returning empty hash");
+            return String::new();
+        }
+    };
     let mut hasher = Sha256::new();
     hasher.update(normalised.as_bytes());
     format!("{:x}", hasher.finalize())
