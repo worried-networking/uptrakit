@@ -73,7 +73,7 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
-nix = { workspace = true, features = ["signal", "process"] }
+nix = { workspace = true, features = ["fs", "signal", "process"] }
 listenfd = { workspace = true }
 sd-notify = { workspace = true }
 tokio-util = { workspace = true }
