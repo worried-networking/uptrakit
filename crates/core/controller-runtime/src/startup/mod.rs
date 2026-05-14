@@ -104,8 +104,11 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     let (channels, receivers) =
         uptrakit_config_reload::RuntimeConfigChannels::from_runtime(&loaded.config);
     let (audit_tx, audit_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (coordinator, handle) =
-        uptrakit_config_reload::ReloadCoordinator::new(Vec::new(), audit_tx);
+    let (coordinator, handle) = uptrakit_config_reload::ReloadCoordinator::new(
+        Vec::new(),
+        audit_tx,
+        std::sync::Arc::new(uptrakit_config_reload::NoopAlertWriter),
+    );
     let _sighup = uptrakit_config_reload::triggers::sighup::spawn_sighup_task(handle.sender());
     let _watch = uptrakit_config_reload::triggers::file_watch::spawn_file_watch_task(
         config_path,

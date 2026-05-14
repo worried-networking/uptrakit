@@ -908,7 +908,11 @@ impl AppStateBuilder {
                 let (_, receivers) =
                     uptrakit_config_reload::RuntimeConfigChannels::from_runtime(&default_runtime);
                 let (audit_tx, _) = tokio::sync::mpsc::unbounded_channel();
-                let (_, handle) = uptrakit_config_reload::ReloadCoordinator::new(vec![], audit_tx);
+                let (_, handle) = uptrakit_config_reload::ReloadCoordinator::new(
+                    vec![],
+                    audit_tx,
+                    std::sync::Arc::new(uptrakit_config_reload::NoopAlertWriter),
+                );
                 let cache = uptrakit_config_reload::SettingsVersionCache::new();
                 (handle, cache, receivers)
             }

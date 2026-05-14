@@ -10,6 +10,8 @@ use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 
+use uptrakit_config_reload::CoordinatorState;
+
 use crate::AppState;
 use crate::middleware::permission::CanManageGlobalSettings;
 
@@ -107,6 +109,25 @@ pub async fn get_system_alerts(
             title: "Global GitHub Provider Invalid".to_string(),
             message: format!("The stored global GitHub provider settings are invalid: {problem}"),
             action: None,
+        });
+    }
+
+    if let CoordinatorState::Degraded(info) = state.coordinator_handle.state() {
+        let subsystems = info.failed_subsystems.join(", ");
+        alerts.push(SystemAlert {
+            id: "coordinator_degraded".to_string(),
+            severity: AlertSeverity::Critical,
+            title: "Config Reload Coordinator Degraded".to_string(),
+            message: format!(
+                "The reload coordinator entered a degraded state since {}. \
+                 Failing subsystems: {subsystems}. Reason: {}. \
+                 Manual intervention or process restart required.",
+                info.since
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+                info.reason
+            ),
+            action: Some("clear_coordinator_degraded".to_string()),
         });
     }
 

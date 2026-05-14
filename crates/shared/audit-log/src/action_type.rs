@@ -193,6 +193,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("system.config_reload.reverted", AuditActionKind::Event);
     pub const SYSTEM_CONFIG_RELOAD_REFUSED: RegisteredAuditAction =
         RegisteredAuditAction::new("system.config_reload.refused", AuditActionKind::Event);
+    pub const SYSTEM_ALERT_WRITTEN: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.alert.written", AuditActionKind::Event);
     pub const SCHEDULED_TASK_UPDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("scheduled_task.update", AuditActionKind::Stateful);
     pub const SCHEDULED_TASK_TRIGGER: RegisteredAuditAction =
@@ -465,6 +467,7 @@ impl AuditActionType {
             AuditActionType::SYSTEM_CONFIG_RELOAD_FAILED,
             AuditActionType::SYSTEM_CONFIG_RELOAD_REVERTED,
             AuditActionType::SYSTEM_CONFIG_RELOAD_REFUSED,
+            AuditActionType::SYSTEM_ALERT_WRITTEN,
             AuditActionType::SCHEDULED_TASK_UPDATE,
             AuditActionType::SCHEDULED_TASK_TRIGGER,
             AuditActionType::HOST_TAG_CREATE,
