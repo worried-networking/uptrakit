@@ -21,13 +21,13 @@ async fn put_settings_without_if_match_returns_428() {
     let client = app.client();
     let token = register_and_get_token(&client).await;
 
-    let (status, _): (_, serde_json::Value) = client
+    let status = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
-        .send_json()
+        .send_status()
         .await;
 
     assert_eq!(status, http::StatusCode::PRECONDITION_REQUIRED);
@@ -49,14 +49,14 @@ async fn put_settings_with_stale_etag_returns_409() {
         .settings_version_cache
         .update(Scope::Tenant(app.state.default_tenant_id), 1);
 
-    let (status, _): (_, serde_json::Value) = client
+    let status = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
         .header("if-match", "W/\"settings-v0\"")
-        .send_json()
+        .send_status()
         .await;
 
     assert_eq!(status, http::StatusCode::CONFLICT);
@@ -100,26 +100,26 @@ async fn etag_version_discriminates_correctly() {
         .update(Scope::Tenant(app.state.default_tenant_id), 2);
 
     // v0 is stale → 409.
-    let (s0, _): (_, serde_json::Value) = client
+    let s0 = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
         .header("if-match", "W/\"settings-v0\"")
-        .send_json()
+        .send_status()
         .await;
     assert_eq!(s0, http::StatusCode::CONFLICT);
 
     // v1 is stale → 409.
-    let (s1, _): (_, serde_json::Value) = client
+    let s1 = client
         .put_json(
             "/api/v1/settings/registration",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
         .header("if-match", "W/\"settings-v1\"")
-        .send_json()
+        .send_status()
         .await;
     assert_eq!(s1, http::StatusCode::CONFLICT);
 
