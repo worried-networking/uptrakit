@@ -825,14 +825,14 @@ fn chrono_date() -> String {
 /// Only `https://` URLs are allowed by default. When `allow_http` is true,
 /// `http://` URLs are also accepted (for `--insecure` mode).
 /// Returns an error for any other scheme (e.g. `file://`, `javascript:`).
-fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), CliError> {
+fn validate_url_scheme(url: &str, allow_http: bool) -> Result<()> {
     if url.starts_with("https://") {
         return Ok(());
     }
     if allow_http && url.starts_with("http://") {
         return Ok(());
     }
-    Err(CliError::Other(format!(
+    bail!(CliError::Other(format!(
         "refusing to open URL with untrusted scheme: {url}"
     )))
 }
@@ -840,19 +840,21 @@ fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), C
 /// Open a URL in the user's default browser.
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open").arg(url).spawn()?;
-    }
+    std::process::Command::new("open").arg(url).spawn()?;
     #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open").arg(url).spawn()?;
-    }
+    std::process::Command::new("xdg-open").arg(url).spawn()?;
     #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()?;
-    }
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn()?;
+    // On unsupported targets the supported-target Ok(()) is compiled away, and vice versa,
+    // so neither branch sees unreachable_code under warnings=deny.
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    return Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening browser not supported on this platform",
+    ));
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     Ok(())
 }
 

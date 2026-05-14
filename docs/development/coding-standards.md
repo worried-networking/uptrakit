@@ -752,7 +752,8 @@ See also: [Security — Secure Development](../security/secure-development.md).
 When a function, type, field, or constant is _only reachable_ via a `#[cfg(feature = "X")]`
 additive block, the compiler may emit `dead_code` (or a related lint) when that feature is
 disabled. Because `#[cfg(not(feature = "X"))]` is prohibited and the item is genuinely needed
-under the feature, suppressing the lint with `#[allow(dead_code)]` is the approved solution.
+under the feature, suppressing the lint with `#[expect(dead_code, reason = "...")]` is the
+approved solution.
 
 **Requirement:** every such suppression must carry a detailed inline comment that:
 
@@ -764,7 +765,7 @@ under the feature, suppressing the lint with `#[allow(dead_code)]` is the approv
 /// Upgrades a no-op stub client to a real bollard client.
 // Only called from the `daemon` feature block in `DockerPlugin::new`. Without the `daemon`
 // feature the function is unreferenced, but it must remain compiled for the feature to work.
-#[allow(dead_code)]
+#[expect(dead_code, reason = "only referenced from the `daemon` feature block; unreachable without it")]
 #[cfg(feature = "daemon")]
 fn upgrade_to_daemon_client(
     _stub: Arc<dyn DockerClient>,
@@ -781,8 +782,8 @@ fn upgrade_to_daemon_client(...) { ... }
 Note: when the item is already behind `#[cfg(feature = "X")]`, the dead-code lint only fires
 under a build that enables `X` but not the specific caller — which is rare. If the item and
 its sole caller are both inside the same `#[cfg(feature = "X")]` block, no suppression is
-needed (the compiler sees them together). Use `#[allow(dead_code)]` only after confirming the
-lint is genuine.
+needed (the compiler sees them together). Use `#[expect(dead_code, reason = "...")]` only after
+confirming the lint is genuine.
 
 No other `#[allow()]` suppressions are permitted without explicit approval.
 
