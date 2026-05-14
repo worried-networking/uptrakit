@@ -5,10 +5,6 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the Agent Skills plugin.
 #[derive(Debug, Error)]
-#[expect(
-    dead_code,
-    reason = "variants used by subsequent modules added in later tasks"
-)]
 pub(crate) enum SkillsError {
     #[error("lock file malformed: {0}")]
     LockFileMalformed(String),
@@ -39,7 +35,6 @@ pub(crate) enum SkillsError {
 }
 
 /// Result type alias for the Skills plugin.
-#[expect(dead_code, reason = "used by subsequent modules added in later tasks")]
 pub(crate) type Result<T> = std::result::Result<T, Report<SkillsError>>;
 
 impl_report_conversion!(SkillsError => PluginError, |e| match &e {
