@@ -16,6 +16,7 @@ use crate::registry::{Kind, Registry};
 
 /// Results from sweeping the source tree for stateful action emit sites.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct EmitReport {
     /// Registered stateful actions for which no emit call site was found.
     pub stateful_actions_without_emit_site: Vec<String>,

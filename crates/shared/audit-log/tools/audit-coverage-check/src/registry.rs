@@ -9,6 +9,7 @@ use syn::{Expr, ExprCall, ExprLit, ExprPath, Item, Lit};
 
 /// All registered audit actions keyed by their string value (e.g. `"auth.login"`).
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Registry {
     /// Map from action value string to its entry.
     pub actions: HashMap<String, RegistryEntry>,
@@ -16,6 +17,7 @@ pub struct Registry {
 
 /// Metadata for a single registered audit action.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RegistryEntry {
     /// The Rust constant identifier as written in `action_type.rs`.
     pub const_ident: String,
