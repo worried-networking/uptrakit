@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "crypto provider install returns Result; already-installed is not an error in tests"
+)]
+
 use uptrakit_config_reload::config::Scope;
 
 use crate::test_harness::TestApp;
