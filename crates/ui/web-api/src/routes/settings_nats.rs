@@ -20,12 +20,12 @@ use uptrakit_web_api_types::MaskedUrl;
 pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
 
 use crate::AppState;
-use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
+use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
-use crate::settings_store::{load_global_setting, upsert_global_setting};
+use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
 
 fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
     let has_url = nats_url.is_some();
@@ -49,8 +49,8 @@ fn emit_nats_failed_event(
     .actor(actor_type, actor_id)
     .target(
         "global_setting",
-        SettingKey::NatsUrl.as_str().to_string(),
-        Some(SettingKey::NatsUrl.as_str().to_string()),
+        "nats.url".to_string(),
+        Some("nats.url".to_string()),
     )
     .outcome(AuditOutcome::Failed)
     .details(details)
@@ -111,6 +111,7 @@ pub async fn get_nats_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_nats_settings(
     State(state): State<Arc<AppState>>,
+    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNatsSettingsRequest>,
@@ -125,7 +126,7 @@ pub async fn update_nats_settings(
             let changed = nats_url.is_some();
             if changed {
                 // Read the before value for the audit snapshot.
-                let before_value = load_global_setting(state.db(), SettingKey::NatsUrl)
+                let before_value = load_global_setting_raw(state.db(), "nats.url")
                     .await
                     .unwrap_or(None)
                     .unwrap_or(serde_json::Value::Null);
@@ -149,7 +150,7 @@ pub async fn update_nats_settings(
                 };
 
                 if let Err(e) =
-                    upsert_global_setting(&tx, SettingKey::NatsUrl, serde_json::json!("")).await
+                    upsert_global_setting_raw(&tx, "nats.url", serde_json::json!("")).await
                 {
                     tracing::error!("Failed to clear nats.url: {e:?}");
                     drop(tx);
@@ -158,7 +159,7 @@ pub async fn update_nats_settings(
                         actor_type,
                         actor_id,
                         serde_json::json!({
-                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "setting_key": "nats.url",
                             "operation": "clear",
                             "reason_code": "nats_url_clear_failed",
                         }),
@@ -169,7 +170,7 @@ pub async fn update_nats_settings(
                     );
                 }
 
-                let key_str = SettingKey::NatsUrl.as_str().to_string();
+                let key_str = "nats.url".to_string();
                 let before_view = GlobalSettingView {
                     key: key_str.clone(),
                     value: before_value,
@@ -185,7 +186,7 @@ pub async fn update_nats_settings(
                         .actor(actor_type, actor_id)
                         .outcome(AuditOutcome::Success)
                         .details(serde_json::json!({
-                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "setting_key": "nats.url",
                             "changed": true,
                             "operation": "clear",
                         }))
@@ -234,7 +235,7 @@ pub async fn update_nats_settings(
             }
 
             // Read the before value for the audit snapshot.
-            let before_value = load_global_setting(state.db(), SettingKey::NatsUrl)
+            let before_value = load_global_setting_raw(state.db(), "nats.url")
                 .await
                 .unwrap_or(None);
 
@@ -247,7 +248,7 @@ pub async fn update_nats_settings(
                         actor_type,
                         actor_id,
                         serde_json::json!({
-                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "setting_key": "nats.url",
                             "operation": "save",
                             "reason_code": "nats_url_encrypt_failed",
                         }),
@@ -277,9 +278,7 @@ pub async fn update_nats_settings(
                 }
             };
 
-            if let Err(e) =
-                upsert_global_setting(&tx, SettingKey::NatsUrl, stored_value.clone()).await
-            {
+            if let Err(e) = upsert_global_setting_raw(&tx, "nats.url", stored_value.clone()).await {
                 tracing::error!("Failed to save nats.url: {e:?}");
                 drop(tx);
                 emit_nats_failed_event(
@@ -287,7 +286,7 @@ pub async fn update_nats_settings(
                     actor_type,
                     actor_id,
                     serde_json::json!({
-                        "setting_key": SettingKey::NatsUrl.as_str(),
+                        "setting_key": "nats.url",
                         "operation": "save",
                         "reason_code": "nats_url_save_failed",
                     }),
@@ -295,7 +294,7 @@ pub async fn update_nats_settings(
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
 
-            let key_str = SettingKey::NatsUrl.as_str().to_string();
+            let key_str = "nats.url".to_string();
             let after_view = GlobalSettingView {
                 key: key_str.clone(),
                 value: stored_value,
@@ -312,7 +311,7 @@ pub async fn update_nats_settings(
                         .actor(actor_type, actor_id)
                         .outcome(AuditOutcome::Success)
                         .details(serde_json::json!({
-                            "setting_key": SettingKey::NatsUrl.as_str(),
+                            "setting_key": "nats.url",
                             "changed": true,
                             "operation": "save",
                         }))
@@ -326,7 +325,7 @@ pub async fn update_nats_settings(
                 .actor(actor_type, actor_id)
                 .outcome(AuditOutcome::Success)
                 .details(serde_json::json!({
-                    "setting_key": SettingKey::NatsUrl.as_str(),
+                    "setting_key": "nats.url",
                     "changed": true,
                     "operation": "save",
                 }))
@@ -662,6 +661,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -691,7 +691,7 @@ mod tests {
             uptrakit_audit_log::AuditActorType::User.as_str()
         );
         let details = row.details_json.expect("details");
-        assert_eq!(details["setting_key"], SettingKey::NatsUrl.as_str());
+        assert_eq!(details["setting_key"], "nats.url");
         assert_eq!(details["changed"], serde_json::json!(true));
         assert!(details.get("value").is_none());
         assert!(details.get("url").is_none());
@@ -728,6 +728,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -779,6 +780,7 @@ mod tests {
 
         let first_response = update_nats_settings(
             State(Arc::clone(&state)),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -796,6 +798,7 @@ mod tests {
 
         let second_response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -845,6 +848,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::ApiToken,
@@ -906,6 +910,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -968,6 +973,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
+            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,

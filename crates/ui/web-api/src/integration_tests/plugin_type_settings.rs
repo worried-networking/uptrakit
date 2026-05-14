@@ -42,6 +42,7 @@ async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&admin_token)
+        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
     assert_eq!(

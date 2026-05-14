@@ -36,6 +36,7 @@ async fn register_second_user_gets_user_role() {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
+        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
     assert_eq!(reopen_status, http::StatusCode::OK);
@@ -64,6 +65,7 @@ async fn register_duplicate_email_returns_409() {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
+        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
 
