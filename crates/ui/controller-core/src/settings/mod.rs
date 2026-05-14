@@ -262,7 +262,7 @@ impl Settings {
 
     fn load_network_settings(raw: &RawSettings) -> NetworkSettings {
         let trusted_proxies = raw
-            .get_setting(SettingKey::TrustedProxies)
+            .get("network.trusted_proxies")
             .and_then(|v| {
                 v.as_array().map(|arr| {
                     arr.iter()
@@ -273,13 +273,13 @@ impl Settings {
             .unwrap_or_default();
 
         let real_ip_header = raw
-            .get_setting(SettingKey::RealIpHeader)
+            .get("network.real_ip_header")
             .and_then(|v| v.as_str())
             .unwrap_or(DEFAULT_REAL_IP_HEADER)
             .to_string();
 
         let sans = raw
-            .get_setting(SettingKey::Sans)
+            .get("network.sans")
             .and_then(|v| {
                 v.as_array().map(|arr| {
                     arr.iter()
@@ -290,26 +290,26 @@ impl Settings {
             .unwrap_or_default();
 
         let https_addr = raw
-            .get_setting(SettingKey::HttpsAddr)
+            .get("network.https_addr")
             .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
             .unwrap_or_else(|| {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0))
             });
 
         let forwarded_client_cert_info_header = raw
-            .get_setting(SettingKey::ForwardedClientCertInfoHeader)
+            .get("network.forwarded_client_cert_info_header")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
 
         let forwarded_client_cert_pem_header = raw
-            .get_setting(SettingKey::ForwardedClientCertPemHeader)
+            .get("network.forwarded_client_cert_pem_header")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
 
         let pki_addr = raw
-            .get_setting(SettingKey::PkiAddr)
+            .get("network.pki_addr")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
@@ -666,7 +666,7 @@ impl Settings {
     /// Returns `None` if the key is absent or the stored value is empty.
     pub fn load_nats_url(raw: &RawSettings) -> Option<MaskedUrl> {
         let stored = raw
-            .get_setting(SettingKey::NatsUrl)
+            .get("nats.url")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())?;
 
@@ -708,18 +708,18 @@ impl Settings {
     /// Load zeroconf settings from a [`RawSettings`] map.
     pub fn load_zeroconf_settings(raw: &RawSettings) -> ZeroconfSnapshot {
         let enabled = raw
-            .get_setting(SettingKey::ZeroconfEnabled)
+            .get("zeroconf.enabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
         let url = raw
-            .get_setting(SettingKey::ZeroconfUrl)
+            .get("zeroconf.url")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
 
         let pki_addr = raw
-            .get_setting(SettingKey::ZeroconfPkiAddr)
+            .get("zeroconf.pki_addr")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);

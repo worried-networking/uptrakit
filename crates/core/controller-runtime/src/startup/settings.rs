@@ -7,9 +7,8 @@ use ipnet::IpNet;
 use rootcause::prelude::*;
 #[cfg(feature = "nats")]
 use uptrakit_web_api::MaskedUrl;
-use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::settings::Settings;
-use uptrakit_web_api::settings_store::RawSettingsExt;
+use uptrakit_web_api::settings_store::RawSettings;
 
 use super::ReconciledSettings;
 use crate::AppError;
@@ -18,8 +17,8 @@ use crate::AppError;
 /// `Some(value)` for non-empty values and `None` for empty/null.
 async fn reconcile_nullable_string(
     db: &sea_orm::DatabaseConnection,
-    key: SettingKey,
-    raw: &uptrakit_web_api::settings_store::RawSettings,
+    key: &'static str,
+    raw: &RawSettings,
     cli_value: Option<String>,
     force: bool,
 ) -> crate::Result<Option<String>> {
@@ -58,14 +57,14 @@ pub(crate) async fn reconcile_all_settings(
     db: &sea_orm::DatabaseConnection,
     args: &crate::cli::Args,
     settings: &Settings,
-    global_raw: &uptrakit_web_api::settings_store::RawSettings,
+    global_raw: &RawSettings,
 ) -> crate::Result<ReconciledSettings> {
     let force = args.force_settings_override;
 
     // Network settings
     let trusted_proxies = reconcile_setting_vec::<IpNet>(crate::reconcile::ReconcileParams {
         db,
-        key: SettingKey::TrustedProxies,
+        key: "network.trusted_proxies",
         raw: global_raw,
         cli_value: if args.trusted_proxies.is_empty() {
             None
@@ -94,7 +93,7 @@ pub(crate) async fn reconcile_all_settings(
 
     let real_ip_header = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
-        key: SettingKey::RealIpHeader,
+        key: "network.real_ip_header",
         raw: global_raw,
         cli_value: args.real_ip_header.clone(),
         default_value: uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
@@ -110,7 +109,7 @@ pub(crate) async fn reconcile_all_settings(
 
     let forwarded_cert_info_opt = reconcile_nullable_string(
         db,
-        SettingKey::ForwardedClientCertInfoHeader,
+        "network.forwarded_client_cert_info_header",
         global_raw,
         args.forwarded_client_cert_info_header.clone(),
         force,
@@ -122,7 +121,7 @@ pub(crate) async fn reconcile_all_settings(
 
     let forwarded_cert_pem_opt = reconcile_nullable_string(
         db,
-        SettingKey::ForwardedClientCertPemHeader,
+        "network.forwarded_client_cert_pem_header",
         global_raw,
         args.forwarded_client_cert_pem_header.clone(),
         force,
@@ -134,7 +133,7 @@ pub(crate) async fn reconcile_all_settings(
 
     let pki_addr_opt = reconcile_nullable_string(
         db,
-        SettingKey::PkiAddr,
+        "network.pki_addr",
         global_raw,
         args.pki_addr.clone(),
         force,
@@ -161,7 +160,7 @@ pub(crate) async fn reconcile_all_settings(
         // Case 1: --san provided — standard reconcile
         reconcile_setting_vec::<String>(crate::reconcile::ReconcileParams {
             db,
-            key: SettingKey::Sans,
+            key: "network.sans",
             raw: global_raw,
             cli_value: Some(args.sans.clone()),
             default_value: vec![],
@@ -181,7 +180,7 @@ pub(crate) async fn reconcile_all_settings(
         .context(AppError::Settings)?
     } else {
         // No --san: check if DB has a value
-        let db_sans = global_raw.get_setting(SettingKey::Sans).and_then(|v| {
+        let db_sans = global_raw.get("network.sans").and_then(|v| {
             v.as_array().map(|arr| {
                 arr.iter()
                     .filter_map(|s| s.as_str().map(String::from))
@@ -207,9 +206,9 @@ pub(crate) async fn reconcile_all_settings(
                     sans = ?san_strings,
                     "first start: auto-detected SANs, saving to database"
                 );
-                uptrakit_web_api::settings_store::upsert_global_setting(
+                uptrakit_web_api::settings_store::upsert_global_setting_raw(
                     db,
-                    SettingKey::Sans,
+                    "network.sans",
                     serde_json::json!(san_strings),
                 )
                 .await
@@ -222,7 +221,7 @@ pub(crate) async fn reconcile_all_settings(
 
     let https_addr = reconcile_socket_addr(
         db,
-        SettingKey::HttpsAddr,
+        "network.https_addr",
         global_raw,
         args.https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
@@ -242,7 +241,7 @@ pub(crate) async fn reconcile_all_settings(
     let nats_url = {
         let nats_url_raw = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
             db,
-            key: SettingKey::NatsUrl,
+            key: "nats.url",
             raw: global_raw,
             cli_value: args.nats_url.clone(),
             default_value: String::new(),
@@ -290,7 +289,7 @@ pub(crate) async fn reconcile_all_settings(
         let zeroconf_enabled =
             crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
                 db,
-                key: SettingKey::ZeroconfEnabled,
+                key: "zeroconf.enabled",
                 raw: global_raw,
                 cli_value: if args.zeroconf { Some(true) } else { None },
                 default_value: false,
@@ -305,7 +304,7 @@ pub(crate) async fn reconcile_all_settings(
 
         let zeroconf_url_opt = reconcile_nullable_string(
             db,
-            SettingKey::ZeroconfUrl,
+            "zeroconf.url",
             global_raw,
             args.zeroconf_url.clone(),
             force,
@@ -319,7 +318,7 @@ pub(crate) async fn reconcile_all_settings(
             .or_else(|| pki_addr_opt.clone());
         let zeroconf_pki_addr_opt = reconcile_nullable_string(
             db,
-            SettingKey::ZeroconfPkiAddr,
+            "zeroconf.pki_addr",
             global_raw,
             zeroconf_pki_addr_cli,
             force,
@@ -409,27 +408,26 @@ where
         force,
         convert,
     } = params;
-    let db_key = key.as_str();
-    let db_value = raw.get(db_key).and_then(convert.from_json);
+    let db_value = raw.get(key).and_then(convert.from_json);
 
     match (db_value, cli_value) {
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
-                tracing::info!(key = db_key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
-                uptrakit_web_api::settings_store::upsert_global_setting(
+                tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
+                uptrakit_web_api::settings_store::upsert_global_setting_raw(
                     db,
                     key,
                     (convert.to_json)(&cli_val),
                 )
                 .await
                 .map_err(|e| {
-                    tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
+                    tracing::error!(key, error = ?e, "failed to upsert setting");
                     rootcause::report!(crate::reconcile::ReconcileError)
                 })?;
                 Ok(cli_val)
             } else {
                 tracing::warn!(
-                    key = db_key,
+                    key,
                     cli = %DisplayVec(&cli_val),
                     db = %DisplayVec(&db_val),
                     "CLI value differs from DB; using DB value (pass --force-settings-override to overwrite)"
@@ -438,33 +436,33 @@ where
             }
         }
         (Some(db_val), _) => {
-            tracing::debug!(key = db_key, value = %DisplayVec(&db_val), "using DB value");
+            tracing::debug!(key, value = %DisplayVec(&db_val), "using DB value");
             Ok(db_val)
         }
         (None, Some(cli_val)) => {
-            tracing::info!(key = db_key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
-            uptrakit_web_api::settings_store::upsert_global_setting(
+            tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
+            uptrakit_web_api::settings_store::upsert_global_setting_raw(
                 db,
                 key,
                 (convert.to_json)(&cli_val),
             )
             .await
             .map_err(|e| {
-                tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
+                tracing::error!(key, error = ?e, "failed to upsert setting");
                 rootcause::report!(crate::reconcile::ReconcileError)
             })?;
             Ok(cli_val)
         }
         (None, None) => {
-            tracing::info!(key = db_key, value = %DisplayVec(&default_value), "seeding DB setting from default");
-            uptrakit_web_api::settings_store::upsert_global_setting(
+            tracing::info!(key, value = %DisplayVec(&default_value), "seeding DB setting from default");
+            uptrakit_web_api::settings_store::upsert_global_setting_raw(
                 db,
                 key,
                 (convert.to_json)(&default_value),
             )
             .await
             .map_err(|e| {
-                tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
+                tracing::error!(key, error = ?e, "failed to upsert setting");
                 rootcause::report!(crate::reconcile::ReconcileError)
             })?;
             Ok(default_value)
@@ -475,8 +473,8 @@ where
 /// Reconcile a `SocketAddr` global setting.
 async fn reconcile_socket_addr(
     db: &sea_orm::DatabaseConnection,
-    key: SettingKey,
-    raw: &uptrakit_web_api::settings_store::RawSettings,
+    key: &'static str,
+    raw: &RawSettings,
     cli_value: Option<SocketAddr>,
     default_value: SocketAddr,
     force: bool,
