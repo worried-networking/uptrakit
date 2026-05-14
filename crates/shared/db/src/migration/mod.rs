@@ -70,6 +70,7 @@ mod m20260430_000002_awaiting_restart_since;
 mod m20260430_000003_update_history_host_active_index;
 mod m20260510_000001_instance_plugin_setting;
 mod m20260512_000001_device_flow_rfc8628;
+mod m20260512_000001_drop_file_keys;
 mod m20260513_000001_oauth_clients;
 mod m20260513_000002_oauth_consents;
 mod m20260513_000003_oauth_authorization_requests;
@@ -160,6 +161,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000005_oauth_refresh_tokens::Migration),
             Box::new(m20260513_000006_oauth_controller_instances::Migration),
             Box::new(m20260514_000001_audit_logs_v2::Migration),
+            Box::new(m20260512_000001_drop_file_keys::Migration),
             Box::new(m20260515_000001_normalize_cert_serial_uppercase::Migration),
             Box::new(m20260516_000001_2fa::Migration),
         ]
