@@ -18,17 +18,14 @@ struct SkillEntryDto {
     not(test),
     expect(
         dead_code,
-        reason = "forward-declared for future plugin tasks; struct not yet constructed outside tests"
+        reason = "used by discovery/detection/update modules landing in Tasks 6–9"
     )
 )]
 #[derive(Debug)]
 pub(crate) struct SkillLockEntry {
     pub(crate) name: String,
-    #[expect(
-        dead_code,
-        reason = "stored from lock file for completeness; not read at runtime"
-    )]
-    pub(crate) source: String,
+    /// Stored from lock file for completeness; not read at runtime.
+    pub(crate) _source: String,
     pub(crate) source_url: String,
     pub(crate) source_type: String,
     pub(crate) skill_path: String,
@@ -39,7 +36,7 @@ pub(crate) struct SkillLockEntry {
     not(test),
     expect(
         dead_code,
-        reason = "forward-declared for future plugin tasks; not called outside tests"
+        reason = "called by discovery/detection/update modules landing in Tasks 6–9"
     )
 )]
 pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
@@ -57,7 +54,7 @@ pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
         };
         entries.push(SkillLockEntry {
             name,
-            source: dto.source,
+            _source: dto.source,
             source_url: dto.source_url,
             source_type: dto.source_type,
             skill_path: dto.skill_path,
@@ -69,22 +66,12 @@ pub(crate) fn parse_skill_lock(json: &str) -> Result<Vec<SkillLockEntry>> {
 
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "forward-declared for future plugin tasks; not called outside tests"
-    )
+    expect(dead_code, reason = "called by discovery module landing in Task 6")
 )]
 pub(crate) fn encode_skill_identifier(source_url: &str, skill_path: &str) -> String {
     format!("{source_url}#{skill_path}")
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called from SkillsConfig::validate_identifier; SkillsConfig not yet externally constructed"
-    )
-)]
 pub(crate) fn parse_skill_identifier(id: &str) -> Result<(Url, String)> {
     if id.len() > 1024 {
         return Err(report!(SkillsError::InvalidIdentifier(
