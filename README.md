@@ -23,6 +23,35 @@ confirmation**.
 - Agents accept no inbound connections
 - Updates are always manual
 
+## Configuration
+
+Uptrakit Controller reads its configuration from a single TOML file.
+
+**Default paths** (first match wins):
+
+1. `~/.config/uptrakit/controller/controller.toml` (Linux XDG config dir)
+2. `/etc/uptrakit/controller.toml`
+
+**Override:**
+
+- `--config <path>` flag
+- `UPTRAKIT_CONFIG` environment variable
+
+**Surviving CLI flags** (all other flags moved to the TOML file):
+
+| Flag                      | Description                                                   |
+| ------------------------- | ------------------------------------------------------------- |
+| `--config <path>`         | Path to the TOML configuration file                           |
+| `--master-key-from <src>` | Master encryption key source (`file:`, `env:`, or inline hex) |
+| `--migrate-and-exit`      | Run DB migrations and exit                                    |
+| `--check-config`          | Validate the config file and exit                             |
+| `--version`               | Print version information                                     |
+| `--verbose` / `-v`        | Increase log verbosity                                        |
+
+For the full config schema and reload mechanics, see the
+[operator runbook](docs/end-user/operator-runbook-reload.md) and
+[ADR 0008](docs/adr/0008-graceful-reload-architecture.md).
+
 ## Development
 
 ```sh
