@@ -319,7 +319,12 @@ mod tests {
             )),
             coordinator_handle: {
                 let (tx, _) = tokio::sync::mpsc::unbounded_channel();
-                uptrakit_config_reload::ReloadCoordinator::new(vec![], tx).1
+                uptrakit_config_reload::ReloadCoordinator::new(
+                    vec![],
+                    tx,
+                    std::sync::Arc::new(uptrakit_config_reload::NoopAlertWriter),
+                )
+                .1
             },
             settings_version_cache: uptrakit_config_reload::SettingsVersionCache::new(),
             db_config_rx: config_rx_for_resolve_ip.db,

@@ -10,7 +10,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use rootcause::prelude::*;
 use tokio::sync::watch;
-use uptrakit_audit_log::AuditLogDispatcher;
+use uptrakit_audit_log::{AuditEmitter, AuditLogDispatcher};
+use uptrakit_config_reload::alerts::{AlertSeverity, SystemAlertWriter};
 use uptrakit_config_reload::config::AuditConfig;
 use uptrakit_config_reload::defaults::WATCHDOG_AUDIT;
 use uptrakit_config_reload::delta::RuntimeConfigDelta;
@@ -144,6 +145,31 @@ uptrakit_config_reload::reloadable_erased_impl!(
     AuditDispatcherReloadable,
     RuntimeConfigDelta::Audit
 );
+
+// ---------------------------------------------------------------------------
+// Alert writer adapter
+// ---------------------------------------------------------------------------
+
+/// Adapter that bridges [`SystemAlertWriter`] to [`AuditEmitter::write_system_alert`].
+///
+/// Pass an `Arc<AuditAlertWriter>` as the `alert_writer` argument to
+/// [`uptrakit_config_reload::ReloadCoordinator::new`] at startup.
+pub(crate) struct AuditAlertWriter {
+    emitter: AuditEmitter,
+}
+
+impl AuditAlertWriter {
+    pub(crate) fn new(emitter: AuditEmitter) -> Self {
+        Self { emitter }
+    }
+}
+
+#[async_trait::async_trait]
+impl SystemAlertWriter for AuditAlertWriter {
+    async fn write(&self, severity: AlertSeverity, message: String) {
+        self.emitter.write_system_alert(severity.as_str(), &message);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests
