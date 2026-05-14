@@ -49,8 +49,11 @@ pub(crate) fn take_inherited_listeners() -> Result<Option<InheritedSockets>, Rep
     }
     let https = take_one(&mut lf, 0, slot_name(&ListenerSlot::Https))?;
     let pki = take_one(&mut lf, 1, slot_name(&ListenerSlot::Pki))?;
-    drop(https.set_nonblocking(true));
-    drop(pki.set_nonblocking(true));
+    https
+        .set_nonblocking(true)
+        .map_err(|e| rootcause::report!("set_nonblocking failed for Https slot: {e}"))?;
+    pki.set_nonblocking(true)
+        .map_err(|e| rootcause::report!("set_nonblocking failed for Pki slot: {e}"))?;
     let https = TcpListener::from_std(https)
         .map_err(|e| rootcause::report!("from_std failed for Https slot: {e}"))?;
     let pki = TcpListener::from_std(pki)
