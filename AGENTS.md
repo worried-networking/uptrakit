@@ -1638,7 +1638,8 @@ Two compile-time-enforced classes:
 
 Domain entities that are snapshot targets derive `AuditView`. The macro generates a deterministic, secret-safe JSON
 projection (`EncryptedString` excluded at compile time; `MaskedUrl`/`MaskedEmail` self-mask). Attributes:
-`#[audit(target_type)]`, `#[audit(skip)]`, `#[audit(include)]`, `#[audit(project_with = "<fn>")]`.
+`#[audit(target_type)]`, `#[audit(skip)]`, `#[audit(include)]`, `#[audit(project_with = "<fn>")]`,
+`#[audit(id_field = "...")]`, `#[audit(display_field = "...")]`, `#[audit(truncatable)]` (last-resort 16 KB cap).
 
 ### Coverage gate
 

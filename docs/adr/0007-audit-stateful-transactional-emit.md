@@ -74,9 +74,9 @@ On SQLite the budget concern is different: mutation transactions are already gat
 additional latency is bounded by the single serialized write path that SQLite already imposes.
 The budget applies to the Postgres path where concurrent writers are possible.
 
-A criterion benchmark in `crates/shared/audit-log/benches/` measures the per-transaction overhead
-of `emit_stateful` against a baseline mutation-only transaction. The measured P99 regression is
-recorded in the implementation plan notes. A regression beyond 5 ms is a signal to investigate
+A criterion benchmark in `crates/shared/audit-log/benches/emit_stateful.rs` measures the
+per-transaction overhead of `emit_stateful` against a baseline mutation-only transaction. Run it
+with `cargo bench -p uptrakit-audit-log`. A regression beyond 5 ms is a signal to investigate
 INSERT path optimizations (batching, async pre-serialization); it is not a CI gate but is reviewed
 during the landing.
 
@@ -135,6 +135,14 @@ the producer can silently omit snapshots. The typestate builder makes the promis
 **Per-action-kind retention.** Deferred to V3. Compliance-driven retention distinctions
 (e.g. keeping stateful rows for 7 years and event rows for 90 days) require a per-action-kind
 policy engine that is out of scope for the V2 data-model release.
+
+### `AuditActionKind` is intentionally closed
+
+`AuditActionKind` does **not** carry `#[non_exhaustive]`. This is a deliberate exception to the
+workspace-wide rule. Adding a third kind is not an additive change — it would reshape every
+producer call site, the typestate builder, and the wire ingress validator. The closed enum makes
+that contract visible; a future architectural change to the kind taxonomy is a new ADR, not a
+back-compat extension.
 
 ## References
 

@@ -107,11 +107,11 @@ remain V1-sized.
 
 **Worked retention example:**
 
-> 100 stateful mutations/day × 16 KB average × 90 days = ~144 MB/tenant for stateful rows
+> 100 stateful mutations/day × 16 KB per row (one snapshot column at cap) × 90 days = ~144 MB/tenant for stateful rows
 
-Use the `audit_log.retention_days` setting to dial this down if storage pressure surfaces. Lower
-values trade audit history depth for storage. See `docs/development/audit-logs.md` for how to
-configure the setting.
+Worst-case: two 16 KB columns per row = ~32 KB/row. Use the `audit_log.retention_days` setting
+(`AuditLogRetentionDays`) to dial this down if storage pressure surfaces. Lower values trade
+audit history depth for storage.
 
 ## V1→V2 cutover note
 
@@ -167,7 +167,7 @@ The `audit_log.retention_days` setting applies globally; per-tenant enforcement 
 
 ## See also
 
-- [Audit Logs Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
-- [Audit Logs API Reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
+- [Audit Logs Development](../development/audit-logs.md)
+- [Audit Logs API Reference](../api/audit-logs.md)
 - [Audit Logs End-User Guide](../end-user/audit-logs.md)
 - [Auth and Authorization](auth-and-authorization.md)
