@@ -535,6 +535,39 @@ cargo test -p uptrakit-integration-tests -- --ignored agent_enrolls
 A dedicated `system-integration-tests` CI job builds the Docker image and runs these tests on
 `ubuntu-latest`.
 
+## Watchdog-Revert Tests
+
+Pattern for testing the coordinator's atomic revert-all behaviour:
+
+1. Build a coordinator with mock `Reloadable` implementations — one that succeeds `apply` but fails `health_check`.
+2. Trigger a reload cycle.
+3. Assert all subsystems were reverted (`revert()` called on each).
+4. Assert the coordinator entered `Degraded` state.
+5. Assert the expected audit row was emitted via the test audit backend.
+
+```rust
+// Example using the coordinator test harness in crates/shared/config-reload/src/coordinator/
+let coord = ReloadCoordinator::new(vec![
+    Box::new(AlwaysOkReloadable::new("db")),
+    Box::new(HealthCheckFailReloadable::new("tls")),
+], alert_writer);
+coord.reload(delta).await;
+assert_eq!(coord.state(), CoordinatorState::Degraded(_));
+```
+
+## File-Watch Tempdir Tests
+
+Pattern for testing the debounced file-watcher without relying on real filesystem timing:
+
+1. Create a `tempfile::TempDir` and write the initial TOML via atomic-rename (`write to .tmp`, then `rename`).
+2. Attach a `notify-debouncer-full` watcher with a 500 ms debounce window.
+3. Write a changed file via atomic-rename.
+4. Advance `tokio::time` by 600 ms (use `#[tokio::test(start_paused = true)]` — this test _does_ use
+   `tokio::time::advance`).
+5. Assert exactly one `ReloadRequest` is received (debounce collapses rapid writes into one event).
+
+Note: use `start_paused = true` only for this pattern — it requires `tokio::time` API usage.
+
 ## Frontend Testing
 
 The frontend uses [Vitest](https://vitest.dev/) for unit and component tests and
