@@ -460,6 +460,17 @@
 										{/if}
 									</div>
 								{/each}
+								{#if selected.details_json}
+									<details class="mt-2">
+										<summary class="cursor-pointer text-xs text-[var(--text-secondary)]">Event details</summary>
+										<pre
+											class="mt-2 overflow-auto rounded-card bg-[var(--bg-raised)] p-4 text-xs text-[var(--text-primary)]">{JSON.stringify(
+												selected.details_json,
+												null,
+												2
+											)}</pre>
+									</details>
+								{/if}
 							</div>
 						{/if}
 					</div>
