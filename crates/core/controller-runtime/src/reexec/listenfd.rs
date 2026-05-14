@@ -1,11 +1,4 @@
 //! Helpers for claiming inherited TCP sockets passed via `LISTEN_FDS`.
-//!
-//! This module is fully implemented but not yet wired into the startup path;
-//! the integration happens in a later graceful-reload task.
-#![expect(
-    dead_code,
-    reason = "wired into startup path in a later graceful-reload task"
-)]
 
 use listenfd::ListenFd;
 use rootcause::Report;
@@ -80,4 +73,33 @@ fn slot_name(slot: &ListenerSlot) -> &'static str {
         ListenerSlot::Https => "Https",
         ListenerSlot::Pki => "Pki",
     }
+}
+
+/// Clear the `FD_CLOEXEC` flag on a raw file descriptor so it survives `exec()`.
+///
+/// Called by the reexec path for each bound listener before replacing the
+/// process image.  Without this step the OS closes all `O_CLOEXEC` descriptors
+/// on exec and the new process image receives empty `LISTEN_FDS` slots.
+///
+/// # Errors
+///
+/// Returns an error if the `fcntl` call fails (e.g. the file descriptor is
+/// invalid or not open).
+///
+/// # Safety
+///
+/// The caller must ensure `fd` is a valid, open file descriptor for the
+/// lifetime of this call.  `RawFd` is unguarded; passing a closed or
+/// reused descriptor yields undefined behaviour in the kernel call.
+pub(crate) fn clear_cloexec_raw(fd: std::os::unix::io::RawFd) -> Result<(), Report> {
+    use std::os::unix::io::BorrowedFd;
+
+    use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+
+    // SAFETY: The caller guarantees `fd` is valid and open.  We borrow it
+    // only for the duration of the `fcntl` call.
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    fcntl(borrowed, FcntlArg::F_SETFD(FdFlag::empty()))
+        .map_err(|e| rootcause::report!("fcntl F_SETFD on fd {fd}: {e}"))?;
+    Ok(())
 }

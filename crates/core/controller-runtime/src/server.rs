@@ -30,6 +30,10 @@ pub(crate) struct ServerOptions {
     pub static_dir: Option<PathBuf>,
     /// axum_server Handle for graceful shutdown.
     pub handle: axum_server::Handle<SocketAddr>,
+    /// Pre-bound HTTPS listener inherited from the parent process via `LISTEN_FDS`.
+    ///
+    /// When `Some`, used directly instead of calling `bind(https_addr)`.
+    pub inherited_listener: Option<std::net::TcpListener>,
 }
 
 /// Run the HTTPS server.
@@ -107,10 +111,19 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 
-    let listener = std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?;
-    listener.set_nonblocking(true).map_err(ServerError::Io)?;
-
-    tracing::info!("HTTPS server listening on {}", cfg.https_addr);
+    let listener = match cfg.inherited_listener {
+        Some(fd) => {
+            tracing::info!(
+                "HTTPS server reusing inherited socket on {}",
+                cfg.https_addr
+            );
+            fd
+        }
+        None => {
+            tracing::info!("HTTPS server listening on {}", cfg.https_addr);
+            std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?
+        }
+    };
     axum_server::from_tcp(listener)
         .context_to::<ServerError>()?
         .acceptor(mtls_acceptor)
@@ -126,12 +139,27 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
 ///
 /// Started when `--pki-http listener` is set. Required for Nginx `ssl_ocsp_responder`
 /// which only supports `http://` OCSP responder URLs.
-pub(crate) async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<()> {
+///
+/// When `inherited` is `Some`, the pre-bound socket is reused instead of calling
+/// `bind(addr)` — used on the reexec path to avoid a brief port-unavailable window.
+pub(crate) async fn run_pki_http(
+    addr: SocketAddr,
+    app_state: Arc<AppState>,
+    inherited: Option<std::net::TcpListener>,
+) -> Result<()> {
     let router = uptrakit_web_api::build_pki_router(app_state);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .context_to::<ServerError>()?;
-    tracing::info!("PKI HTTP server listening on {addr}");
+    let listener = match inherited {
+        Some(fd) => {
+            tracing::info!("PKI HTTP server reusing inherited socket on {addr}");
+            tokio::net::TcpListener::from_std(fd).context_to::<ServerError>()?
+        }
+        None => {
+            tracing::info!("PKI HTTP server listening on {addr}");
+            tokio::net::TcpListener::bind(addr)
+                .await
+                .context_to::<ServerError>()?
+        }
+    };
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
