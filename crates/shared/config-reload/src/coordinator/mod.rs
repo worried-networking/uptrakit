@@ -296,15 +296,25 @@ impl ReloadCoordinatorHandle {
         self.tx.send(request).await
     }
 
-    /// Stub until Plan 3 wires the control channel.
+    /// Clear the Degraded state if the coordinator is currently degraded.
+    ///
+    /// This is a direct state transition — the operator asserts that the
+    /// underlying issue has been resolved. No health re-check is performed here;
+    /// that requires the full list of reloadables held by the state machine.
+    /// If the coordinator is [`CoordinatorState::Idle`] or
+    /// [`CoordinatorState::Reloading`], this is a no-op.
     ///
     /// # Errors
     ///
-    /// Always returns `Err` — restart the process to recover from Degraded
-    /// until the control channel is implemented.
+    /// Currently infallible; returns `Ok(())` always. The signature is
+    /// `Result` so that future versions can propagate channel send errors
+    /// without a breaking change.
     pub async fn clear_degraded(&self) -> Result<(), rootcause::Report> {
-        Err(rootcause::report!(
-            "clear_degraded not yet wired (Plan 3 follow-up); restart to recover from Degraded"
-        ))
+        let current = (**self.state.load()).clone();
+        if matches!(current, CoordinatorState::Degraded(_)) {
+            self.state
+                .store(std::sync::Arc::new(CoordinatorState::Idle));
+        }
+        Ok(())
     }
 }
