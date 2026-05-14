@@ -37,11 +37,7 @@ impl ZeroconfConfig {
                     "zeroconf.url is empty when enabled=true".into()
                 ));
             }
-            if self.pki_addr.is_empty() {
-                bail!(ConfigReloadError::Validate(
-                    "zeroconf.pki_addr is empty when enabled=true".into()
-                ));
-            }
+            // pki_addr is optional here; runtime falls back to network.pki.addr when empty.
         }
         Ok(())
     }

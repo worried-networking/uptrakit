@@ -52,9 +52,6 @@ impl LogConfig {
     /// Returns an error if `path` is empty or `level` is not a valid
     /// [`tracing::Level`].
     pub fn validate(&self) -> Result<(), Report> {
-        if self.path.is_empty() {
-            bail!(ConfigReloadError::Validate("log.path is empty".into()));
-        }
         self.level.parse::<tracing::Level>().map_err(|e| {
             report!(ConfigReloadError::Validate(format!(
                 "log.level {:?} is not a valid tracing level: {e}",

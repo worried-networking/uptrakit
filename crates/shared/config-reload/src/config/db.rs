@@ -70,9 +70,6 @@ impl DbConfig {
     /// Returns an error if `url` is empty, `pool_size` is zero, or
     /// `acquire_timeout_ms` is zero.
     pub fn validate(&self) -> Result<(), Report> {
-        if self.url.is_empty() {
-            bail!(ConfigReloadError::Validate("db.url is empty".into()));
-        }
         if self.pool_size == 0 {
             bail!(ConfigReloadError::Validate(
                 "db.pool_size must be >= 1".into()

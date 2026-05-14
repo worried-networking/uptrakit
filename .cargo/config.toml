@@ -13,4 +13,4 @@ index = "sparse+https://index.crates.io/"
 # These settings do not affect release builds or CI unless explicitly opted in.
 
 [target.'cfg(target_os = "macos")']
-rustflags = ["-C", "split-debuginfo=unpacked"]
+rustflags = ["-C", "split-debuginfo=unpacked", "--cfg", "tokio_allow_from_blocking_fd"]

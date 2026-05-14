@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub struct RuntimeConfig {
     /// Database connection and pool settings.
+    #[serde(default)]
     pub db: DbConfig,
     /// Encryption master key settings.
     pub master_key: MasterKeyConfig,
@@ -42,13 +43,16 @@ pub struct RuntimeConfig {
     /// NATS messaging server settings.
     pub nats: NatsConfig,
     /// Audit log settings.
+    #[serde(default)]
     pub audit: AuditConfig,
     /// Logging settings.
+    #[serde(default)]
     pub log: LogConfig,
     /// Zero-configuration auto-discovery settings.
     #[serde(default)]
     pub zeroconf: ZeroconfConfig,
     /// Which services run embedded inside the controller binary.
+    #[serde(default)]
     pub embedded_services: EmbeddedServicesConfig,
 }
 
