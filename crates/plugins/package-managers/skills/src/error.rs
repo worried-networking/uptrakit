@@ -13,10 +13,6 @@ pub(crate) enum SkillsError {
     InvalidIdentifier(String),
 
     #[error("unsupported source type: {0}")]
-    #[expect(
-        dead_code,
-        reason = "constructed in releases.rs, which lands in Task 8"
-    )]
     UnsupportedSource(String),
 
     #[error("plugin error: {0}")]

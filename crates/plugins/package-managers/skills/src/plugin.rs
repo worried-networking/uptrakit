@@ -8,7 +8,7 @@ use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ExecuteUpdateResult, HostRequirements, HostRuntime, PluginConfigValidationError,
     PluginError, PluginFamily, ReleaseFetcher, ReleaseInfo, Result, UpdateOutputSender,
-    UpstreamRelease, declare_plugin, roles::ReleaseFetchContext,
+    declare_plugin, roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
@@ -23,7 +23,6 @@ pub struct SkillsPlugin {
     #[expect(dead_code, reason = "read by executor modules landing in Tasks 7–9")]
     pub(crate) config: SkillsConfig,
     pub(crate) executor: Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
-    #[expect(dead_code, reason = "read by release-fetch module landing in Task 8")]
     pub(crate) provider: Option<Arc<dyn GitHubProviderClient>>,
 }
 
@@ -116,14 +115,8 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
 
 // ── Temporary role stubs ─────────────────────────────────────────────────────
 // Discoverer is implemented in discovery.rs (Task 6).
-// VersionDetector, ReleaseFetcher, UpdateExecutor stubs will be replaced in Tasks 7–9.
-
-#[async_trait]
-impl ReleaseFetcher for SkillsPlugin {
-    async fn fetch_releases(&self, _id: &str) -> Result<Vec<UpstreamRelease>> {
-        Ok(vec![])
-    }
-}
+// ReleaseFetcher is implemented in releases.rs (Task 8).
+// VersionDetector, UpdateExecutor stubs will be replaced in Tasks 7 and 9.
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SkillsPlugin {
