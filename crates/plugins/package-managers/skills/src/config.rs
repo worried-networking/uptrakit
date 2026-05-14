@@ -3,24 +3,12 @@ use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationEr
 
 use crate::lock::parse_skill_identifier;
 
-#[expect(
-    dead_code,
-    reason = "used by SkillsConfig::default; not yet referenced from plugin entry point"
-)]
 fn default_skills_version() -> String {
     "latest".to_string()
 }
 
 /// Configuration for the Agent Skills package-manager plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[expect(
-    unreachable_pub,
-    reason = "will be re-exported from lib.rs once the plugin entry point is wired up"
-)]
-#[expect(
-    dead_code,
-    reason = "plugin entry point not yet wired up; struct will be constructed in a later task"
-)]
 pub struct SkillsConfig {
     /// npm dist-tag or version string passed to `npx skills@<version>`.
     ///

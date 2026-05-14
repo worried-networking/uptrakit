@@ -5,34 +5,19 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the Agent Skills plugin.
 #[derive(Debug, Error)]
-#[expect(
-    dead_code,
-    reason = "several variants are forward-declared for later tasks and not yet constructed"
-)]
 pub(crate) enum SkillsError {
     #[error("lock file malformed: {0}")]
     LockFileMalformed(String),
-
-    #[error("lock entry not found: {0}")]
-    LockEntryNotFound(String),
 
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),
 
     #[error("unsupported source type: {0}")]
+    #[expect(
+        dead_code,
+        reason = "constructed in releases.rs, which lands in Task 8"
+    )]
     UnsupportedSource(String),
-
-    #[error("GitHub provider unavailable: {0}")]
-    ProviderUnavailable(String),
-
-    #[error("GitHub provider error: {0}")]
-    ProviderError(String),
-
-    #[error("command failed with exit code {0}")]
-    CommandFailed(i32),
-
-    #[error("configuration error: {0}")]
-    Configuration(String),
 
     #[error("plugin error: {0}")]
     Plugin(String),
@@ -42,8 +27,7 @@ pub(crate) enum SkillsError {
 pub(crate) type Result<T> = std::result::Result<T, Report<SkillsError>>;
 
 impl_report_conversion!(SkillsError => PluginError, |e| match &e {
-    SkillsError::InvalidIdentifier(_) | SkillsError::Configuration(_) =>
-        PluginError::Configuration(e.to_string()),
+    SkillsError::InvalidIdentifier(_) => PluginError::Configuration(e.to_string()),
     _ => PluginError::PluginInternal(e.to_string()),
 });
 impl_report_conversion!(PluginError => SkillsError, |e| SkillsError::Plugin(e.to_string()));
