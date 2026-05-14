@@ -122,37 +122,43 @@ mod tests {
     }
 
     const SAMPLE_LOCK: &str = r#"{
-      "brainstorming": {
-        "source": "obra/superpowers",
-        "sourceUrl": "https://github.com/obra/superpowers",
-        "sourceType": "github",
-        "skillPath": "skills/brainstorming/SKILL.md",
-        "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        "installedAt": "2025-01-01T00:00:00Z",
-        "updatedAt": "2025-01-02T00:00:00Z"
+      "version": 3,
+      "skills": {
+        "brainstorming": {
+          "source": "obra/superpowers",
+          "sourceUrl": "https://github.com/obra/superpowers",
+          "sourceType": "github",
+          "skillPath": "skills/brainstorming/SKILL.md",
+          "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "installedAt": "2025-01-01T00:00:00Z",
+          "updatedAt": "2025-01-02T00:00:00Z"
+        }
       }
     }"#;
 
     const MIXED_LOCK: &str = r#"{
-      "brainstorming": {
-        "source": "obra/superpowers",
-        "sourceUrl": "https://github.com/obra/superpowers",
-        "sourceType": "github",
-        "skillPath": "skills/brainstorming/SKILL.md",
-        "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-      },
-      "local-skill": {
-        "source": "local/source",
-        "sourceUrl": "https://gitlab.com/local/source",
-        "sourceType": "gitlab",
-        "skillPath": "skills/local-skill/SKILL.md",
-        "skillFolderHash": "aabbccddaabbccddaabbccddaabbccddaabbccdd"
+      "version": 3,
+      "skills": {
+        "brainstorming": {
+          "source": "obra/superpowers",
+          "sourceUrl": "https://github.com/obra/superpowers",
+          "sourceType": "github",
+          "skillPath": "skills/brainstorming/SKILL.md",
+          "skillFolderHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        },
+        "local-skill": {
+          "source": "local/source",
+          "sourceUrl": "https://gitlab.com/local/source",
+          "sourceType": "gitlab",
+          "skillPath": "skills/local-skill/SKILL.md",
+          "skillFolderHash": "aabbccddaabbccddaabbccddaabbccddaabbccdd"
+        }
       }
     }"#;
 
     #[tokio::test]
     async fn empty_lock_file_returns_empty_discovery() {
-        let plugin = make_plugin("{}", 0);
+        let plugin = make_plugin(r#"{"version": 3, "skills": {}}"#, 0);
         let result = plugin.discover_software().await.expect("ok");
         assert!(result.is_empty());
     }
