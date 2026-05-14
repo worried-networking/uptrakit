@@ -6,7 +6,7 @@ use futures_util::future::join_all;
 use uptrakit_backoff::Backoff;
 use uptrakit_plugin_infrastructure_registry::{
     BatchDetectItem, BatchFetchItem, HostRuntime, PluginCapability, PluginError, PluginResult,
-    ReleaseFetcher, get_descriptor,
+    ReleaseFetchContext, ReleaseFetcher, get_descriptor,
 };
 use uptrakit_wire::{
     PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
@@ -346,7 +346,8 @@ fn default_fetcher_factory(
         )))
     })?;
 
-    (slot.create)(config, runtime)
+    let fetch_ctx = ReleaseFetchContext::none();
+    (slot.create)(config, runtime, &fetch_ctx)
 }
 
 /// Refresh the package index for each unique fetch group.
@@ -641,7 +642,9 @@ async fn fetch_latest(
         )
     })?;
 
-    let fetcher = (slot.create)(&effective_config, runtime).map_err(|e| e.to_string())?;
+    let fetch_ctx = ReleaseFetchContext::none();
+    let fetcher =
+        (slot.create)(&effective_config, runtime, &fetch_ctx).map_err(|e| e.to_string())?;
 
     let pkg = &assignment.package_identifier;
     let releases = match run_with_retry("fetch_releases", MAX_RETRIES, || {

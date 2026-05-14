@@ -136,6 +136,12 @@ impl ReleaseFetchContext {
     }
 }
 
+impl Default for ReleaseFetchContext {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 /// Fetch upstream releases for software packages.
 #[async_trait]
 pub trait ReleaseFetcher: PluginMeta {
@@ -761,6 +767,44 @@ mod release_fetch_context_tests {
         assert!(ctx.global_provider_lookup.is_none());
         #[cfg(not(feature = "catalog"))]
         let _ = ctx;
+    }
+
+    #[test]
+    fn release_fetch_context_default_equals_none() {
+        // Default is a convenience alias for none().
+        let ctx = ReleaseFetchContext::default();
+        #[cfg(feature = "catalog")]
+        assert!(ctx.global_provider_lookup.is_none());
+        #[cfg(not(feature = "catalog"))]
+        let _ = ctx;
+    }
+
+    #[cfg(feature = "catalog")]
+    #[test]
+    fn release_fetch_context_with_lookup_opt_some_roundtrips_lookup() {
+        use crate::descriptor::GlobalProviderLookup;
+        use std::sync::Arc;
+
+        struct DummyLookup;
+        impl GlobalProviderLookup for DummyLookup {
+            fn lookup(&self, _id: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+                None
+            }
+        }
+
+        let lookup: Arc<dyn GlobalProviderLookup> = Arc::new(DummyLookup);
+        let ctx = ReleaseFetchContext::with_lookup_opt(Some(Arc::clone(&lookup)));
+        assert!(
+            ctx.global_provider_lookup.is_some(),
+            "with_lookup_opt(Some(...)) must preserve the lookup in the context"
+        );
+    }
+
+    #[cfg(feature = "catalog")]
+    #[test]
+    fn release_fetch_context_with_lookup_opt_none_is_none() {
+        let ctx = ReleaseFetchContext::with_lookup_opt(None);
+        assert!(ctx.global_provider_lookup.is_none());
     }
 }
 

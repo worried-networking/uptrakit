@@ -72,6 +72,7 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
     {
         descs.push(&crate::test_support::DESCRIPTOR);
         descs.push(&crate::test_support::PER_ITEM_FAIL_DESCRIPTOR);
+        descs.push(&crate::test_support::CTX_CAPTURE_DESCRIPTOR);
     }
     descs
 }
@@ -240,6 +241,7 @@ mod tests {
         {
             known.insert(plugin_ids::TEST_FETCH_FAIL.as_str().to_owned());
             known.insert(plugin_ids::TEST_PER_ITEM_FAIL.as_str().to_owned());
+            known.insert(plugin_ids::TEST_CTX_CAPTURE.as_str().to_owned());
         }
         for d in &descs {
             assert!(

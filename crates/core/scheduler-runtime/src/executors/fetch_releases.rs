@@ -946,6 +946,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn with_global_provider_lookup_passes_lookup_to_release_fetcher_context() {
+        use uptrakit_plugin_infrastructure_registry::test_support::{
+            ctx_capture_had_lookup, reset_ctx_capture_had_lookup,
+        };
+
+        struct DummyLookup;
+        impl GlobalProviderLookup for DummyLookup {
+            fn lookup(&self, _provider_id: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+                None
+            }
+        }
+
+        reset_ctx_capture_had_lookup();
+
+        let db = setup_db().await;
+        let (tenant_id, _) = insert_controller_fetch_fixture(&db, "__test_ctx_capture").await;
+        let notifier = Arc::new(NoopSchedulerNotifier);
+        let lookup: Arc<dyn GlobalProviderLookup> = Arc::new(DummyLookup);
+        let executor = FetchReleasesExecutor::new(db.clone(), notifier)
+            .with_global_provider_lookup(Some(lookup));
+
+        executor
+            .execute(&make_fetch_releases_task(tenant_id))
+            .await
+            .unwrap();
+
+        assert!(
+            ctx_capture_had_lookup(),
+            "provider_lookup must be threaded from FetchReleasesExecutor through ReleaseFetchContext to the factory"
+        );
+    }
+
+    #[tokio::test]
     async fn test_per_item_fetch_error_preserves_latest_version() {
         let db = setup_db().await;
         let (tenant_id, host_software_item_id) =
