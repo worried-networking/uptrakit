@@ -145,6 +145,35 @@ to the first server-cert SAN. Must match the trust-domain segment of every Servi
 SPIFFE URI SAN.
 _Avoid_: domain (overloaded), namespace (Kubernetes overload).
 
+**Config Section**:
+A named top-level block in `controller.toml` (e.g., `[db]`, `[network]`, `[tls]`) whose
+parsed value is distributed to subsystems via a `tokio::sync::watch` channel.
+
+**ConfigReconciler**:
+Background task (2 s poll) that reads the current `settings_version` from the DB and triggers
+a reload when it increases, bridging DB mutations to the TOML-driven reload path.
+
+**Irreversibly-bound key**:
+A config value whose change cannot be applied in-process (e.g., listen address, DB pool URL).
+Changes to irreversibly-bound keys cause the coordinator to reexec the process via `exec()`.
+
+**Reexec**:
+In-process replacement of the running binary image via `exec()`, preserving listening sockets
+(via `listenfd`/`sd_notify`) while resetting accepted TCP connections.
+
+**Reloadable**:
+A trait (`validate`, `apply`, `revert`, `health_check`, `rollback_window`) implemented by each
+long-lived subsystem. The reload coordinator calls these methods atomically during a reload cycle.
+
+**Reload Coordinator**:
+The component (`ReloadCoordinator` in `crates/shared/config-reload/`) that orchestrates a reload
+cycle: parse → validate-all → apply-all → health-check-all → commit or revert-all.
+
+**Watchdog window**:
+The `rollback_window()` duration returned by each `Reloadable`. If the subsystem's health check
+does not pass within this window after `apply`, the coordinator reverts all subsystems and enters
+the `Degraded` state.
+
 ## Relationships
 
 - A **Tenant** owns **Hosts**, **Software Items**, **Updates**, and all configuration
