@@ -940,6 +940,28 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let mut sigint = signal(SignalKind::interrupt())
         .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
 
+    // Claim inherited sockets from a parent reexec, if present.
+    let inherited = reexec::listenfd::take_inherited_listeners().unwrap_or_else(|e| {
+        tracing::warn!("LISTEN_FDS claim failed: {e}; falling back to fresh bind");
+        None
+    });
+    let (inherited_https, inherited_pki) = match inherited {
+        Some(s) => {
+            let https_std = s.https.into_std().map_err(|e| {
+                rootcause::report!(AppError::Config(format!(
+                    "into_std failed for inherited HTTPS socket: {e}"
+                )))
+            })?;
+            let pki_std = s.pki.into_std().map_err(|e| {
+                rootcause::report!(AppError::Config(format!(
+                    "into_std failed for inherited PKI socket: {e}"
+                )))
+            })?;
+            (Some(https_std), Some(pki_std))
+        }
+        None => (None, None),
+    };
+
     // Spawn HTTPS server
     let server_handle = axum_server::Handle::new();
     let server_options = server::ServerOptions {
@@ -948,6 +970,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         app_state: Arc::clone(&app_state),
         static_dir: validated.static_dir,
         handle: server_handle.clone(),
+        inherited_listener: inherited_https,
     };
     let server_task = tokio::spawn(server::run(server_options));
 
@@ -956,7 +979,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     spawn_zeroconf(&mut bg, &app_state, reconciled.https_addr);
 
     // Spawn PKI HTTP server if needed
-    spawn_pki_http(&mut bg, &app_state, validated.pki_http_port);
+    spawn_pki_http(&mut bg, &app_state, validated.pki_http_port, inherited_pki);
 
     // Notify the service manager (and stdout-based supervisors) that all
     // servers are bound and the controller is ready to accept connections.
@@ -1379,10 +1402,14 @@ async fn reload_audit_bridge(
 }
 
 /// Spawn the optional plain-HTTP PKI server on the given port.
+///
+/// `inherited` is a pre-bound socket to reuse on the reexec path; `None` on
+/// cold start causes a fresh `bind(addr)`.
 fn spawn_pki_http(
     bg: &mut tasks::BackgroundTasks,
     app_state: &Arc<AppState>,
     pki_http_port: Option<u16>,
+    inherited: Option<std::net::TcpListener>,
 ) {
     let Some(port) = pki_http_port else {
         return;
@@ -1390,7 +1417,7 @@ fn spawn_pki_http(
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let app_state_for_pki = Arc::clone(app_state);
     let pki_http_handle = tokio::spawn(async move {
-        if let Err(e) = server::run_pki_http(addr, app_state_for_pki).await {
+        if let Err(e) = server::run_pki_http(addr, app_state_for_pki, inherited).await {
             tracing::error!(error = ?e, "PKI HTTP server error");
         }
     });
