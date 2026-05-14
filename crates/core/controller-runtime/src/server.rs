@@ -108,6 +108,7 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 
     let listener = std::net::TcpListener::bind(cfg.https_addr).map_err(ServerError::Io)?;
+    listener.set_nonblocking(true).map_err(ServerError::Io)?;
 
     tracing::info!("HTTPS server listening on {}", cfg.https_addr);
     axum_server::from_tcp(listener)
