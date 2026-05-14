@@ -70,7 +70,19 @@ pub async fn get_registration_settings(
         require_token_for_oidc: reg.require_token_for_oidc,
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    let version = state
+        .settings_version_cache
+        .get(uptrakit_config_reload::config::Scope::Tenant(
+            state.default_tenant_id,
+        ))
+        .unwrap_or(0);
+    let etag = format!("W/\"settings-v{version}\"");
+    (
+        StatusCode::OK,
+        [(axum::http::header::ETAG, etag)],
+        Json(response),
+    )
+        .into_response()
 }
 
 /// Update registration settings
@@ -251,6 +263,19 @@ pub async fn update_registration_settings(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
     hook.flush_after_commit().await;
+
+    // Bump the in-process cache so callers immediately see the new ETag version.
+    // The reconciler will overwrite this on its next poll; this ensures zero-latency
+    // visibility within the same process between the commit and the next poll cycle.
+    {
+        let scope = uptrakit_config_reload::config::Scope::Tenant(tenant_id);
+        let next = state
+            .settings_version_cache
+            .get(scope)
+            .unwrap_or(0)
+            .saturating_add(1);
+        state.settings_version_cache.update(scope, next);
+    }
 
     state.settings.set_registration(reg).await;
 
