@@ -13,6 +13,7 @@ pub mod error;
 pub mod loader;
 pub mod reconciler;
 pub mod reloadable;
+pub mod status;
 pub mod triggers;
 
 pub use alerts::{AlertSeverity, NoopAlertWriter, SystemAlertWriter};
@@ -28,3 +29,4 @@ pub use error::ConfigReloadError;
 pub use loader::{LoadedConfig, TomlConfigLoader};
 pub use reconciler::SettingsVersionCache;
 pub use reloadable::{Reloadable, ReloadableErased};
+pub use status::{ConfigFileState, LastReloadInfo};

@@ -70,6 +70,8 @@ use crate::AppState;
         crate::routes::settings_agent_certs::get_agent_certificate_settings,
         crate::routes::settings_agent_certs::update_agent_certificate_settings,
         crate::routes::system_alerts::get_system_alerts,
+        crate::routes::instance_config_state::get_config_state,
+        crate::routes::instance_config_state::clear_coordinator_degraded,
         crate::routes::server_cert::renew_server_certificate,
         crate::routes::api_tokens::create_api_token,
         crate::routes::api_tokens::list_api_tokens,
@@ -232,6 +234,10 @@ use crate::AppState;
             crate::routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest,
             crate::routes::system_alerts::SystemAlert,
             crate::routes::system_alerts::SystemAlertsResponse,
+            uptrakit_web_api_types::instance_config_state::ConfigStateResponse,
+            uptrakit_web_api_types::instance_config_state::FileStateView,
+            uptrakit_web_api_types::instance_config_state::LastReloadView,
+            uptrakit_web_api_types::instance_config_state::DegradedInfoView,
             crate::routes::api_tokens::CreateApiTokenRequest,
             crate::routes::api_tokens::CreateApiTokenResponse,
             crate::routes::api_tokens::ApiTokenResponse,
@@ -568,6 +574,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::system_services::deactivate_system_service
         ))
         .routes(routes!(crate::routes::system_alerts::get_system_alerts))
+        .routes(routes!(
+            crate::routes::instance_config_state::get_config_state
+        ))
+        .routes(routes!(
+            crate::routes::instance_config_state::clear_coordinator_degraded
+        ))
         .routes(routes!(
             crate::routes::server_cert::renew_server_certificate
         ))
