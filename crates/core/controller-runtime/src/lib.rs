@@ -1282,18 +1282,18 @@ async fn reload_audit_bridge(
                 sections,
                 per_subsystem_ms,
             } => {
-                let info = uptrakit_config_reload::LastReloadInfo {
-                    completed_at: time::OffsetDateTime::now_utc(),
-                    sections: sections.clone(),
-                    per_subsystem_ms: per_subsystem_ms.clone(),
-                };
+                let info = uptrakit_config_reload::LastReloadInfo::new(
+                    time::OffsetDateTime::now_utc(),
+                    sections.clone(),
+                    per_subsystem_ms.clone(),
+                );
                 // Receivers may have been dropped (e.g. tests); ignore send errors.
                 drop(last_reload_tx.send(Some(info)));
                 let event_json = serde_json::json!({
                     "type": "applied",
                     "at": time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap_or_default(),
+                        .unwrap_or_else(|_| String::new()),
                     "sections": sections,
                 });
                 recent_events_tx.send_modify(|v| {
@@ -1312,7 +1312,7 @@ async fn reload_audit_bridge(
                     "type": "failed",
                     "at": time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap_or_default(),
+                        .unwrap_or_else(|_| String::new()),
                     "phase": phase.as_str(),
                     "subsystem": subsystem,
                     "error": error,
@@ -1329,7 +1329,7 @@ async fn reload_audit_bridge(
                     "type": "reverted",
                     "at": time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap_or_default(),
+                        .unwrap_or_else(|_| String::new()),
                     "subsystem": subsystem,
                     "reason": reason,
                 });

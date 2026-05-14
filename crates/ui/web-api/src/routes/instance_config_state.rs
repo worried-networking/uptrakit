@@ -11,6 +11,7 @@ use uptrakit_web_api_types::instance_config_state::{
 };
 
 use crate::AppState;
+use crate::error_response::error_response_with_code;
 use crate::middleware::permission::{CanManageInstanceConfigState, CanViewInstanceConfigState};
 
 /// Get the current config reload coordinator state.
@@ -35,19 +36,16 @@ pub async fn get_config_state(
     let last_reload_info = state.last_reload.borrow().clone();
     let recent = state.recent_reload_events.borrow().clone();
 
-    let file = FileStateView {
-        path: file_state.path,
-        digest: file_state.digest,
-        loaded_at: file_state.loaded_at,
-        pending_digest: file_state.pending_digest,
-        pending_detected_at: file_state.pending_detected_at,
-    };
+    let file = FileStateView::new(
+        file_state.path,
+        file_state.digest,
+        file_state.loaded_at,
+        file_state.pending_digest,
+        file_state.pending_detected_at,
+    );
 
-    let last_reload = last_reload_info.map(|r| LastReloadView {
-        completed_at: r.completed_at,
-        sections: r.sections,
-        per_subsystem_ms: r.per_subsystem_ms,
-    });
+    let last_reload = last_reload_info
+        .map(|r| LastReloadView::new(r.completed_at, r.sections, r.per_subsystem_ms));
 
     let sections = render_sections(&state);
 
@@ -56,23 +54,26 @@ pub async fn get_config_state(
         CoordinatorState::Reloading => ("reloading".to_string(), None),
         CoordinatorState::Degraded(info) => (
             "degraded".to_string(),
-            Some(DegradedInfoView {
-                since: info.since,
-                failed_subsystems: info.failed_subsystems.clone(),
-                reason: info.reason.clone(),
-            }),
+            Some(DegradedInfoView::new(
+                info.since,
+                info.failed_subsystems.clone(),
+                info.reason.clone(),
+            )),
         ),
-        _ => ("unknown".to_string(), None),
+        _ => {
+            tracing::warn!("unrecognised CoordinatorState variant; treating as unknown");
+            ("unknown".to_string(), None)
+        }
     };
 
-    let resp = ConfigStateResponse {
-        coordinator_state: coordinator_state_str,
+    let resp = ConfigStateResponse::new(
+        coordinator_state_str,
         degraded,
         file,
         last_reload,
         sections,
-        recent_events: recent,
-    };
+        recent,
+    );
 
     (StatusCode::OK, Json(resp)).into_response()
 }
@@ -99,11 +100,12 @@ pub async fn clear_coordinator_degraded(
     manage: CanManageInstanceConfigState,
 ) -> Response {
     if let Err(e) = state.coordinator_handle.clear_degraded().await {
-        return (
+        tracing::error!(error = %e, "clear_degraded failed");
+        return error_response_with_code(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("clear_degraded failed: {e}"),
-        )
-            .into_response();
+            "config_reload.clear_degraded_failed",
+        );
     }
     // ManageInstanceConfigState implies ViewInstanceConfigState; reuse the inner
     // AuthenticatedUser to avoid repeating the auth/permission check.

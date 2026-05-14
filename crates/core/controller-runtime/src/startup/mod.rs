@@ -137,15 +137,18 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     // Compute initial file state. Use file size as a digest stub — a proper
     // SHA-256 would require adding sha2 to the workspace deps; the stub is
     // sufficient for the status endpoint's change-detection use-case.
-    let file_bytes = std::fs::read(&config_path).unwrap_or_default();
+    let file_bytes = std::fs::read(&config_path).unwrap_or_else(|e| {
+        tracing::warn!(path = %config_path.display(), error = %e, "could not read config file for digest");
+        Vec::new()
+    });
     let digest = format!("size:{}", file_bytes.len());
-    let initial_file_state = uptrakit_config_reload::ConfigFileState {
-        path: config_path.display().to_string(),
+    let initial_file_state = uptrakit_config_reload::ConfigFileState::new(
+        config_path.display().to_string(),
         digest,
-        loaded_at: time::OffsetDateTime::now_utc(),
-        pending_digest: None,
-        pending_detected_at: None,
-    };
+        time::OffsetDateTime::now_utc(),
+        None,
+        None,
+    );
     let (reload_file_state_tx, reload_file_state_rx) =
         tokio::sync::watch::channel(initial_file_state);
     let (reload_last_reload_tx, reload_last_reload_rx) = tokio::sync::watch::channel(None);
