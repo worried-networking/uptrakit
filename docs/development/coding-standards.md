@@ -1726,6 +1726,16 @@ let db = db_rx.borrow().conn().clone();
 Never hold `db_rx.borrow()` across an `.await` point — the read lock blocks
 `watch::Sender::send()`. Clone the `Arc<DbConnHandle>` first, then drop the borrow.
 
+### UpdateStatus grouping helpers
+
+Use `UpdateStatus::unfinished()` and `UpdateStatus::host_blocking()` for status filters — do not
+inline the status arrays at call sites.
+
+- `unfinished()` — all four non-terminal statuses (Queued, Pending, InProgress, AwaitingRestart).
+  Use for: "does an active row exist for this (host, item)?", state reporting queries.
+- `host_blocking()` — excludes Queued. Use for: "is this host currently occupied by an in-flight
+  update?", host-level serialisation checks.
+
 ### Per-item policy override pattern
 
 Use the **three-state override** model for per-item policy configuration:
