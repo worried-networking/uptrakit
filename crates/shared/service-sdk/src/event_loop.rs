@@ -622,7 +622,8 @@ mod tests {
         let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key_der)
             .expect("signing key must load");
         let ck = Arc::new(rustls::sign::CertifiedKey::new(vec![cert_der], signing_key));
-        Arc::new(AgentClientCertResolver::new(ck))
+        let session_store = crate::session_store::CertScopedClientSessionStore::new(8);
+        Arc::new(AgentClientCertResolver::new(ck, session_store))
     }
 
     #[derive(Clone, Copy)]

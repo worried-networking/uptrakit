@@ -869,6 +869,39 @@ if call_count.is_multiple_of(CLEANUP_INTERVAL) {
 }
 ```
 
+## TLS Session Resumption with mTLS Cert Rotation
+
+**Scope.** Applies only to rustls `ClientConfig` builders that use a swappable
+`ResolvesClientCert` — i.e. the agent's mTLS connector built via
+`uptrakit_service_sdk::tls::build_client_config_with_resolver` /
+`build_system_trust_client_config_with_resolver`. Static-cert builders
+(`build_pinned_ca_client_config`, `build_mtls_client_config`,
+`build_system_roots_client_config`, `build_tofu_client_config`) cannot rotate identity
+at runtime and intentionally configure no resumption.
+
+**Invariant.** Every resolver-based mTLS `ClientConfig` MUST register a
+[`CertScopedClientSessionStore`](../../crates/shared/service-sdk/src/session_store.rs) as
+its resumption store, and the same `Arc` instance MUST be the one attached to the
+matching `AgentClientCertResolver` via `AgentClientCertResolver::new(initial,
+session_store)`. `AgentClientCertResolver::swap` publishes the new
+`CertifiedKey` and then atomically flushes the store. When a CA-rebuild
+or any other event reconstructs the `ClientConfig`, thread the _same_
+`Arc<CertScopedClientSessionStore>` through to it — building a fresh store
+silently re-introduces the resumption-after-revocation bug because the
+resolver's `swap()` would reset an orphan cache while rustls keeps
+replaying tickets in the live config. `clippy.toml` bans
+`rustls::client::Resumption::in_memory_sessions` (and the crate-root
+re-export) via `disallowed-methods` to enforce this at compile time.
+
+**Why.** TLS 1.3 PSK resumption (RFC 8446 §2.2) skips
+`Certificate`/`CertificateVerify`, so on every resumed handshake the
+server reads back the _original_ session's client cert via
+`peer_certificates()`. Without per-rotation invalidation, a rotated agent
+keeps re-presenting the old (now-revoked) cert through cached tickets;
+the server rejects every reconnect as `CertificateRevoked` and the
+process loops until the in-memory ticket cache is wiped by a restart.
+Observed in production on 2026-05-14.
+
 ## Parallel Broadcast Pattern
 
 When broadcasting messages to multiple consumers via `mpsc::Sender`, use parallel sends with

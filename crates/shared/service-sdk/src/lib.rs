@@ -67,6 +67,7 @@ pub mod lifecycle;
 pub mod main_helper;
 #[cfg(feature = "sensitive-params")]
 pub mod sensitive_params;
+pub mod session_store;
 pub mod shared_types;
 pub mod shutdown;
 pub mod signal;
@@ -109,6 +110,7 @@ pub use lifecycle::{default_resolve_shutdown, run_service_lifecycle};
 pub use main_helper::{init_crypto, print_build_info, run_lifecycle_and_handle_errors};
 #[cfg(feature = "sensitive-params")]
 pub use sensitive_params::decrypt_sensitive_params;
+pub use session_store::CertScopedClientSessionStore;
 pub use shared_types::{
     EventLoopContext, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
 };

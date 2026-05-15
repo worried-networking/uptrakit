@@ -428,13 +428,16 @@ async fn build_mtls_connector_with_resolver(
     ca_pem: Option<&[u8]>,
     trust_opts: &crate::tls::TrustOptions,
     resolver: std::sync::Arc<crate::cert_resolver::AgentClientCertResolver>,
+    session_store: std::sync::Arc<crate::session_store::CertScopedClientSessionStore>,
 ) -> Result<tokio_rustls::TlsConnector> {
     let config = match ca_pem {
         Some(pem) => {
             let root_store = crate::tls::build_root_store(pem, trust_opts).await?;
-            crate::tls::build_client_config_with_resolver(root_store, resolver)?
+            crate::tls::build_client_config_with_resolver(root_store, resolver, session_store)?
         }
-        None => crate::tls::build_system_trust_client_config_with_resolver(resolver)?,
+        None => {
+            crate::tls::build_system_trust_client_config_with_resolver(resolver, session_store)?
+        }
     };
     Ok(tokio_rustls::TlsConnector::from(config))
 }
@@ -463,6 +466,14 @@ async fn run_authenticated_with_reconnect(
     // picked up without a restart.
     let mut current_ca: Option<Vec<u8>> = params.initial_ca_pem.map(<[u8]>::to_vec);
 
+    // Build the cert-scoped session store first so the resolver can flush
+    // it on every rotation. The *same* `Arc` instance is threaded into
+    // every `ClientConfig` built below; constructing a fresh store at the
+    // CA-rebuild path would silently re-introduce the resumption-after-
+    // revocation bug because the resolver's `swap()` would reset an
+    // orphan cache while the live config kept replaying stale tickets.
+    let session_store = crate::session_store::CertScopedClientSessionStore::new(256);
+
     // Build the cert resolver once for the process lifetime.  The resolver
     // holds an `ArcSwap<CertifiedKey>` that `handle_certificate` can update
     // without tearing down the TLS session.
@@ -475,6 +486,7 @@ async fn run_authenticated_with_reconnect(
     let initial_ck = crate::tls::build_certified_key(cert_pem, &key_pem_str)?;
     let cert_resolver = std::sync::Arc::new(crate::cert_resolver::AgentClientCertResolver::new(
         std::sync::Arc::new(initial_ck),
+        std::sync::Arc::clone(&session_store),
     ));
 
     // Build the initial TlsConnector (backed by the resolver).
@@ -482,6 +494,7 @@ async fn run_authenticated_with_reconnect(
         current_ca.as_deref(),
         &params.trust_opts,
         std::sync::Arc::clone(&cert_resolver),
+        std::sync::Arc::clone(&session_store),
     )
     .await?;
 
@@ -500,6 +513,7 @@ async fn run_authenticated_with_reconnect(
                     current_ca.as_deref(),
                     &params.trust_opts,
                     std::sync::Arc::clone(&cert_resolver),
+                    std::sync::Arc::clone(&session_store),
                 )
                 .await?;
             }
