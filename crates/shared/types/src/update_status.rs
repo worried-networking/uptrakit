@@ -51,6 +51,24 @@ impl UpdateStatus {
             Self::Failed => "failed",
         }
     }
+
+    /// All non-terminal statuses — states where a new trigger for the same
+    /// (host, software_item) must be rejected.
+    pub const fn unfinished() -> [Self; 4] {
+        [
+            Self::Queued,
+            Self::Pending,
+            Self::InProgress,
+            Self::AwaitingRestart,
+        ]
+    }
+
+    /// Statuses that block the host from running another update concurrently.
+    /// Excludes `Queued` — a queued update does not occupy the host's execution
+    /// slot.
+    pub const fn host_blocking() -> [Self; 3] {
+        [Self::Pending, Self::InProgress, Self::AwaitingRestart]
+    }
 }
 
 impl fmt::Display for UpdateStatus {
@@ -151,5 +169,27 @@ mod tests {
     fn parse_error_display() {
         let err = ParseUpdateStatusError;
         assert_eq!(err.to_string(), "invalid update status value");
+    }
+
+    #[test]
+    fn unfinished_contains_four_statuses() {
+        let u = UpdateStatus::unfinished();
+        assert_eq!(u.len(), 4);
+        assert!(u.contains(&UpdateStatus::Queued));
+        assert!(u.contains(&UpdateStatus::Pending));
+        assert!(u.contains(&UpdateStatus::InProgress));
+        assert!(u.contains(&UpdateStatus::AwaitingRestart));
+        assert!(!u.contains(&UpdateStatus::Completed));
+        assert!(!u.contains(&UpdateStatus::Failed));
+    }
+
+    #[test]
+    fn host_blocking_contains_three_statuses_excludes_queued() {
+        let h = UpdateStatus::host_blocking();
+        assert_eq!(h.len(), 3);
+        assert!(!h.contains(&UpdateStatus::Queued));
+        assert!(h.contains(&UpdateStatus::Pending));
+        assert!(h.contains(&UpdateStatus::InProgress));
+        assert!(h.contains(&UpdateStatus::AwaitingRestart));
     }
 }

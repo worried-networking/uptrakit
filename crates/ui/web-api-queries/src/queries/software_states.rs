@@ -5,8 +5,8 @@
 //! services (e.g. MQTT bridge).
 
 use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait as _,
+    ColumnTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait as _,
 };
 use std::collections::{HashMap, HashSet};
 use uptrakit_shared_db::{
@@ -16,7 +16,7 @@ use uptrakit_shared_db::{
         software_item, update_history,
     },
 };
-use uptrakit_shared_types::ServiceStatus;
+use uptrakit_shared_types::{ServiceStatus, UpdateStatus};
 use uptrakit_wire::{
     HostPackageSummary, HostStateMetadata, SoftwareStateHostEntry, SoftwareStateItem,
     SoftwareStatesPage, SoftwareStatesPayload,
@@ -134,12 +134,7 @@ pub async fn load_software_states_for_tenant(
         .column(update_history::Column::HostId)
         .column(update_history::Column::SoftwareItemId)
         .filter(update_history::Column::SoftwareItemId.is_in(item_ids.iter().copied()))
-        .filter(
-            Condition::any()
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress)),
-        )
+        .filter(update_history::Column::Status.is_in(UpdateStatus::unfinished()))
         .into_model::<ActiveUpdateRow>()
         .all(db)
         .await?
@@ -402,12 +397,7 @@ pub async fn load_software_states_page_for_tenant(
         .column(update_history::Column::HostId)
         .column(update_history::Column::SoftwareItemId)
         .filter(update_history::Column::HostId.is_in(page_host_ids.iter().copied()))
-        .filter(
-            Condition::any()
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
-                .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress)),
-        )
+        .filter(update_history::Column::Status.is_in(UpdateStatus::unfinished()))
         .into_model::<ActiveUpdateRow>()
         .all(db)
         .await?

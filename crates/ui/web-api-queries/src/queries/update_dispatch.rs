@@ -29,6 +29,7 @@ use uptrakit_shared_db::entity::{
     service_host, software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::UpdateStatus;
 use uptrakit_wire::{
     AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
 };
@@ -937,11 +938,7 @@ pub async fn validate_update_preconditions(
 pub async fn has_active_update_for_host(db: &DatabaseConnection, host_id: Uuid) -> Result<bool> {
     let count = UpdateHistory::find()
         .filter(update_history::Column::HostId.eq(host_id))
-        .filter(update_history::Column::Status.is_in([
-            update_history::UpdateStatus::Pending,
-            update_history::UpdateStatus::InProgress,
-            update_history::UpdateStatus::AwaitingRestart,
-        ]))
+        .filter(update_history::Column::Status.is_in(UpdateStatus::host_blocking()))
         .count(db)
         .await
         .context_to()?;
