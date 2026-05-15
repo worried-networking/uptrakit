@@ -1,6 +1,6 @@
 //! Full coordinator state-machine implementation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -406,6 +406,74 @@ impl ReloadCoordinator {
     }
 }
 
+/// Diff `prior` and `new`; return the minimal set of in-process deltas.
+///
+/// Irreversibly-bound keys (`db.url`, `master_key.path`, `log.path`,
+/// embedded topology) are checked by the reexec hook BEFORE this function
+/// is called. `EmbeddedServices` is never emitted as a delta.
+fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
+    let mut deltas = Vec::new();
+    if prior.db != new.db {
+        deltas.push(RuntimeConfigDelta::Db(Arc::new(new.db.clone())));
+    }
+    if prior.network != new.network {
+        deltas.push(RuntimeConfigDelta::Network(Arc::new(new.network.clone())));
+    }
+    if prior.nats != new.nats {
+        deltas.push(RuntimeConfigDelta::Nats(Arc::new(new.nats.clone())));
+    }
+    if prior.tls != new.tls {
+        deltas.push(RuntimeConfigDelta::Tls(Arc::new(new.tls.clone())));
+    }
+    if prior.audit != new.audit {
+        deltas.push(RuntimeConfigDelta::Audit(Arc::new(new.audit.clone())));
+    }
+    if prior.zeroconf != new.zeroconf {
+        deltas.push(RuntimeConfigDelta::Zeroconf(Arc::new(new.zeroconf.clone())));
+    }
+    // EmbeddedServices topology changes trigger reexec (handled before
+    // build_deltas is called). Never emit EmbeddedServices here.
+    deltas
+}
+
+/// Map `DbBump` section strings to coordinator deltas.
+///
+/// Unknown sections are logged at `warn` and skipped. Duplicate entries
+/// (e.g. `["audit", "audit_log"]`) are deduplicated by variant tag.
+fn sections_to_deltas(sections: &[String], current: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
+    let mut deltas = Vec::new();
+    for s in sections {
+        match s.as_str() {
+            "audit" | "audit_log" | "registration" => {
+                deltas.push(RuntimeConfigDelta::Audit(Arc::new(current.audit.clone())));
+            }
+            "plugins" => {
+                deltas.push(RuntimeConfigDelta::PluginsDbRefresh);
+            }
+            other => {
+                tracing::warn!(section = other, "unknown section in DbBump; skipping delta");
+            }
+        }
+    }
+    dedup_deltas(deltas)
+}
+
+/// Deduplicate a delta list by variant tag, keeping the last occurrence.
+///
+/// Last-wins semantics: when `sections_to_deltas` maps multiple section names
+/// to the same delta variant (e.g. `"audit"` and `"audit_log"` both map to
+/// `Audit`), the last entry in the input order is kept.
+fn dedup_deltas(deltas: Vec<RuntimeConfigDelta>) -> Vec<RuntimeConfigDelta> {
+    let mut seen = HashSet::new();
+    let mut result: Vec<_> = deltas
+        .into_iter()
+        .rev()
+        .filter(|d| seen.insert(d.variant_tag()))
+        .collect();
+    result.reverse();
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -573,5 +641,65 @@ mod tests {
         assert!(alerts.iter().any(|(s, _)| *s == AlertSeverity::Error));
         assert!(alerts.iter().any(|(s, _)| *s == AlertSeverity::Critical));
         assert!(matches!(coord.state(), CoordinatorState::Degraded(_)));
+    }
+
+    // ── Delta helper function tests ──────────────────────────────────────────
+
+    #[test]
+    fn build_deltas_empty_on_identical_configs() {
+        let c = RuntimeConfig::default();
+        let result = build_deltas(&c, &c);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn build_deltas_detects_audit_change() {
+        let prior = RuntimeConfig::default();
+        let mut new = RuntimeConfig::default();
+        new.audit.filter = "info".to_string();
+        let deltas = build_deltas(&prior, &new);
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].variant_tag(), "Audit");
+    }
+
+    #[test]
+    fn dedup_keeps_last_occurrence() {
+        let a = RuntimeConfigDelta::Audit(Arc::new(Default::default()));
+        let b = RuntimeConfigDelta::Audit(Arc::new(Default::default()));
+        let result = dedup_deltas(vec![a, b]);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn sections_to_deltas_maps_audit() {
+        let c = RuntimeConfig::default();
+        let sections = vec!["audit".to_string()];
+        let deltas = sections_to_deltas(&sections, &c);
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].variant_tag(), "Audit");
+    }
+
+    #[test]
+    fn sections_to_deltas_maps_plugins() {
+        let c = RuntimeConfig::default();
+        let sections = vec!["plugins".to_string()];
+        let deltas = sections_to_deltas(&sections, &c);
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].variant_tag(), "PluginsDbRefresh");
+    }
+
+    #[test]
+    fn sections_to_deltas_deduplicates() {
+        let c = RuntimeConfig::default();
+        let sections = vec!["audit".to_string(), "audit_log".to_string()];
+        let deltas = sections_to_deltas(&sections, &c);
+        assert_eq!(deltas.len(), 1);
+    }
+
+    //  Test the helper functions directly
+    #[test]
+    fn test_build_deltas() {
+        let c = RuntimeConfig::default();
+        assert!(build_deltas(&c, &c).is_empty());
     }
 }
