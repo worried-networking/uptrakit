@@ -21,7 +21,7 @@ use uuid::Uuid;
 use super::update_dispatch::{
     CreateUpdateRecordParams, TriggerUpdateError, ValidatedUpdateTarget, build_plugin_assignment,
     config_prefers_interactive, create_update_history_record, has_active_update_for_host,
-    validate_update_preconditions,
+    has_active_update_for_host_software_item, validate_update_preconditions,
 };
 use crate::queries::update_types::ActorType;
 
@@ -147,6 +147,12 @@ pub async fn trigger_update_for_host(
         interactive: resolved_interactive,
     };
 
+    // Item-level deduplication: 409 if any non-terminal row exists for this
+    // (host, software_item) pair (precedes the host-level serialisation check).
+    if has_active_update_for_host_software_item(db, params.host_id, params.item_id).await? {
+        return Err(report!(TriggerUpdateError::UpdateAlreadyActive));
+    }
+
     // Check if the host already has an active (Pending/InProgress) update.
     let host_busy = has_active_update_for_host(db, params.host_id).await?;
 
@@ -188,12 +194,20 @@ pub async fn trigger_update_for_host(
                 host_id = %params.host_id,
                 "concurrent Pending INSERT detected (unique constraint); re-inserting as Queued"
             );
-            let id = create_update_history_record(
+            let queued_result = create_update_history_record(
                 db,
                 &build_record(update_history::UpdateStatus::Queued),
             )
-            .await?;
-            (id, update_history::UpdateStatus::Queued)
+            .await;
+            match queued_result {
+                Ok(id) => (id, update_history::UpdateStatus::Queued),
+                Err(e) if is_unique_constraint_violation(&e) => {
+                    // (host_id, software_item_id) constraint violated for Queued row —
+                    // duplicate trigger for the same item.
+                    return Err(report!(TriggerUpdateError::UpdateAlreadyActive));
+                }
+                Err(e) => return Err(e),
+            }
         }
         Err(e) => return Err(e),
     };
@@ -620,18 +634,37 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_update_queued_when_host_busy() {
-        // When a Pending update already exists for the host, trigger_update_for_host
-        // must insert a Queued record and return initial_status: Queued.
+        // When a Pending update exists for a *different* item on the host,
+        // trigger_update_for_host must insert a Queued record and return
+        // initial_status: Queued (host-level serialisation).
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let now = OffsetDateTime::now_utc();
 
-        // Insert a Pending update for the host (simulates an active update).
+        // Insert a second software item so we can seed a Pending update on it.
+        let other_item_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: Set(other_item_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("other-app".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Insert a Pending update for the *other* item on the same host.
         update_history::ActiveModel {
             id: Set(Uuid::now_v7()),
             tenant_id: Set(f.tenant_id),
             host_id: Set(f.host_id),
-            software_item_id: Set(f.item_id),
+            software_item_id: Set(other_item_id),
             host_software_item_id: Set(None),
             from_version: Set(None),
             to_version: Set(Some("1.1.0".to_string())),
@@ -688,6 +721,70 @@ mod tests {
             .unwrap();
         assert_eq!(record.status, update_history::UpdateStatus::Queued);
         assert!(record.batch_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn trigger_update_returns_already_active_for_same_item() {
+        // When any non-terminal update already exists for the same (host, item) pair,
+        // trigger_update_for_host must return UpdateAlreadyActive.
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Seed a Pending update for the same item.
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            awaiting_restart_since: Set(None),
+            created_at: Set(now),
+            update_category: Set("feature".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let outcome = trigger_update_for_host(
+            &db,
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.2.0".to_string(),
+                actor_type: ActorType::User,
+                actor_id: "user-1".to_string(),
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await;
+
+        match &outcome {
+            Err(e) => assert!(
+                matches!(e.current_context(), TriggerUpdateError::UpdateAlreadyActive),
+                "expected UpdateAlreadyActive, got a different error"
+            ),
+            Ok(_) => panic!("expected Err(UpdateAlreadyActive), got Ok"),
+        }
     }
 
     #[tokio::test]
@@ -1089,16 +1186,36 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_update_queued_returns_no_work_bundle() {
+        // When the host is busy with a *different* item, the new trigger must
+        // queue and return no work bundle (Queued path returns no pending_protection_work).
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let now = time::OffsetDateTime::now_utc();
 
-        // Seed a Pending record so the host appears busy.
+        // Insert a second software item so we can seed a Pending update on it.
+        let other_item_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: sea_orm::Set(other_item_id),
+            tenant_id: sea_orm::Set(f.tenant_id),
+            name: sea_orm::Set("other-app-2".to_string()),
+            featured: sea_orm::Set(false),
+            icon_url: sea_orm::Set(None),
+            last_checked_at: sea_orm::Set(None),
+            awaiting_restart_timeout: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Seed a Pending record for the other item so the host appears busy.
         update_history::ActiveModel {
             id: sea_orm::Set(Uuid::now_v7()),
             tenant_id: sea_orm::Set(f.tenant_id),
             host_id: sea_orm::Set(f.host_id),
-            software_item_id: sea_orm::Set(f.item_id),
+            software_item_id: sea_orm::Set(other_item_id),
             host_software_item_id: sea_orm::Set(None),
             from_version: sea_orm::Set(None),
             to_version: sea_orm::Set(Some("1.0.0".to_string())),

@@ -945,6 +945,23 @@ pub async fn has_active_update_for_host(db: &DatabaseConnection, host_id: Uuid) 
     Ok(count > 0)
 }
 
+/// Returns `true` if a `Queued`, `Pending`, `InProgress`, or `AwaitingRestart` row
+/// already exists for the given `(host_id, software_item_id)` pair.
+pub async fn has_active_update_for_host_software_item(
+    db: &DatabaseConnection,
+    host_id: Uuid,
+    software_item_id: Uuid,
+) -> Result<bool> {
+    let count = UpdateHistory::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::SoftwareItemId.eq(software_item_id))
+        .filter(update_history::Column::Status.is_in(UpdateStatus::unfinished()))
+        .count(db)
+        .await
+        .context_to()?;
+    Ok(count > 0)
+}
+
 // ---------------------------------------------------------------------------
 // Layer 2: Create update_history record
 // ---------------------------------------------------------------------------
@@ -1468,6 +1485,116 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows, 0, "CAS must not affect an already-InProgress row");
+    }
+
+    #[tokio::test]
+    async fn has_active_update_for_host_software_item_returns_true_for_active_statuses() {
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+        use uptrakit_shared_db::entity::update_history;
+        use uptrakit_shared_types::UpdateStatus;
+
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, item_id) = insert_update_history_parents(&db).await;
+
+        for status in UpdateStatus::unfinished() {
+            // Clear previous rows to avoid index violations between iterations.
+            update_history::Entity::delete_many()
+                .exec(&db)
+                .await
+                .expect("delete");
+
+            let id = uuid::Uuid::now_v7();
+            let now = time::OffsetDateTime::now_utc();
+            update_history::ActiveModel {
+                id: Set(id),
+                tenant_id: Set(tenant_id),
+                host_id: Set(host_id),
+                software_item_id: Set(item_id),
+                host_software_item_id: Set(None),
+                status: Set(status),
+                batch_id: Set(None),
+                actor_type: Set(crate::queries::update_types::ActorType::User.to_string()),
+                actor_id: Set("test".to_string()),
+                from_version: Set(None),
+                to_version: Set(None),
+                update_category: Set("unknown".to_string()),
+                interactive: Set(false),
+                created_at: Set(now),
+                output: Set(String::new()),
+                output_bytes: Set(0),
+                execution_owner_service_id: Set(None),
+                execution_owner_instance_id: Set(None),
+                started_at: Set(None),
+                completed_at: Set(None),
+                awaiting_restart_since: Set(None),
+                output_truncated: Set(false),
+                pre_update_protection_status: Set(None),
+                pre_update_protection_summary: Set(None),
+                recovery_hint: Set(None),
+            }
+            .insert(&db)
+            .await
+            .expect("insert update_history");
+
+            let result = super::has_active_update_for_host_software_item(&db, host_id, item_id)
+                .await
+                .expect("query");
+            assert!(result, "expected true for status {status:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn has_active_update_for_host_software_item_returns_false_for_terminal_statuses() {
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+        use uptrakit_shared_db::entity::update_history;
+        use uptrakit_shared_types::UpdateStatus;
+
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, item_id) = insert_update_history_parents(&db).await;
+
+        for status in [UpdateStatus::Completed, UpdateStatus::Failed] {
+            update_history::Entity::delete_many()
+                .exec(&db)
+                .await
+                .expect("delete");
+
+            let now = time::OffsetDateTime::now_utc();
+            update_history::ActiveModel {
+                id: Set(uuid::Uuid::now_v7()),
+                tenant_id: Set(tenant_id),
+                host_id: Set(host_id),
+                software_item_id: Set(item_id),
+                host_software_item_id: Set(None),
+                status: Set(status),
+                batch_id: Set(None),
+                actor_type: Set(crate::queries::update_types::ActorType::User.to_string()),
+                actor_id: Set("test".to_string()),
+                from_version: Set(None),
+                to_version: Set(None),
+                update_category: Set("unknown".to_string()),
+                interactive: Set(false),
+                created_at: Set(now),
+                output: Set(String::new()),
+                output_bytes: Set(0),
+                execution_owner_service_id: Set(None),
+                execution_owner_instance_id: Set(None),
+                started_at: Set(None),
+                completed_at: Set(Some(now)),
+                awaiting_restart_since: Set(None),
+                output_truncated: Set(false),
+                pre_update_protection_status: Set(None),
+                pre_update_protection_summary: Set(None),
+                recovery_hint: Set(None),
+            }
+            .insert(&db)
+            .await
+            .expect("insert");
+
+            let result = super::has_active_update_for_host_software_item(&db, host_id, item_id)
+                .await
+                .expect("query");
+            assert!(!result, "expected false for status {status:?}");
+        }
     }
 
     #[tokio::test]
