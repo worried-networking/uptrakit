@@ -63,6 +63,10 @@ pub(crate) struct BootedConfig {
     /// Read at boot to wire `trust_domain` from `[tls]` into `RcgenAgentCertSigner`.
     /// Also consumed by Plan 2 tasks to seed subsystem-level Reloadables.
     pub runtime: uptrakit_config_reload::RuntimeConfig,
+    /// `Arc`-wrapped clone of `runtime` for seeding the coordinator's
+    /// `current_config` field without cloning the whole struct again.
+    #[expect(dead_code, reason = "seeded into ReloadCoordinator in Plan 3")]
+    pub runtime_arc: std::sync::Arc<uptrakit_config_reload::RuntimeConfig>,
     /// Coordinator (not yet spawned). Caller adds Reloadables via
     /// [`uptrakit_config_reload::ReloadCoordinator::extend_reloadables`], extracts
     /// a handle, then spawns.
@@ -134,14 +138,8 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     );
     let settings_version_cache = uptrakit_config_reload::SettingsVersionCache::new();
 
-    // Compute initial file state. Use file size as a digest stub — a proper
-    // SHA-256 would require adding sha2 to the workspace deps; the stub is
-    // sufficient for the status endpoint's change-detection use-case.
-    let file_bytes = std::fs::read(&config_path).unwrap_or_else(|e| {
-        tracing::warn!(path = %config_path.display(), error = %e, "could not read config file for digest");
-        Vec::new()
-    });
-    let digest = format!("size:{}", file_bytes.len());
+    // Compute initial file state using SHA-256 digest.
+    let digest = file_digest(&config_path);
     let initial_file_state = uptrakit_config_reload::ConfigFileState::new(
         config_path.display().to_string(),
         digest,
@@ -155,8 +153,11 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     let (reload_recent_events_tx, reload_recent_events_rx) =
         tokio::sync::watch::channel(Vec::new());
 
+    let runtime_arc = std::sync::Arc::new(loaded.config.clone());
+
     Ok(BootedConfig {
         runtime: loaded.config,
+        runtime_arc,
         coordinator,
         settings_version_cache,
         channels,
@@ -169,6 +170,33 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
         reload_recent_events_tx,
         reload_recent_events_rx,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Compute a `"sha256:<hex>"` digest of the file at `path`.
+///
+/// Falls back to `"size:<N>"` on I/O error so that the status endpoint
+/// always has a value rather than returning an empty string.
+pub(crate) fn file_digest(path: &std::path::Path) -> String {
+    use sha2::{Digest as _, Sha256};
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let mut h = Sha256::new();
+            h.update(&bytes);
+            format!("sha256:{:x}", h.finalize())
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "could not read config for digest; using size stub"
+            );
+            format!("size:{}", path.metadata().map(|m| m.len()).unwrap_or(0))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
