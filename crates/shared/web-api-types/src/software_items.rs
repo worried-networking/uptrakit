@@ -388,6 +388,10 @@ pub struct SoftwareItemHostSummary {
     /// status badge and open the live terminal instead of the update confirmation dialog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_update_history_id: Option<Uuid>,
+    /// Status of the active update, if any. One of: "queued", "pending",
+    /// "in_progress", "awaiting_restart". None when no active update exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_update_status: Option<String>,
     /// Classification of the available update (security, bugfix, feature, unknown).
     pub update_category: String,
     #[serde(with = "time::serde::rfc3339::option")]
