@@ -14,7 +14,9 @@ use tracing::{error, info, warn};
 use crate::alerts::{AlertSeverity, NoopAlertWriter, SystemAlertWriter};
 use crate::audit::ReloadAuditEvent;
 use crate::config::RuntimeConfig;
-use crate::coordinator::{CoordinatorState, DegradedInfo, ReloadCoordinatorHandle, ReloadRequest};
+use crate::coordinator::{
+    CoordinatorState, DegradedInfo, ReloadCoordinatorHandle, ReloadRequest, ReloadSource,
+};
 use crate::delta::RuntimeConfigDelta;
 use crate::reexec_hook::ReexecHook;
 use crate::reloadable::ReloadableErased;
@@ -137,10 +139,7 @@ impl ReloadCoordinator {
             // Requests arriving while run_cycle executes wait in the 64-entry channel buffer
             // (back-pressure coalescing). No audit event for queued-but-not-yet-processed requests.
             if let CoordinatorState::Degraded(_) = **self.state.load() {
-                warn!(
-                    source = ?req.source,
-                    "ignoring reload request while coordinator is Degraded"
-                );
+                warn!(source = ?req.source, "ignoring reload request while Degraded");
                 if self
                     .audit_tx
                     .send(ReloadAuditEvent::Refused {
@@ -153,10 +152,124 @@ impl ReloadCoordinator {
                 }
                 continue;
             }
+
+            // Clone source before moving `req` into process_request.
+            let source = req.source.clone();
             self.state.store(Arc::new(CoordinatorState::Reloading));
-            // Plan 2 produces actual deltas from diffing old/new config.
-            // This stub transitions back to Idle; run_cycle wired in Plan 2.
-            self.state.store(Arc::new(CoordinatorState::Idle));
+            if self
+                .audit_tx
+                .send(ReloadAuditEvent::Requested {
+                    source: source.clone(),
+                })
+                .is_err()
+            {
+                warn!("audit channel closed; Requested event dropped");
+            }
+
+            let outcome = self.process_request(req).await;
+
+            match outcome {
+                Ok(per_ms) => {
+                    self.state.store(Arc::new(CoordinatorState::Idle));
+                    if self
+                        .audit_tx
+                        .send(ReloadAuditEvent::Applied {
+                            sections: per_ms.keys().cloned().collect(),
+                            per_subsystem_ms: per_ms,
+                        })
+                        .is_err()
+                    {
+                        warn!("audit channel closed; Applied event dropped");
+                    }
+                }
+                Err(e) => {
+                    // revert_phase sets Degraded if the revert itself fails;
+                    // otherwise we return to Idle.
+                    if !matches!(**self.state.load(), CoordinatorState::Degraded(_)) {
+                        self.state.store(Arc::new(CoordinatorState::Idle));
+                    }
+                    if self
+                        .audit_tx
+                        .send(ReloadAuditEvent::Failed {
+                            phase: crate::coordinator::ReloadPhase::Apply,
+                            subsystem: None,
+                            error: e.to_string(),
+                        })
+                        .is_err()
+                    {
+                        warn!("audit channel closed; Failed event dropped");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Process one reload request: load/diff/triage for file triggers;
+    /// map sections to deltas for DB bumps.
+    ///
+    /// Extracted into its own `async fn` to satisfy `clippy::large_futures`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if TOML loading fails, the reexec hook returns
+    /// `ExecFailed`, or `run_cycle` fails.
+    async fn process_request(
+        &mut self,
+        req: ReloadRequest,
+    ) -> Result<BTreeMap<String, u64>, Report> {
+        match &req.source {
+            ReloadSource::Sighup | ReloadSource::FileWatch { .. } => {
+                let config_path = match &self.config_path {
+                    Some(p) => p.clone(),
+                    None => {
+                        return Err(rootcause::report!(
+                            "coordinator has no config_path set; cannot reload from file"
+                        ));
+                    }
+                };
+
+                let loaded = crate::loader::TomlConfigLoader::load(&config_path)?;
+                for w in &loaded.warnings {
+                    tracing::warn!("config reload: {w}");
+                }
+                let new_config = loaded.config;
+
+                let prior = Arc::clone(&self.current_config);
+
+                // Check for irreversibly-bound key changes via the hook.
+                if let Some(hook) = &self.reexec_hook {
+                    match hook.check_and_trigger(&prior, &new_config) {
+                        crate::reexec_hook::ReexecOutcome::NotNeeded => {}
+                        crate::reexec_hook::ReexecOutcome::ExecFailed(err) => return Err(err),
+                    }
+                }
+
+                let deltas = build_deltas(&prior, &new_config);
+                if deltas.is_empty() {
+                    info!("file reload: no section changes detected; no-op");
+                    return Ok(BTreeMap::new());
+                }
+
+                let per_ms = self.run_cycle(deltas).await?;
+
+                // Update current config only after successful apply.
+                self.current_config = Arc::new(new_config);
+                Ok(per_ms)
+            }
+
+            ReloadSource::DbBump { sections, .. } => {
+                let current = Arc::clone(&self.current_config);
+                let deltas = sections_to_deltas(sections, &current);
+                if deltas.is_empty() {
+                    return Ok(BTreeMap::new());
+                }
+                self.run_cycle(deltas).await
+            }
+
+            ReloadSource::Boot | ReloadSource::Other(_) => {
+                tracing::debug!(source = ?req.source, "coordinator: ignoring non-actionable source");
+                Ok(BTreeMap::new())
+            }
         }
     }
 
@@ -411,7 +524,6 @@ impl ReloadCoordinator {
 /// Irreversibly-bound keys (`db.url`, `master_key.path`, `log.path`,
 /// embedded topology) are checked by the reexec hook BEFORE this function
 /// is called. `EmbeddedServices` is never emitted as a delta.
-#[cfg_attr(not(test), expect(dead_code, reason = "called from Task 6 run()"))]
 fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
     let mut deltas = Vec::new();
     if prior.db != new.db {
@@ -441,7 +553,6 @@ fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfig
 ///
 /// Unknown sections are logged at `warn` and skipped. Duplicate entries
 /// (e.g. `["audit", "audit_log"]`) are deduplicated by variant tag.
-#[cfg_attr(not(test), expect(dead_code, reason = "called from Task 6 run()"))]
 fn sections_to_deltas(sections: &[String], current: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
     let mut deltas = Vec::new();
     for s in sections {
