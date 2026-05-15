@@ -11,10 +11,12 @@
 //! token fires.  Poll errors are logged as warnings and retried on the next
 //! tick.
 
+use std::sync::Arc;
+
 use rootcause::prelude::*;
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::EntityTrait;
 use time::OffsetDateTime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uptrakit_config_reload::config::Scope;
@@ -29,7 +31,7 @@ use uptrakit_shared_db::entity::settings_version;
 /// cleanly when `cancel` is triggered or when the sender side of `tx` is
 /// dropped (coordinator exited).
 pub(crate) fn spawn_config_reconciler(
-    db: DatabaseConnection,
+    db_rx: watch::Receiver<Arc<crate::reload::db_pool::DbConnHandle>>,
     tx: mpsc::Sender<ReloadRequest>,
     cache: SettingsVersionCache,
     cancel: CancellationToken,
@@ -46,7 +48,7 @@ pub(crate) fn spawn_config_reconciler(
                 _ = tick.tick() => {}
             }
 
-            match poll_once(&db, &tx, &cache).await {
+            match poll_once(&db_rx, &tx, &cache).await {
                 Ok(()) => {}
                 Err(e) => {
                     warn!(error = %e, "config reconciler poll failed; retrying next tick");
@@ -63,12 +65,13 @@ pub(crate) fn spawn_config_reconciler(
 ///
 /// Returns an error if the DB query fails; the caller logs and retries.
 async fn poll_once(
-    db: &DatabaseConnection,
+    db_rx: &watch::Receiver<Arc<crate::reload::db_pool::DbConnHandle>>,
     tx: &mpsc::Sender<ReloadRequest>,
     cache: &SettingsVersionCache,
 ) -> Result<(), Report> {
+    let handle = db_rx.borrow().clone();
     let rows = settings_version::Entity::find()
-        .all(db)
+        .all(handle.conn())
         .await
         .map_err(|e| rootcause::report!(e))?;
 
@@ -122,9 +125,11 @@ async fn poll_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ActiveModelTrait, ActiveValue, Database};
+    use sea_orm::{ActiveModelTrait, ActiveValue, Database, DatabaseConnection};
     use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
+
+    use crate::reload::db_pool::DbPoolReloadable;
 
     async fn build_test_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:")
@@ -167,19 +172,27 @@ mod tests {
         sv.insert(db).await.expect("insert settings_version");
     }
 
+    // Wraps a DatabaseConnection in a watch channel for tests.
+    // The DbPoolReloadable (and its Sender) is dropped after subscribe(); the
+    // Receiver still works for borrow() reads.
+    fn make_db_rx(
+        db: DatabaseConnection,
+    ) -> watch::Receiver<Arc<crate::reload::db_pool::DbConnHandle>> {
+        DbPoolReloadable::new(db, "sqlite::memory:".to_string()).subscribe()
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn reconciler_detects_global_bump() {
         let db = build_test_db().await;
         let tenant_id = Uuid::now_v7();
         insert_tenant_and_version(&db, tenant_id, 1, 1).await;
 
+        let db_rx = make_db_rx(db);
         let (tx, mut rx) = mpsc::channel(8);
         let cache = SettingsVersionCache::new();
-
         let cancel = CancellationToken::new();
-        let handle = spawn_config_reconciler(db.clone(), tx, cache.clone(), cancel.clone());
+        let handle = spawn_config_reconciler(db_rx, tx, cache.clone(), cancel.clone());
 
-        // Wait for the reconciler to detect the initial global bump.
         let req = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
             .await
             .expect("timed out")
@@ -201,14 +214,13 @@ mod tests {
     async fn reconciler_detects_tenant_bump() {
         let db = build_test_db().await;
         let tenant_id = Uuid::now_v7();
-        // global_version = 0 → no global bump; version = 1 → tenant bump.
         insert_tenant_and_version(&db, tenant_id, 1, 0).await;
 
+        let db_rx = make_db_rx(db);
         let (tx, mut rx) = mpsc::channel(8);
         let cache = SettingsVersionCache::new();
-
         let cancel = CancellationToken::new();
-        let handle = spawn_config_reconciler(db.clone(), tx, cache.clone(), cancel.clone());
+        let handle = spawn_config_reconciler(db_rx, tx, cache.clone(), cancel.clone());
 
         let req = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
             .await
@@ -233,14 +245,12 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         insert_tenant_and_version(&db, tenant_id, 1, 1).await;
 
+        let db_rx = make_db_rx(db);
         let (tx, mut rx) = mpsc::channel(8);
         let cache = SettingsVersionCache::new();
-
         let cancel = CancellationToken::new();
-        let handle = spawn_config_reconciler(db.clone(), tx, cache.clone(), cancel.clone());
+        let handle = spawn_config_reconciler(db_rx, tx, cache.clone(), cancel.clone());
 
-        // First tick emits bumps for both global and tenant (both are 1 > 0).
-        // Drain until the channel goes quiet within one poll window.
         loop {
             let got = tokio::time::timeout(
                 RECONCILER_POLL + std::time::Duration::from_millis(300),
@@ -248,12 +258,10 @@ mod tests {
             )
             .await;
             if got.is_err() {
-                break; // Timed out — initial bursts drained.
+                break;
             }
         }
 
-        // After the cache is primed, no further bump should be emitted for
-        // the same version numbers.  Give the reconciler two more ticks.
         let nothing = tokio::time::timeout(RECONCILER_POLL * 2, rx.recv()).await;
         assert!(nothing.is_err(), "expected timeout, not a second bump");
 
@@ -264,12 +272,45 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn poll_once_emits_nothing_on_empty_db() {
         let db = build_test_db().await;
+        let db_rx = make_db_rx(db);
         let (tx, mut rx) = mpsc::channel(8);
         let cache = SettingsVersionCache::new();
 
-        poll_once(&db, &tx, &cache).await.unwrap();
+        poll_once(&db_rx, &tx, &cache).await.unwrap();
         drop(tx);
 
         assert!(rx.recv().await.is_none(), "expected no messages");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reconciler_works_with_watch_receiver() {
+        let db = build_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant_and_version(&db, tenant_id, 1, 1).await;
+
+        let reloadable = DbPoolReloadable::new(db, "sqlite::memory:".to_string());
+        let db_rx = reloadable.subscribe();
+
+        let (tx, mut rx) = mpsc::channel(8);
+        let cache = SettingsVersionCache::new();
+        let cancel = CancellationToken::new();
+
+        let handle = spawn_config_reconciler(db_rx, tx, cache, cancel.clone());
+
+        let req = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+
+        assert!(matches!(
+            req.source,
+            ReloadSource::DbBump {
+                scope: Scope::Global,
+                ..
+            }
+        ));
+
+        cancel.cancel();
+        handle.await.expect("task panicked");
     }
 }
