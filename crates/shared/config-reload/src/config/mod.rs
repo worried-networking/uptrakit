@@ -38,7 +38,9 @@ pub struct RuntimeConfig {
     pub master_key: MasterKeyConfig,
     /// Network listener settings (HTTPS + PKI).
     pub network: NetworkConfig,
-    /// TLS certificate and key settings.
+    /// TLS certificate and key settings. Optional: when omitted the
+    /// controller falls back to managed self-signed certificates.
+    #[serde(default)]
     pub tls: TlsConfig,
     /// NATS messaging server settings.
     pub nats: NatsConfig,
