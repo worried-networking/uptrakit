@@ -1789,20 +1789,6 @@ pub async fn trigger_update(
         }
     };
 
-    state
-        .notification
-        .event_broadcaster
-        .send(
-            tenant_db.tenant_id(),
-            AdminEvent::UpdateTriggered {
-                update_history_id: result.update_history_id,
-                host_id,
-                software_item_id: item_id,
-                status: status.to_string(),
-            },
-        )
-        .await;
-
     let resp = TriggerUpdateResponse {
         update_history_id: result.update_history_id,
         status,

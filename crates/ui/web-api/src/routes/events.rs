@@ -183,6 +183,10 @@ mod tests {
             data.get("software_item_id").is_some(),
             "software_item_id missing: {data}"
         );
-        assert!(data.get("status").is_some(), "status missing: {data}");
+        assert_eq!(
+            data["status"],
+            serde_json::json!("pending"),
+            "status value mismatch: {data}"
+        );
     }
 }

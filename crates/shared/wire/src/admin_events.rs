@@ -674,6 +674,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn update_triggered_missing_status_defaults_to_pending() {
+        let json = r#"{"update_triggered":{"update_history_id":"00000000-0000-0000-0000-000000000000","host_id":"00000000-0000-0000-0000-000000000000","software_item_id":"00000000-0000-0000-0000-000000000000"}}"#;
+        let event: AdminEvent =
+            serde_json::from_str(json).expect("backward-compat deserialization");
+        assert!(
+            matches!(event, AdminEvent::UpdateTriggered { status: ref s, .. } if s == "pending"),
+            "expected UpdateTriggered with pending status, got: {event:?}"
+        );
+    }
+
     /// Verify that `Other(String)` event_name() returns the raw variant string.
     #[test]
     fn other_event_name_returns_raw_string() {
