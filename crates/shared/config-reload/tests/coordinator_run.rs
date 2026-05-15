@@ -123,9 +123,9 @@ async fn run_loop_emits_requested_then_applied() {
     );
 }
 
-// This test uses start_paused = true because run_cycle's watchdog calls
-// tokio::time::timeout with rollback_window. With paused time, we advance manually
-// so the watchdog fires deterministically without wall-clock waiting.
+// start_paused = true because run_cycle's watchdog uses tokio::time::timeout.
+// health_check() returns Err immediately, so the timeout resolves synchronously
+// regardless of wall-clock time — paused time makes this deterministic.
 #[tokio::test(start_paused = true)]
 async fn run_loop_refuses_when_degraded() {
     use tokio::sync::mpsc;

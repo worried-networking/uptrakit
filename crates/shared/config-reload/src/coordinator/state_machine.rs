@@ -601,7 +601,7 @@ fn dedup_deltas(deltas: Vec<RuntimeConfigDelta>) -> Vec<RuntimeConfigDelta> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
     use std::time::Duration;
 
     use super::*;
@@ -615,14 +615,14 @@ mod tests {
 
     impl CapturingAlertWriter {
         fn alerts(&self) -> Vec<(AlertSeverity, String)> {
-            self.captured.lock().unwrap().clone()
+            self.captured.lock().clone()
         }
     }
 
     #[async_trait::async_trait]
     impl SystemAlertWriter for CapturingAlertWriter {
         async fn write(&self, severity: AlertSeverity, message: String) {
-            self.captured.lock().unwrap().push((severity, message));
+            self.captured.lock().push((severity, message));
         }
     }
 

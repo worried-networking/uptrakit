@@ -1455,7 +1455,12 @@ async fn reload_audit_bridge(
                             s.pending_detected_at = None;
                         });
                     }
-                    _ => {}
+                    _ => {
+                        tracing::debug!(
+                            ?source,
+                            "reload_audit_bridge: non-file source applied, no file-state update"
+                        );
+                    }
                 }
 
                 let event_json = serde_json::json!({
@@ -1513,7 +1518,11 @@ async fn reload_audit_bridge(
                     }
                 });
             }
-            _ => {}
+            _ => {
+                tracing::debug!(
+                    "reload_audit_bridge: unhandled ReloadAuditEvent in status-watch (not a watch channel concern)"
+                );
+            }
         }
 
         let (action, outcome, details) = match &event {
