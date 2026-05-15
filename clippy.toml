@@ -3,3 +3,14 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-dbg-in-tests = true
 allow-indexing-slicing-in-tests = true
+
+# TLS 1.3 PSK resumption skips Certificate/CertificateVerify on resumed
+# sessions, so a resumption cache shared across cert rotations keeps
+# presenting the old (potentially revoked) client cert to the server.
+# Force every resolver-based mTLS `ClientConfig` to go through
+# `CertScopedClientSessionStore` (see
+# `crates/shared/service-sdk/src/session_store.rs`) so cert rotation
+# flushes the cache atomically.
+disallowed-methods = [
+    { path = "rustls::client::Resumption::in_memory_sessions", reason = "use uptrakit_service_sdk::session_store::CertScopedClientSessionStore — TLS 1.3 resumption with a swappable client cert must invalidate on rotation" },
+]

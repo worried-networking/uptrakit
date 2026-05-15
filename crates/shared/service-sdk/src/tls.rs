@@ -204,7 +204,15 @@ pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
 /// on the same instance will take effect for the next connection without
 /// rebuilding the `ClientConfig`.
 ///
-/// Session resumption is enabled with a 256-entry in-memory cache.
+/// Session resumption is enabled, backed by the supplied
+/// [`CertScopedClientSessionStore`]. The same `session_store` instance MUST
+/// be the one attached to `resolver` so that
+/// [`AgentClientCertResolver::swap`](crate::cert_resolver::AgentClientCertResolver::swap)
+/// flushes the cache that this config actually consults. The static-cert
+/// builders elsewhere in this module ([`build_pinned_ca_client_config`],
+/// [`build_mtls_client_config`], [`build_system_roots_client_config`],
+/// [`build_tofu_client_config`]) cannot rotate identity at runtime and
+/// intentionally have no resumption configured.
 ///
 /// Callers should build the `RootCertStore` via [`build_root_store`] to
 /// incorporate any opt-in trust sources (public roots, native certs).
@@ -215,12 +223,15 @@ pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
 pub fn build_client_config_with_resolver(
     root_store: RootCertStore,
     resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
+    session_store: Arc<crate::session_store::CertScopedClientSessionStore>,
 ) -> Result<Arc<rustls::ClientConfig>> {
     let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_client_cert_resolver(resolver);
 
-    config.resumption = rustls::client::Resumption::in_memory_sessions(256);
+    config.resumption = rustls::client::Resumption::store(
+        session_store as Arc<dyn rustls::client::ClientSessionStore>,
+    );
 
     Ok(Arc::new(config))
 }
@@ -260,13 +271,17 @@ pub fn build_certified_key(cert_pem: &str, key_pem: &str) -> Result<rustls::sign
 /// Build an `Arc<ClientConfig>` for mTLS with a hot-swappable client
 /// certificate using system/webpki root certificates.
 ///
-/// Session resumption is enabled with a 256-entry in-memory cache.
+/// Session resumption is enabled, backed by the supplied
+/// [`CertScopedClientSessionStore`]. See
+/// [`build_client_config_with_resolver`] for the invariant on the
+/// `session_store` argument.
 ///
 /// # Errors
 ///
 /// Returns an error if the system root store cannot be loaded.
 pub fn build_system_trust_client_config_with_resolver(
     resolver: Arc<crate::cert_resolver::AgentClientCertResolver>,
+    session_store: Arc<crate::session_store::CertScopedClientSessionStore>,
 ) -> Result<Arc<rustls::ClientConfig>> {
     let root_store = build_webpki_root_store();
 
@@ -274,7 +289,9 @@ pub fn build_system_trust_client_config_with_resolver(
         .with_root_certificates(root_store)
         .with_client_cert_resolver(resolver);
 
-    config.resumption = rustls::client::Resumption::in_memory_sessions(256);
+    config.resumption = rustls::client::Resumption::store(
+        session_store as Arc<dyn rustls::client::ClientSessionStore>,
+    );
 
     Ok(Arc::new(config))
 }
