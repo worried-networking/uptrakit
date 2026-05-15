@@ -866,6 +866,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             reload_file_state_tx,
             reload_last_reload_tx,
             reload_recent_events_tx,
+            config_path_for_coord.clone(),
         ));
 
         (
@@ -1391,6 +1392,19 @@ fn spawn_zeroconf(
     }
 }
 
+/// Compute the hex-encoded SHA-256 digest of a file at `path`.
+///
+/// Returns an empty string and logs a warning if the file cannot be read.
+fn file_digest(path: &std::path::Path) -> String {
+    match std::fs::read(path) {
+        Ok(bytes) => crate::pki::sha256_hex(&bytes),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "could not read config file for digest");
+            String::new()
+        }
+    }
+}
+
 /// Bridge task: receive [`ReloadAuditEvent`]s from the coordinator and emit them as
 /// system-scoped [`AuditEntry`] rows via [`AuditEmitter::emit_event`].
 ///
@@ -1399,9 +1413,10 @@ fn spawn_zeroconf(
 async fn reload_audit_bridge(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
     emitter: uptrakit_audit_log::AuditEmitter,
-    _file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
+    file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
     last_reload_tx: tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
     recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
+    config_path: std::path::PathBuf,
 ) {
     use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
     use uptrakit_config_reload::ReloadAuditEvent;
@@ -1409,10 +1424,17 @@ async fn reload_audit_bridge(
     while let Some(event) = rx.recv().await {
         // Update status watch channels.
         match &event {
+            ReloadAuditEvent::FileChanged { path } => {
+                let pending_digest = file_digest(path);
+                file_state_tx.send_modify(|s| {
+                    s.pending_digest = Some(pending_digest);
+                    s.pending_detected_at = Some(time::OffsetDateTime::now_utc());
+                });
+            }
             ReloadAuditEvent::Applied {
                 sections,
                 per_subsystem_ms,
-                source: _,
+                source,
             } => {
                 let info = uptrakit_config_reload::LastReloadInfo::new(
                     time::OffsetDateTime::now_utc(),
@@ -1421,6 +1443,21 @@ async fn reload_audit_bridge(
                 );
                 // Receivers may have been dropped (e.g. tests); ignore send errors.
                 drop(last_reload_tx.send(Some(info)));
+
+                match source {
+                    uptrakit_config_reload::ReloadSource::Sighup
+                    | uptrakit_config_reload::ReloadSource::FileWatch { .. } => {
+                        let new_digest = file_digest(&config_path);
+                        file_state_tx.send_modify(|s| {
+                            s.digest = new_digest;
+                            s.loaded_at = time::OffsetDateTime::now_utc();
+                            s.pending_digest = None;
+                            s.pending_detected_at = None;
+                        });
+                    }
+                    _ => {}
+                }
+
                 let event_json = serde_json::json!({
                     "type": "applied",
                     "at": time::OffsetDateTime::now_utc()
@@ -1440,6 +1477,10 @@ async fn reload_audit_bridge(
                 subsystem,
                 error,
             } => {
+                file_state_tx.send_modify(|s| {
+                    s.pending_digest = None;
+                    s.pending_detected_at = None;
+                });
                 let event_json = serde_json::json!({
                     "type": "failed",
                     "at": time::OffsetDateTime::now_utc()
@@ -1509,7 +1550,13 @@ async fn reload_audit_bridge(
                 AuditOutcome::Failed,
                 serde_json::json!({ "subsystem": subsystem, "reason": reason }),
             ),
-            _ => continue,
+            ReloadAuditEvent::FileChanged { .. } => continue, // not audit-logged; handled in status watch
+            _ => {
+                tracing::warn!(
+                    "reload_audit_bridge: unhandled ReloadAuditEvent variant (skipping audit emit)"
+                );
+                continue;
+            }
         };
         if let Ok(entry) = AuditEntry::<Event>::builder_event(action)
             .system_scope()
