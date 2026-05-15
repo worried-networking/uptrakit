@@ -85,23 +85,38 @@ return `TriggerUpdateError::UpdateAlreadyActive` rather than propagating the DB 
 **Note:** `UpdateAlreadyActive` already maps to HTTP 409
 (`api_error/mappings.rs:976`) — no mapping change needed.
 
-### 3. Add `UpdateStatus::unfinished()` helper
+### 3. Add `UpdateStatus` grouping helpers
 
 Add to the existing `impl UpdateStatus` block in
 `crates/shared/types/src/update_status.rs`:
 
 ```rust
-/// All non-terminal statuses — states where an update is still active and
-/// a new trigger for the same (host, software_item) must be rejected.
+/// All non-terminal statuses — states where a new trigger for the same
+/// (host, software_item) must be rejected.
 pub const fn unfinished() -> [Self; 4] {
     [Self::Queued, Self::Pending, Self::InProgress, Self::AwaitingRestart]
 }
+
+/// Statuses that block the host from running another update concurrently.
+/// Excludes `Queued` — a queued update does not occupy the host's execution
+/// slot; it is waiting for the preceding update to finish.
+pub const fn host_blocking() -> [Self; 3] {
+    [Self::Pending, Self::InProgress, Self::AwaitingRestart]
+}
 ```
 
-Use `UpdateStatus::unfinished()` everywhere the non-terminal status set is needed:
-`active_updates` query in `software_items/mod.rs`, `has_active_update_for_host` in
-`update_dispatch.rs`, and the new `has_active_update_for_host_software_item`. Eliminates
-the repeated inline array and ensures `AwaitingRestart` cannot be silently omitted again.
+**Callsite assignments:**
+
+- `UpdateStatus::unfinished()` — `active_updates` query in `software_items/mod.rs` and
+  the new `has_active_update_for_host_software_item` in `update_dispatch.rs`.
+- `UpdateStatus::host_blocking()` — `has_active_update_for_host` in `update_dispatch.rs`
+  (currently inlines `[Pending, InProgress, AwaitingRestart]`); also fixes two callsites in
+  `software_states.rs` (lines 139–141 and 407–409) which currently use `Queued | Pending |
+InProgress` — missing `AwaitingRestart`, the same class of omission bug as in
+  `software_items/mod.rs`.
+
+No other groupings (`terminal()`, `not_started()`, etc.) have repeated multi-value callsites
+— deferred until actual repetition exists.
 
 ### 4. Add `active_update_status` to `SoftwareItemHostSummary`
 
@@ -375,10 +390,11 @@ SSE: UpdateCompleted{...}
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `crates/shared/db/src/migration/`                                      | New migration: `(host_id, software_item_id)` partial unique index                                                  |
 | `crates/shared/db/src/migration/lib.rs`                                | Register new migration                                                                                             |
-| `crates/shared/types/src/update_status.rs`                             | Add `UpdateStatus::unfinished() -> [Self; 4]`                                                                      |
-| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`             | Add `has_active_update_for_host_software_item`; use `UpdateStatus::unfinished()`                                   |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs`             | Call new pre-check; switch to `UpdateStatus::unfinished()`                                                         |
+| `crates/shared/types/src/update_status.rs`                             | Add `UpdateStatus::unfinished() -> [Self; 4]` and `host_blocking() -> [Self; 3]`                                   |
+| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`             | Add `has_active_update_for_host_software_item`; use `unfinished()` and `host_blocking()`                           |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs`             | Call new pre-check; switch `has_active_update_for_host` to `host_blocking()`                                       |
 | `crates/ui/web-api-queries/src/queries/software_items/mod.rs`          | Switch to `UpdateStatus::unfinished()`; carry `status` alongside `id` in map                                       |
+| `crates/ui/web-api-queries/src/queries/software_states.rs`             | Fix `AwaitingRestart` omission at lines 139–141 and 407–409; switch to `host_blocking()`                           |
 | `crates/shared/web-api-types/src/software_items.rs`                    | Add `active_update_status: Option<String>` to `SoftwareItemHostSummary`                                            |
 | `crates/shared/wire/src/admin_events.rs`                               | Add `status: String` to `UpdateTriggered`; update serialisation, deserialisation, and `all_variants()` test helper |
 | `crates/shared/wire/asyncapi.yaml`                                     | Add `status: string` to `update_triggered` message schema                                                          |
