@@ -45,6 +45,7 @@ mod tasks;
 mod zeroconf;
 
 use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,6 +62,7 @@ use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
+use uptrakit_config_reload::{ReexecHook, ReexecOutcome};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::settings::Settings;
 
@@ -88,6 +90,49 @@ impl_report_conversion!(
     uptrakit_crypto::CryptoError => AppError,
     |e| AppError::Config(e.to_string())
 );
+
+/// Reexec hook implementation for the controller process.
+///
+/// Captures listener FDs and exec arguments at startup so that
+/// [`reexec::perform_reexec`] can reconstruct the command line without
+/// re-reading the process environment after a signal.
+struct ControllerReexecHook {
+    /// Resolved from `std::env::current_exe()` at startup.
+    current_exe: std::path::PathBuf,
+    config_path: std::path::PathBuf,
+    master_key_file: Option<String>,
+    generation: u64,
+    /// Raw listener FDs cleared of `FD_CLOEXEC` before `exec()`.
+    /// Empty when PKI HTTP is disabled; the child re-binds in that case.
+    listener_fds: Vec<std::os::unix::io::RawFd>,
+}
+
+impl ReexecHook for ControllerReexecHook {
+    fn check_and_trigger(
+        &self,
+        prior: &uptrakit_config_reload::RuntimeConfig,
+        new: &uptrakit_config_reload::RuntimeConfig,
+    ) -> ReexecOutcome {
+        let decision = reexec::triage::decide(prior, new);
+        if !decision.needed {
+            return ReexecOutcome::NotNeeded;
+        }
+        tracing::info!(reasons = ?decision.reasons, "reexec required by config change");
+
+        let plan = reexec::ReexecPlan {
+            current_exe: self.current_exe.clone(),
+            config_path: self.config_path.clone(),
+            master_key_file: self.master_key_file.clone(),
+            listener_count: self.listener_fds.len(),
+            generation: self.generation,
+        };
+
+        match reexec::perform_reexec(&plan, &self.listener_fds) {
+            Ok(infallible) => match infallible {},
+            Err(e) => ReexecOutcome::ExecFailed(e),
+        }
+    }
+}
 
 async fn async_main() -> std::process::ExitCode {
     let args = cli::Args::parse();
@@ -140,6 +185,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         )))
     })?;
     tracing::info!("toml config path: {}", config_path.display());
+    let config_path_for_coord = config_path.clone();
     let booted = startup::boot_config(config_path)
         .await
         .map_err(|e| report!(AppError::Config(format!("failed to load TOML config: {e}"))))?;
@@ -341,6 +387,71 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(runtime, &reconciled)?;
+
+    // Phase 8b: Claim inherited TCP sockets and pre-bind listeners.
+    //
+    // This must happen before the coordinator block so that `listener_fds` and
+    // `https_std`/`pki_std_for_spawn` are in scope when the reexec hook is
+    // constructed and when the server task is spawned.
+    let inherited = reexec::listenfd::take_inherited_listeners().unwrap_or_else(|e| {
+        tracing::warn!("LISTEN_FDS claim failed: {e}; falling back to fresh bind");
+        None
+    });
+    let (inherited_https, inherited_pki) = match inherited {
+        Some(s) => {
+            let https_std = s.https.into_std().map_err(|e| {
+                rootcause::report!(AppError::Config(format!(
+                    "into_std failed for inherited HTTPS socket: {e}"
+                )))
+            })?;
+            let pki_std = s.pki.into_std().map_err(|e| {
+                rootcause::report!(AppError::Config(format!(
+                    "into_std failed for inherited PKI socket: {e}"
+                )))
+            })?;
+            (Some(https_std), Some(pki_std))
+        }
+        None => (None, None),
+    };
+
+    // Pre-bind HTTPS socket so we have the raw FD for reexec listener inheritance.
+    let https_std = match inherited_https {
+        Some(l) => l,
+        None => {
+            let l = std::net::TcpListener::bind(reconciled.https_addr).map_err(|e| {
+                report!(AppError::Config(format!(
+                    "bind HTTPS {}: {e}",
+                    reconciled.https_addr
+                )))
+            })?;
+            l.set_nonblocking(true)
+                .map_err(|e| report!(AppError::Config(format!("set_nonblocking HTTPS: {e}"))))?;
+            l
+        }
+    };
+    let https_raw_fd = https_std.as_raw_fd();
+
+    // Pre-bind PKI socket and collect listener FDs for reexec inheritance.
+    let (listener_fds, pki_std_for_spawn): (
+        Vec<std::os::unix::io::RawFd>,
+        Option<std::net::TcpListener>,
+    ) = if let Some(pki_port) = validated.pki_http_port {
+        let pki_std = match inherited_pki {
+            Some(l) => l,
+            None => {
+                let addr = std::net::SocketAddr::from(([0, 0, 0, 0], pki_port));
+                let l = std::net::TcpListener::bind(addr)
+                    .map_err(|e| report!(AppError::Config(format!("bind PKI HTTP {addr}: {e}"))))?;
+                l.set_nonblocking(true)
+                    .map_err(|e| report!(AppError::Config(format!("set_nonblocking PKI: {e}"))))?;
+                l
+            }
+        };
+        let pki_fd = pki_std.as_raw_fd();
+        (vec![https_raw_fd, pki_fd], Some(pki_std))
+    } else {
+        (vec![], None)
+    };
 
     // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
     let pki =
@@ -716,6 +827,21 @@ async fn run_server(args: cli::Args) -> Result<()> {
             .set_alert_writer(std::sync::Arc::new(reload::audit::AuditAlertWriter::new(
                 audit_emitter.clone(),
             )));
+
+        let current_exe = std::env::current_exe()
+            .map_err(|e| report!(AppError::Config(format!("resolve current_exe: {e}"))))?;
+        b.coordinator.set_config_path(config_path_for_coord.clone());
+        b.coordinator
+            .set_current_config(Arc::new(b.runtime.clone()));
+        b.coordinator
+            .set_reexec_hook(Box::new(ControllerReexecHook {
+                current_exe,
+                config_path: config_path_for_coord.clone(),
+                master_key_file: args.master_key_from.clone(),
+                generation: reexec::listenfd::current_generation(),
+                listener_fds: listener_fds.clone(),
+            }));
+
         let coordinator_handle = b.coordinator.handle();
 
         let _reconciler = reload::reconciler::spawn_config_reconciler(
@@ -950,28 +1076,6 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let mut sigint = signal(SignalKind::interrupt())
         .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
 
-    // Claim inherited sockets from a parent reexec, if present.
-    let inherited = reexec::listenfd::take_inherited_listeners().unwrap_or_else(|e| {
-        tracing::warn!("LISTEN_FDS claim failed: {e}; falling back to fresh bind");
-        None
-    });
-    let (inherited_https, inherited_pki) = match inherited {
-        Some(s) => {
-            let https_std = s.https.into_std().map_err(|e| {
-                rootcause::report!(AppError::Config(format!(
-                    "into_std failed for inherited HTTPS socket: {e}"
-                )))
-            })?;
-            let pki_std = s.pki.into_std().map_err(|e| {
-                rootcause::report!(AppError::Config(format!(
-                    "into_std failed for inherited PKI socket: {e}"
-                )))
-            })?;
-            (Some(https_std), Some(pki_std))
-        }
-        None => (None, None),
-    };
-
     // Spawn HTTPS server
     let server_handle = axum_server::Handle::new();
     let server_options = server::ServerOptions {
@@ -980,7 +1084,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         app_state: Arc::clone(&app_state),
         static_dir: validated.static_dir,
         handle: server_handle.clone(),
-        inherited_listener: inherited_https,
+        inherited_listener: Some(https_std),
     };
     let server_task = tokio::spawn(server::run(server_options));
 
@@ -989,7 +1093,12 @@ async fn run_server(args: cli::Args) -> Result<()> {
     spawn_zeroconf(&mut bg, &app_state, reconciled.https_addr);
 
     // Spawn PKI HTTP server if needed
-    spawn_pki_http(&mut bg, &app_state, validated.pki_http_port, inherited_pki);
+    spawn_pki_http(
+        &mut bg,
+        &app_state,
+        validated.pki_http_port,
+        pki_std_for_spawn,
+    );
 
     // Notify the service manager (and stdout-based supervisors) that all
     // servers are bound and the controller is ready to accept connections.

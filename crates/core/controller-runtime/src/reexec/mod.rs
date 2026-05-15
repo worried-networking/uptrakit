@@ -2,9 +2,6 @@ pub(crate) mod listenfd;
 pub(crate) mod sd_notify;
 pub(crate) mod triage;
 
-// Coordinator pre-apply hook wiring: future task. For now, triage + reexec
-// helpers are available but not yet called by the coordinator.
-
 use std::path::PathBuf;
 
 use rootcause::Report;
@@ -48,10 +45,6 @@ pub(crate) struct ReexecPlan {
 /// (e.g. the binary path is no longer accessible).  The error is always
 /// non-fatal from the caller's perspective because the original process is
 /// still running.
-#[expect(
-    dead_code,
-    reason = "wired into the coordinator pre-apply hook in a future graceful-reload task"
-)]
 pub(crate) fn perform_reexec(
     plan: &ReexecPlan,
     listener_fds: &[std::os::unix::io::RawFd],
