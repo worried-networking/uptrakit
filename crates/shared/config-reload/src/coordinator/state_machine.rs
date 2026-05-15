@@ -1,6 +1,7 @@
 //! Full coordinator state-machine implementation.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -12,8 +13,10 @@ use tracing::{error, info, warn};
 
 use crate::alerts::{AlertSeverity, NoopAlertWriter, SystemAlertWriter};
 use crate::audit::ReloadAuditEvent;
+use crate::config::RuntimeConfig;
 use crate::coordinator::{CoordinatorState, DegradedInfo, ReloadCoordinatorHandle, ReloadRequest};
 use crate::delta::RuntimeConfigDelta;
+use crate::reexec_hook::ReexecHook;
 use crate::reloadable::ReloadableErased;
 
 /// The coordinator state machine.
@@ -28,6 +31,20 @@ pub struct ReloadCoordinator {
     handle: ReloadCoordinatorHandle,
     audit_tx: mpsc::UnboundedSender<ReloadAuditEvent>,
     alert_writer: Arc<dyn SystemAlertWriter>,
+    /// Path of the TOML config file. Populated via [`set_config_path`].
+    /// `None` until set; file-sourced requests return an error if absent.
+    config_path: Option<PathBuf>,
+    /// Most recent successfully-applied (or boot) `RuntimeConfig`.
+    ///
+    /// Accessed only from the sequential `run()` loop — plain `Arc` is
+    /// sufficient (no concurrent readers, no lock needed).
+    current_config: Arc<RuntimeConfig>,
+    /// Hook invoked before applying file-sourced deltas to decide whether
+    /// irreversibly-bound keys changed and reexec is required.
+    ///
+    /// `Box` not `Arc`: the coordinator's sequential `run()` loop is the sole
+    /// owner — no other task clones or shares this hook.
+    reexec_hook: Option<Box<dyn ReexecHook>>,
 }
 
 impl ReloadCoordinator {
@@ -54,6 +71,9 @@ impl ReloadCoordinator {
             handle: handle.clone(),
             audit_tx,
             alert_writer,
+            config_path: None,
+            current_config: Arc::new(RuntimeConfig::default()),
+            reexec_hook: None,
         };
         (coord, handle)
     }
@@ -78,6 +98,30 @@ impl ReloadCoordinator {
     /// the real adapter can replace the [`NoopAlertWriter`] installed at construction.
     pub fn set_alert_writer(&mut self, writer: Arc<dyn SystemAlertWriter>) {
         self.alert_writer = writer;
+    }
+
+    /// Set the TOML config file path.
+    ///
+    /// Must be called before [`run`](Self::run) for Sighup/FileWatch requests
+    /// to succeed.
+    pub fn set_config_path(&mut self, path: PathBuf) {
+        self.config_path = Some(path);
+    }
+
+    /// Set the current (boot-time) `RuntimeConfig` used as the diff baseline.
+    ///
+    /// Must be called before [`run`](Self::run) when file-sourced reloads are
+    /// expected.
+    pub fn set_current_config(&mut self, config: Arc<RuntimeConfig>) {
+        self.current_config = config;
+    }
+
+    /// Register the reexec hook called before applying file-sourced deltas.
+    ///
+    /// When absent, file-sourced reloads skip the reexec check. Acceptable
+    /// when reexec is not required (e.g. in tests).
+    pub fn set_reexec_hook(&mut self, hook: Box<dyn ReexecHook>) {
+        self.reexec_hook = Some(hook);
     }
 
     /// Return a snapshot of the current coordinator state.
@@ -138,6 +182,9 @@ impl ReloadCoordinator {
             handle,
             audit_tx,
             alert_writer: Arc::new(NoopAlertWriter),
+            config_path: None,
+            current_config: Arc::new(RuntimeConfig::default()),
+            reexec_hook: None,
         }
     }
 
@@ -485,6 +532,9 @@ mod tests {
             handle,
             audit_tx,
             alert_writer: writer,
+            config_path: None,
+            current_config: Arc::new(RuntimeConfig::default()),
+            reexec_hook: None,
         }
     }
 
