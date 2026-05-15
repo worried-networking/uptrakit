@@ -1700,6 +1700,32 @@ hint, so it is safe to pass unconditionally regardless of which backend is activ
 not need `BEGIN IMMEDIATE`; `busy_timeout` handles the ordinary writer-writer lock contention
 for those.
 
+### Database Pool Migration
+
+`DbPoolReloadable` owns a `tokio::sync::watch` channel that publishes replacement
+`Arc<DbConnHandle>` values when the pool is reloaded. Two patterns apply:
+
+**Watch-driven re-read** (for long-lived polling consumers):
+
+```rust
+// Receive a watch::Receiver<Arc<DbConnHandle>> from DbPoolReloadable::subscribe().
+// Re-read the current handle on every iteration — never clone it outside the loop.
+let handle = db_rx.borrow().clone(); // Arc clone; releases read lock immediately
+let rows = MyEntity::find().all(handle.conn()).await?;
+```
+
+**Initial-handle** (for startup components that construct once):
+
+```rust
+// Clone the connection from the initial handle. This site uses the boot-time
+// pool until the process restarts. Annotate with a TODO for future migration.
+// TODO: migrate to watch::Receiver<Arc<DbConnHandle>> for live pool updates.
+let db = db_rx.borrow().conn().clone();
+```
+
+Never hold `db_rx.borrow()` across an `.await` point — the read lock blocks
+`watch::Sender::send()`. Clone the `Arc<DbConnHandle>` first, then drop the borrow.
+
 ### Per-item policy override pattern
 
 Use the **three-state override** model for per-item policy configuration:
