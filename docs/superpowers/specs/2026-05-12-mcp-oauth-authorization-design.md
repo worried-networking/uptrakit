@@ -167,7 +167,7 @@ Served as `application/json`; cached at boot, regenerated on `oauth.canonical_ho
 
 ### 5.3 Placement rationale
 
-ADR 0007 captures the long-form placement reasoning. Summary: ADR 0001's three-criterion test for extraction
+ADR 0010 captures the long-form placement reasoning. Summary: ADR 0001's three-criterion test for extraction
 into a dedicated `uptrakit-oauth-as` crate is satisfied on "coherent concept" but fails on "clear seam" and
 "self-contained test surface" today — the AS depends on `JwtManager`, `AuthState`, `RateLimitStore`,
 `SessionService`, the session-cookie middleware in `require_auth`, and the SvelteKit consent route in the
@@ -1468,7 +1468,7 @@ applicable, (3) optionally set `oauth.jwt_signing_secret` (random fallback used 
 | File                                                                  | Action | Purpose                                                                |
 | --------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
 | `docs/superpowers/specs/2026-05-12-mcp-oauth-authorization-design.md` | new    | This spec.                                                             |
-| `docs/adr/0007-mcp-oauth-authorization-server-placement.md`           | new    | AS placement decision; CIMD > DCR priority; HMAC v1 + asymmetric path. |
+| `docs/adr/0010-mcp-oauth-authorization-server-placement.md`           | new    | AS placement decision; CIMD > DCR priority; HMAC v1 + asymmetric path. |
 | `docs/development/oauth-mcp.md`                                       | new    | Adding MCP tools: ToolAuth metadata, scope rule, audit emission.       |
 | `docs/security/oauth-mcp.md`                                          | new    | Threat model, audience binding, PKCE enforcement, CIMD SSRF, replay.   |
 | `docs/end-user/mcp-clients.md`                                        | new    | Connect Claude Desktop / Cursor; consent screen; Authorized Apps.      |
