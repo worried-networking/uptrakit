@@ -2,18 +2,20 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getAuthMethods } from '$lib/api';
+	import { getAuthMethods, extractErrorMessage } from '$lib/api';
 	import {
 		getUser,
-		handleLogin,
 		handleOidcCallback,
 		handleOidcCompleteRegistration,
 		handleOidcLink,
 		handleOidcLogin
 	} from '$lib/auth.svelte';
+	import { setAccessToken, setSessionExpired } from '$lib/token-store.svelte';
+	import { setUser } from '$lib/auth.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import type { AuthMethodsResponse } from '$lib/types';
+	import type { AuthMethodsResponse, MfaChallengeResponse, AuthResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
+	import MfaStep from '$lib/components/mfa/MfaStep.svelte';
 	import { Callout } from '$lib/components/ui';
 	import { FormFieldRow, Input } from '$lib/components/forms';
 	import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
@@ -44,6 +46,7 @@
 	let registrationTokenError = $state('');
 	let linkPasswordError = $state('');
 	let _authContext = $state<string | null>(null);
+	let mfaChallenge = $state<MfaChallengeResponse | null>(null);
 
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
@@ -171,12 +174,58 @@
 		return !linkPasswordError;
 	}
 
+	function parseSetupRequired(token: string): boolean {
+		try {
+			const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+			const payload = JSON.parse(atob(base64)) as Record<string, unknown>;
+			return payload['setup_required'] === true;
+		} catch {
+			return false;
+		}
+	}
+
+	function handleMfaSuccess(res: AuthResponse) {
+		setAccessToken(res.access_token);
+		setUser(res.user);
+		setSessionExpired(false);
+		mfaChallenge = null;
+		goto(safeRedirect());
+	}
+
 	async function onSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		bannerError = '';
 		if (!validateLoginFields()) return;
 		try {
-			await handleLogin({ email, password });
+			const res = await fetch(`/api/v1/auth/login`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify({ email, password })
+			});
+
+			if (res.status === 202) {
+				mfaChallenge = (await res.json()) as MfaChallengeResponse;
+				return;
+			}
+
+			if (!res.ok) {
+				bannerError = await extractErrorMessage(res);
+				return;
+			}
+
+			const authRes = (await res.json()) as AuthResponse;
+			if (parseSetupRequired(authRes.access_token)) {
+				setAccessToken(authRes.access_token);
+				setUser(authRes.user);
+				setSessionExpired(false);
+				goto('/profile#security');
+				return;
+			}
+
+			setAccessToken(authRes.access_token);
+			setUser(authRes.user);
+			setSessionExpired(false);
 			goto(safeRedirect());
 		} catch (err) {
 			bannerError = err instanceof Error ? err.message : 'Login failed';
@@ -315,6 +364,15 @@
 				{/if}
 			</div>
 		</form>
+	{:else if mfaChallenge}
+		<MfaStep
+			mfaToken={mfaChallenge.mfa_token}
+			availableMethods={mfaChallenge.mfa_methods}
+			onSuccess={handleMfaSuccess}
+			onError={(msg) => {
+				bannerError = msg;
+			}}
+		/>
 	{:else}
 		{#if authMethods?.setup_required}
 			<Callout

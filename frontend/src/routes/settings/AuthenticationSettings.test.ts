@@ -8,7 +8,7 @@ import * as api from '$lib/api';
 import AuthenticationSettings from './AuthenticationSettings.svelte';
 
 const settingsProps = {
-	settings: { password_auth_enabled: true },
+	settings: { password_auth_enabled: true, two_factor_required: false },
 	onSuccess: vi.fn(),
 	onError: vi.fn()
 };
@@ -24,8 +24,8 @@ describe('AuthenticationSettings button', () => {
 	it('Save button carries aria-busy=true while save is in flight', async () => {
 		let resolve!: () => void;
 		vi.mocked(api.updateAuthenticationSettings).mockReturnValue(
-			new Promise<{ password_auth_enabled: boolean }>((r) => {
-				resolve = () => r({ password_auth_enabled: true });
+			new Promise<{ password_auth_enabled: boolean; two_factor_required: boolean }>((r) => {
+				resolve = () => r({ password_auth_enabled: true, two_factor_required: false });
 			})
 		);
 
@@ -42,8 +42,8 @@ describe('AuthenticationSettings button', () => {
 	it('Save button text is static "Save" during loading — no text swap', async () => {
 		let resolve!: () => void;
 		vi.mocked(api.updateAuthenticationSettings).mockReturnValue(
-			new Promise<{ password_auth_enabled: boolean }>((r) => {
-				resolve = () => r({ password_auth_enabled: true });
+			new Promise<{ password_auth_enabled: boolean; two_factor_required: boolean }>((r) => {
+				resolve = () => r({ password_auth_enabled: true, two_factor_required: false });
 			})
 		);
 

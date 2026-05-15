@@ -89,7 +89,16 @@ import type {
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse,
 	InstancePluginSummary,
-	ConfigStateResponse
+	ConfigStateResponse,
+	MfaVerifyRequest,
+	MfaEmailRequest,
+	MfaStatusResponse,
+	TotpEnrollResponse,
+	TotpConfirmRequest,
+	TotpConfirmResponse,
+	DisableTotpRequest,
+	RegenerateRecoveryCodesRequest,
+	RegenerateRecoveryCodesResponse
 } from './types';
 import type {
 	InvokeSurfaceInteractionRequest,
@@ -255,6 +264,21 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 		}
 	}
 
+	if (res.status === 403) {
+		try {
+			const body = (await res.clone().json()) as Record<string, unknown>;
+			if (body?.error === '2fa_setup_required') {
+				if (typeof window !== 'undefined') {
+					window.location.href = '/profile#security';
+				}
+				throw new Error('2fa_setup_required');
+			}
+		} catch (e) {
+			if (e instanceof Error && e.message === '2fa_setup_required') throw e;
+			// Not JSON or not the 2FA error — fall through
+		}
+	}
+
 	return res;
 }
 
@@ -360,6 +384,56 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 		throw new Error(message);
 	}
 	return res.json();
+}
+
+/** POST /auth/mfa/verify — complete MFA challenge (unauthenticated, uses mfa_token) */
+export async function mfaVerify(data: MfaVerifyRequest): Promise<AuthResponse> {
+	const res = await fetch(`${BASE}/auth/mfa/verify`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
+		body: JSON.stringify(data),
+		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
+	});
+	if (!res.ok) throw new Error(await extractErrorMessage(res));
+	return res.json();
+}
+
+/** POST /auth/mfa/email — trigger email OTP (unauthenticated, uses mfa_token) */
+export async function mfaSendEmail(data: MfaEmailRequest): Promise<void> {
+	const res = await fetch(`${BASE}/auth/mfa/email`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
+		body: JSON.stringify(data),
+		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
+	});
+	if (!res.ok) throw new Error(await extractErrorMessage(res));
+}
+
+/** GET /auth/me/2fa — current 2FA status */
+export function mfaStatus(): Promise<MfaStatusResponse> {
+	return request('/auth/me/2fa');
+}
+
+/** POST /auth/me/2fa/totp/enroll — begin TOTP enrollment */
+export function mfaEnroll(): Promise<TotpEnrollResponse> {
+	return request('/auth/me/2fa/totp/enroll', { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /auth/me/2fa/totp/confirm — confirm TOTP code */
+export function mfaConfirm(data: TotpConfirmRequest): Promise<TotpConfirmResponse> {
+	return request('/auth/me/2fa/totp/confirm', { method: 'POST', body: JSON.stringify(data) });
+}
+
+/** POST /auth/me/2fa/totp/disable — disable TOTP */
+export function mfaDisable(data: DisableTotpRequest): Promise<void> {
+	return requestVoid('/auth/me/2fa/totp/disable', { method: 'POST', body: JSON.stringify(data) });
+}
+
+/** POST /auth/me/2fa/recovery-codes/regenerate — replace recovery codes */
+export function mfaRegenerateCodes(data: RegenerateRecoveryCodesRequest): Promise<RegenerateRecoveryCodesResponse> {
+	return request('/auth/me/2fa/recovery-codes/regenerate', { method: 'POST', body: JSON.stringify(data) });
 }
 
 export function getServices(options?: {

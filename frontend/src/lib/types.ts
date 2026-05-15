@@ -161,10 +161,63 @@ export interface UpdateRegistrationSettings {
 
 export interface AuthenticationSettings {
 	password_auth_enabled: boolean;
+	two_factor_required: boolean;
 }
 
 export interface UpdateAuthenticationSettings {
 	password_auth_enabled?: boolean;
+	two_factor_required?: boolean;
+}
+
+export type MfaMethod = 'totp' | 'email' | 'recovery_code';
+
+export interface MfaChallengeResponse {
+	mfa_token: string;
+	mfa_methods: MfaMethod[];
+}
+
+export interface MfaVerifyRequest {
+	mfa_token: string;
+	code: string;
+	method: MfaMethod;
+}
+
+export interface MfaEmailRequest {
+	mfa_token: string;
+}
+
+export interface MfaStatusResponse {
+	totp_enrolled: boolean;
+	recovery_codes_count: number;
+	methods_available: MfaMethod[];
+}
+
+export interface TotpEnrollResponse {
+	otpauth_uri: string;
+	secret: string;
+}
+
+export interface TotpConfirmRequest {
+	code: string;
+}
+
+export interface TotpConfirmResponse {
+	recovery_codes: string[];
+	session: AuthResponse | null;
+}
+
+export interface DisableTotpRequest {
+	password?: string;
+	totp_code?: string;
+}
+
+export interface RegenerateRecoveryCodesRequest {
+	password?: string;
+	totp_code?: string;
+}
+
+export interface RegenerateRecoveryCodesResponse {
+	recovery_codes: string[];
 }
 
 export interface AgentCertificateSettings {
