@@ -17,11 +17,13 @@
 	} = $props();
 
 	let passwordAuthEnabled: boolean = $state(true);
+	let twoFactorRequired: boolean = $state(false);
 	let isSaving: boolean = $state(false);
 
 	$effect(() => {
 		if (settings) {
 			passwordAuthEnabled = settings.password_auth_enabled;
+			twoFactorRequired = settings.two_factor_required;
 		}
 	});
 
@@ -29,9 +31,11 @@
 		isSaving = true;
 		try {
 			const res = await updateAuthenticationSettings({
-				password_auth_enabled: passwordAuthEnabled
+				password_auth_enabled: passwordAuthEnabled,
+				two_factor_required: twoFactorRequired
 			});
 			passwordAuthEnabled = res.password_auth_enabled;
+			twoFactorRequired = res.two_factor_required;
 			onSuccess('Authentication settings saved.');
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save authentication settings');
@@ -50,6 +54,12 @@
 				<label class="flex items-center gap-3">
 					<Checkbox id="password-auth-enabled" bind:checked={passwordAuthEnabled} />
 					<span>Enable password authentication</span>
+				</label>
+			</FormFieldRow>
+			<FormFieldRow label="Require Two-Factor Authentication" inputId="two-factor-required">
+				<label class="flex items-center gap-3">
+					<Checkbox id="two-factor-required" bind:checked={twoFactorRequired} />
+					<span>Require all password-authenticated users to enroll in 2FA</span>
 				</label>
 			</FormFieldRow>
 			<div class="flex items-center gap-2">

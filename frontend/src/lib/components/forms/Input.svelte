@@ -19,6 +19,9 @@
 		oninput?: (e: Event) => void;
 		onblur?: (e: FocusEvent) => void;
 		onkeydown?: (e: KeyboardEvent) => void;
+		inputmode?: 'none' | 'text' | 'decimal' | 'numeric' | 'tel' | 'search' | 'email' | 'url';
+		pattern?: string;
+		maxlength?: number;
 		'aria-describedby'?: string;
 		'aria-label'?: string;
 		class?: string;
@@ -55,6 +58,9 @@
 		oninput,
 		onblur,
 		onkeydown,
+		inputmode,
+		pattern,
+		maxlength,
 		'aria-describedby': ariaDescribedby,
 		'aria-label': ariaLabel,
 		class: className = ''
@@ -77,6 +83,9 @@
 	{required}
 	{min}
 	{max}
+	{inputmode}
+	{pattern}
+	{maxlength}
 	{oninput}
 	{onblur}
 	{onkeydown}

@@ -30,6 +30,7 @@
 	import { goto } from '$app/navigation';
 	import { FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
+	import SecuritySection from './SecuritySection.svelte';
 
 	const user = $derived(getUser());
 	const authMethod = $derived(getAuthMethod());
@@ -292,6 +293,12 @@
 					/>
 				{/if}
 			</SectionCard>
+
+			{#if authMethod === 'password'}
+				<div id="security">
+					<SecuritySection />
+				</div>
+			{/if}
 		{/if}
 
 		{#if showChangeEmailModal}
