@@ -68,6 +68,15 @@ impl DbPoolReloadable {
             snapshot: Mutex::new(None),
         }
     }
+
+    /// Subscribe to pool-handle updates.
+    ///
+    /// Returns a receiver that gets a new value every time [`apply`] opens a
+    /// replacement pool.  Callers must hold the receiver alive for the watch
+    /// channel to deliver updates.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<Arc<DbConnHandle>> {
+        self.tx.subscribe()
+    }
 }
 
 impl Reloadable for DbPoolReloadable {
@@ -216,6 +225,25 @@ mod tests {
         let new_cfg = std::sync::Arc::new(DbConfig::with_all(TEST_URL, 32, 6_000));
         reloadable.apply(new_cfg).await.unwrap();
         reloadable.health_check().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn subscribe_receives_new_pool_after_apply() {
+        let pool = build_test_pool().await;
+        let reloadable = DbPoolReloadable::new(pool.clone(), TEST_URL.to_string());
+        let rx = reloadable.subscribe();
+
+        // No change yet.
+        assert!(!rx.has_changed().unwrap());
+
+        let new_cfg = std::sync::Arc::new(DbConfig::with_all(TEST_URL, 32, 6_000));
+        reloadable.apply(new_cfg).await.unwrap();
+
+        // apply() should have published a new handle.
+        assert!(
+            rx.has_changed().unwrap(),
+            "subscriber did not receive new pool"
+        );
     }
 
     async fn build_test_pool() -> DatabaseConnection {
