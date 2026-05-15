@@ -29,6 +29,7 @@ Candidates approved by this test:
 | MCP server                                                    | Completed — merging | Spec: `docs/superpowers/specs/2026-05-01-extract-mcp-crate-design.md`                                                                                                                                                         |
 | Notification delivery core (`uptrakit-notification-delivery`) | Completed           | Spec: `docs/superpowers/specs/2026-05-01-notification-delivery-extraction-design.md`. `dispatch_loop` (queue, rule matching, channel loading, log writing) remains in `web-api` — it is stateful orchestration, not delivery. |
 | `surface_proxy/`                                              | Completed           | Spec: `docs/superpowers/specs/2026-05-01-extract-surface-proxy-crate-design.md`. `SurfaceProxyDeps` sub-state struct introduced in `web-api`; `service_connections` also extracted as pre-condition.                          |
+| OAuth Authorization Server                                    | Deferred (Phase 2)  | Seam not yet clean — depends on JwtManager, AuthState, session middleware, frontend. See ADR 0010.                                                                                                                            |
 
 Explicitly rejected: extracting `actions/` as a unit. It covers host, service,
 batch, software item, and settings mutations — no single coherent concept. The real

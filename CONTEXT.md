@@ -145,6 +145,37 @@ to the first server-cert SAN. Must match the trust-domain segment of every Servi
 SPIFFE URI SAN.
 _Avoid_: domain (overloaded), namespace (Kubernetes overload).
 
+**Consent Grant**:
+A User's persisted approval of an OAuth Client's scope set, recorded in `oauth_consents`. Revocable
+from the User's Authorized Apps view or via cascade when the OAuth Client is revoked.
+_Avoid_: authorization (already overloaded in OAuth context), permission grant (collides with
+Permission).
+
+**MCP Authorization Server**:
+The OAuth 2.1 Authorization Server embedded in the Controller. Issues access and refresh tokens for
+the MCP Resource Server. Canonical URL `https://<oauth.canonical_host>`. Lives inside
+`uptrakit-web-api` v1.
+_Avoid_: auth server (collides with OIDC Provider auth), token server.
+
+**MCP Resource Server**:
+The component of `uptrakit-mcp` that validates OAuth access tokens for inbound MCP requests.
+Canonical URL `https://<oauth.canonical_host>/mcp`. Identified by the `resource` parameter in
+RFC 8707 token requests.
+_Avoid_: MCP endpoint, MCP service (collides with Service).
+
+**OAuth Client**:
+An application identity registered with the controller's MCP Authorization Server. Created via
+Dynamic Client Registration, Client ID Metadata Document fetch, or manual Operator registration.
+Holds redirect URIs, default scopes, and one or more grants from Users.
+_Avoid_: application, third party (too vague), integration (conflicts with Plugin).
+
+**Scope (OAuth)**:
+A string that names an action class an OAuth Client may perform on the MCP Resource Server. v1
+values: `mcp:read`, `mcp:write`. Distinct from **Permission**, which names what a User can do
+regardless of which client they use. Effective rights = `scope ∩ Permission`.
+_Avoid_: using `Scope` bare for either concept without the `(OAuth)` / `(Permission)` qualifier in
+code comments or docs.
+
 **Config Section**:
 Logical grouping of settings whose lifetime is bound together for reload; one `Arc<SectionConfig>`
 and one `watch::Sender` per section.
@@ -217,3 +248,6 @@ Default values are constants in `uptrakit-config-reload::defaults`.
 - **"release"** — means "available version to upgrade to." For Docker containers this maps to
   an image tag; for GitHub-based items it maps to a GitHub release. The term is canonical
   regardless of the underlying mechanism.
+- **"scope"** — two distinct concepts exist: **Scope (OAuth)** (action class on the MCP Resource
+  Server) and **Permission** (user right). Always qualify when ambiguous; the typed enum names
+  (`McpScope`, `Permission`) keep code clear.

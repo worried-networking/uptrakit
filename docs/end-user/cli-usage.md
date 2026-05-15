@@ -44,6 +44,11 @@ variables, which take precedence over stored configuration.
 
 ## Authentication
 
+> **Note:** `uptrakit-cli` continues to use API tokens in v1 — there is no behavioural change from
+> this release. Phase 2 may revisit CLI auth, but no changes are planned for the current release.
+> For details on how API tokens are managed, see the
+> [Profile and API Tokens](profile-tokens.md) page.
+
 Before using most commands you must authenticate. The CLI uses a device authorization flow (RFC 8628).
 When the user approves in the browser, the CLI receives the token instantly via SSE. If SSE is
 unavailable (e.g. older server), it falls back to polling every 5 seconds.

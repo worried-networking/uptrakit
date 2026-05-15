@@ -461,6 +461,25 @@ certificate; no bearer secret lookup is performed.
 
 See also: [Wire Protocol](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for connection sequencing.
 
+## OAuth 2.1 for MCP
+
+Uptrakit ships a dual-auth model for MCP access: opaque `upk_*` API tokens for non-interactive
+callers (CLI, CI) and OAuth 2.1 for browser-capable MCP clients (Claude Desktop, Cursor). Auth is
+prefix-dispatched at the MCP Resource Server — a `Bearer upk_` prefix routes to opaque token
+validation; a `Bearer eyJ` prefix routes to JWT validation.
+
+The cross-rejection guarantee is enforced by audience claims. Dashboard JWTs (`aud: ["uptrakit"]`,
+short-lived session tokens) are rejected by the MCP Resource Server's OAuth validator. OAuth JWTs
+(`aud: ["<oauth.canonical_host>/mcp"]`) are rejected by the Dashboard JWT middleware — `aud`
+mismatch by design, preventing session token reuse as OAuth bearer tokens and vice versa.
+
+See also:
+
+- [MCP OAuth Authorization Design](../superpowers/specs/2026-05-12-mcp-oauth-authorization-design.md)
+- [ADR 0010 — MCP OAuth Authorization Server Placement](../adr/0010-mcp-oauth-authorization-server-placement.md)
+- [OAuth MCP Security](oauth-mcp.md)
+- [OAuth MCP Development Guide](../development/oauth-mcp.md)
+
 ## Content Security Policy
 
 The admin UI's Content Security Policy (set in `frontend/src/app.html`) includes
