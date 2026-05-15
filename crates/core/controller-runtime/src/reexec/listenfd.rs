@@ -78,6 +78,17 @@ fn slot_name(slot: &ListenerSlot) -> &'static str {
     }
 }
 
+/// Return the current process reexec generation.
+///
+/// Reads `UPTRAKIT_REEXEC_GENERATION` set by the previous generation's
+/// `perform_reexec`. Returns `0` on cold start (env var absent or unparseable).
+pub(crate) fn current_generation() -> u64 {
+    std::env::var("UPTRAKIT_REEXEC_GENERATION")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
 /// Clear the `FD_CLOEXEC` flag on a raw file descriptor so it survives `exec()`.
 ///
 /// Called by the reexec path for each bound listener before replacing the

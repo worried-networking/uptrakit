@@ -18,13 +18,6 @@ use uptrakit_config_reload::RuntimeConfig;
 /// Decision returned by [`decide`].
 #[derive(Debug)]
 #[non_exhaustive]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired into the coordinator pre-apply hook in a future graceful-reload task"
-    )
-)]
 pub(crate) struct ReexecDecision {
     /// Whether a re-exec is required.
     pub(crate) needed: bool,
@@ -40,13 +33,6 @@ pub(crate) struct ReexecDecision {
 /// Returns a [`ReexecDecision`] with `needed = true` and one or more
 /// `reasons` entries when at least one re-exec-forcing field changed.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired into the coordinator pre-apply hook in a future graceful-reload task"
-    )
-)]
 pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecision {
     let mut reasons: Vec<&'static str> = Vec::new();
 
