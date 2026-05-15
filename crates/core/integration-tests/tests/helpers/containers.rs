@@ -84,7 +84,7 @@ impl ControllerContainer {
             config_file,
             r#"
 [db]
-url = "sqlite:///data/state/controller.db"
+url = "sqlite:///data/state/controller.db?mode=rwc"
 
 [master_key]
 path = "/tmp/dummy-overridden-by-cli"
