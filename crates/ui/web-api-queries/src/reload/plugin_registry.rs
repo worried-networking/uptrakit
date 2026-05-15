@@ -87,10 +87,46 @@ impl Reloadable for PluginCatalogReloadable {
     }
 }
 
-uptrakit_config_reload::reloadable_erased_impl!(
-    PluginCatalogReloadable,
-    RuntimeConfigDelta::Plugins
-);
+#[async_trait::async_trait]
+impl uptrakit_config_reload::reloadable::ReloadableErased for PluginCatalogReloadable {
+    fn name(&self) -> &'static str {
+        <Self as uptrakit_config_reload::reloadable::Reloadable>::name(self)
+    }
+
+    fn validate(&self, delta: &RuntimeConfigDelta) -> Result<(), rootcause::Report> {
+        if let RuntimeConfigDelta::Plugins(cfg) = delta {
+            <Self as uptrakit_config_reload::reloadable::Reloadable>::validate(self, cfg)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn apply(&self, delta: &RuntimeConfigDelta) -> Result<(), rootcause::Report> {
+        match delta {
+            RuntimeConfigDelta::Plugins(cfg) => {
+                <Self as uptrakit_config_reload::reloadable::Reloadable>::apply(self, cfg.clone())
+                    .await
+            }
+            RuntimeConfigDelta::PluginsDbRefresh => {
+                tracing::info!("plugin catalog DB refresh signal received (V1: no-op)");
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn revert(&self) -> Result<(), rootcause::Report> {
+        <Self as uptrakit_config_reload::reloadable::Reloadable>::revert(self).await
+    }
+
+    async fn health_check(&self) -> Result<(), rootcause::Report> {
+        <Self as uptrakit_config_reload::reloadable::Reloadable>::health_check(self).await
+    }
+
+    fn rollback_window(&self) -> std::time::Duration {
+        <Self as uptrakit_config_reload::reloadable::Reloadable>::rollback_window(self)
+    }
+}
 
 #[cfg(test)]
 mod tests {
