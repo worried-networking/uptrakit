@@ -404,12 +404,17 @@ async fn run_server(args: cli::Args) -> Result<()> {
                     "into_std failed for inherited HTTPS socket: {e}"
                 )))
             })?;
-            let pki_std = s.pki.into_std().map_err(|e| {
-                rootcause::report!(AppError::Config(format!(
-                    "into_std failed for inherited PKI socket: {e}"
-                )))
-            })?;
-            (Some(https_std), Some(pki_std))
+            let pki_std = s
+                .pki
+                .map(|p| {
+                    p.into_std().map_err(|e| {
+                        rootcause::report!(AppError::Config(format!(
+                            "into_std failed for inherited PKI socket: {e}"
+                        )))
+                    })
+                })
+                .transpose()?;
+            (Some(https_std), pki_std)
         }
         None => (None, None),
     };
@@ -450,7 +455,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let pki_fd = pki_std.as_raw_fd();
         (vec![https_raw_fd, pki_fd], Some(pki_std))
     } else {
-        (vec![], None)
+        // PKI disabled: only HTTPS socket inherited (1 FD).
+        (vec![https_raw_fd], None)
     };
 
     // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
@@ -1519,8 +1525,8 @@ async fn reload_audit_bridge(
                 });
             }
             _ => {
-                tracing::debug!(
-                    "reload_audit_bridge: unhandled ReloadAuditEvent in status-watch (not a watch channel concern)"
+                tracing::warn!(
+                    "reload_audit_bridge: unhandled ReloadAuditEvent variant in status-watch; not updating any channel"
                 );
             }
         }
