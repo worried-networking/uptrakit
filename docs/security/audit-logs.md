@@ -165,6 +165,55 @@ Per-tenant enforcement is active via the `audit_log.retention_days` setting.
 
 The `audit_log.retention_days` setting applies globally; per-tenant enforcement is active.
 
+## OAuth and MCP Audit Events
+
+The following 19 event types cover the OAuth Authorization Server (AS), the MCP Resource Server
+(RS), client lifecycle, and consent flows.
+
+### AS endpoint events
+
+| Event type                | Actor                        | Target       | Reason codes                                                                                                                | Class     |
+| ------------------------- | ---------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `oauth.authorize_request` | User (anon or authenticated) | oauth_client | `pkce_missing`, `pkce_invalid_method`, `redirect_uri_mismatch`, `resource_missing`, `resource_mismatch`, `client_not_found` | AuthEvent |
+| `oauth.token_issued`      | User                         | oauth_client | `code_exchanged`, `refresh_rotated`                                                                                         | AuthEvent |
+| `oauth.token_rejected`    | User                         | oauth_client | `code_not_found`, `code_expired`, `pkce_verify_failed`, `client_mismatch`                                                   | AuthEvent |
+| `oauth.refresh_rotated`   | User                         | oauth_client | `rotation_ok`                                                                                                               | AuthEvent |
+
+### Security events
+
+| Event type                               | Actor    | Target          | Reason codes                                                       | Class            |
+| ---------------------------------------- | -------- | --------------- | ------------------------------------------------------------------ | ---------------- |
+| `oauth.refresh_replay_detected`          | System   | oauth_client    | `replay_detected`                                                  | SecurityCritical |
+| `oauth.rate_limited`                     | System   | client_id or IP | `dcr_cap`, `authorize_cap`, `token_cap`, `consent_cap`, `cimd_cap` | SecurityCritical |
+| `oauth.client_registration_rate_limited` | System   | oauth_client    | `dcr_hourly_cap`                                                   | SecurityCritical |
+| `oauth.config_audience_hosts_changed`    | Operator | system          | `hosts_updated`                                                    | SecurityCritical |
+| `oauth.cimd_parse_failed`                | System   | oauth_client    | `fetch_failed`, `parse_failed`, `invalid_client_id`                | SecurityCritical |
+
+### Client lifecycle events
+
+| Event type                                 | Actor            | Target       | Reason codes                           | Class           |
+| ------------------------------------------ | ---------------- | ------------ | -------------------------------------- | --------------- |
+| `oauth.client_registered`                  | User or Operator | oauth_client | `dcr`, `cimd`, `manual`                | ClientLifecycle |
+| `oauth.client_first_use`                   | User             | oauth_client | —                                      | ClientLifecycle |
+| `oauth.client_metadata_refreshed`          | System           | oauth_client | `no_material_change`                   | ClientLifecycle |
+| `oauth.client_metadata_changed_materially` | System           | oauth_client | `redirect_uri_changed`, `name_changed` | ClientLifecycle |
+| `oauth.client_trusted`                     | Operator         | oauth_client | —                                      | ClientLifecycle |
+| `oauth.client_revoked`                     | Operator or User | oauth_client | `operator_revoke`, `user_revoke`       | ClientLifecycle |
+
+### Consent events
+
+| Event type             | Actor | Target       | Reason codes                  | Class     |
+| ---------------------- | ----- | ------------ | ----------------------------- | --------- |
+| `oauth.consent_grant`  | User  | oauth_client | `new_grant`, `scope_expanded` | AuthEvent |
+| `oauth.consent_deny`   | User  | oauth_client | `user_denied`                 | AuthEvent |
+| `oauth.consent_revoke` | User  | oauth_client | `user_revoke`                 | AuthEvent |
+
+### RS-side events
+
+| Event type               | Actor                   | Target       | Reason codes                                                         | Class     |
+| ------------------------ | ----------------------- | ------------ | -------------------------------------------------------------------- | --------- |
+| `mcp.oauth_authenticate` | User (via OAuth client) | mcp_resource | `token_valid`, `token_expired`, `aud_mismatch`, `insufficient_scope` | AuthEvent |
+
 ## See also
 
 - [Audit Logs Development](../development/audit-logs.md)

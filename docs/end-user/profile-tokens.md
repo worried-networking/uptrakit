@@ -135,6 +135,15 @@ If a system is decommissioned or a token may have been exposed, revoke it immedi
 the Profile page or via the CLI. There is no waiting period — revocation takes effect
 instantly.
 
+## API Tokens and OAuth 2.1
+
+Opaque `upk_*` API tokens remain the canonical credential for non-interactive callers — CLI, CI
+pipelines, and ops scripts. OAuth 2.1 is layered alongside API tokens as an additional auth path
+for browser-capable MCP clients (such as Claude Desktop or Cursor); it does not replace or sit on
+top of the API token system. Phase 2 may revisit deprecation timelines, but v1 ships no sunset
+commitment for API tokens. See [MCP Clients](mcp-clients.md) for how OAuth 2.1 is used in that
+context.
+
 ## Related Documentation
 
 - [Auth Flows](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) — token issuance, storage, and denylist behavior.

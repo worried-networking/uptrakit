@@ -289,8 +289,10 @@ At that point:
 - `McpAuthLayer` owns its own AS/RS logic entirely within `uptrakit-mcp`
 - `McpAuthError` and `McpRequestContext` may be revised or extended
 
-The bridge function is **intentionally temporary scaffolding** — the `// TODO: replace
-with OAuth 2.1 validation` comment signals this to future implementors.
+The bridge function is **intentionally temporary scaffolding**. The full OAuth 2.1 design —
+Authorization Server placement, token issuance, PKCE, Dynamic Client Registration, consent flow,
+and RS-side validation — is specified in
+[`docs/superpowers/specs/2026-05-12-mcp-oauth-authorization-design.md`](2026-05-12-mcp-oauth-authorization-design.md).
 
 ---
 
