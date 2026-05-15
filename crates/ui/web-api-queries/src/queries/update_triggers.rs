@@ -13,6 +13,7 @@
 //! for the orchestrator to consume. The batch update code path calls the layers
 //! independently (bulk validation, bulk insert, selective dispatch).
 
+use rootcause::prelude::*;
 use uptrakit_shared_db::entity::update_history;
 use uptrakit_wire::ReleaseInfo;
 use uuid::Uuid;
@@ -151,9 +152,16 @@ pub async fn trigger_update_for_host(
 
     if host_busy {
         // Insert as Queued — do not dispatch until the active update completes.
-        let update_history_id =
+        let queued_result =
             create_update_history_record(db, &build_record(update_history::UpdateStatus::Queued))
-                .await?;
+                .await;
+        let update_history_id = match queued_result {
+            Ok(id) => id,
+            Err(e) if is_unique_constraint_violation(&e) => {
+                return Err(report!(TriggerUpdateError::UpdateAlreadyActive));
+            }
+            Err(e) => return Err(e),
+        };
         tracing::info!(
             update_id = %update_history_id,
             host_id = %params.host_id,
@@ -176,7 +184,7 @@ pub async fn trigger_update_for_host(
         Err(e) if is_unique_constraint_violation(&e) => {
             // Concurrent Pending INSERT from another controller won the race.
             // Re-insert as Queued so this update is not lost.
-            tracing::debug!(
+            tracing::warn!(
                 host_id = %params.host_id,
                 "concurrent Pending INSERT detected (unique constraint); re-inserting as Queued"
             );
