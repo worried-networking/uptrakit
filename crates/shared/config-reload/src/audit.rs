@@ -1,6 +1,7 @@
 //! Audit events emitted by the reload coordinator.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use crate::coordinator::{ReloadPhase, ReloadSource};
 
@@ -24,12 +25,27 @@ pub enum ReloadAuditEvent {
         /// The source that submitted the request.
         source: ReloadSource,
     },
+    /// The coordinator loaded a new TOML file and is about to apply it.
+    ///
+    /// Emitted between `Requested` and `Applied`/`Failed`. The bridge uses
+    /// this to set `ConfigFileState::pending_digest` / `pending_detected_at`.
+    /// The coordinator emits the path rather than the digest; the bridge
+    /// computes the digest (via `sha2`) when it receives this event.
+    FileChanged {
+        /// Path of the newly-loaded TOML file.
+        path: PathBuf,
+    },
     /// The reload cycle completed successfully.
     Applied {
         /// Which config sections were changed.
         sections: Vec<String>,
         /// Wall-clock milliseconds spent per subsystem (apply + health-check).
         per_subsystem_ms: BTreeMap<String, u64>,
+        /// The source that triggered this reload cycle.
+        ///
+        /// Used by `reload_audit_bridge` to decide whether to re-read the
+        /// config file and update `ConfigFileState`.
+        source: ReloadSource,
     },
     /// The reload cycle failed at the given phase.
     Failed {

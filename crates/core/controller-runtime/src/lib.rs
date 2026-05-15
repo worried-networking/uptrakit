@@ -1303,6 +1303,7 @@ async fn reload_audit_bridge(
             ReloadAuditEvent::Applied {
                 sections,
                 per_subsystem_ms,
+                source: _,
             } => {
                 let info = uptrakit_config_reload::LastReloadInfo::new(
                     time::OffsetDateTime::now_utc(),
@@ -1379,6 +1380,7 @@ async fn reload_audit_bridge(
             ReloadAuditEvent::Applied {
                 sections,
                 per_subsystem_ms,
+                source: _,
             } => (
                 AuditActionType::SYSTEM_CONFIG_RELOAD_APPLIED,
                 AuditOutcome::Success,
