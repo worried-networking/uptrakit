@@ -165,7 +165,9 @@ Expected: no errors.
 
 ```bash
 git add frontend/src/lib/types.ts frontend/src/lib/stores/events.svelte.ts frontend/src/lib/stores/events.svelte.test.ts
-git commit -m "feat(frontend): add active_update_status to SoftwareItemHostSummary + fix SSE debounce key"
+git commit -m "feat(frontend): add active_update_status to SoftwareItemHostSummary + fix SSE debounce key
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -321,7 +323,9 @@ Expected: no errors.
 
 ```bash
 git add frontend/src/lib/api.ts frontend/src/lib/api.test.ts
-git commit -m "feat(frontend): add ApiError class with errorCode for structured error handling"
+git commit -m "feat(frontend): add ApiError class with errorCode for structured error handling
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -422,7 +426,29 @@ subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
 (The detail page has no `UpdateProtectionStarted` that needs to stay. `UpdateStarted` used to call `loadItem(true)` — leave that in temporarily. Task
 6 replaces these with in-place updates.)
 
-- [ ] **Step 6: Remove `pendingLive*` assignments in `executeUpdate`**
+- [ ] **Step 6: Update `software-detail-update-trigger.test.ts` — remove broken UpdateProtectionStarted auto-open tests**
+
+Removing the `UpdateProtectionStarted` auto-open handler in Step 5 breaks existing tests at lines 214, 235, and 317 of
+`frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts` that verify modal auto-open on that event.
+
+Find every test block that calls `fireEvent(AdminEventType.UpdateProtectionStarted, ...)` and expects the live modal to open automatically. Remove
+those assertions (the auto-open behavior no longer exists). If a test's only purpose was to verify auto-open, delete it entirely. If a test also
+covers other behavior, keep the non-auto-open assertions and delete the `UpdateProtectionStarted` fire + modal-open expectation.
+
+```bash
+grep -n "UpdateProtectionStarted\|pendingLive" \
+  "frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts"
+```
+
+For each match, either delete the test or remove the auto-open assertion. After editing, run:
+
+```bash
+cd frontend && npm run test -- --reporter=verbose software-detail-update-trigger
+```
+
+Expected: all remaining tests pass.
+
+- [ ] **Step 7: Remove `pendingLive*` assignments in `executeUpdate`**
 
 In `executeUpdate` (around line 563 in `[id]/+page.svelte`), remove the lines that set `pendingLiveHistoryId` and `pendingLiveHostName`. The function
 body becomes:
@@ -452,7 +478,7 @@ async function executeUpdate() {
 }
 ```
 
-- [ ] **Step 7: Type-check**
+- [ ] **Step 8: Type-check**
 
 ```bash
 cd frontend && npm run check
@@ -460,11 +486,14 @@ cd frontend && npm run check
 
 Expected: no errors (no references to removed state variables should remain).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add "frontend/src/routes/software/+page.svelte" "frontend/src/routes/software/[id]/+page.svelte"
-git commit -m "feat(frontend): remove auto-open terminal on update trigger"
+git add "frontend/src/routes/software/+page.svelte" "frontend/src/routes/software/[id]/+page.svelte" \
+  "frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts"
+git commit -m "feat(frontend): remove auto-open terminal on update trigger
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -640,7 +669,9 @@ Expected: no errors.
 
 ```bash
 git add frontend/src/lib/components/ui/SoftwareGroupList.svelte
-git commit -m "feat(frontend): add live status badges + allUpdatableHostsActive to SoftwareGroupList"
+git commit -m "feat(frontend): add live status badges + allUpdatableHostsActive to SoftwareGroupList
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -891,7 +922,7 @@ unsubscribers.push(
           ? {
               ...h,
               active_update_history_id: data.update_history_id as string,
-              active_update_status: ((data.status as string) ?? "pending") || "pending",
+              active_update_status: (data.status as string) ?? "pending",
             }
           : h,
       ),
@@ -980,7 +1011,9 @@ Expected: no errors.
 
 ```bash
 git add "frontend/src/routes/software/+page.svelte" frontend/src/routes/software/software-trigger-status.test.ts
-git commit -m "feat(frontend): SSE cache updates, 409 handling, modal active-host disable in software list page"
+git commit -m "feat(frontend): SSE cache updates, 409 handling, modal active-host disable in software list page
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1121,15 +1154,7 @@ Find the badge rendering block at line ~1033:
     {:else if host.active_update_status === 'awaiting_restart'}
         <StatusBadge tone="info" label="Awaiting Restart" />
     {:else}
-        <span class="inline-flex" title="View update progress">
-            <ActionBadge
-                variant="navigation"
-                tone="info"
-                idleLabel="In Progress"
-                hoverLabel="→ Log"
-                onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
-            />
-        </span>
+        <StatusBadge tone="info" label="In Progress" />
     {/if}
 {:else if canTriggerUpdates && host.update_available}
     <span
@@ -1154,17 +1179,11 @@ not the status field).
 
 - [ ] **Step 6: Update `versionStatusLabel` and `versionStatusTone` for four-way split**
 
-Replace `versionStatusLabel` (line 732):
+Replace `versionStatusLabel` (line 732). This function is only called from the `{:else}` branch when `!host.active_update_history_id` (see Step 5),
+so the `if (host.active_update_history_id)` guard is dead code — omit it:
 
 ```typescript
 function versionStatusLabel(host: SoftwareItemHostSummary): string {
-  if (host.active_update_history_id) {
-    const s = host.active_update_status;
-    if (s === "queued") return "Queued";
-    if (s === "pending") return "Pending";
-    if (s === "awaiting_restart") return "Awaiting Restart";
-    return "In Progress";
-  }
   if (!host.installed_version) return "Unknown";
   const latest = effectiveLatestVersion(host);
   if (!latest) return "Unknown latest";
@@ -1176,11 +1195,11 @@ function versionStatusLabel(host: SoftwareItemHostSummary): string {
 }
 ```
 
-Replace `versionStatusTone` (line 744):
+Replace `versionStatusTone` (line 744). Same reasoning — only called when no active update, so the `if (host.active_update_history_id)` branch is
+unreachable:
 
 ```typescript
 function versionStatusTone(host: SoftwareItemHostSummary): "info" | "neutral" | "warning" | "success" {
-  if (host.active_update_history_id) return "info";
   if (!host.installed_version) return "neutral";
   const latest = effectiveLatestVersion(host);
   if (!latest) return "neutral";
@@ -1189,8 +1208,6 @@ function versionStatusTone(host: SoftwareItemHostSummary): "info" | "neutral" | 
   return "success";
 }
 ```
-
-(`versionStatusTone` remains unchanged — `info` covers all four active states.)
 
 - [ ] **Step 7: Update `updateAllHostItems` derived to disable active hosts**
 
@@ -1297,7 +1314,9 @@ Expected: no errors.
 
 ```bash
 git add "frontend/src/routes/software/[id]/+page.svelte" "frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts"
-git commit -m "feat(frontend): SSE cache, four-way badge split, and 409 handling on software detail page"
+git commit -m "feat(frontend): SSE cache, four-way badge split, and 409 handling on software detail page
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1328,7 +1347,9 @@ If lint/format fixes were made:
 
 ```bash
 git add -p  # stage only the lint/format changes
-git commit -m "chore(frontend): fix lint and format warnings from update-trigger-ux plan B"
+git commit -m "chore(frontend): fix lint and format warnings from update-trigger-ux plan B
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
 
 ---

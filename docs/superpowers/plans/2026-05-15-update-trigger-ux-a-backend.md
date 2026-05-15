@@ -322,10 +322,8 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
       use uptrakit_shared_db::entity::update_history;
       use uptrakit_shared_types::UpdateStatus;
 
-      let db = setup_migrated_db().await;
-      let tenant_id = insert_default_tenant(&db).await;
-      let host_id = insert_bare_host(&db, tenant_id).await;
-      let item_id = insert_bare_software_item(&db, tenant_id).await;
+      let db = make_sqlite_db().await;
+      let (tenant_id, host_id, item_id) = insert_update_history_parents(&db).await;
 
       for status in UpdateStatus::unfinished() {
           // Clear previous rows to avoid index violations between iterations
@@ -341,10 +339,10 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
               tenant_id: Set(tenant_id),
               host_id: Set(host_id),
               software_item_id: Set(item_id),
-              host_software_item_id: Set(uuid::Uuid::now_v7()),
+              host_software_item_id: Set(Some(uuid::Uuid::now_v7())),
               status: Set(status),
               batch_id: Set(None),
-              actor_type: Set("user".to_string()),
+              actor_type: Set(crate::queries::update_types::ActorType::User.as_str().to_string()),
               actor_id: Set("test".to_string()),
               from_version: Set(None),
               to_version: Set(None),
@@ -371,10 +369,8 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
       use uptrakit_shared_db::entity::update_history;
       use uptrakit_shared_types::UpdateStatus;
 
-      let db = setup_migrated_db().await;
-      let tenant_id = insert_default_tenant(&db).await;
-      let host_id = insert_bare_host(&db, tenant_id).await;
-      let item_id = insert_bare_software_item(&db, tenant_id).await;
+      let db = make_sqlite_db().await;
+      let (tenant_id, host_id, item_id) = insert_update_history_parents(&db).await;
 
       for status in [UpdateStatus::Completed, UpdateStatus::Failed] {
           update_history::Entity::delete_many()
@@ -388,10 +384,10 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
               tenant_id: Set(tenant_id),
               host_id: Set(host_id),
               software_item_id: Set(item_id),
-              host_software_item_id: Set(uuid::Uuid::now_v7()),
+              host_software_item_id: Set(Some(uuid::Uuid::now_v7())),
               status: Set(status),
               batch_id: Set(None),
-              actor_type: Set("user".to_string()),
+              actor_type: Set(crate::queries::update_types::ActorType::User.as_str().to_string()),
               actor_id: Set("test".to_string()),
               from_version: Set(None),
               to_version: Set(None),
@@ -523,34 +519,23 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
   }
   ```
 
-- [ ] **Step 3.7: Write a failing test for duplicate single-host trigger**
+- [ ] **Step 3.7: Verify `has_active_update_for_host_software_item` is wired in `update_triggers.rs`**
 
-  In `update_triggers.rs` tests, add a test verifying the pre-check fires:
+  Confirm the pre-check call site exists:
 
-  ```rust
-  #[cfg(all(test, feature = "db-sqlite"))]
-  mod tests {
-      // ... existing test setup ...
-
-      #[tokio::test]
-      async fn trigger_update_for_host_returns_already_active_if_non_terminal_row_exists() {
-          // This test inserts a Pending row for (host, item) then verifies that a
-          // second trigger call returns UpdateAlreadyActive.
-          // Full test harness setup requires all the prerequisite rows — use the
-          // existing insert_* helpers from this test module.
-          // Implementation guide:
-          // 1. insert_default_tenant → insert host, software_item, host_software_item,
-          //    plugin_config row with a valid execute_update plugin
-          // 2. trigger_update_for_host(...) → Ok (first trigger, creates Pending row)
-          // 3. trigger_update_for_host(...) again → Err(UpdateAlreadyActive)
-          todo!("implement with full harness — see existing trigger_update tests in this module")
-      }
-  }
+  ```bash
+  grep -n "has_active_update_for_host_software_item" \
+    crates/ui/web-api-queries/src/queries/update_triggers.rs
   ```
 
-  > **Implementation note:** This test requires the same setup as existing `trigger_update` integration tests in this file. Follow the pattern of the
-  > nearest existing test that calls `trigger_update_for_host` directly. The `todo!()` is a placeholder — replace it with the actual setup before
-  > committing.
+  Expected: at least one match at the line added in Step 3.5.
+
+  > **Integration test note:** A full end-to-end test that calls `trigger_update_for_host` twice requires wiring a complete execute-update plugin
+  > config (see the nearest existing test in `update_triggers.rs` that calls `trigger_update_for_host` directly). Implement that test in the same
+  > `#[cfg(all(test, feature = "db-sqlite"))]` block, following the pattern of `insert_update_history_parents` in `update_dispatch.rs` for the
+  > prerequisite setup. The integration test is strongly recommended before shipping; the unit tests in Steps 3.1–3.4 already cover the core query
+  > logic.
+  > **Do not commit a `todo!()` macro** — the workspace `todo = "deny"` lint rejects it in all build targets including tests.
 
 - [ ] **Step 3.8: Verify compilation**
 
@@ -678,7 +663,8 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
          .collect(),
      ```
 
-  3. Update the `SoftwareItemHostSummary` construction (around line 481) to unpack the new tuple:
+  3. Update the `SoftwareItemHostSummary` construction (around line 481) to unpack the new tuple. Compute a single `active` lookup before the struct
+     literal to avoid calling `HashMap::get` twice for the same key:
 
      Before:
 
@@ -686,11 +672,17 @@ field uses a named serde default so old consumers (no `status` key) receive `"pe
      active_update_history_id: data.active_updates.get(&host.id).copied(),
      ```
 
-     After:
+     After (declare `active` immediately before the struct literal):
 
      ```rust
-     active_update_history_id: data.active_updates.get(&host.id).map(|(id, _)| *id),
-     active_update_status: data.active_updates.get(&host.id).map(|(_, s)| s.clone()),
+     let active = data.active_updates.get(&host.id);
+     ```
+
+     Then in the struct literal:
+
+     ```rust
+     active_update_history_id: active.map(|(id, _)| *id),
+     active_update_status: active.map(|(_, s)| s.clone()),
      ```
 
 - [ ] **Step 4.6: Write a test verifying `AwaitingRestart` populates `active_update_status`**
