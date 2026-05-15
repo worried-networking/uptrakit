@@ -1980,6 +1980,30 @@ Rules:
 - `health_check()` verifies the subsystem accepted the new config and is operating normally.
 - `rollback_window()` returns the maximum duration the watchdog waits for `health_check()`.
 
+## Reexec Hook Pattern
+
+When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key.path`,
+`log.path`, embedded-service topology), the coordinator delegates the decision to a `ReexecHook`
+implementation registered at startup.
+
+**Rules:**
+
+- The `uptrakit-config-reload` crate defines `ReexecHook` and `ReexecOutcome`; it must not import
+  `triage::decide` or `perform_reexec` from `controller-runtime`. This boundary keeps the shared
+  crate ignorant of process-exec internals.
+- The `controller-runtime` crate implements `ControllerReexecHook` (which calls `triage::decide`
+  and `perform_reexec`) and registers it via `coordinator.set_reexec_hook(...)` before spawning
+  `coordinator.run()`.
+- Capture `current_exe` via `std::env::current_exe()` at startup (before the hook is
+  constructed) and propagate any error through `run_server()`'s `Result` return. Never call
+  `current_exe()` inside the hook — it may fail after a process name change.
+- Listener FDs for `perform_reexec` are captured by pre-binding HTTPS (and PKI when
+  configured) sockets in `run_server()` before spawning server tasks. The raw FD integer is
+  valid after the socket is moved into the server task; `clear_cloexec_raw` uses the integer,
+  not the Rust wrapper.
+- When no `ReexecHook` is registered (e.g. in tests), the coordinator skips the reexec check
+  and proceeds with in-process apply.
+
 ## Per-Section Watch Pattern
 
 Config changes flow through `tokio::sync::watch<Arc<SectionConfig>>` channels. Inject receivers at
