@@ -1117,6 +1117,7 @@ mod tests {
             latest_release_metadata: None,
             update_available: true,
             active_update_history_id: None,
+            active_update_status: None,
             update_category: "unknown".to_string(),
             last_updated_at: None,
             linked_at: now,

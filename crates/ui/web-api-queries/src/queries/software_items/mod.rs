@@ -159,7 +159,7 @@ impl SoftwareItemQueryError {
 pub(super) struct HostAssignmentData {
     pub(super) links: Vec<host_software_item::Model>,
     pub(super) hosts: HashMap<Uuid, host::Model>,
-    pub(super) active_updates: HashMap<Uuid, Uuid>,
+    pub(super) active_updates: HashMap<Uuid, (Uuid, String)>,
     pub(super) plugin_rows: Vec<host_software_item_plugin::Model>,
     pub(super) plugin_configs: HashMap<Uuid, plugin_config::Model>,
 }
@@ -343,18 +343,17 @@ pub(super) async fn load_host_assignment_data(
     };
 
     // Batch-load active update IDs for all hosts. One query total (no N+1).
-    let active_updates: HashMap<Uuid, Uuid> = match UpdateHistory::find()
+    let active_updates: HashMap<Uuid, (Uuid, String)> = match UpdateHistory::find()
         .filter(update_history::Column::SoftwareItemId.eq(item_id))
         .filter(update_history::Column::HostId.is_in(host_ids.clone()))
-        .filter(update_history::Column::Status.is_in([
-            UpdateStatus::Queued,
-            UpdateStatus::Pending,
-            UpdateStatus::InProgress,
-        ]))
+        .filter(update_history::Column::Status.is_in(UpdateStatus::unfinished()))
         .all(db)
         .await
     {
-        Ok(rows) => rows.into_iter().map(|u| (u.host_id, u.id)).collect(),
+        Ok(rows) => rows
+            .into_iter()
+            .map(|u| (u.host_id, (u.id, u.status.to_string())))
+            .collect(),
         Err(e) => {
             tracing::warn!("Failed to load active updates for software item: {e}");
             HashMap::new()
@@ -478,6 +477,7 @@ async fn try_load_item_hosts_inner(
             link.latest_version.as_deref(),
         );
 
+        let active = data.active_updates.get(&host.id);
         hosts.push(SoftwareItemHostSummary {
             id: link.id,
             host_id: host.id,
@@ -491,7 +491,8 @@ async fn try_load_item_hosts_inner(
             latest_version: link.latest_version,
             latest_release_metadata: link.latest_release_metadata,
             update_available: update_avail,
-            active_update_history_id: data.active_updates.get(&host.id).copied(),
+            active_update_history_id: active.map(|(id, _)| *id),
+            active_update_status: active.map(|(_, s)| s.clone()),
             update_category: link.update_category,
             last_updated_at: link.last_updated_at,
             linked_at: link.linked_at,
