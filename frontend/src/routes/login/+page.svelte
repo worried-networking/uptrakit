@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getAuthMethods, extractErrorMessage } from '$lib/api';
+	import { getAuthMethods, extractErrorMessage, loginRaw } from '$lib/api';
 	import {
 		getUser,
 		handleOidcCallback,
@@ -197,12 +197,7 @@
 		bannerError = '';
 		if (!validateLoginFields()) return;
 		try {
-			const res = await fetch(`/api/v1/auth/login`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'same-origin',
-				body: JSON.stringify({ email, password })
-			});
+			const res = await loginRaw({ email, password });
 
 			if (res.status === 202) {
 				mfaChallenge = (await res.json()) as MfaChallengeResponse;

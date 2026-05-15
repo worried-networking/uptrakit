@@ -16,6 +16,7 @@
 	let newRecoveryCodes = $state<string[]>([]);
 	let loading = $state(false);
 	let errorMsg = $state('');
+	let successMsg = $state('');
 	let showDisableForm = $state(false);
 	let showRegenForm = $state(false);
 
@@ -70,11 +71,13 @@
 		}
 		loading = true;
 		errorMsg = '';
+		successMsg = '';
 		try {
 			await mfaDisable(disablePassword ? { password: disablePassword } : { totp_code: disableTotpCode });
 			showDisableForm = false;
 			disablePassword = '';
 			disableTotpCode = '';
+			successMsg = '2FA has been disabled.';
 			await loadStatus();
 		} catch (e) {
 			errorMsg = e instanceof Error ? e.message : 'Failed to disable 2FA';
@@ -108,6 +111,9 @@
 <SectionCard title="Two-Factor Authentication">
 	{#if errorMsg}
 		<p class="text-[var(--color-danger)] text-sm mb-3">{errorMsg}</p>
+	{/if}
+	{#if successMsg}
+		<p class="text-[var(--color-success)] text-sm mb-3">{successMsg}</p>
 	{/if}
 
 	{#if status === null}
@@ -213,9 +219,15 @@
 				Scan the QR code below with your authenticator app (Google Authenticator, Authy, 1Password, etc.), or enter the
 				secret manually.
 			</p>
-			<div class="p-3 bg-[var(--bg-raised)] rounded-card border border-[var(--border-subtle)]">
+			<div class="p-3 bg-[var(--bg-raised)] rounded-card border border-[var(--border-subtle)] space-y-2">
+				<a
+					href={enrollData.otpauth_uri}
+					class="text-sm text-[var(--accent)] underline underline-offset-4 hover:text-[var(--accent-bright)]"
+				>
+					Open in authenticator app
+				</a>
+				<p class="text-xs text-[var(--text-secondary)]">Or enter the secret manually:</p>
 				<p class="text-xs font-mono break-all">{enrollData.secret}</p>
-				<p class="text-xs text-[var(--text-secondary)] mt-1">Manual entry secret (Base32)</p>
 			</div>
 			<p class="text-sm">Then enter the 6-digit code from your app to confirm:</p>
 			<FormFieldRow label="Code from app" inputId="confirm-code">

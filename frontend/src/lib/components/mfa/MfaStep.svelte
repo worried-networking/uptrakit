@@ -37,6 +37,7 @@
 			const msg = e instanceof Error ? e.message : 'Verification failed';
 			errorMsg = msg;
 			onError(msg);
+			code = '';
 		} finally {
 			loading = false;
 		}
