@@ -31,13 +31,11 @@ impl ZeroconfConfig {
     /// Returns an error if `enabled` is `true` but `url` or `pki_addr` is
     /// empty.
     pub fn validate(&self) -> Result<(), Report> {
-        if self.enabled {
-            if self.url.is_empty() {
-                bail!(ConfigReloadError::Validate(
-                    "zeroconf.url is empty when enabled=true".into()
-                ));
-            }
-            // pki_addr is optional here; runtime falls back to network.pki.addr when empty.
+        // pki_addr is optional here; runtime falls back to network.pki.addr when empty.
+        if self.enabled && self.url.is_empty() {
+            bail!(ConfigReloadError::Validate(
+                "zeroconf.url is empty when enabled=true".into()
+            ));
         }
         Ok(())
     }

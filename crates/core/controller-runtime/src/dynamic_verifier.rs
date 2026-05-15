@@ -174,7 +174,7 @@ mod tests {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (ca_a_der, _ca_b_der, _leaf_der) = build_two_root_fixtures();
-        let subjects = subjects_from_roots(&[ca_a_der.clone()]);
+        let subjects = subjects_from_roots(std::slice::from_ref(&ca_a_der));
         let verifier = build_verifier_from_roots(&[ca_a_der]);
         let dynamic = DynamicClientVerifier::new(verifier, subjects);
         assert_eq!(
