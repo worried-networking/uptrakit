@@ -781,6 +781,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let mut b = booted;
         // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
         let db_reloadable = reload::db_pool::DbPoolReloadable::new(db_conn.clone(), db_url.clone());
+        let db_rx = db_reloadable.subscribe();
         let (tls_reloadable, _tls_rx) =
             reload::tls_snapshot::TlsSnapshotReloadable::new(b.runtime.tls.clone());
         let (https_reloadable, _https_rx) =
@@ -851,7 +852,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let coordinator_handle = b.coordinator.handle();
 
         let _reconciler = reload::reconciler::spawn_config_reconciler(
-            db_conn.clone(),
+            db_rx,
             coordinator_handle.sender(),
             b.settings_version_cache.clone(),
             shutdown_token.clone(),
