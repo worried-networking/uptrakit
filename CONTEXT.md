@@ -29,6 +29,13 @@ _Avoid_: version, tag (too ambiguous across package managers and container regis
 An instruction dispatched to an Agent to apply a change to a Software Item on a Host.
 _Avoid_: upgrade, install, deployment
 
+**UpdateStatus**:
+The lifecycle state of a single Update row. Terminal statuses: `Succeeded`, `Failed`,
+`Cancelled`. Non-terminal statuses: `Queued`, `Pending`, `InProgress`, `AwaitingRestart`.
+Grouping helpers — `unfinished()` = [Queued, Pending, InProgress, AwaitingRestart] (all
+non-terminal; use for duplicate-trigger checks); `host_blocking()` = [Pending, InProgress,
+AwaitingRestart] (occupies host execution slot; excludes Queued).
+
 **Controller**:
 The central server that coordinates all Services.
 _Avoid_: backend, server, hub
