@@ -152,6 +152,13 @@ class RefreshError extends Error {
 	}
 }
 
+class TwoFactorSetupRequiredError extends Error {
+	constructor() {
+		super('2fa_setup_required');
+		this.name = 'TwoFactorSetupRequiredError';
+	}
+}
+
 export async function refreshAccessToken(): Promise<RefreshResponse> {
 	const res = await fetch(`${BASE}/auth/refresh`, {
 		method: 'POST',
@@ -271,10 +278,10 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 				if (typeof window !== 'undefined') {
 					window.location.href = '/profile#security';
 				}
-				throw new Error('2fa_setup_required');
+				throw new TwoFactorSetupRequiredError();
 			}
 		} catch (e) {
-			if (e instanceof Error && e.message === '2fa_setup_required') throw e;
+			if (e instanceof TwoFactorSetupRequiredError) throw e;
 			// Not JSON or not the 2FA error — fall through
 		}
 	}
@@ -327,6 +334,17 @@ export function register(data: RegisterRequest): Promise<AuthResponse> {
 
 export function login(data: LoginRequest): Promise<AuthResponse> {
 	return request('/auth/login', { method: 'POST', body: JSON.stringify(data) });
+}
+
+/** POST /auth/login — raw response so callers can inspect 202 MFA challenge. */
+export function loginRaw(data: LoginRequest): Promise<Response> {
+	return fetch(`${BASE}/auth/login`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
+		body: JSON.stringify(data),
+		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
+	});
 }
 
 export function logout(): Promise<void> {
