@@ -182,6 +182,7 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
                     update_history_id: trigger_result.update_history_id,
                     host_id: params.host_id,
                     software_item_id: params.software_item_id,
+                    status: dispatch_status_str.clone(),
                 },
             )
             .await;

@@ -4276,7 +4276,7 @@ components:
             Receiving controllers deserialise this and relay it to local SSE subscribers
             via `send_local` / `send_global_local` without re-publishing to NATS.
           examples:
-            - '{"update_triggered":{"update_history_id":"...","host_id":"...","software_item_id":"..."}}'
+            - '{"update_triggered":{"update_history_id":"...","host_id":"...","software_item_id":"...","status":"pending"}}'
 
     ReportPluginConfigPayload:
       type: object
