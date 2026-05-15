@@ -11,11 +11,9 @@ use crate::config::RuntimeConfig;
 /// `exec()` on success diverges and never returns, so this type is only
 /// ever constructed on the two non-diverging paths.
 ///
-/// Not `#[non_exhaustive]` — this is a closed two-variant result-like enum
-/// whose only match site is `ControllerReexecHook::check_and_trigger`. Adding
-/// `#[non_exhaustive]` to an enum in a shared crate forces every external
-/// consumer to add a wildcard arm, which would make the exhaustive match in
-/// `controller-runtime` fail to compile.
+/// Not suitable for `match` exhaustion in external crates without a wildcard arm.
+/// The safe fallback for any unknown variant is `NotNeeded` (proceed in-process).
+#[non_exhaustive]
 #[must_use]
 pub enum ReexecOutcome {
     /// Reexec was attempted but `exec()` returned an error. The process is

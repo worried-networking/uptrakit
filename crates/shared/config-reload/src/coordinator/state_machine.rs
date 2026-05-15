@@ -250,9 +250,17 @@ impl ReloadCoordinator {
 
                 // Check for irreversibly-bound key changes via the hook.
                 if let Some(hook) = &self.reexec_hook {
+                    #[expect(
+                        unreachable_patterns,
+                        reason = "ReexecOutcome is #[non_exhaustive]; this arm is dead within \
+                                  the defining crate but required for external match sites"
+                    )]
                     match hook.check_and_trigger(&prior, &new_config) {
                         crate::reexec_hook::ReexecOutcome::NotNeeded => {}
                         crate::reexec_hook::ReexecOutcome::ExecFailed(err) => return Err(err),
+                        _ => {
+                            tracing::warn!("unknown ReexecOutcome variant; treating as NotNeeded");
+                        }
                     }
                 }
 
