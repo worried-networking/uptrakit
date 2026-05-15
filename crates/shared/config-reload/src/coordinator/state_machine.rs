@@ -176,6 +176,7 @@ impl ReloadCoordinator {
                         .send(ReloadAuditEvent::Applied {
                             sections: per_ms.keys().cloned().collect(),
                             per_subsystem_ms: per_ms,
+                            source,
                         })
                         .is_err()
                     {
@@ -233,6 +234,17 @@ impl ReloadCoordinator {
                     tracing::warn!("config reload: {w}");
                 }
                 let new_config = loaded.config;
+
+                // Emit FileChanged so the audit bridge sets pending_digest.
+                if self
+                    .audit_tx
+                    .send(ReloadAuditEvent::FileChanged {
+                        path: config_path.clone(),
+                    })
+                    .is_err()
+                {
+                    warn!("audit channel closed; FileChanged event dropped");
+                }
 
                 let prior = Arc::clone(&self.current_config);
 
