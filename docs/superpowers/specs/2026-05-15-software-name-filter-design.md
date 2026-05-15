@@ -30,27 +30,34 @@ Two-layer fix: push the filter to SQL in the backend, expose a filter input in t
 
 ### Filter construction
 
-Lowercase the query in Rust, escape LIKE metacharacters (`%` and `_`), then build a
-`%pattern%` bind param. SQL receives a fully-escaped, pre-lowercased string — no
-`LOWER()` call needed on the pattern side, and no metacharacter injection possible:
+Lowercase the query in Rust, escape all three LIKE-significant characters (`\`, `%`,
+`_`) using `\` as the escape character, then build a `%pattern%` bind param. The `\`
+must be escaped first — otherwise a user-supplied `\%` would produce `\\%`, and without
+an explicit `ESCAPE` clause the database treats the trailing `%` as a wildcard.
 
 ```rust
 let escaped = query.to_lowercase()
-    .replace('%', r"\%")
-    .replace('_', r"\_");
+    .replace('\\', r"\\")  // must be first
+    .replace('%',  r"\%")
+    .replace('_',  r"\_");
 let pattern = format!("%{escaped}%");
 base_query = base_query.filter(
-    Expr::expr(Func::lower(Expr::col(software_item::Column::Name)))
-        .like(pattern)
+    sea_orm::sea_query::Expr::cust_with_values(
+        "LOWER(name) LIKE ? ESCAPE '\\'",
+        [pattern],
+    )
 );
 ```
 
-> **Note:** SeaORM's `.like()` sends the pattern as a bind parameter, preventing SQL
-> injection. The `\%` / `\_` escapes prevent the user's literal `%` or `_` characters
-> from acting as LIKE wildcards. SQLite and Postgres both honour backslash escaping in
-> `LIKE` by default.
+`ESCAPE '\\'` is standard SQL and works identically on SQLite and Postgres.
 
-This is added to `base_query` alongside the other filters (`featured`, `host_id`,
+**SQL injection protection:** the SQL string passed to `cust_with_values` is a static
+literal — no user input is concatenated into it. The pattern value is passed as a
+positional bind parameter (`?`) and handled entirely by the DB driver, never
+interpolated into SQL text. SeaORM's `.like()` is not used here because it emits
+`LIKE ?` with no `ESCAPE` clause, making literal `%` and `_` impossible to match.
+
+This filter is added to `base_query` alongside the other filters (`featured`, `host_id`,
 `updatable`, `plugin_type`) before the paginator runs.
 
 ### Pagination unification
@@ -142,8 +149,10 @@ Add test in `crates/ui/web-api/src/integration_tests/software_items_crud.rs`:
 - Call with `query = Some("z")` — assert `items` contains `"nginx"` only.
 - Call with `query = Some("   ")` (whitespace-only, trimmed to empty) — assert all 3
   items returned (no filter applied).
-- Call with `query = Some("1%")` — assert zero results (literal `%` is escaped, not a
-  wildcard; no item named `"1"` followed by anything).
+- Call with `query = Some("1%")` — assert zero results (literal `%` escaped, not a
+  wildcard; no item literally containing `"1%"`).
+- Call with `query = Some(r"\%")` — assert zero results (backslash escaped first, then
+  `%`; no item literally containing `"\%"`).
 
 ### Frontend
 
