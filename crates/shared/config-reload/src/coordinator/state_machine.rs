@@ -411,6 +411,7 @@ impl ReloadCoordinator {
 /// Irreversibly-bound keys (`db.url`, `master_key.path`, `log.path`,
 /// embedded topology) are checked by the reexec hook BEFORE this function
 /// is called. `EmbeddedServices` is never emitted as a delta.
+#[cfg_attr(not(test), expect(dead_code, reason = "called from Task 6 run()"))]
 fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
     let mut deltas = Vec::new();
     if prior.db != new.db {
@@ -440,6 +441,7 @@ fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfig
 ///
 /// Unknown sections are logged at `warn` and skipped. Duplicate entries
 /// (e.g. `["audit", "audit_log"]`) are deduplicated by variant tag.
+#[cfg_attr(not(test), expect(dead_code, reason = "called from Task 6 run()"))]
 fn sections_to_deltas(sections: &[String], current: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {
     let mut deltas = Vec::new();
     for s in sections {
