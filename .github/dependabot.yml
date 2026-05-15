@@ -12,6 +12,99 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    open-pull-requests-limit: 20
+    groups:
+      crypto-provider:
+        patterns:
+          - "rustls"
+          - "rustls-*"
+          - "tokio-rustls"
+          - "webpki-roots"
+          - "rcgen"
+          - "x509-*"
+          - "der"
+          - "spki"
+          - "const-oid"
+          - "aws-lc-rs"
+          - "zeroize"
+          - "subtle"
+          - "sqlx"
+          - "rumqttc"
+          - "async-nats"
+          - "axum-server"
+          - "reqwest"
+          - "testcontainers"
+          - "testcontainers-modules"
+          - "openidconnect"
+      async-runtime:
+        patterns:
+          - "tokio"
+          - "tokio-*"
+          - "futures"
+          - "futures-util"
+          - "async-stream"
+          - "async-trait"
+          - "tungstenite"
+      auth-identity:
+        patterns:
+          - "jsonwebtoken"
+          - "argon2"
+          - "totp-rs"
+          - "hmac"
+          - "sha1"
+          - "sha2"
+      serde-encoding:
+        patterns:
+          - "serde"
+          - "serde_*"
+          - "toml"
+          - "base64"
+          - "hex"
+          - "percent-encoding"
+      web-http:
+        patterns:
+          - "axum"
+          - "axum-*"
+          - "tower"
+          - "tower-*"
+          - "http"
+          - "http-body-util"
+          - "client-ip"
+          - "rmcp"
+      database:
+        patterns:
+          - "sea-orm"
+          - "sea-orm-*"
+      observability:
+        patterns:
+          - "tracing"
+          - "tracing-*"
+          - "metrics"
+          - "metrics-*"
+      openapi-schema:
+        patterns:
+          - "utoipa"
+          - "utoipa-*"
+          - "schemars"
+      proc-macros:
+        patterns:
+          - "syn"
+          - "quote"
+          - "proc-macro2"
+          - "strum"
+          - "paste"
+      ssh:
+        patterns:
+          - "russh"
+          - "russh-*"
+          - "ssh-key"
+          - "ssh2-config"
+      testing:
+        patterns:
+          - "httpmock"
+          - "tracing-test"
+          - "tempfile"
+          - "husky-rs"
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
