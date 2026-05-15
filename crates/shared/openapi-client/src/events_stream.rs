@@ -38,6 +38,8 @@ pub enum AdminSseEvent {
         update_history_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
+        /// Trigger status: "pending" (agent connected) or "queued" (agent offline).
+        status: String,
     },
     /// A software update started executing.
     UpdateStarted {
@@ -194,17 +196,23 @@ fn parse_typed_event(event: RawSseEvent) -> std::result::Result<AdminSseEvent, S
             })
         }
         "update_triggered" => {
+            fn default_pending_status() -> String {
+                "pending".into()
+            }
             #[derive(serde::Deserialize)]
             struct Payload {
                 update_history_id: Uuid,
                 host_id: Uuid,
                 software_item_id: Uuid,
+                #[serde(default = "default_pending_status")]
+                status: String,
             }
             let p: Payload = serde_json::from_str(&event.data)?;
             Ok(AdminSseEvent::UpdateTriggered {
                 update_history_id: p.update_history_id,
                 host_id: p.host_id,
                 software_item_id: p.software_item_id,
+                status: p.status,
             })
         }
         "update_started" => {
@@ -368,10 +376,26 @@ mod tests {
     fn parse_update_triggered() {
         let event = make_event(
             "update_triggered",
+            r#"{"update_history_id":"550e8400-e29b-41d4-a716-446655440001","host_id":"550e8400-e29b-41d4-a716-446655440002","software_item_id":"550e8400-e29b-41d4-a716-446655440003","status":"pending"}"#,
+        );
+        let result = parse_typed_event(event).unwrap();
+        assert!(matches!(
+            result,
+            AdminSseEvent::UpdateTriggered { status, .. } if status == "pending"
+        ));
+    }
+
+    #[test]
+    fn parse_update_triggered_missing_status_defaults_to_pending() {
+        let event = make_event(
+            "update_triggered",
             r#"{"update_history_id":"550e8400-e29b-41d4-a716-446655440001","host_id":"550e8400-e29b-41d4-a716-446655440002","software_item_id":"550e8400-e29b-41d4-a716-446655440003"}"#,
         );
         let result = parse_typed_event(event).unwrap();
-        assert!(matches!(result, AdminSseEvent::UpdateTriggered { .. }));
+        assert!(matches!(
+            result,
+            AdminSseEvent::UpdateTriggered { status, .. } if status == "pending"
+        ));
     }
 
     #[test]

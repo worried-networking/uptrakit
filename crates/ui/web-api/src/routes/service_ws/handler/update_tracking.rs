@@ -166,6 +166,7 @@ pub(super) async fn handle_service_trigger_update(
                         update_history_id: result.update_history_id,
                         host_id: payload.host_id,
                         software_item_id: payload.software_item_id,
+                        status: dispatch_status.to_string(),
                     },
                 )
                 .await;

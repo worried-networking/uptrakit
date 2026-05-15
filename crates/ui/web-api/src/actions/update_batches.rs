@@ -89,6 +89,7 @@ pub(crate) async fn trigger_host_batch(
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,
                     software_item_id: item.software_item_id,
+                    status: item.trigger_status.to_string(),
                 },
             )
             .await;
@@ -332,6 +333,7 @@ pub(crate) async fn trigger_item_batch(
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,
                     software_item_id: item.software_item_id,
+                    status: item.trigger_status.to_string(),
                 },
             )
             .await;

@@ -56,6 +56,8 @@ pub enum AdminEvent {
         update_history_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
+        /// Trigger status: "pending" (agent connected) or "queued" (agent offline).
+        status: String,
     },
     /// Controller pre-update protection started for a software update.
     ///
@@ -269,21 +271,28 @@ impl<'de> Deserialize<'de> for AdminEvent {
                 })
             }
             "update_triggered" => {
+                fn default_pending_status() -> String {
+                    "pending".into()
+                }
                 #[derive(Deserialize)]
                 struct Inner {
                     update_history_id: Uuid,
                     host_id: Uuid,
                     software_item_id: Uuid,
+                    #[serde(default = "default_pending_status")]
+                    status: String,
                 }
                 let Inner {
                     update_history_id,
                     host_id,
                     software_item_id,
+                    status,
                 } = serde_json::from_value(inner).map_err(serde::de::Error::custom)?;
                 Ok(Self::UpdateTriggered {
                     update_history_id,
                     host_id,
                     software_item_id,
+                    status,
                 })
             }
             "update_protection_started" => {
@@ -479,6 +488,7 @@ mod tests {
                 update_history_id: id,
                 host_id: id,
                 software_item_id: id,
+                status: "pending".to_string(),
             },
             AdminEvent::UpdateProtectionStarted {
                 update_history_id: id,
@@ -550,6 +560,7 @@ mod tests {
                 update_history_id: id,
                 host_id: id,
                 software_item_id: id,
+                status: "pending".to_string(),
             }
             .event_name(),
             "update_triggered"

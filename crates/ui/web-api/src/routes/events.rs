@@ -167,6 +167,7 @@ mod tests {
             update_history_id: id,
             host_id: id,
             software_item_id: id,
+            status: "pending".to_string(),
         };
         let data = extract_sse_data(&event);
         assert!(
@@ -182,5 +183,6 @@ mod tests {
             data.get("software_item_id").is_some(),
             "software_item_id missing: {data}"
         );
+        assert!(data.get("status").is_some(), "status missing: {data}");
     }
 }
