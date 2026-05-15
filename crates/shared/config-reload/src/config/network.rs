@@ -77,7 +77,15 @@ impl NetworkConfig {
             )))
         })?;
         // network.pki.addr is the public PKI URL (e.g. `http://hostname:8080`),
-        // not a bind address — SocketAddr parsing does not apply.
+        // not a bind address — SocketAddr parsing does not apply. We still
+        // reject the collision case where a misconfigured deployment puts
+        // both listeners on the same string addr (would race for the port).
+        if !self.pki.addr.is_empty() && self.pki.addr == self.https.addr {
+            bail!(ConfigReloadError::Validate(format!(
+                "network.pki.addr ({}) collides with network.https.addr",
+                self.pki.addr,
+            )));
+        }
         Ok(())
     }
 }
