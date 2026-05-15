@@ -81,3 +81,127 @@ impl DeviceFlowErrorAuditExt for DeviceFlowError {
         }
     }
 }
+
+/// High-level classification for audit events used to drive filtered views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AuditClass {
+    /// Routine authentication lifecycle events.
+    AuthEvent,
+    /// OAuth client registration, trust, revocation, and CIMD lifecycle.
+    ClientLifecycle,
+    /// Events that indicate a potential attack or critical config change.
+    SecurityCritical,
+}
+
+/// Returns the audit class for a given OAuth action, or `None` for non-OAuth actions.
+pub(crate) fn oauth_audit_class(action: RegisteredAuditAction) -> Option<AuditClass> {
+    use uptrakit_audit_log::AuditActionType;
+    if action == AuditActionType::OAUTH_REFRESH_REPLAY_DETECTED
+        || action == AuditActionType::OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED
+        || action == AuditActionType::OAUTH_CIMD_PARSE_FAILED
+        || action == AuditActionType::OAUTH_CLIENT_REGISTRATION_RATE_LIMITED
+        || action == AuditActionType::OAUTH_RATE_LIMITED
+    {
+        Some(AuditClass::SecurityCritical)
+    } else if action == AuditActionType::OAUTH_CLIENT_REGISTERED
+        || action == AuditActionType::OAUTH_CLIENT_FIRST_USE
+        || action == AuditActionType::OAUTH_CLIENT_METADATA_REFRESHED
+        || action == AuditActionType::OAUTH_CLIENT_METADATA_CHANGED_MATERIALLY
+        || action == AuditActionType::OAUTH_CLIENT_TRUSTED
+        || action == AuditActionType::OAUTH_CLIENT_REVOKED
+    {
+        Some(AuditClass::ClientLifecycle)
+    } else if action == AuditActionType::OAUTH_AUTHORIZE_REQUEST
+        || action == AuditActionType::OAUTH_TOKEN_ISSUED
+        || action == AuditActionType::OAUTH_TOKEN_REJECTED
+        || action == AuditActionType::OAUTH_REFRESH_ROTATED
+        || action == AuditActionType::OAUTH_CONSENT_GRANT
+        || action == AuditActionType::OAUTH_CONSENT_DENY
+        || action == AuditActionType::OAUTH_CONSENT_REVOKE
+        || action == AuditActionType::MCP_OAUTH_AUTHENTICATE
+    {
+        Some(AuditClass::AuthEvent)
+    } else {
+        None
+    }
+}
+
+/// Returns `true` if the action should appear in security-relevant filtered audit streams.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by oauth route handlers not yet wired up"
+    )
+)]
+pub(crate) fn is_security_relevant(action: RegisteredAuditAction) -> bool {
+    matches!(
+        oauth_audit_class(action),
+        Some(AuditClass::SecurityCritical)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuditClass, is_security_relevant, oauth_audit_class};
+    use uptrakit_audit_log::AuditActionType;
+
+    #[test]
+    fn replay_detected_is_security_critical() {
+        assert_eq!(
+            oauth_audit_class(AuditActionType::OAUTH_REFRESH_REPLAY_DETECTED),
+            Some(AuditClass::SecurityCritical),
+        );
+    }
+
+    #[test]
+    fn config_change_is_security_critical() {
+        assert_eq!(
+            oauth_audit_class(AuditActionType::OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED),
+            Some(AuditClass::SecurityCritical),
+        );
+    }
+
+    #[test]
+    fn token_issued_is_auth_event() {
+        assert_eq!(
+            oauth_audit_class(AuditActionType::OAUTH_TOKEN_ISSUED),
+            Some(AuditClass::AuthEvent),
+        );
+    }
+
+    #[test]
+    fn client_registered_is_client_lifecycle() {
+        assert_eq!(
+            oauth_audit_class(AuditActionType::OAUTH_CLIENT_REGISTERED),
+            Some(AuditClass::ClientLifecycle),
+        );
+    }
+
+    #[test]
+    fn security_relevant_includes_security_critical_events() {
+        assert!(is_security_relevant(
+            AuditActionType::OAUTH_REFRESH_REPLAY_DETECTED
+        ));
+        assert!(is_security_relevant(
+            AuditActionType::OAUTH_CONFIG_AUDIENCE_HOSTS_CHANGED
+        ));
+        assert!(is_security_relevant(
+            AuditActionType::OAUTH_CIMD_PARSE_FAILED
+        ));
+    }
+
+    #[test]
+    fn security_relevant_excludes_routine_events() {
+        assert!(!is_security_relevant(AuditActionType::OAUTH_TOKEN_ISSUED));
+        assert!(!is_security_relevant(
+            AuditActionType::OAUTH_CLIENT_REGISTERED
+        ));
+        assert!(!is_security_relevant(AuditActionType::OAUTH_CONSENT_GRANT));
+    }
+
+    #[test]
+    fn non_oauth_action_returns_none() {
+        assert_eq!(oauth_audit_class(AuditActionType::AUTH_LOGIN), None);
+    }
+}
