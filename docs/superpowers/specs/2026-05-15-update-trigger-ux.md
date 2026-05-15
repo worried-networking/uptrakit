@@ -85,18 +85,23 @@ return `TriggerUpdateError::UpdateAlreadyActive` rather than propagating the DB 
 **Note:** `UpdateAlreadyActive` already maps to HTTP 409
 (`api_error/mappings.rs:976`) — no mapping change needed.
 
-### 3. Fix `AwaitingRestart` omission in `active_updates` query
+### 3. Add `UpdateStatus::unfinished()` helper
 
-`software_items/mod.rs:349` — add `UpdateStatus::AwaitingRestart` to the `is_in` filter:
+Add to the existing `impl UpdateStatus` block in
+`crates/shared/types/src/update_status.rs`:
 
 ```rust
-.filter(update_history::Column::Status.is_in([
-    UpdateStatus::Queued,
-    UpdateStatus::Pending,
-    UpdateStatus::InProgress,
-    UpdateStatus::AwaitingRestart,  // add this
-]))
+/// All non-terminal statuses — states where an update is still active and
+/// a new trigger for the same (host, software_item) must be rejected.
+pub const fn unfinished() -> [Self; 4] {
+    [Self::Queued, Self::Pending, Self::InProgress, Self::AwaitingRestart]
+}
 ```
+
+Use `UpdateStatus::unfinished()` everywhere the non-terminal status set is needed:
+`active_updates` query in `software_items/mod.rs`, `has_active_update_for_host` in
+`update_dispatch.rs`, and the new `has_active_update_for_host_software_item`. Eliminates
+the repeated inline array and ensures `AwaitingRestart` cannot be silently omitted again.
 
 ### 4. Add `active_update_status` to `SoftwareItemHostSummary`
 
@@ -370,9 +375,10 @@ SSE: UpdateCompleted{...}
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `crates/shared/db/src/migration/`                                      | New migration: `(host_id, software_item_id)` partial unique index                                                  |
 | `crates/shared/db/src/migration/lib.rs`                                | Register new migration                                                                                             |
-| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`             | Add `has_active_update_for_host_software_item`                                                                     |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs`             | Call new pre-check; add `AwaitingRestart` to active status filter                                                  |
-| `crates/ui/web-api-queries/src/queries/software_items/mod.rs`          | Add `AwaitingRestart` to `active_updates` query; carry `status` alongside `id` in map                              |
+| `crates/shared/types/src/update_status.rs`                             | Add `UpdateStatus::unfinished() -> [Self; 4]`                                                                      |
+| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`             | Add `has_active_update_for_host_software_item`; use `UpdateStatus::unfinished()`                                   |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs`             | Call new pre-check; switch to `UpdateStatus::unfinished()`                                                         |
+| `crates/ui/web-api-queries/src/queries/software_items/mod.rs`          | Switch to `UpdateStatus::unfinished()`; carry `status` alongside `id` in map                                       |
 | `crates/shared/web-api-types/src/software_items.rs`                    | Add `active_update_status: Option<String>` to `SoftwareItemHostSummary`                                            |
 | `crates/shared/wire/src/admin_events.rs`                               | Add `status: String` to `UpdateTriggered`; update serialisation, deserialisation, and `all_variants()` test helper |
 | `crates/shared/wire/asyncapi.yaml`                                     | Add `status: string` to `update_triggered` message schema                                                          |
