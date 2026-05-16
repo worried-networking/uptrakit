@@ -1483,7 +1483,7 @@ mod tests {
     #[test]
     fn cert_signed_by_ca_different() {
         // Use CAs with different DNs so issuer check can distinguish them
-        let key1 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key1 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params1 = CertificateParams::default();
         params1
             .distinguished_name
@@ -1492,12 +1492,12 @@ mod tests {
         let _ca1_cert = params1.self_signed(&key1).unwrap();
         let issuer1 = Issuer::new(params1, key1);
 
-        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let server_params = CertificateParams::new(vec!["localhost".into()]).unwrap();
         let server_cert = server_params.signed_by(&server_key, &issuer1).unwrap();
         let server_pem = server_cert.pem();
 
-        let key2 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key2 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params2 = CertificateParams::default();
         params2
             .distinguished_name

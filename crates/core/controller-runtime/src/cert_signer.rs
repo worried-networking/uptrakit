@@ -270,7 +270,7 @@ mod tests {
     }
 
     fn make_test_signer() -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
-        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = CertificateParams::default();
         params
             .distinguished_name
@@ -306,7 +306,7 @@ mod tests {
 
     /// Generate a test CSR with the given CN using rcgen.
     fn generate_test_csr(cn: &str) -> String {
-        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = CertificateParams::default();
         params
             .distinguished_name
@@ -320,7 +320,7 @@ mod tests {
 
     /// Generate a test CSR with a SPIFFE URI SAN.
     fn generate_test_csr_with_spiffe(service_id: uuid::Uuid, trust_domain: &str) -> String {
-        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = CertificateParams::default();
         params
             .distinguished_name
@@ -571,7 +571,7 @@ mod tests {
         let agent_id = Uuid::now_v7();
         let other_id = Uuid::now_v7();
         // CSR CN matches agent_id but SPIFFE SAN refers to other_id.
-        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = CertificateParams::default();
         params
             .distinguished_name
