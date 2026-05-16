@@ -8,6 +8,7 @@ use crate::validation::{Validate, ValidationError};
 pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus};
 
 /// Unified response for any service (agent or MQTT).
+#[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ServiceResponse {
@@ -55,6 +56,58 @@ pub struct ServiceResponse {
     /// service certificate contains a SPIFFE URI SAN.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spiffe_id: Option<String>,
+    /// Serial number of the most recent non-revoked service certificate.
+    ///
+    /// Populated only on the detail endpoint (`GET /api/v1/services/{id}`).
+    /// Absent (`None`) on the list endpoint to avoid N+1 queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_serial_number: Option<String>,
+}
+
+impl ServiceResponse {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "ServiceResponse has 17 fields; all are required at construction"
+    )]
+    pub fn new(
+        id: Uuid,
+        capabilities: Vec<String>,
+        service_label: String,
+        hostname: String,
+        friendly_name: String,
+        is_embedded: bool,
+        ip_address: Option<String>,
+        status: ServiceStatus,
+        client_version: Option<String>,
+        last_seen_at: Option<OffsetDateTime>,
+        created_at: OffsetDateTime,
+        updated_at: OffsetDateTime,
+        ping_interval_seconds: Option<u32>,
+        cert_lifetime_hours: Option<u32>,
+        yielded_to: Option<Vec<Uuid>>,
+        spiffe_id: Option<String>,
+        cert_serial_number: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            capabilities,
+            service_label,
+            hostname,
+            friendly_name,
+            is_embedded,
+            ip_address,
+            status,
+            client_version,
+            last_seen_at,
+            created_at,
+            updated_at,
+            ping_interval_seconds,
+            cert_lifetime_hours,
+            yielded_to,
+            spiffe_id,
+            cert_serial_number,
+        }
+    }
 }
 
 /// Query parameters for listing services.
@@ -191,6 +244,7 @@ mod tests {
             cert_lifetime_hours: None,
             yielded_to: None,
             spiffe_id: None,
+            cert_serial_number: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -230,6 +284,7 @@ mod tests {
             cert_lifetime_hours: None,
             yielded_to: None,
             spiffe_id: None,
+            cert_serial_number: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -265,6 +320,7 @@ mod tests {
             cert_lifetime_hours: None,
             yielded_to: None,
             spiffe_id: None,
+            cert_serial_number: None,
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -456,6 +512,7 @@ mod tests {
             cert_lifetime_hours: Some(48),
             yielded_to: Some(vec![sample_uuid()]),
             spiffe_id: None,
+            cert_serial_number: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(json.contains(r#""cert_lifetime_hours":48"#));
@@ -485,6 +542,7 @@ mod tests {
             cert_lifetime_hours: None,
             yielded_to: None,
             spiffe_id: None,
+            cert_serial_number: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(!json.contains("cert_lifetime_hours"));
