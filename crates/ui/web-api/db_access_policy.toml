@@ -542,6 +542,10 @@ list_update_history = "tenant-scoped"
 get_update_history = "tenant-scoped"
 stream_update_output = "full-state"
 
+[routes."test_utils.rs"]
+request_service_renewal = "full-state"
+disconnect_service = "full-state"
+
 [routes."users.rs"]
 build_user_response = "ignore"
 get_user_role_summaries = "ignore"

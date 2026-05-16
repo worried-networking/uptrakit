@@ -970,6 +970,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         );
     }
 
+    #[cfg(feature = "test-utils")]
+    {
+        router = router.route(
+            "/api/v1/test/services/{id}/request-renewal",
+            axum::routing::post(crate::routes::test_utils::request_service_renewal),
+        );
+        router = router.route(
+            "/api/v1/test/services/{id}/disconnect",
+            axum::routing::post(crate::routes::test_utils::disconnect_service),
+        );
+    }
+
     // Always serve the raw OpenAPI JSON at a stable URL.
     let api_for_json = api.clone();
     router = router.route(
