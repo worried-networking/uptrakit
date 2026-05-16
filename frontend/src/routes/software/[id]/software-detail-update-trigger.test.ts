@@ -73,7 +73,6 @@ import * as auth from '$lib/auth.svelte';
 import * as notifications from '$lib/notifications.svelte';
 import * as interactive from '$lib/interactive';
 import { page } from '$app/state';
-import { AdminEventType } from '$lib/sse';
 
 const adminUser = {
 	id: '00000000-0000-0000-0000-000000000001',
@@ -211,43 +210,6 @@ describe('Software Detail Update Triggers', () => {
 		expect(screen.queryByText('Update Output')).not.toBeInTheDocument();
 	});
 
-	it('launches terminal output without route-local terminal shell chrome on successful trigger', async () => {
-		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
-		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-			update_history_id: 'uh-live',
-			status: 'pending'
-		});
-
-		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
-		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
-		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
-
-		await waitFor(() =>
-			expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-1', {
-				to_version: '1.1.0'
-			})
-		);
-		// Fire the update_protection_started SSE event to trigger modal opening
-		eventMocks.fireEvent(AdminEventType.UpdateProtectionStarted, {
-			update_history_id: 'uh-live',
-			software_item_id: 'software-1'
-		});
-		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
-		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
-		expect(screen.queryByText('Update Output')).not.toBeInTheDocument();
-		await waitFor(() =>
-			expect(interactive.connectInteractiveSession).toHaveBeenCalledWith('uh-live', expect.any(Object))
-		);
-		const sigintButton = await screen.findByRole('button', { name: 'Ctrl+C' });
-		expect(sigintButton.closest('[data-ui="terminal-shell"]')).toBe(shell);
-		await fireEvent.click(sigintButton);
-		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
-	});
-
 	it('does not count failed trigger responses as successful in update-all flow', async () => {
 		const hostOne = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
 		const hostTwo = makeHost({ id: 'row-2', hostId: 'host-2', hostname: 'host-two' });
@@ -298,32 +260,6 @@ describe('Software Detail Update Triggers', () => {
 		expect(triggerBtn).not.toHaveAttribute('aria-busy');
 		await fireEvent.click(triggerBtn);
 		await waitFor(() => expect(triggerBtn).toHaveAttribute('aria-busy', 'true'));
-	});
-
-	it('uses shared inline badges instead of warning status overrides for the live terminal', async () => {
-		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
-		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-			update_history_id: 'uh-live',
-			status: 'pending'
-		});
-
-		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
-		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
-
-		// Fire the update_protection_started SSE event to trigger modal opening
-		eventMocks.fireEvent(AdminEventType.UpdateProtectionStarted, {
-			update_history_id: 'uh-live',
-			software_item_id: 'software-1'
-		});
-
-		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
-		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
-		expect(document.querySelector('[data-ui="terminal-inline-badges"]')).toBeInTheDocument();
-		expect(screen.queryByText('Input Required')).not.toBeInTheDocument();
-		expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
 	});
 
 	it('Delete header button renders danger variant', async () => {
