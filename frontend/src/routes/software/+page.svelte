@@ -1168,6 +1168,7 @@
 							onOpenMenu={toggleMenu}
 							onOpenUpdateAllModal={openUpdateAllModal}
 							onOpenSingleHostUpdate={openSingleHostUpdate}
+							onOpenLiveModal={_openLiveModal}
 							onPageChange={loadAll}
 							onToggleFeatured={toggleFeatured}
 						/>

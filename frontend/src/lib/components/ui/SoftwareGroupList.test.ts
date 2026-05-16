@@ -81,6 +81,7 @@ function makeProps(
 		onOpenMenu: vi.fn(),
 		onOpenUpdateAllModal: vi.fn(),
 		onOpenSingleHostUpdate: vi.fn(),
+		onOpenLiveModal: vi.fn(),
 		onPageChange: vi.fn(),
 		onToggleFeatured: vi.fn()
 	};
