@@ -15,7 +15,8 @@
 		unassignHostFromSoftwareItem,
 		getUpdateHistoryEntry,
 		previewSoftwareItemMerge,
-		executeSoftwareItemMerge
+		executeSoftwareItemMerge,
+		ApiError
 	} from '$lib/api';
 	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -104,11 +105,17 @@
 		const hosts: SoftwareItemHostSummary[] = updateAllDetail?.hosts ?? [];
 		return hosts.map((h) => {
 			const upToDate = !h.update_available;
+			const alreadyActive = !!h.active_update_history_id;
+			const isDisabled = upToDate || alreadyActive;
 			return {
 				value: h.host_id,
 				label: h.friendly_name || h.hostname,
-				sublabel: upToDate ? 'Already up to date' : `${h.installed_version ?? 'unknown'} → ${h.latest_version}`,
-				disabled: upToDate
+				sublabel: alreadyActive
+					? 'Update already active'
+					: upToDate
+						? 'Already up to date'
+						: `${h.installed_version ?? 'unknown'} → ${h.latest_version}`,
+				disabled: isDisabled
 			};
 		});
 	});
@@ -283,7 +290,30 @@
 					if (data.software_item_id === id) loadItem(true);
 				}),
 				subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
-					if (data.software_item_id === id) loadItem(true);
+					if (data.software_item_id !== id) return;
+					if (!item) return;
+					item = {
+						...item,
+						hosts: item.hosts.map((h) =>
+							h.host_id === (data.host_id as string)
+								? {
+										...h,
+										active_update_history_id: data.update_history_id as string,
+										active_update_status: ((data.status as string) ?? 'pending') || 'pending'
+									}
+								: h
+						)
+					};
+				}),
+				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
+					if (data.software_item_id !== id) return;
+					if (!item) return;
+					item = {
+						...item,
+						hosts: item.hosts.map((h) =>
+							h.host_id === (data.host_id as string) ? { ...h, active_update_status: 'in_progress' } : h
+						)
+					};
 				})
 			);
 			refreshInterval = setInterval(() => {
@@ -555,7 +585,11 @@
 
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to trigger update');
+			if (e instanceof ApiError && e.errorCode === 'trigger_update.update_already_active') {
+				showError('An update is already active for this host');
+			} else {
+				showError(e instanceof Error ? e.message : 'Failed to trigger update');
+			}
 		} finally {
 			updateTriggering = false;
 		}
@@ -635,7 +669,7 @@
 			const detail = await getSoftwareItem(item.id);
 			updateAllDetail = detail;
 			updateAllSelectedHostIds.clear();
-			for (const h of detail.hosts.filter((h) => h.update_available)) {
+			for (const h of detail.hosts.filter((h) => h.update_available && !h.active_update_history_id)) {
 				updateAllSelectedHostIds.add(h.host_id);
 			}
 		} catch (e) {
@@ -657,9 +691,14 @@
 		);
 		let succeeded = 0;
 		let failed = 0;
+		let alreadyActive = 0;
 		for (const result of results) {
 			if (result.status === 'rejected') {
-				failed += 1;
+				if (result.reason instanceof ApiError && result.reason.errorCode === 'trigger_update.update_already_active') {
+					alreadyActive += 1;
+				} else {
+					failed += 1;
+				}
 				continue;
 			}
 			if (result.value.status === 'failed') {
@@ -669,6 +708,7 @@
 			succeeded += 1;
 		}
 		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
+		if (alreadyActive > 0) showError(`${alreadyActive} host(s) already have an active update.`);
 		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
 		updateAllTriggering = false;
 		updateAllModal = false;
@@ -705,7 +745,6 @@
 	}
 
 	function versionStatusLabel(host: SoftwareItemHostSummary): string {
-		if (host.active_update_history_id) return 'In Progress';
 		if (!host.installed_version) return 'Unknown';
 		const latest = effectiveLatestVersion(host);
 		if (!latest) return 'Unknown latest';
@@ -717,7 +756,6 @@
 	}
 
 	function versionStatusTone(host: SoftwareItemHostSummary): 'info' | 'neutral' | 'warning' | 'success' {
-		if (host.active_update_history_id) return 'info';
 		if (!host.installed_version) return 'neutral';
 		const latest = effectiveLatestVersion(host);
 		if (!latest) return 'neutral';
@@ -1005,16 +1043,26 @@
 									{/if}
 								</td>
 								<td class="table-cell-pad text-[var(--text-primary)]">
-									{#if canView && host.active_update_history_id}
-										<span class="inline-flex" title="View update progress">
-											<ActionBadge
-												variant="navigation"
-												tone="info"
-												idleLabel="In Progress"
-												hoverLabel="→ Log"
-												onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
-											/>
-										</span>
+									{#if host.active_update_history_id}
+										{#if host.active_update_status === 'in_progress' && canView}
+											<span class="inline-flex" title="View update progress">
+												<ActionBadge
+													variant="navigation"
+													tone="info"
+													idleLabel="In Progress"
+													hoverLabel="→ Log"
+													onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
+												/>
+											</span>
+										{:else if host.active_update_status === 'queued'}
+											<StatusBadge tone="info" label="Queued" />
+										{:else if host.active_update_status === 'pending'}
+											<StatusBadge tone="info" label="Pending" />
+										{:else if host.active_update_status === 'awaiting_restart'}
+											<StatusBadge tone="info" label="Awaiting Restart" />
+										{:else}
+											<StatusBadge tone="info" label="In Progress" />
+										{/if}
 									{:else if canTriggerUpdates && host.update_available}
 										<span
 											class="inline-flex"
