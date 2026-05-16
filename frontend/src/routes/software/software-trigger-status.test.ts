@@ -612,6 +612,42 @@ describe('Software Page Trigger Status Handling', () => {
 				expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('An update is already active for this host')
 			);
 		});
+
+		it('UpdateAllButton is disabled when all updatable hosts have active update', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [
+				{
+					...makeHostSummary('host-1', 'host-one'),
+					update_available: true,
+					latest_version: '2.0.0',
+					active_update_history_id: 'hist-abc',
+					active_update_status: 'in_progress'
+				},
+				{
+					...makeHostSummary('host-2', 'host-two'),
+					update_available: true,
+					latest_version: '2.0.0',
+					active_update_history_id: 'hist-def',
+					active_update_status: 'pending'
+				}
+			];
+			const detail = makeDetail(item, hosts);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Multi-host: wait for detail to load
+			await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+			// The UpdateAllButton should be in 'dim' state = aria-label "All hosts already updating"
+			await waitFor(() =>
+				expect(screen.queryByRole('button', { name: /all hosts already updating/i })).toBeInTheDocument()
+			);
+		});
 	});
 
 	describe('SSE in-place cache updates', () => {

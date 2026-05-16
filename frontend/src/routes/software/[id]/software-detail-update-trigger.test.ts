@@ -78,6 +78,7 @@ import * as auth from '$lib/auth.svelte';
 import * as notifications from '$lib/notifications.svelte';
 import * as interactive from '$lib/interactive';
 import { page } from '$app/state';
+import { AdminEventType } from '$lib/sse';
 
 const adminUser = {
 	id: '00000000-0000-0000-0000-000000000001',
@@ -365,5 +366,94 @@ describe('active status badge rendering on detail page', () => {
 		await waitFor(() =>
 			expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('An update is already active for this host')
 		);
+	});
+});
+
+describe('SSE in-place updates on detail page', () => {
+	beforeAll(() => {
+		class ResizeObserverMock {
+			observe = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => ({
+				matches: false,
+				media: '',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(() => false)
+			}))
+		);
+	});
+
+	beforeEach(() => {
+		page.params.id = 'software-1';
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('UpdateTriggered SSE sets active_update_history_id and shows Pending badge', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' }),
+			update_available: true,
+			latest_version: '2.0.0',
+			active_update_history_id: null,
+			active_update_status: null
+		};
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+		// Initially shows Update button
+		await screen.findByRole('button', { name: 'Update' });
+
+		// Fire UpdateTriggered SSE event
+		eventMocks.fireEvent(AdminEventType.UpdateTriggered, {
+			software_item_id: 'software-1',
+			host_id: 'host-1',
+			update_history_id: 'hist-123',
+			status: 'pending'
+		});
+
+		// Should now show Pending badge without a page reload
+		await waitFor(() => expect(screen.queryByText('Pending')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+	});
+
+	it('UpdateStarted SSE transitions status to in_progress (shows In Progress badge)', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' }),
+			active_update_history_id: 'hist-123',
+			active_update_status: 'pending'
+		};
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+		await screen.findByText('Pending');
+
+		// Fire UpdateStarted
+		eventMocks.fireEvent(AdminEventType.UpdateStarted, {
+			software_item_id: 'software-1',
+			host_id: 'host-1',
+			update_history_id: 'hist-123'
+		});
+
+		await waitFor(() => expect(screen.queryByText('In Progress')).toBeInTheDocument());
+		expect(screen.queryByText('Pending')).not.toBeInTheDocument();
 	});
 });

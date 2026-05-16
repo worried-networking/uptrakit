@@ -257,6 +257,8 @@
 				return 'info';
 			case 'in_progress':
 				return 'warning';
+			case 'awaiting_restart':
+				return 'info';
 			case 'completed':
 				return 'success';
 			case 'failed':
@@ -276,6 +278,8 @@
 				return '✕';
 			case 'in_progress':
 				return '↑';
+			case 'awaiting_restart':
+				return '⟳';
 			case 'queued':
 			case 'pending':
 				return '·';
@@ -290,6 +294,7 @@
 				return 'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]';
 			case 'in_progress':
 				return 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
+			case 'awaiting_restart':
 			case 'queued':
 			case 'pending':
 				return 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
