@@ -45,7 +45,7 @@ impl TestPki {
         let ca_cn = "Test CA".to_string();
 
         // --- CA ---
-        let ca_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let ca_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("CA key generation failed");
 
         let mut ca_params = CertificateParams::new(vec![]).expect("CA params");
@@ -68,7 +68,7 @@ impl TestPki {
             Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key).expect("CA issuer creation failed");
 
         // --- Server cert ---
-        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("server key generation failed");
 
         let mut server_params = CertificateParams::new(vec![
@@ -92,7 +92,7 @@ impl TestPki {
 
         // --- Agent cert ---
         let agent_id = uuid::Uuid::now_v7();
-        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("agent key generation failed");
 
         let mut agent_params = CertificateParams::new(vec![]).expect("agent cert params");
@@ -130,7 +130,7 @@ impl TestPki {
             .expect("CA issuer from PEM");
 
         let agent_id = uuid::Uuid::now_v7();
-        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("extra agent key generation failed");
 
         let mut agent_params = CertificateParams::new(vec![]).expect("extra agent cert params");
@@ -160,7 +160,7 @@ impl TestPki {
             .expect("CA issuer from PEM");
 
         let agent_id = uuid::Uuid::now_v7();
-        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("AIA agent key generation failed");
 
         let mut agent_params = CertificateParams::new(vec![]).expect("AIA agent cert params");

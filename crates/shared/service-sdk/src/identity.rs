@@ -887,7 +887,7 @@ mod tests {
 
         // Generate a real self-signed cert to test with.
         identity.ensure_keypair().await.expect("ensure_keypair");
-        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
@@ -1019,7 +1019,7 @@ mod tests {
 
     #[test]
     fn pem_to_der_real_certificate() {
-        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         let cert = params.self_signed(&kp).expect("self-sign");
         let pem = cert.pem();
@@ -1109,7 +1109,7 @@ mod tests {
 
         // Generate a fresh certificate (not expired)
         identity.ensure_keypair().await.expect("ensure_keypair");
-        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         let cert = params.self_signed(&kp).expect("self-sign");
         identity
@@ -1196,7 +1196,7 @@ mod tests {
 
         // Save a certificate (clears enrollment_secret but should preserve tenant_id).
         identity.ensure_keypair().await.expect("ensure_keypair");
-        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         let cert = params.self_signed(&kp).expect("self-sign");
         identity

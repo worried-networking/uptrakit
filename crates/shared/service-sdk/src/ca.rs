@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn ca_pem_fingerprint_deterministic() {
         // Generate a test cert
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn ca_pem_fingerprint_different_certs_have_different_fingerprints() {
-        let key_pair_a = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let key_pair_a = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("key pair A generation should succeed");
         let mut params_a = rcgen::CertificateParams::default();
         params_a
@@ -408,7 +408,7 @@ mod tests {
             .self_signed(&key_pair_a)
             .expect("self-signed cert A should be created");
 
-        let key_pair_b = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let key_pair_b = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("key pair B generation should succeed");
         let mut params_b = rcgen::CertificateParams::default();
         params_b
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn ca_pem_fingerprint_only_hex_chars() {
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("key pair generation should succeed");
         let mut params = rcgen::CertificateParams::default();
         params

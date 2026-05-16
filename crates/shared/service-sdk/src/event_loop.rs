@@ -609,7 +609,7 @@ mod tests {
     /// to call `run_event_loop_connected` but do not exercise certificate logic.
     fn make_test_cert_resolver() -> Arc<AgentClientCertResolver> {
         install_crypto_provider();
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("keygen must succeed");
         let params = rcgen::CertificateParams::new(vec!["test.local".to_string()])
             .expect("params must be valid");
