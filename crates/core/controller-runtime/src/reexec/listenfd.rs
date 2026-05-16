@@ -69,31 +69,29 @@ pub(crate) fn current_generation() -> u64 {
         .unwrap_or(0)
 }
 
-/// Clear the `FD_CLOEXEC` flag on a raw file descriptor so it survives `exec()`.
+/// Clear the `FD_CLOEXEC` flag on a listener so it survives `exec()`.
 ///
-/// Called by the reexec path for each bound listener before replacing the
-/// process image.  Without this step the OS closes all `O_CLOEXEC` descriptors
-/// on exec and the new process image receives empty `LISTEN_FDS` slots.
+/// Called at bind time (and after `into_std()` for inherited sockets) so that
+/// each bound listener is non-cloexec from the moment it is ready.  Both
+/// paths are required: the fresh-bind path clears the flag for the first exec,
+/// and the inherited-socket path clears it for every subsequent exec
+/// (generation N → N+1).  Without the inherited call, every reexec beyond
+/// the first would fail silently — the kernel would close all `FD_CLOEXEC`
+/// descriptors and the child would receive empty `LISTEN_FDS` slots.
+///
+/// `T: AsFd` means the compiler enforces that the file descriptor is valid and
+/// open for the lifetime of the call — no `unsafe` required.
 ///
 /// # Errors
 ///
-/// Returns an error if the `fcntl` call fails (e.g. the file descriptor is
-/// invalid or not open).
-///
-/// # Safety
-///
-/// The caller must ensure `fd` is a valid, open file descriptor for the
-/// lifetime of this call.  `RawFd` is unguarded; passing a closed or
-/// reused descriptor yields undefined behaviour in the kernel call.
-pub(crate) fn clear_cloexec_raw(fd: std::os::unix::io::RawFd) -> Result<(), Report> {
-    use std::os::unix::io::BorrowedFd;
+/// Returns an error if the underlying `fcntl(F_SETFD)` syscall fails.
+pub(crate) fn clear_cloexec(fd: impl std::os::unix::io::AsFd) -> Result<(), Report> {
+    use std::os::unix::io::AsRawFd as _;
 
     use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 
-    // SAFETY: The caller guarantees `fd` is valid and open.  We borrow it
-    // only for the duration of the `fcntl` call.
-    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-    fcntl(borrowed, FcntlArg::F_SETFD(FdFlag::empty()))
-        .map_err(|e| rootcause::report!("fcntl F_SETFD on fd {fd}: {e}"))?;
+    let raw = fd.as_fd().as_raw_fd(); // capture for error message before move
+    fcntl(fd, FcntlArg::F_SETFD(FdFlag::empty()))
+        .map_err(|e| rootcause::report!("fcntl F_SETFD on fd {raw}: {e}"))?;
     Ok(())
 }

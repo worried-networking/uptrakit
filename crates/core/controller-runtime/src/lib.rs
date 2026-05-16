@@ -45,7 +45,6 @@ mod tasks;
 mod zeroconf;
 
 use std::net::SocketAddr;
-use std::os::unix::io::AsRawFd as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -102,9 +101,9 @@ struct ControllerReexecHook {
     config_path: std::path::PathBuf,
     master_key_file: Option<String>,
     generation: u64,
-    /// Raw listener FDs cleared of `FD_CLOEXEC` before `exec()`.
-    /// Empty when PKI HTTP is disabled; the child re-binds in that case.
-    listener_fds: Vec<std::os::unix::io::RawFd>,
+    /// Number of bound listeners passed via `LISTEN_FDS` to the child process.
+    /// 1 when PKI HTTP is disabled, 2 when enabled.
+    listener_count: usize,
 }
 
 impl ReexecHook for ControllerReexecHook {
@@ -123,11 +122,11 @@ impl ReexecHook for ControllerReexecHook {
             current_exe: self.current_exe.clone(),
             config_path: self.config_path.clone(),
             master_key_file: self.master_key_file.clone(),
-            listener_count: self.listener_fds.len(),
+            listener_count: self.listener_count,
             generation: self.generation,
         };
 
-        match reexec::perform_reexec(&plan, &self.listener_fds) {
+        match reexec::perform_reexec(&plan) {
             Ok(infallible) => match infallible {},
             Err(e) => ReexecOutcome::ExecFailed(e),
         }
@@ -390,7 +389,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Phase 8b: Claim inherited TCP sockets and pre-bind listeners.
     //
-    // This must happen before the coordinator block so that `listener_fds` and
+    // This must happen before the coordinator block so that `listener_count` and
     // `https_std`/`pki_std_for_spawn` are in scope when the reexec hook is
     // constructed and when the server task is spawned.
     let inherited = reexec::listenfd::take_inherited_listeners().unwrap_or_else(|e| {
@@ -419,7 +418,14 @@ async fn run_server(args: cli::Args) -> Result<()> {
         None => (None, None),
     };
 
-    // Pre-bind HTTPS socket so we have the raw FD for reexec listener inheritance.
+    // Obtain the HTTPS socket — either freshly bound or inherited from LISTEN_FDS.
+    // clear_cloexec is required on BOTH paths:
+    //   fresh-bind: clears the flag for the *current* exec() (generation 0→1).
+    //   inherited:  clears it again for the *next* exec() (generation N→N+1).
+    //               Without this call on the inherited path, every second reexec
+    //               fails silently — the kernel closes FD_CLOEXEC descriptors on
+    //               exec() and the child receives empty LISTEN_FDS slots.
+    // Do not move this call inside either match arm.
     let https_std = match inherited_https {
         Some(l) => l,
         None => {
@@ -434,30 +440,34 @@ async fn run_server(args: cli::Args) -> Result<()> {
             l
         }
     };
-    let https_raw_fd = https_std.as_raw_fd();
+    reexec::listenfd::clear_cloexec(&https_std)
+        .map_err(|e| report!(AppError::Config(format!("clear_cloexec HTTPS: {e}"))))?;
 
-    // Pre-bind PKI socket and collect listener FDs for reexec inheritance.
-    let (listener_fds, pki_std_for_spawn): (
-        Vec<std::os::unix::io::RawFd>,
-        Option<std::net::TcpListener>,
-    ) = if let Some(pki_port) = validated.pki_http_port {
-        let pki_std = match inherited_pki {
-            Some(l) => l,
-            None => {
-                let addr = std::net::SocketAddr::from(([0, 0, 0, 0], pki_port));
-                let l = std::net::TcpListener::bind(addr)
-                    .map_err(|e| report!(AppError::Config(format!("bind PKI HTTP {addr}: {e}"))))?;
-                l.set_nonblocking(true)
-                    .map_err(|e| report!(AppError::Config(format!("set_nonblocking PKI: {e}"))))?;
-                l
-            }
+    // Obtain the PKI socket (if enabled) — either freshly bound or inherited.
+    // Same invariant as HTTPS: clear_cloexec is required on both paths.
+    // Do not move the call inside either match arm.
+    let (listener_count, pki_std_for_spawn): (usize, Option<std::net::TcpListener>) =
+        if let Some(pki_port) = validated.pki_http_port {
+            let pki_std = match inherited_pki {
+                Some(l) => l,
+                None => {
+                    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], pki_port));
+                    let l = std::net::TcpListener::bind(addr).map_err(|e| {
+                        report!(AppError::Config(format!("bind PKI HTTP {addr}: {e}")))
+                    })?;
+                    l.set_nonblocking(true).map_err(|e| {
+                        report!(AppError::Config(format!("set_nonblocking PKI: {e}")))
+                    })?;
+                    l
+                }
+            };
+            reexec::listenfd::clear_cloexec(&pki_std)
+                .map_err(|e| report!(AppError::Config(format!("clear_cloexec PKI: {e}"))))?;
+            (2, Some(pki_std))
+        } else {
+            // PKI disabled: only HTTPS socket inherited (1 FD).
+            (1, None)
         };
-        let pki_fd = pki_std.as_raw_fd();
-        (vec![https_raw_fd, pki_fd], Some(pki_std))
-    } else {
-        // PKI disabled: only HTTPS socket inherited (1 FD).
-        (vec![https_raw_fd], None)
-    };
 
     // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
     let pki =
@@ -846,7 +856,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 config_path: config_path_for_coord.clone(),
                 master_key_file: args.master_key_from.clone(),
                 generation: reexec::listenfd::current_generation(),
-                listener_fds: listener_fds.clone(),
+                listener_count,
             }));
 
         let coordinator_handle = b.coordinator.handle();
