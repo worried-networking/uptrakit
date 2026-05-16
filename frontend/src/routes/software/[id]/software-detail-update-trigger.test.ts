@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 import { Permission } from '$lib/types';
+import { ApiError } from '$lib/api';
 
 const interactiveMocks = vi.hoisted(() => ({
 	disconnect: vi.fn(),
@@ -9,19 +10,23 @@ const interactiveMocks = vi.hoisted(() => ({
 	sendSignal: vi.fn()
 }));
 
-vi.mock('$lib/api', () => ({
-	getSoftwareItem: vi.fn(),
-	getSoftwareItems: vi.fn(),
-	checkSoftwareItemVersions: vi.fn(),
-	checkSoftwareItemVersionsHost: vi.fn(),
-	triggerSoftwareUpdate: vi.fn(),
-	updateSoftwareItem: vi.fn(),
-	deleteSoftwareItem: vi.fn(),
-	unassignHostFromSoftwareItem: vi.fn(),
-	getUpdateHistoryEntry: vi.fn(),
-	previewSoftwareItemMerge: vi.fn(),
-	executeSoftwareItemMerge: vi.fn()
-}));
+vi.mock('$lib/api', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api')>();
+	return {
+		getSoftwareItem: vi.fn(),
+		getSoftwareItems: vi.fn(),
+		checkSoftwareItemVersions: vi.fn(),
+		checkSoftwareItemVersionsHost: vi.fn(),
+		triggerSoftwareUpdate: vi.fn(),
+		updateSoftwareItem: vi.fn(),
+		deleteSoftwareItem: vi.fn(),
+		unassignHostFromSoftwareItem: vi.fn(),
+		getUpdateHistoryEntry: vi.fn(),
+		previewSoftwareItemMerge: vi.fn(),
+		executeSoftwareItemMerge: vi.fn(),
+		ApiError: actual.ApiError
+	};
+});
 
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => null)
@@ -271,5 +276,92 @@ describe('Software Detail Update Triggers', () => {
 
 		const deleteBtn = screen.getByRole('button', { name: 'Delete' });
 		expect(deleteBtn.className).toContain('var(--color-danger-bg)');
+	});
+});
+
+describe('active status badge rendering on detail page', () => {
+	beforeAll(() => {
+		class ResizeObserverMock {
+			observe = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => ({
+				matches: false,
+				media: '',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(() => false)
+			}))
+		);
+	});
+
+	beforeEach(() => {
+		page.params.id = 'software-1';
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('shows "Queued" StatusBadge (not "Update") when host active_update_status is queued', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' }),
+			update_available: true,
+			active_update_history_id: 'hist-abc',
+			active_update_status: 'queued'
+		};
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+		await waitFor(() => expect(screen.queryByText('Queued')).toBeInTheDocument());
+		expect(screen.queryByText('Update')).not.toBeInTheDocument();
+	});
+
+	it('shows "In Progress" ActionBadge when active_update_status is in_progress', async () => {
+		const host: SoftwareItemHostSummary = {
+			...makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' }),
+			active_update_history_id: 'hist-abc',
+			active_update_status: 'in_progress'
+		};
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+		await waitFor(() => expect(screen.queryByText('In Progress')).toBeInTheDocument());
+	});
+
+	it('shows 409-specific toast in single-host executeUpdate', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+		vi.mocked(api.triggerSoftwareUpdate).mockRejectedValue(
+			new ApiError('Update already active', 409, 'trigger_update.update_already_active')
+		);
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+		const updateBadge = await screen.findByRole('button', { name: 'Update' });
+		await fireEvent.click(updateBadge);
+
+		const confirmBtn = await screen.findByRole('button', { name: 'Trigger Update' });
+		await fireEvent.click(confirmBtn);
+
+		await waitFor(() =>
+			expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('An update is already active for this host')
+		);
 	});
 });
