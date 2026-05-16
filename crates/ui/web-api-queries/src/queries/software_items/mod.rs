@@ -547,3 +547,215 @@ pub use host_assignments::{
 
 pub use merge::{execute_merge_software_items, preview_merge_software_items};
 pub use plugin_assignments::{delete_plugin_assignment, delete_plugin_assignment_in_tx};
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod active_update_status_tests {
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, software_item, tenant, update_history,
+    };
+    use uuid::Uuid;
+
+    async fn make_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        db
+    }
+
+    /// Insert the minimum parent rows required by FK constraints.
+    /// Returns `(tenant_id, host_id, software_item_id, host_software_item_id)`.
+    async fn insert_parents(db: &DatabaseConnection) -> (Uuid, Uuid, Uuid, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(format!("t-{tenant_id}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-item".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software_item");
+
+        host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item");
+
+        (tenant_id, host_id, item_id, hsi_id)
+    }
+
+    #[tokio::test]
+    async fn awaiting_restart_row_populates_active_update_status() {
+        let db = make_db().await;
+        let now = OffsetDateTime::now_utc();
+        let (tenant_id, host_id, item_id, _hsi_id) = insert_parents(&db).await;
+
+        let update_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.0.0".to_string())),
+            status: Set(update_history::UpdateStatus::AwaitingRestart),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            awaiting_restart_since: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update_history");
+
+        let hosts = super::load_item_hosts(&db, item_id).await;
+
+        assert_eq!(hosts.len(), 1, "expected one host summary");
+        let summary = &hosts[0];
+        assert_eq!(
+            summary.active_update_history_id,
+            Some(update_id),
+            "active_update_history_id should match the AwaitingRestart row"
+        );
+        assert_eq!(
+            summary.active_update_status.as_deref(),
+            Some("awaiting_restart"),
+            "active_update_status should be 'awaiting_restart'"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_row_only_leaves_active_update_status_empty() {
+        let db = make_db().await;
+        let now = OffsetDateTime::now_utc();
+        let (tenant_id, host_id, item_id, _hsi_id) = insert_parents(&db).await;
+
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.0.0".to_string())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            awaiting_restart_since: Set(None),
+            created_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update_history");
+
+        let hosts = super::load_item_hosts(&db, item_id).await;
+
+        assert_eq!(hosts.len(), 1, "expected one host summary");
+        let summary = &hosts[0];
+        assert!(
+            summary.active_update_history_id.is_none(),
+            "active_update_history_id should be None for a Completed row"
+        );
+        assert!(
+            summary.active_update_status.is_none(),
+            "active_update_status should be None for a Completed row"
+        );
+    }
+}
