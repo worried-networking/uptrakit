@@ -292,7 +292,7 @@ mod tests {
     /// Generate a self-signed CA cert with a specific validity period.
     fn generate_test_ca_cert(days_valid: i64) -> String {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
