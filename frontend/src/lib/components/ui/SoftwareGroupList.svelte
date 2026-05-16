@@ -306,7 +306,26 @@
 						<div aria-hidden="true"></div>
 					{/if}
 					<div class="flex justify-end">
-						{#if canTriggerUpdates}
+						{#if isCompactSingleHost && compactSingleHost?.active_update_history_id}
+							{@const host = compactSingleHost!}
+							{#if host.active_update_status === 'in_progress'}
+								<ActionBadge
+									variant="navigation"
+									tone="info"
+									idleLabel="In Progress"
+									hoverLabel="View"
+									onclick={() => onOpenLiveModal(host.active_update_history_id!, host.hostname, item.name)}
+								/>
+							{:else if host.active_update_status === 'queued'}
+								<StatusBadge tone="info" label="Queued" />
+							{:else if host.active_update_status === 'pending'}
+								<StatusBadge tone="info" label="Pending" />
+							{:else if host.active_update_status === 'awaiting_restart'}
+								<StatusBadge tone="info" label="Awaiting Restart" />
+							{:else}
+								<StatusBadge tone="info" label="In Progress" />
+							{/if}
+						{:else if canTriggerUpdates}
 							{#if isCompactSingleHost}
 								<ActionBadge
 									variant="navigation"
@@ -590,7 +609,26 @@
 						{/if}
 					</div>
 					<div class="shrink-0">
-						{#if canTriggerUpdates}
+						{#if compactSingleHost.active_update_history_id}
+							{#if compactSingleHost.active_update_status === 'in_progress'}
+								<ActionBadge
+									variant="navigation"
+									tone="info"
+									idleLabel="In Progress"
+									hoverLabel="View"
+									onclick={() =>
+										onOpenLiveModal(compactSingleHost.active_update_history_id!, compactSingleHost.hostname, item.name)}
+								/>
+							{:else if compactSingleHost.active_update_status === 'queued'}
+								<StatusBadge tone="info" label="Queued" />
+							{:else if compactSingleHost.active_update_status === 'pending'}
+								<StatusBadge tone="info" label="Pending" />
+							{:else if compactSingleHost.active_update_status === 'awaiting_restart'}
+								<StatusBadge tone="info" label="Awaiting Restart" />
+							{:else}
+								<StatusBadge tone="info" label="In Progress" />
+							{/if}
+						{:else if canTriggerUpdates}
 							<ActionBadge
 								variant="navigation"
 								tone="accent"
