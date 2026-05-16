@@ -24,14 +24,16 @@ pub(crate) fn validate_configuration(
     let has_tls_cert = !tls_cert.is_empty();
     let has_tls_key = !tls_key.is_empty();
 
-    // If --static-dir is given explicitly, always resolve and use it (overrides embedded assets).
-    // Without an explicit path: auto-detect only when embedded-frontend is not compiled in.
-    let static_dir_path: Option<PathBuf> = None; // static dir is no longer CLI-configurable; auto-detect only
-    let static_dir = if !cfg!(feature = "embedded-frontend") {
-        resolve_static_dir(static_dir_path)?
-    } else {
-        None
-    };
+    // In debug builds (but not test builds), probe the filesystem first so
+    // `frontend/build` changes are picked up without recompiling.
+    // Falls back to embedded if the dir is absent.
+    let static_dir_path: Option<PathBuf> = None;
+    let static_dir =
+        if !cfg!(feature = "embedded-frontend") || (cfg!(debug_assertions) && !cfg!(test)) {
+            resolve_static_dir(static_dir_path)?
+        } else {
+            None
+        };
 
     // Validate TLS paths: both or neither must be non-empty.
     if has_tls_cert != has_tls_key {
