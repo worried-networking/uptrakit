@@ -201,6 +201,40 @@ async fn build_service_responses(
         .collect())
 }
 
+/// Fetch the serial number of the most recent non-revoked certificate for a service.
+///
+/// `service_certificate` has no `tenant_id` column. Tenant isolation is enforced
+/// by joining through `service::Entity` (which is `TenantScoped`), per the
+/// coding-standards rule: "service_host has no tenant_id; scope queries via
+/// TenantDb::find_via_tenant_join through service (TenantScoped)".
+async fn fetch_cert_serial(tenant_db: &TenantDb, service_id: Uuid) -> Result<Option<String>> {
+    let cert = tenant_db
+        .find_via_tenant_join::<service_certificate::Entity, service::Entity>(
+            service_certificate::Relation::Service.def(),
+        )
+        .filter(service_certificate::Column::ServiceId.eq(service_id))
+        .filter(service_certificate::Column::RevokedAt.is_null())
+        .order_by_desc(service_certificate::Column::CreatedAt)
+        .one(tenant_db.db())
+        .await
+        .context_to()?;
+    Ok(cert.map(|c| c.serial_number))
+}
+
+/// Like `get_active_service` but also populates `cert_serial_number`.
+///
+/// Use only for the detail endpoint — calling this for a list would produce N+1 queries.
+pub async fn get_active_service_detail(
+    tenant_db: &TenantDb,
+    id: Uuid,
+) -> Result<Option<ServiceResponse>> {
+    let Some(mut svc) = get_active_service(tenant_db, id).await? else {
+        return Ok(None);
+    };
+    svc.cert_serial_number = fetch_cert_serial(tenant_db, id).await?;
+    Ok(Some(svc))
+}
+
 // --- Public query functions ---
 
 #[tracing::instrument(skip_all)]

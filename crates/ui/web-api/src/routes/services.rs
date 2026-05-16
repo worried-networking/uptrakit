@@ -169,7 +169,7 @@ pub async fn get_service(
     CanViewServices(_user): CanViewServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
-    match svc_queries::get_active_service(&tenant_db, service_id).await {
+    match svc_queries::get_active_service_detail(&tenant_db, service_id).await {
         Ok(Some(mut resp)) => {
             let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
             if !trust_domain.is_empty() {
