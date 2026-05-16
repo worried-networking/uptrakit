@@ -336,6 +336,13 @@ pub async fn list_software_items(
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<ListSoftwareItemsParams>,
 ) -> Response {
+    if params
+        .query
+        .as_deref()
+        .is_some_and(|q| q.chars().count() > 200)
+    {
+        return error_response(StatusCode::BAD_REQUEST, "query too long");
+    }
     match item_queries::list_software_items(&tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
