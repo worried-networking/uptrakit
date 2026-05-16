@@ -55,7 +55,7 @@ COPY --from=planner /app/recipe.json recipe.json
 # Cook controller-standalone first (rust-embed etc. are non-default; nats is the
 # only forwarding feature — db-sqlite/oidc are always-on via the dep spec)
 RUN cargo chef cook --release --recipe-path recipe.json \
-    -p uptrakit-controller-standalone --features nats
+    -p uptrakit-controller-standalone --features nats,test-utils
 # Cook remaining workspace deps (agent, scheduler, mqtt, etc.)
 RUN cargo chef cook --release --recipe-path recipe.json
 
@@ -66,7 +66,7 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Build all binaries — standalone embeds the frontend (used by integration tests),
 # lean controller is also built for completeness.
 RUN cargo build --release \
-    -p uptrakit-controller-standalone --features nats && \
+    -p uptrakit-controller-standalone --features nats,test-utils && \
     cargo build --release \
     -p uptrakit-controller --features nats && \
     cargo build --release \
