@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use crate::helpers::api_client::ApiClient;
-use crate::helpers::containers::{ControllerContainer, ServiceContainer, test_network_name};
+use super::api_client::ApiClient;
+use super::containers::{ControllerContainer, ServiceContainer, test_network_name};
 
 /// Options for starting an `AgentControllerHarness`.
 pub(crate) struct HarnessOptions {

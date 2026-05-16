@@ -14,10 +14,7 @@
 
 mod helpers;
 
-#[path = "helpers/agent_controller_harness.rs"]
-mod agent_controller_harness;
-
-use crate::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
+use crate::helpers::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
 
 /// Verify that an Agent enrolls with a SPIFFE URI SAN in its CSR, the Controller
 /// signs it preserving the SAN, and the Controller returns the SPIFFE identity

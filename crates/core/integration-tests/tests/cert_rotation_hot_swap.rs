@@ -15,10 +15,7 @@
 
 mod helpers;
 
-#[path = "helpers/agent_controller_harness.rs"]
-mod agent_controller_harness;
-
-use crate::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
+use crate::helpers::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
 
 /// Verify that cert renewal via the resolver hot-swap path keeps the session
 /// alive and the new cert is presented on the next TLS handshake.
