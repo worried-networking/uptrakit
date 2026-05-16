@@ -533,7 +533,10 @@ pub struct ListSoftwareItemsParams {
     /// Omit to return items for any plugin type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<String>,
-    /// Free-text search query applied against item name and related metadata.
+    /// Filter by name — case-insensitive substring match, max 200 chars.
+    /// The caller lowercases and escapes LIKE metacharacters before the SQL
+    /// bind; the database evaluates `LOWER(name) LIKE ? ESCAPE '\'`.
+    /// Empty/whitespace-only values are ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
 }
