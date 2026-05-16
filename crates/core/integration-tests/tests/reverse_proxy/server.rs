@@ -142,7 +142,7 @@ async fn build_state(
 
     let rustls_cfg = {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
             .expect("cert params")
             .self_signed(&key_pair)

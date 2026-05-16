@@ -377,7 +377,7 @@ mod tests {
     /// Generate a self-signed CA certificate + key pair for testing.
     fn generate_test_ca() -> (String, rcgen::KeyPair) {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -391,7 +391,7 @@ mod tests {
     fn generate_test_client_cert(ca_pem: &str, ca_key: &rcgen::KeyPair) -> (String, String) {
         let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, ca_key).expect("issuer");
         let client_key =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params =
             rcgen::CertificateParams::new(vec!["client.test".to_string()]).expect("params");
         params

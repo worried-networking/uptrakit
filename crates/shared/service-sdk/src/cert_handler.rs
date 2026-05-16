@@ -545,7 +545,7 @@ mod tests {
 
         // Create a real self-signed cert with a far-future not_after so
         // should_force_reconnect returns false.
-        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         // Set not_after to 10 years in the future.
         params.not_after = rcgen::date_time_ymd(2035, 1, 1);
