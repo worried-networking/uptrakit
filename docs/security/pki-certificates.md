@@ -10,11 +10,15 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 
 ## Asset Lifetimes
 
-| Asset                  | Lifetime                      | Renewal Window                           |
-| ---------------------- | ----------------------------- | ---------------------------------------- |
-| CA certificate         | 5 years                       | Rotate 6 months before expiry            |
-| Server HTTPS cert      | 90 days                       | Renew 30 days before expiry              |
-| Agent/MQTT client cert | 168 h (default, max 17 520 h) | `min(14 days, lifetime / 5)` — see below |
+| Asset                  | Lifetime                      | Renewal Window                           | Key Algorithm                  |
+| ---------------------- | ----------------------------- | ---------------------------------------- | ------------------------------ |
+| CA certificate         | 5 years                       | Rotate 6 months before expiry            | P-384 / PKCS_ECDSA_P384_SHA384 |
+| Server HTTPS cert      | 90 days                       | Renew 30 days before expiry              | P-384 / PKCS_ECDSA_P384_SHA384 |
+| Agent/MQTT client cert | 168 h (default, max 17 520 h) | `min(14 days, lifetime / 5)` — see below | P-384 / PKCS_ECDSA_P384_SHA384 |
+
+> **Key algorithm:** All newly generated keys use P-384 (ECDSA, SHA-384). Existing keys continue
+> to use P-256 until their normal renewal cycle. The semi-production deployment should trigger
+> `POST /api/v1/settings/rotate-ca` after deploying this change to accelerate CA renewal to P-384.
 
 ## Agent/MQTT Certificate Renewal Window
 
