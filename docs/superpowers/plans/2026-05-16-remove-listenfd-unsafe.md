@@ -280,7 +280,14 @@ This task has four sub-changes. Make all four before running `cargo check`.
 - [ ] **Step 3: Replace with the clear_cloexec call; remove `https_raw_fd`**
 
   ```rust
-  // Pre-bind HTTPS socket and clear FD_CLOEXEC so it survives reexec exec().
+  // Obtain the HTTPS socket — either freshly bound or inherited from LISTEN_FDS.
+  // clear_cloexec is required on BOTH paths:
+  //   fresh-bind: clears the flag for the *current* exec() (generation 0→1).
+  //   inherited:  clears it again for the *next* exec() (generation N→N+1).
+  //               Without this call on the inherited path, every second reexec
+  //               fails silently — the kernel closes FD_CLOEXEC descriptors on
+  //               exec() and the child receives empty LISTEN_FDS slots.
+  // Do not move this call inside either match arm.
   let https_std = match inherited_https {
       Some(l) => l,
       None => {
@@ -333,7 +340,9 @@ This task has four sub-changes. Make all four before running `cargo check`.
 - [ ] **Step 5: Replace with `listener_count` and `clear_cloexec` for PKI**
 
   ```rust
-  // Pre-bind PKI socket (if enabled) and clear FD_CLOEXEC for reexec inheritance.
+  // Obtain the PKI socket (if enabled) — either freshly bound or inherited.
+  // Same invariant as HTTPS: clear_cloexec is required on both paths.
+  // Do not move the call inside either match arm.
   let (listener_count, pki_std_for_spawn): (usize, Option<std::net::TcpListener>) =
       if let Some(pki_port) = validated.pki_http_port {
           let pki_std = match inherited_pki {
@@ -522,30 +531,52 @@ This task has four sub-changes. Make all four before running `cargo check`.
   Expected: all tests pass. The `reexec::triage` tests (the only tests in this crate's
   reexec module) should all still pass — they test config-change triage, not the fcntl path.
 
-- [ ] **Step 5: Check integration test suite for two-generation reexec coverage**
+- [ ] **Step 5: `cargo deny` and `markdownlint`**
 
-  Open `crates/core/integration-tests/tests/system.rs` and search for any test that:
-  - triggers reexec twice (generation 0 → 1 → 2), and
-  - verifies socket continuity after the second exec
+  ```bash
+  cargo deny check
+  markdownlint --config .markdownlint.json '**/*.md'
+  ```
 
-  If no such test exists: add a `#[tokio::test] #[ignore]` test named
-  `reexec_two_generations_inherit_sockets` in `system.rs` that:
+  Expected: both pass with no errors.
+
+- [ ] **Step 6: Check integration test suite for two-generation reexec coverage**
+
+  Search `crates/core/integration-tests/tests/system/controller_startup.rs` for any test
+  that triggers reexec twice (generation 0 → 1 → 2) and verifies socket continuity after
+  the second exec.
+
+  No such test currently exists (confirmed by grep). Add a
+  `#[tokio::test] #[ignore]` test named `reexec_two_generations_inherit_sockets` to
+  `crates/core/integration-tests/tests/system/controller_startup.rs` following the same
+  `ControllerContainer::start` + `ApiClient` pattern used by existing tests in that file:
   1. Starts the controller (generation 0)
   2. Triggers a config-change reexec → waits for generation 1 to be healthy
   3. Triggers a second config-change reexec → waits for generation 2 to be healthy
   4. Verifies the HTTPS port responds after both transitions
 
-  If integration tests in this repo use a harness or helper (check
-  `crates/core/integration-tests/src/lib.rs`), follow the same pattern for
-  controller startup.
+  Do not add the test to `system.rs` — that file is a `mod`-only dispatcher.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
+
+  If Step 6 added a new test, stage it. Adjust the `git add` accordingly:
 
   ```bash
+  # If Step 6 wrote a new test:
+  git add \
+    crates/core/controller-runtime/src/reexec/listenfd.rs \
+    crates/core/controller-runtime/src/reexec/mod.rs \
+    crates/core/controller-runtime/src/lib.rs \
+    crates/core/integration-tests/tests/system/controller_startup.rs
+
+  # If Step 6 found the test already exists (no new file):
   git add \
     crates/core/controller-runtime/src/reexec/listenfd.rs \
     crates/core/controller-runtime/src/reexec/mod.rs \
     crates/core/controller-runtime/src/lib.rs
+  ```
+
+  ```bash
   git commit -m "$(cat <<'EOF'
   refactor(reexec): eliminate unsafe BorrowedFd::borrow_raw in listenfd.rs
 
@@ -586,7 +617,7 @@ This task has four sub-changes. Make all four before running `cargo check`.
 | `perform_reexec` signature + loop removal                        | Task 2 Step 2                     |
 | `perform_reexec` doc comment updated                             | Task 2 Step 1                     |
 | No doc impact (internal, no public API)                          | Noted in spec; no doc tasks added |
-| Two-generation reexec test                                       | Task 5 Step 5                     |
+| Two-generation reexec test                                       | Task 5 Step 6                     |
 
 **No placeholders found.** All steps show exact code.
 
