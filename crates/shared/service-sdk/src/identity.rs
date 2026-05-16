@@ -322,7 +322,7 @@ impl ServiceIdentityState {
         }
 
         let keypair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).map_err(|e| {
                 report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(
                     e.to_string()
                 )))
@@ -611,7 +611,7 @@ pub fn generate_keypair_and_csr(
         ));
     }
 
-    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).map_err(|e| {
         report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
             format!("key generation failed: {e}")
         )))

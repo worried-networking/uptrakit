@@ -1225,7 +1225,7 @@ mod ca_trust_tests {
 
     fn make_test_cert_pem() -> String {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("key pair");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("key pair");
         let params = rcgen::CertificateParams::default();
         params
             .self_signed(&key_pair)
