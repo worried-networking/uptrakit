@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -74,6 +74,7 @@
 	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import { Search, X } from 'lucide-svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -93,6 +94,8 @@
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
 	let nameFilter: string = $state(page.url.searchParams.get('query') ?? '');
 	let nameFilterDebounce: ReturnType<typeof setTimeout> | undefined;
+	let nameFilterOpen = $state((page.url.searchParams.get('query') ?? '') !== '');
+	let nameFilterWrapperEl: HTMLDivElement | undefined = $state(undefined);
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
 	const slotTabSurfaces = $derived(
@@ -420,6 +423,7 @@
 			clearTimeout(nameFilterDebounce);
 			nameFilterDebounce = undefined;
 			nameFilter = '';
+			nameFilterOpen = false;
 			showUpdatableOnly = false;
 			pluginTypeFilter = '';
 		}
@@ -1089,20 +1093,70 @@
 									}}
 								/>
 							{/if}
-							<Input
-								id="software-name-filter"
-								type="search"
-								placeholder="Filter by name"
-								aria-label="Filter by name"
-								bind:value={nameFilter}
-								oninput={() => {
-									clearTimeout(nameFilterDebounce);
-									nameFilterDebounce = setTimeout(() => {
-										currentPage = 1;
-										loadAll(1);
-									}, 300);
-								}}
-							/>
+							{#if !nameFilterOpen}
+								<Button
+									variant="ghost"
+									size="sm"
+									ariaLabel="Filter by name"
+									onclick={async () => {
+										nameFilterOpen = true;
+										await tick();
+										nameFilterWrapperEl?.querySelector('input')?.focus();
+									}}
+								>
+									{#snippet leadingIcon()}<Search size={14} aria-hidden="true" />{/snippet}
+								</Button>
+							{/if}
+							<div
+								bind:this={nameFilterWrapperEl}
+								class:hidden={!nameFilterOpen}
+								class="flex w-full items-center gap-1 md:w-auto"
+							>
+								<Input
+									id="software-name-filter"
+									type="search"
+									placeholder="Filter by name"
+									aria-label="Filter by name"
+									bind:value={nameFilter}
+									class="w-full md:w-48"
+									oninput={() => {
+										clearTimeout(nameFilterDebounce);
+										nameFilterDebounce = setTimeout(() => {
+											currentPage = 1;
+											loadAll(1);
+										}, 300);
+									}}
+									onkeydown={(e) => {
+										if (e.key === 'Escape') {
+											clearTimeout(nameFilterDebounce);
+											const wasFiltering = nameFilter !== '';
+											nameFilter = '';
+											nameFilterOpen = false;
+											if (wasFiltering) {
+												currentPage = 1;
+												loadAll(1);
+											}
+										}
+									}}
+								/>
+								<Button
+									variant="ghost"
+									size="sm"
+									ariaLabel="Clear name filter"
+									onclick={() => {
+										clearTimeout(nameFilterDebounce);
+										const wasFiltering = nameFilter !== '';
+										nameFilter = '';
+										nameFilterOpen = false;
+										if (wasFiltering) {
+											currentPage = 1;
+											loadAll(1);
+										}
+									}}
+								>
+									{#snippet leadingIcon()}<X size={14} aria-hidden="true" />{/snippet}
+								</Button>
+							</div>
 						</div>
 						{#if canManage}
 							<div class="shrink-0">
