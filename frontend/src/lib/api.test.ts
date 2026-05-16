@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractErrorMessage, me, sealedBoxEncrypt } from './api';
+import { ApiError, extractErrorMessage, me, sealedBoxEncrypt } from './api';
 import { getAccessToken, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type { RefreshResponse, User } from './types';
 
@@ -459,5 +459,24 @@ describe('sealedBoxEncrypt', () => {
 		// 65 + 12 + 0 + 16 = 93 bytes.
 		const decoded = atob(result);
 		expect(decoded.length).toBe(93);
+	});
+});
+
+// ── ApiError ──────────────────────────────────────────────────────────────────
+
+describe('ApiError', () => {
+	it('carries errorCode and status', () => {
+		const err = new ApiError('Already active', 409, 'trigger_update.update_already_active');
+		expect(err).toBeInstanceOf(Error);
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err.message).toBe('Already active');
+		expect(err.status).toBe(409);
+		expect(err.errorCode).toBe('trigger_update.update_already_active');
+		expect(err.name).toBe('ApiError');
+	});
+
+	it('accepts null errorCode', () => {
+		const err = new ApiError('Not found', 404, null);
+		expect(err.errorCode).toBeNull();
 	});
 });
