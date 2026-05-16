@@ -60,6 +60,8 @@ vi.mock('$lib/notifications.svelte', () => ({
 
 import SoftwarePage from './+page.svelte';
 import * as auth from '$lib/auth.svelte';
+import * as api from '$lib/api';
+import { page } from '$app/state';
 
 const viewUser = {
 	id: '00000000-0000-0000-0000-000000000001',
@@ -82,5 +84,27 @@ describe('Software page — name filter URL initialization', () => {
 
 		const input = screen.getByRole('searchbox') as HTMLInputElement;
 		expect(input.value).toBe('foo');
+	});
+
+	it('calls getSoftwareItems with the query parameter as the 7th argument', async () => {
+		// Create a new URL with the nginx query parameter
+		const nginxUrl = new URL('http://localhost/software?query=nginx');
+		Object.defineProperty(page.url, 'href', { value: nginxUrl.href, configurable: true });
+		Object.defineProperty(page.url, 'search', { value: nginxUrl.search, configurable: true });
+		Object.defineProperty(page.url, 'searchParams', { value: nginxUrl.searchParams, configurable: true });
+
+		render(SoftwarePage);
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
+
+		expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledWith(
+			expect.anything(),
+			undefined,
+			expect.anything(),
+			undefined,
+			undefined,
+			undefined,
+			'nginx'
+		);
 	});
 });
