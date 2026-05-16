@@ -26,6 +26,7 @@
 		onOpenMenu,
 		onOpenUpdateAllModal,
 		onOpenSingleHostUpdate,
+		onOpenLiveModal,
 		onPageChange,
 		onToggleFeatured,
 		showUpdatableOnly = false
@@ -48,6 +49,7 @@
 		onOpenMenu: (id: string, button: HTMLElement) => void;
 		onOpenUpdateAllModal: (item: SoftwareItemResponse) => void;
 		onOpenSingleHostUpdate: (item: SoftwareItemResponse, host: SoftwareItemHostSummary) => void;
+		onOpenLiveModal: (updateHistoryId: string, hostName: string, itemName: string) => void;
 		onPageChange: (page: number) => void;
 		onToggleFeatured: (item: SoftwareItemResponse) => void;
 		showUpdatableOnly?: boolean;
@@ -97,6 +99,13 @@
 	function hasAnyUpdateableHosts(item: SoftwareItemResponse): boolean {
 		const c = updateableHostCount(item);
 		return c === null ? item.update_available : c > 0;
+	}
+
+	function allUpdatableHostsActive(item: SoftwareItemResponse): boolean {
+		const detail = itemDetailsById.get(item.id);
+		if (!detail) return false;
+		const updatable = detail.hosts.filter((h) => h.update_available && h.latest_version);
+		return updatable.length > 0 && updatable.every((h) => !!h.active_update_history_id);
 	}
 
 	function softwareUpdateLabel(item: SoftwareItemResponse): string {
@@ -310,9 +319,15 @@
 									onclick={() => compactSingleHost && onOpenSingleHostUpdate(item, compactSingleHost)}
 								/>
 							{:else}
+								{@const anyUpdatable = hasAnyUpdateableHosts(item)}
+								{@const allActive = allUpdatableHostsActive(item)}
 								<UpdateAllButton
-									state={hasAnyUpdateableHosts(item) ? 'idle' : 'dim'}
-									ariaLabel={hasAnyUpdateableHosts(item) ? undefined : 'No updates available'}
+									state={anyUpdatable && !allActive ? 'idle' : 'dim'}
+									ariaLabel={!anyUpdatable
+										? 'No updates available'
+										: allActive
+											? 'All hosts already updating'
+											: undefined}
 									onclick={() => onOpenUpdateAllModal(item)}
 								/>
 							{/if}
@@ -414,7 +429,25 @@
 									{/if}
 								</div>
 								<div class="flex justify-end">
-									{#if host.update_available && canTriggerUpdates}
+									{#if host.active_update_history_id}
+										{#if host.active_update_status === 'in_progress'}
+											<ActionBadge
+												variant="navigation"
+												tone="info"
+												idleLabel="In Progress"
+												hoverLabel="View"
+												onclick={() => onOpenLiveModal(host.active_update_history_id!, host.hostname, item.name)}
+											/>
+										{:else if host.active_update_status === 'queued'}
+											<StatusBadge tone="info" label="Queued" />
+										{:else if host.active_update_status === 'pending'}
+											<StatusBadge tone="info" label="Pending" />
+										{:else if host.active_update_status === 'awaiting_restart'}
+											<StatusBadge tone="info" label="Awaiting Restart" />
+										{:else}
+											<StatusBadge tone="info" label="In Progress" />
+										{/if}
+									{:else if host.update_available && canTriggerUpdates}
 										<ActionBadge
 											variant="navigation"
 											tone="accent"
@@ -632,7 +665,25 @@
 									{/if}
 								</div>
 								<div class="shrink-0">
-									{#if host.update_available && canTriggerUpdates}
+									{#if host.active_update_history_id}
+										{#if host.active_update_status === 'in_progress'}
+											<ActionBadge
+												variant="navigation"
+												tone="info"
+												idleLabel="In Progress"
+												hoverLabel="View"
+												onclick={() => onOpenLiveModal(host.active_update_history_id!, host.hostname, item.name)}
+											/>
+										{:else if host.active_update_status === 'queued'}
+											<StatusBadge tone="info" label="Queued" />
+										{:else if host.active_update_status === 'pending'}
+											<StatusBadge tone="info" label="Pending" />
+										{:else if host.active_update_status === 'awaiting_restart'}
+											<StatusBadge tone="info" label="Awaiting Restart" />
+										{:else}
+											<StatusBadge tone="info" label="In Progress" />
+										{/if}
+									{:else if host.update_available && canTriggerUpdates}
 										<ActionBadge
 											variant="navigation"
 											tone="accent"
