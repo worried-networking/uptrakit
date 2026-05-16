@@ -161,9 +161,6 @@
 		itemName: string;
 	} | null = $state(null);
 	let singleHostUpdateTriggering: boolean = $state(false);
-	let pendingLiveHistoryId: string | null = $state(null);
-	let pendingLiveHostName: string = $state('');
-	let pendingLiveItemName: string = $state('');
 	let liveModal: { updateHistoryId: string; hostName: string; itemName: string } | null = $state(null);
 	let liveStartedAt: number | null = $state(null);
 	let liveWsState: InteractiveConnectionState = $state('disconnected');
@@ -296,29 +293,7 @@
 				subscribeToEvent(AdminEventType.SoftwareItemUpdated, () => loadAll(currentPage, true)),
 				subscribeToEvent(AdminEventType.SoftwareItemCreated, () => loadAll(currentPage, true)),
 				subscribeToEvent(AdminEventType.VersionCheckCompleted, () => loadAll(currentPage, true)),
-				subscribeToEvent(AdminEventType.UpdateCompleted, () => loadAll(currentPage, true)),
-				subscribeToEvent(AdminEventType.UpdateProtectionStarted, (data) => {
-					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
-						const histId = pendingLiveHistoryId;
-						const hostName = pendingLiveHostName;
-						const itemName = pendingLiveItemName;
-						pendingLiveHistoryId = null;
-						pendingLiveHostName = '';
-						pendingLiveItemName = '';
-						openLiveModal(histId, hostName, itemName);
-					}
-				}),
-				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
-					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
-						const histId = pendingLiveHistoryId;
-						const hostName = pendingLiveHostName;
-						const itemName = pendingLiveItemName;
-						pendingLiveHistoryId = null;
-						pendingLiveHostName = '';
-						pendingLiveItemName = '';
-						openLiveModal(histId, hostName, itemName);
-					}
-				})
+				subscribeToEvent(AdminEventType.UpdateCompleted, () => loadAll(currentPage, true))
 			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
@@ -657,8 +632,7 @@
 		if (!singleHostUpdateModal || singleHostUpdateTriggering || !canTriggerUpdates) return;
 		singleHostUpdateTriggering = true;
 		try {
-			const { host, toVersion, itemId, itemName } = singleHostUpdateModal;
-			const hostName = host.hostname;
+			const { host, toVersion, itemId } = singleHostUpdateModal;
 			const res = await triggerSoftwareUpdate(itemId, host.host_id, { to_version: toVersion });
 			singleHostUpdateModal = null;
 			if (res.status === 'failed') {
@@ -668,9 +642,6 @@
 			}
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			void loadAll(currentPage, true);
-			pendingLiveHistoryId = res.update_history_id;
-			pendingLiveHostName = hostName;
-			pendingLiveItemName = itemName;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
 		} finally {
@@ -678,7 +649,7 @@
 		}
 	}
 
-	function openLiveModal(updateHistoryId: string, hostName: string, itemName: string) {
+	function _openLiveModal(updateHistoryId: string, hostName: string, itemName: string) {
 		liveModal = { updateHistoryId, hostName, itemName };
 		liveStartedAt = Date.now();
 		liveWsState = 'connecting';

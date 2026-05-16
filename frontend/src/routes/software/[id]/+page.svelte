@@ -151,8 +151,6 @@
 	let liveWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
 	let liveStdinAttention: boolean = $state(false);
 	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
-	let pendingLiveHistoryId: string | null = $state(null);
-	let pendingLiveHostName: string = $state('');
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(
@@ -285,26 +283,6 @@
 					if (data.software_item_id === id) loadItem(true);
 				}),
 				subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
-					if (data.software_item_id === id) loadItem(true);
-				}),
-				subscribeToEvent(AdminEventType.UpdateProtectionStarted, (data) => {
-					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
-						const histId = pendingLiveHistoryId;
-						const hostName = pendingLiveHostName;
-						pendingLiveHistoryId = null;
-						pendingLiveHostName = '';
-						openLiveModal(histId, hostName);
-					}
-					if (data.software_item_id === id) loadItem(true);
-				}),
-				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
-					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
-						const histId = pendingLiveHistoryId;
-						const hostName = pendingLiveHostName;
-						pendingLiveHistoryId = null;
-						pendingLiveHostName = '';
-						openLiveModal(histId, hostName);
-					}
 					if (data.software_item_id === id) loadItem(true);
 				})
 			);
@@ -564,7 +542,6 @@
 		if (!item || !updateModal || updateTriggering || !canTriggerUpdates) return;
 		updateTriggering = true;
 		try {
-			const hostName = updateModal.host.hostname;
 			const res = await triggerSoftwareUpdate(item.id, updateModal.host.host_id, {
 				to_version: updateModal.toVersion
 			});
@@ -577,8 +554,6 @@
 			}
 
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
-			pendingLiveHistoryId = res.update_history_id;
-			pendingLiveHostName = hostName;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
 		} finally {
