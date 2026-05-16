@@ -604,6 +604,7 @@ export interface SoftwareItemHostSummary {
 	latest_release_metadata?: Record<string, unknown> | null;
 	update_available: boolean;
 	active_update_history_id?: string | null;
+	active_update_status?: string | null;
 	last_updated_at: string | null;
 	linked_at: string;
 	plugins: HostPluginRoleSummary[];
@@ -677,7 +678,7 @@ export interface UpdateSoftwareItemRequest {
 	icon_url?: string | null;
 }
 
-export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'completed' | 'failed';
+export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'awaiting_restart' | 'completed' | 'failed';
 
 export interface UpdateHistoryResponse {
 	id: string;
