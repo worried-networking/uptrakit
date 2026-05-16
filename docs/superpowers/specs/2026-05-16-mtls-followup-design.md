@@ -66,9 +66,8 @@ triggering, service disconnection, or cert serial introspection.
 **P-384 migration:**
 
 - `crates/core/controller-runtime/src/pki.rs` — CA keygen, server cert keygen
-- `crates/shared/service-sdk/src/identity.rs` — service CSR keygen (3 sites)
-- `crates/shared/service-sdk/src/cert_handler.rs` — renewal keypair
-- `crates/shared/service-sdk/src/cert_resolver.rs` — resolver keypair
+- `crates/shared/service-sdk/src/identity.rs` — service CSR keygen (2 sites — ECIES
+  function excluded, see §4.1)
 - `crates/ui/cli/src/commands/auth.rs` — CLI CA trust keypair
 - `crates/ui/web-api/src/ocsp.rs:410` — OCSP signing algorithm constant
 - All test helpers (`pki_utils.rs`, `extract.rs`, middleware tests, etc.) —
@@ -107,8 +106,6 @@ at every production key generation call site:
 | `controller-runtime/src/pki.rs`     | CA bootstrap, server cert                   |
 | `web-api/src/routes/server_cert.rs` | HTTP-triggered server cert renewal (`:171`) |
 | `service-sdk/src/identity.rs`       | CSR generation (2 sites — see note below)   |
-| `service-sdk/src/cert_handler.rs`   | Renewal keypair                             |
-| `service-sdk/src/cert_resolver.rs`  | Resolver keypair                            |
 | `cli/src/commands/auth.rs`          | CLI CA trust keypair                        |
 
 **`generate_p256_keypair_for_ecies` exclusion.** `identity.rs` also contains
@@ -119,10 +116,12 @@ the ECIES protocol and its callers depend on the specific byte layout of P-256
 uncompressed public keys. Do not migrate it. The "2 sites" count above
 excludes this function.
 
-Test helpers (~15 sites in `pki_utils.rs`, `extract.rs`, middleware and
-handler tests) receive the same substitution. These are in `#[cfg(test)]`
-blocks or test modules; the change is mechanical. `server_cert.rs:335` and
-`:349` are test sites in the same file; include them in the mechanical sweep.
+Test helpers (~15 sites in `pki_utils.rs`, `extract.rs`, middleware and handler
+tests) receive the same substitution. These are in `#[cfg(test)]` blocks or
+test modules; the change is mechanical. `server_cert.rs:335` and `:349` are
+test sites in the same file. `cert_handler.rs` and `cert_resolver.rs` contain
+P-256 keygen only in their `#[cfg(test)]` modules — include all of these in
+the mechanical sweep.
 
 ### 4.2 OCSP signing algorithm
 
@@ -157,12 +156,15 @@ P-384 keys organically: CA at next rotation (~5 years), server cert at next
 no re-enrollment required.
 
 **CA rotation gap.** The CA is the highest-value target for the P-384 upgrade
-(it is the longest-lived key), yet it migrates last under organic rotation. If
-the improved security margin for the CA matters on a shorter timeline, the
-semi-production deployment can optionally trigger an immediate CA re-issue after
-deploying this spec via `POST /api/v1/settings/rotate-ca`. This triggers cert
-renewal for all connected Agents within the renewal window. The re-issue is
-optional and not required for correctness.
+(it is the longest-lived key), yet it migrates last under organic rotation. The
+P-384 migration has near-zero security value for the CA without an explicit
+rotation: an attacker who breaks the existing P-256 CA key can mint arbitrary
+certs regardless of the leaf key algorithm. The semi-production deployment
+**should trigger an immediate CA re-issue** as the first post-deploy step via
+`POST /api/v1/settings/rotate-ca`. This triggers cert renewal for all connected
+Agents within the renewal window. The re-issue is not required for correctness,
+but is the recommended step to realize the P-384 security improvement for the
+highest-value key material.
 
 ## 5. AgentControllerHarness
 
@@ -175,8 +177,7 @@ goes through the existing `ApiClient` pointed at the mapped host port.
 
 ```text
 AgentControllerHarness
-├── ControllerContainer   (testcontainers, Docker network)
-├── NatsContainer         (sidecar, same pattern as system/ tests)
+├── ControllerContainer   (owns NATS sidecar internally, same pattern as system/ tests)
 ├── ApiClient             (points at controller.host_port())
 └── Vec<AgentHandle>
     └── AgentHandle
@@ -202,22 +203,29 @@ the harness is HTTP-only and imports nothing from the controller library. The
 Dockerfile.test build already compiles with `--all-features`; no Dockerfile
 change is required.
 
-All test-utils route handlers are gated:
+All test-utils route handlers are gated by both compile-time feature and a
+runtime env var. Routes are registered only when `test-utils` is compiled in
+AND `UPTRAKIT_TEST_UTILS_ENABLED=true` is set in the environment:
 
 ```rust
 #[cfg(feature = "test-utils")]
-pub mod test_routes;
+if std::env::var("UPTRAKIT_TEST_UTILS_ENABLED").as_deref() == Ok("true") {
+    router = router.merge(test_routes::router());
+}
 ```
 
-The Dockerfile.test build already compiles with `--all-features`; no
-Dockerfile change is required.
+This eliminates the accidental-promotion risk: even if `Dockerfile.test` is
+mistakenly tagged as the production image, the endpoints are not registered
+unless the env var is explicitly set. The integration-tests runner sets
+`UPTRAKIT_TEST_UTILS_ENABLED=true` via the container env var mechanism.
 
 ### 5.3 New Controller endpoints
 
 Both endpoints live under `/api/v1/test/` and are compiled only with
 `test-utils`. Per coding standards ("Route handlers enforce permission via
 typed Axum extractors; never inline has_permission"), each handler carries a
-`TestUtilsAllowed` extractor — a zero-sized type that always extracts
+`TestUtilsAllowed` extractor — a zero-sized type that implements
+`FromRequestParts` with `type Rejection = Infallible` and always extracts
 successfully, making the no-auth policy explicit in the type system rather than
 implicit in a bare async function. The `ApiClient` in the harness is already
 authenticated (standard session token) so the real-auth routes work normally;
@@ -257,25 +265,34 @@ pub cert_serial_number: Option<String>,
 ```
 
 `ServiceResponse` does **not** currently carry `#[non_exhaustive]`. Adding a
-field breaks all exhaustive struct literal construction sites in tests. This
-spec adds `#[non_exhaustive]` to `ServiceResponse` as part of this work (coding
-standards require it on all extensible public structs). All existing struct
-literal construction sites (in test modules in `web-api-types/src/services.rs`
-and elsewhere) must add `..Default::default()` or switch to builder helpers.
-This is a mechanical fix alongside the field addition.
+field breaks all exhaustive struct literal construction sites. This spec adds
+`#[non_exhaustive]` to `ServiceResponse` as part of this work (coding standards
+require it on all extensible public structs). `ServiceResponse` has required
+non-optional fields and does not implement `Default`, so existing struct literal
+construction sites must add `cert_serial_number: None` explicitly — not
+`..Default::default()`. This is a mechanical fix alongside the field addition.
 
 **Population strategy.** `cert_serial_number` is populated only on the
 single-service detail endpoint (`GET /api/v1/services/{id}`), not on the list
 endpoint (`GET /api/v1/services`). Populating it for list responses would
 require a per-row query on `service_certificates`, violating the N+1 prevention
 rule ("Batch N rows into one is_in(ids) query; no per-item queries"). The
-field returns `None` in list responses via the existing `None` default. The
-harness only calls the detail endpoint for polling, so this restriction is
-sufficient.
+field returns `None` in list responses via the new explicit `None` literal at
+list construction sites.
 
-The detail query adds a sub-select or lateral join to `service_certificates`
-for the most recent non-revoked row, scoped to the service ID. `None` if no
-cert exists yet (e.g., newly enrolled but cert not yet signed).
+**Detail vs. list fork.** `model_to_response` in `web-api-queries` is called by
+both list and detail paths — it must remain innocent of the extra join. The
+detail-endpoint handler (`get_service` in `routes/services.rs`) calls a new
+`build_service_detail_response` helper that, after calling `model_to_response`,
+issues a second targeted query to `service_certificates` for the most recent
+non-revoked row scoped to the service ID, then sets `cert_serial_number`. `None`
+if no cert exists yet (e.g. newly enrolled but cert not yet signed). The list
+handler continues to call the existing path unchanged.
+
+**Future-drift guard.** Any future detail-only field (not appropriate for list
+responses) must be added in `build_service_detail_response` only, never in
+`model_to_response`. A comment on `build_service_detail_response` documents this
+invariant to prevent silent drift across the two code paths.
 
 ### 5.5 Harness API
 
@@ -294,9 +311,8 @@ impl Default for HarnessOptions {
 
 pub struct AgentControllerHarness {
     pub controller: ControllerHandle,
-    _nats: ContainerAsync<GenericImage>,
-    _controller: ContainerAsync<GenericImage>,
-    _config_file: NamedTempFile,
+    // ControllerContainer owns _nats_container internally — no separate NATS handle needed here.
+    _controller_container: ControllerContainer,
 }
 
 pub struct ControllerHandle {
@@ -311,16 +327,16 @@ pub struct AgentHandle {
 
 Public methods:
 
-| Method                                                           | Maps to                                                                                                                                      |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AgentControllerHarness::start_with(opts)`                       | `ControllerContainer::start()` + writes `[tls] trust_domain` into config TOML                                                                |
-| `harness.spawn_agent(name) -> AgentHandle`                       | `ServiceContainer::start_agent()` + `wait_for_connected()`                                                                                   |
-| `AgentHandle::service_id() -> Uuid`                              | cached from enrollment poll                                                                                                                  |
-| `AgentHandle::wait_for_connected(&self)` internal                | polls until service is `Approved` **and** `POST /test/services/{id}/request-renewal` returns `200` (not `404`), confirming WebSocket is live |
-| `AgentHandle::wait_for_cert_renewed(&self, before_serial: &str)` | polls `GET /api/v1/services/{id}` until `cert_serial_number != before_serial`, 60s timeout                                                   |
-| `ControllerHandle::identity_of(service_id) -> ServiceResponse`   | `GET /api/v1/services/{id}` — returns full response; callers read `.spiffe_id` and `.cert_serial_number`                                     |
-| `ControllerHandle::request_cert_renewal(service_id)`             | `POST /api/v1/test/services/{id}/request-renewal`                                                                                            |
-| `ControllerHandle::disconnect_service(service_id)`               | `POST /api/v1/test/services/{id}/disconnect`                                                                                                 |
+| Method                                                           | Maps to                                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AgentControllerHarness::start_with(opts)`                       | `ControllerContainer::start()` + writes `[tls] trust_domain` into config TOML                                                                                                                                |
+| `harness.spawn_agent(name) -> AgentHandle`                       | `ServiceContainer::start_agent()` + `wait_for_connected()`                                                                                                                                                   |
+| `AgentHandle::service_id() -> Uuid`                              | cached from enrollment poll                                                                                                                                                                                  |
+| `AgentHandle::wait_for_connected(&self)` internal                | polls until service is `Approved` **and** `POST /test/services/{id}/request-renewal` returns `200` (not `404`), confirming WebSocket is live                                                                 |
+| `AgentHandle::wait_for_cert_renewed(&self, before_serial: &str)` | polls `GET /api/v1/services/{id}` until `cert_serial_number != before_serial`, 60s timeout                                                                                                                   |
+| `ControllerHandle::identity_of(service_id) -> ServiceResponse`   | `GET /api/v1/services/{id}` — returns full response; callers read `.spiffe_id` and `.cert_serial_number`                                                                                                     |
+| `ControllerHandle::request_cert_renewal(service_id)`             | `POST /api/v1/test/services/{id}/request-renewal`; retries up to 5× on `404` with 500ms backoff (guards against unexpected mid-test disconnect; in normal flow the service is already connected when called) |
+| `ControllerHandle::disconnect_service(service_id)`               | `POST /api/v1/test/services/{id}/disconnect`                                                                                                                                                                 |
 
 `spawn_agent` internally calls `wait_for_connected`, which polls
 `GET /api/v1/services` with a 60s timeout until the service appears as
@@ -424,7 +440,8 @@ The following text is appended to the Consequences section of
 
 ### 7.1 Unit tests
 
-- `cert_signer.rs` — wrong trust domain CSR rejected (new unit test, see §5.7)
+- `cert_signer.rs` — verify existing `spiffe_san_wrong_trust_domain_rejected`
+  (`:548`) covers the full rejection path; extend if any gap exists (see §5.7)
 - OCSP `ocsp.rs` — existing tests pass with P-384 CA key (verify no test
   hard-codes the P-256 OID; fix if found)
 - `pki.rs` — existing CA roundtrip tests pass with P-384 keys
@@ -481,15 +498,14 @@ Both Docker gates are mandatory for any PR in this spec.
 **Risk:** Test-utils endpoints compiled into a production build if
 `--all-features` is used outside tests.
 
-Mitigation: The `Cargo.toml` feature comment and `deny.toml` advisory
-annotations must explicitly mark `test-utils` as a test-only feature not for
-production. The production Dockerfile does not use `--all-features`. The
-`TestUtilsAllowed` extractor makes the no-auth policy explicit and auditable
-in code review. The `cargo deny` check should include a linting rule that
-warns if `test-utils` appears in any non-`dev-dependencies` context. If the
-single deployment ever moves toward a multi-tenant production setup, revisit
-with a startup-time secret header check (`X-Test-Utils-Secret` matched against
-an env var) before the endpoints are registered.
+Mitigation: Routes are registered only when both `test-utils` is compiled in
+AND `UPTRAKIT_TEST_UTILS_ENABLED=true` is set (§5.2). Both `Cargo.toml`
+feature declarations carry a `# test-only feature — do not enable in
+production builds` comment. The production Dockerfile does not set
+`UPTRAKIT_TEST_UTILS_ENABLED`. `cargo deny` does not support feature-usage
+gating; the env var guard, code review, and Dockerfile separation are the real
+controls. The `TestUtilsAllowed` extractor makes the no-auth policy explicit and
+auditable in code review.
 
 **Risk:** P-384 keys break an existing interop assumption with a reverse-proxy
 that requires P-256 for mTLS client validation.
