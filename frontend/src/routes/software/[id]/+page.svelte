@@ -299,7 +299,7 @@
 								? {
 										...h,
 										active_update_history_id: data.update_history_id as string,
-										active_update_status: ((data.status as string) ?? 'pending') || 'pending'
+										active_update_status: (data.status as string) ?? 'pending'
 									}
 								: h
 						)
@@ -1044,16 +1044,20 @@
 								</td>
 								<td class="table-cell-pad text-[var(--text-primary)]">
 									{#if host.active_update_history_id}
-										{#if host.active_update_status === 'in_progress' && canView}
-											<span class="inline-flex" title="View update progress">
-												<ActionBadge
-													variant="navigation"
-													tone="info"
-													idleLabel="In Progress"
-													hoverLabel="→ Log"
-													onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
-												/>
-											</span>
+										{#if host.active_update_status === 'in_progress'}
+											{#if canView}
+												<span class="inline-flex" title="View update progress">
+													<ActionBadge
+														variant="navigation"
+														tone="info"
+														idleLabel="In Progress"
+														hoverLabel="→ Log"
+														onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
+													/>
+												</span>
+											{:else}
+												<StatusBadge tone="info" label="In Progress" />
+											{/if}
 										{:else if host.active_update_status === 'queued'}
 											<StatusBadge tone="info" label="Queued" />
 										{:else if host.active_update_status === 'pending'}

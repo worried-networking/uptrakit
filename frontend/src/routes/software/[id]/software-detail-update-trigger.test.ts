@@ -124,6 +124,7 @@ function makeHost({
 		latest_release_metadata: null,
 		update_available: true,
 		active_update_history_id: null,
+		active_update_status: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
 		plugins: []
@@ -342,6 +343,7 @@ describe('active status badge rendering on detail page', () => {
 		await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
 
 		await waitFor(() => expect(screen.queryByText('In Progress')).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: /in progress/i })).toBeInTheDocument();
 	});
 
 	it('shows 409-specific toast in single-host executeUpdate', async () => {
