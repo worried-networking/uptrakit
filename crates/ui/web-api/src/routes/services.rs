@@ -694,24 +694,25 @@ pub async fn reject_service(
             let has_ssh = caps.contains(&Capability::SshRemote);
             let profile = ServiceProfile::from_capabilities(&caps);
             let cap_strings: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
-            let resp = ServiceResponse {
-                id: after.id,
-                capabilities: cap_strings,
-                service_label: profile.service_label(has_ssh).to_string(),
-                hostname: after.hostname.clone(),
-                friendly_name: after.friendly_name.clone(),
-                is_embedded: after.is_embedded,
-                ip_address: after.ip_address.clone(),
-                status: WireStatus::Rejected,
-                client_version: after.client_version.clone(),
-                last_seen_at: after.last_seen_at,
-                created_at: after.created_at,
-                updated_at: after.updated_at,
-                ping_interval_seconds: after.ping_interval_seconds.map(|v| v as u32),
-                cert_lifetime_hours: after.cert_lifetime_hours.map(|v| v as u32),
-                yielded_to: None,
-                spiffe_id: None,
-            };
+            let resp = ServiceResponse::new(
+                after.id,
+                cap_strings,
+                profile.service_label(has_ssh).to_string(),
+                after.hostname.clone(),
+                after.friendly_name.clone(),
+                after.is_embedded,
+                after.ip_address.clone(),
+                WireStatus::Rejected,
+                after.client_version.clone(),
+                after.last_seen_at,
+                after.created_at,
+                after.updated_at,
+                after.ping_interval_seconds.map(|v| v as u32),
+                after.cert_lifetime_hours.map(|v| v as u32),
+                None, // yielded_to
+                None, // spiffe_id
+                None, // cert_serial_number
+            );
             Ok((StatusCode::OK, Json(resp)).into_response())
         }
         Err(e) => {

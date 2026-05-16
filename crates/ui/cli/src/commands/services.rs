@@ -547,30 +547,31 @@ mod tests {
     use time::macros::datetime;
 
     fn sample_service() -> ServiceResponse {
-        ServiceResponse {
-            id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+        ServiceResponse::new(
+            "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            capabilities: vec![
+            vec![
                 "graceful_shutdown".to_string(),
                 "software_discovery".to_string(),
                 "update_hooks".to_string(),
             ],
-            service_label: "Agent".to_string(),
-            hostname: "agent-host.local".to_string(),
-            friendly_name: "Test Agent".to_string(),
-            is_embedded: false,
-            ip_address: None,
-            status: "approved".parse().unwrap(),
-            client_version: Some("1.0.0".to_string()),
-            last_seen_at: Some(datetime!(2025-01-01 00:00:00 UTC)),
-            created_at: datetime!(2025-01-01 00:00:00 UTC),
-            updated_at: datetime!(2025-01-01 00:00:00 UTC),
-            ping_interval_seconds: None,
-            cert_lifetime_hours: None,
-            yielded_to: None,
-            spiffe_id: None,
-        }
+            "Agent".to_string(),
+            "agent-host.local".to_string(),
+            "Test Agent".to_string(),
+            false,
+            None,
+            "approved".parse().unwrap(),
+            Some("1.0.0".to_string()),
+            Some(datetime!(2025-01-01 00:00:00 UTC)),
+            datetime!(2025-01-01 00:00:00 UTC),
+            datetime!(2025-01-01 00:00:00 UTC),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     #[test]

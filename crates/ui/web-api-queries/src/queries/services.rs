@@ -139,24 +139,25 @@ fn model_to_response(m: service::Model, yielded_to: Option<Vec<Uuid>>) -> Servic
     let profile = ServiceProfile::from_capabilities(&caps);
     let has_ssh = caps.contains(&Capability::SshRemote);
     let cap_strings: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
-    ServiceResponse {
-        id: m.id,
-        capabilities: cap_strings,
-        service_label: profile.service_label(has_ssh).to_string(),
-        hostname: m.hostname,
-        friendly_name: m.friendly_name,
-        is_embedded: m.is_embedded,
-        ip_address: m.ip_address,
-        status: m.status,
-        client_version: m.client_version,
-        last_seen_at: m.last_seen_at,
-        created_at: m.created_at,
-        updated_at: m.updated_at,
-        ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
-        cert_lifetime_hours: m.cert_lifetime_hours.map(|v| v as u32),
+    ServiceResponse::new(
+        m.id,
+        cap_strings,
+        profile.service_label(has_ssh).to_string(),
+        m.hostname,
+        m.friendly_name,
+        m.is_embedded,
+        m.ip_address,
+        m.status,
+        m.client_version,
+        m.last_seen_at,
+        m.created_at,
+        m.updated_at,
+        m.ping_interval_seconds.map(|v| v as u32),
+        m.cert_lifetime_hours.map(|v| v as u32),
         yielded_to,
-        spiffe_id: None,
-    }
+        None, // spiffe_id — populated by the handler if trust domain is set
+        None, // cert_serial_number — populated only by get_active_service_detail
+    )
 }
 
 async fn build_service_response(
