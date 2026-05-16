@@ -10,10 +10,12 @@ ADRs touched: [`docs/adr/0013-defer-root-intermediate-ca-split.md`](../../adr/00
 
 Address two deferred items from the mTLS hardening spec:
 
-1. **P-256 → P-384 key algorithm migration.** Every newly generated key in the
-   system (CA, server cert, service client certs, CLI CA trust key) migrates to
-   P-384. P-384 provides a wider classical security margin for long-lived material
-   without requiring new dependencies or wire format changes.
+1. **P-256 → P-384 key algorithm migration.** CA keys, service client certs,
+   and CLI CA trust keys migrate to P-384. Server HTTPS certificates stay at
+   P-256 for broad reverse-proxy compatibility (Envoy ≤ 1.32 hardcodes
+   P-256-only for static TLS config). P-384 provides a wider classical security
+   margin for long-lived material without requiring new dependencies or wire
+   format changes.
 
 2. **`AgentControllerHarness`.** A Docker-based integration test harness that
    unblocks two stubbed tests (`spiffe_identity.rs`,
@@ -65,7 +67,7 @@ triggering, service disconnection, or cert serial introspection.
 
 **P-384 migration:**
 
-- `crates/core/controller-runtime/src/pki.rs` — CA keygen, server cert keygen
+- `crates/core/controller-runtime/src/pki.rs` — CA keygen only (server cert stays P-256, see §4.1)
 - `crates/shared/service-sdk/src/identity.rs` — service CSR keygen (2 sites — ECIES
   function excluded, see §4.1)
 - `crates/ui/cli/src/commands/auth.rs` — CLI CA trust keypair
@@ -99,14 +101,21 @@ triggering, service disconnection, or cert serial introspection.
 ### 4.1 Key generation
 
 Replace `rcgen::PKCS_ECDSA_P256_SHA256` with `rcgen::PKCS_ECDSA_P384_SHA384`
-at every production key generation call site:
+at every CA and client key generation call site:
 
-| File                                | Sites                                       |
-| ----------------------------------- | ------------------------------------------- |
-| `controller-runtime/src/pki.rs`     | CA bootstrap, server cert                   |
-| `web-api/src/routes/server_cert.rs` | HTTP-triggered server cert renewal (`:171`) |
-| `service-sdk/src/identity.rs`       | CSR generation (2 sites — see note below)   |
-| `cli/src/commands/auth.rs`          | CLI CA trust keypair                        |
+| File                            | Sites                                     |
+| ------------------------------- | ----------------------------------------- |
+| `controller-runtime/src/pki.rs` | CA bootstrap (`:476`) only                |
+| `service-sdk/src/identity.rs`   | CSR generation (2 sites — see note below) |
+| `cli/src/commands/auth.rs`      | CLI CA trust keypair                      |
+
+**Server cert stays P-256.** `controller-runtime/src/pki.rs:697`
+(`generate_server_cert`) and `web-api/src/routes/server_cert.rs:171` (HTTP
+renewal endpoint) remain `PKCS_ECDSA_P256_SHA256`. Envoy ≤ 1.32 hardcodes
+"only P-256 ECDSA certificates are supported" for static TLS config; migrating
+server certs to P-384 would break any Envoy reverse proxy in front of the
+controller. Corresponding test helpers at `server_cert.rs:349`
+(`generate_test_server_cert`) also stay P-256.
 
 **`generate_p256_keypair_for_ecies` exclusion.** `identity.rs` also contains
 `generate_p256_keypair_for_ecies` (line 667), which generates a P-256 keypair
@@ -118,10 +127,9 @@ excludes this function.
 
 Test helpers (~15 sites in `pki_utils.rs`, `extract.rs`, middleware and handler
 tests) receive the same substitution. These are in `#[cfg(test)]` blocks or
-test modules; the change is mechanical. `server_cert.rs:335` and `:349` are
-test sites in the same file. `cert_handler.rs` and `cert_resolver.rs` contain
-P-256 keygen only in their `#[cfg(test)]` modules — include all of these in
-the mechanical sweep.
+test modules; the change is mechanical. `cert_handler.rs` and `cert_resolver.rs`
+contain P-256 keygen only in their `#[cfg(test)]` modules — include all of
+these in the mechanical sweep (server cert helpers excepted as noted above).
 
 ### 4.2 OCSP signing algorithm
 
@@ -149,11 +157,11 @@ already pinned in `Cargo.toml`.
 
 ### 4.4 Rollout behaviour
 
-Existing keys (CA cert, server cert, service client certs) are unaffected until
-their normal renewal cycle. The single semi-production deployment will pick up
-P-384 keys organically: CA at next rotation (~5 years), server cert at next
-90-day renewal, service certs at their next renewal window. No forced migration,
-no re-enrollment required.
+Existing keys (CA cert, service client certs) are unaffected until their normal
+renewal cycle. The single semi-production deployment will pick up P-384 keys
+organically: CA at next rotation (~5 years), service certs at their next renewal
+window. Server certs stay P-256 permanently. No forced migration, no
+re-enrollment required.
 
 **CA rotation gap.** The CA is the highest-value target for the P-384 upgrade
 (it is the longest-lived key), yet it migrates last under organic rotation. The
@@ -485,8 +493,9 @@ Both Docker gates are mandatory for any PR in this spec.
 
 ## 8. Documentation deliverables
 
-- `docs/security/pki-certificates.md` — update algorithm column in the asset
-  lifetimes table to P-384; note that existing keys are not force-rotated
+- `docs/security/pki-certificates.md` — update algorithm column: CA and
+  agent/service client certs → P-384; server HTTPS cert → P-256 (with note
+  explaining Envoy compatibility rationale); note existing keys not force-rotated
 - `docs/adr/0013-defer-root-intermediate-ca-split.md` — extended deferral note
   (§6)
 - `CONTEXT.md` — no new glossary terms

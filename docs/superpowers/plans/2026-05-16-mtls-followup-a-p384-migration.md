@@ -3,15 +3,17 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace every production TLS key generation site in the codebase from P-256
-(`rcgen::PKCS_ECDSA_P256_SHA256`) to P-384 (`rcgen::PKCS_ECDSA_P384_SHA384`), and update the OCSP signing
-algorithm constant to match.
+**Goal:** Migrate CA keys and service client certs from P-256 to P-384. Server HTTPS certificates stay at
+P-256 (Envoy ≤ 1.32 hardcodes "only P-256 ECDSA certificates are supported" for static TLS config). Update
+the OCSP signing algorithm constant to match the CA key.
 
-**Architecture:** Mechanical constant substitution across seven production call sites and ~40 test-module call
+**Architecture:** Mechanical constant substitution across five production call sites and ~40 test-module call
 sites. No new dependencies, no DB schema changes, no wire format changes. The substitution is
 `PKCS_ECDSA_P256_SHA256` → `PKCS_ECDSA_P384_SHA384` (rcgen keygen) and `ECDSA_P256_SHA256_ASN1_SIGNING` →
-`ECDSA_P384_SHA384_ASN1_SIGNING` (aws-lc-rs OCSP). One function — `generate_p256_keypair_for_ecies` in
-`identity.rs` — is intentionally excluded: ECIES sealed-box encryption depends on P-256 uncompressed key layout.
+`ECDSA_P384_SHA384_ASN1_SIGNING` (aws-lc-rs OCSP). Two functions are intentionally excluded:
+`generate_p256_keypair_for_ecies` in `identity.rs` (ECIES depends on P-256 uncompressed key layout) and all
+server cert generators (`generate_server_cert` in pki.rs, renewal endpoint in server_cert.rs) for Envoy
+compatibility.
 
 **Tech Stack:** Rust (edition 2024), rcgen (certificate generation), aws-lc-rs (cryptographic operations)
 
@@ -21,95 +23,96 @@ sites. No new dependencies, no DB schema changes, no wire format changes. The su
 
 **Production sites — modified:**
 
-| File                                          | Lines    | Role                                         |
-| --------------------------------------------- | -------- | -------------------------------------------- |
-| `crates/core/controller-runtime/src/pki.rs`   | 476, 697 | CA bootstrap keygen, server cert keygen      |
-| `crates/ui/web-api/src/routes/server_cert.rs` | 171      | HTTP-triggered server cert renewal           |
-| `crates/shared/service-sdk/src/identity.rs`   | 325, 614 | `ensure_keypair`, `generate_keypair_and_csr` |
-| `crates/ui/cli/src/commands/auth.rs`          | 1228     | CLI CA trust keypair                         |
-| `crates/ui/web-api/src/ocsp.rs`               | 410      | OCSP signing algorithm constant              |
+| File                                        | Lines    | Role                                         |
+| ------------------------------------------- | -------- | -------------------------------------------- |
+| `crates/core/controller-runtime/src/pki.rs` | 476      | CA bootstrap keygen only                     |
+| `crates/shared/service-sdk/src/identity.rs` | 325, 614 | `ensure_keypair`, `generate_keypair_and_csr` |
+| `crates/ui/cli/src/commands/auth.rs`        | 1228     | CLI CA trust keypair                         |
+| `crates/ui/web-api/src/ocsp.rs`             | 410      | OCSP signing algorithm constant              |
 
 **Test-only sites — mechanical sweep:**
 
-| File                                                              | Lines                                  | Note                     |
-| ----------------------------------------------------------------- | -------------------------------------- | ------------------------ |
-| `crates/core/controller-runtime/src/pki.rs`                       | 1486, 1495, 1500                       | test module              |
-| `crates/core/controller-runtime/src/cert_signer.rs`               | 273, 309, 323, 574                     | test module              |
-| `crates/core/controller-runtime/src/crl_manager.rs`               | 655                                    | test module              |
-| `crates/core/controller-runtime/src/scheduler/mod.rs`             | 295                                    | test module              |
-| `crates/ui/web-api/src/routes/server_cert.rs`                     | 335, 349                               | test module in same file |
-| `crates/ui/web-api/src/pki_utils.rs`                              | 236, 247, 262, 272, 281, 297, 308, 316 | test helpers             |
-| `crates/ui/web-api/src/extract.rs`                                | 480, 496, 513, 528, 537, 549           | test module              |
-| `crates/ui/web-api/src/lib.rs`                                    | 153                                    | test module              |
-| `crates/ui/web-api/src/middleware/require_auth.rs`                | 421                                    | test module              |
-| `crates/ui/web-api/src/middleware/resolve_ip.rs`                  | 190                                    | test module              |
-| `crates/ui/web-api/src/routes/auth.rs`                            | 964                                    | test module              |
-| `crates/ui/web-api/src/routes/me_2fa.rs`                          | 936                                    | test module              |
-| `crates/ui/web-api/src/routes/mfa.rs`                             | 769                                    | test module              |
-| `crates/ui/web-api/src/routes/services.rs`                        | 1466                                   | test module              |
-| `crates/ui/web-api/src/routes/settings_nats.rs`                   | 453                                    | test module              |
-| `crates/ui/web-api/src/routes/surfaces.rs`                        | 1038                                   | test module              |
-| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`     | 2014, 2073                             | test module              |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`          | 3509                                   | test module              |
-| `crates/ui/web-api/src/test_harness/mod.rs`                       | 153                                    | test harness             |
-| `crates/shared/service-sdk/src/ca.rs`                             | 377, 400, 411, 435                     | test module              |
-| `crates/shared/service-sdk/src/cert_handler.rs`                   | 548                                    | test module              |
-| `crates/shared/service-sdk/src/cert_resolver.rs`                  | 127                                    | test module              |
-| `crates/shared/service-sdk/src/event_loop.rs`                     | 612                                    | test module              |
-| `crates/shared/service-sdk/src/identity.rs`                       | 890, 1022, 1112, 1199                  | test module              |
-| `crates/shared/service-sdk/src/tls.rs`                            | 380, 394                               | test module              |
-| `crates/core/agent-ssh-runtime/src/ssh_key.rs`                    | 411                                    | test module              |
-| `crates/ui/cli/tests/command_execution.rs`                        | 214                                    | test file                |
-| `crates/core/integration-tests/tests/database_helpers/harness.rs` | 136                                    | test infrastructure      |
-| `crates/core/integration-tests/tests/reverse_proxy/pki.rs`        | 48, 71, 95, 133, 163                   | test infrastructure      |
-| `crates/core/integration-tests/tests/reverse_proxy/server.rs`     | 145                                    | test infrastructure      |
+| File                                                              | Lines                                  | Note                                                         |
+| ----------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------ |
+| `crates/core/controller-runtime/src/pki.rs`                       | 1486, 1495, 1500                       | test module                                                  |
+| `crates/core/controller-runtime/src/cert_signer.rs`               | 273, 309, 323, 574                     | test module                                                  |
+| `crates/core/controller-runtime/src/crl_manager.rs`               | 655                                    | test module                                                  |
+| `crates/core/controller-runtime/src/scheduler/mod.rs`             | 295                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/server_cert.rs`                     | 335                                    | test module (CA keygen only; `:349` server cert stays P-256) |
+| `crates/ui/web-api/src/pki_utils.rs`                              | 236, 247, 262, 272, 281, 297, 308, 316 | test helpers                                                 |
+| `crates/ui/web-api/src/extract.rs`                                | 480, 496, 513, 528, 537, 549           | test module                                                  |
+| `crates/ui/web-api/src/lib.rs`                                    | 153                                    | test module                                                  |
+| `crates/ui/web-api/src/middleware/require_auth.rs`                | 421                                    | test module                                                  |
+| `crates/ui/web-api/src/middleware/resolve_ip.rs`                  | 190                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/auth.rs`                            | 964                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/me_2fa.rs`                          | 936                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/mfa.rs`                             | 769                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/services.rs`                        | 1466                                   | test module                                                  |
+| `crates/ui/web-api/src/routes/settings_nats.rs`                   | 453                                    | test module                                                  |
+| `crates/ui/web-api/src/routes/surfaces.rs`                        | 1038                                   | test module                                                  |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`     | 2014, 2073                             | test module                                                  |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`          | 3509                                   | test module                                                  |
+| `crates/ui/web-api/src/test_harness/mod.rs`                       | 153                                    | test harness                                                 |
+| `crates/shared/service-sdk/src/ca.rs`                             | 377, 400, 411, 435                     | test module                                                  |
+| `crates/shared/service-sdk/src/cert_handler.rs`                   | 548                                    | test module                                                  |
+| `crates/shared/service-sdk/src/cert_resolver.rs`                  | 127                                    | test module                                                  |
+| `crates/shared/service-sdk/src/event_loop.rs`                     | 612                                    | test module                                                  |
+| `crates/shared/service-sdk/src/identity.rs`                       | 890, 1022, 1112, 1199                  | test module                                                  |
+| `crates/shared/service-sdk/src/tls.rs`                            | 380, 394                               | test module                                                  |
+| `crates/core/agent-ssh-runtime/src/ssh_key.rs`                    | 411                                    | test module                                                  |
+| `crates/ui/cli/tests/command_execution.rs`                        | 214                                    | test file                                                    |
+| `crates/core/integration-tests/tests/database_helpers/harness.rs` | 136                                    | test infrastructure                                          |
+| `crates/core/integration-tests/tests/reverse_proxy/pki.rs`        | 48, 71, 95, 133, 163                   | test infrastructure                                          |
+| `crates/core/integration-tests/tests/reverse_proxy/server.rs`     | 145                                    | test infrastructure                                          |
 
 **Do NOT migrate (intentionally P-256):**
 
-| File                                        | Line | Reason                                                                       |
-| ------------------------------------------- | ---- | ---------------------------------------------------------------------------- |
-| `crates/shared/service-sdk/src/identity.rs` | 670  | `generate_p256_keypair_for_ecies` — ECIES uses P-256 uncompressed key format |
-| `crates/core/mqtt-runtime/src/handler.rs`   | 289  | ECIES identity for MQTT embedded handler test                                |
-| `crates/core/mqtt-runtime/src/lib.rs`       | 1188 | ECIES sealed-box decrypt test                                                |
-| `crates/shared/crypto/src/ecies.rs`         | 240  | ECIES module test, intentionally P-256                                       |
+| File                                          | Line | Reason                                                                         |
+| --------------------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `crates/core/controller-runtime/src/pki.rs`   | 697  | `generate_server_cert` — server cert stays P-256 (Envoy ≤ 1.32 compatibility)  |
+| `crates/ui/web-api/src/routes/server_cert.rs` | 171  | HTTP-triggered server cert renewal — same reason                               |
+| `crates/ui/web-api/src/routes/server_cert.rs` | 349  | `generate_test_server_cert` test helper — mirrors production P-256 server cert |
+| `crates/shared/service-sdk/src/identity.rs`   | 670  | `generate_p256_keypair_for_ecies` — ECIES uses P-256 uncompressed key format   |
+| `crates/core/mqtt-runtime/src/handler.rs`     | 289  | ECIES identity for MQTT embedded handler test                                  |
+| `crates/core/mqtt-runtime/src/lib.rs`         | 1188 | ECIES sealed-box decrypt test                                                  |
+| `crates/shared/crypto/src/ecies.rs`           | 240  | ECIES module test, intentionally P-256                                         |
 
 **Documentation modified:**
 
-- `docs/security/pki-certificates.md` — algorithm column → P-384
+- `docs/security/pki-certificates.md` — CA and client cert column → P-384; server cert column stays P-256
 - `docs/development/coding-standards.md` — update any P-256 mention
 
 ---
 
-## Task 1: Migrate production sites in controller-runtime and server_cert.rs
+## Task 1: Migrate production CA keygen in controller-runtime
 
 **Files:**
 
-- Modify: `crates/core/controller-runtime/src/pki.rs:476, 697`
-- Modify: `crates/ui/web-api/src/routes/server_cert.rs:171`
+- Modify: `crates/core/controller-runtime/src/pki.rs:476` (CA bootstrap only)
+- Do NOT touch: `pki.rs:697` (`generate_server_cert` stays P-256)
+- Do NOT touch: `crates/ui/web-api/src/routes/server_cert.rs:171` (renewal stays P-256)
 
-- [ ] **Step 1: Open `crates/core/controller-runtime/src/pki.rs`. Find lines 476 and 697. Both read:**
+- [ ] **Step 1: Open `crates/core/controller-runtime/src/pki.rs`. Find line 476 (inside `generate_ca`). It reads:**
 
 ```rust
 KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context_to::<PkiError>()?;
 ```
 
-Change both to:
+Change to:
 
 ```rust
 KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).context_to::<PkiError>()?;
 ```
 
-- [ ] **Step 2: Open `crates/ui/web-api/src/routes/server_cert.rs`. Find line 171:**
+**Line 697 (`generate_server_cert`) must remain P-256 — do not change it.**
 
-```rust
-let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+- [ ] **Step 2: Verify only line 476 changed and line 697 is still P-256:**
+
+```bash
+grep -n "PKCS_ECDSA_P256_SHA256\|PKCS_ECDSA_P384_SHA384" crates/core/controller-runtime/src/pki.rs | head -5
 ```
 
-Change to:
-
-```rust
-let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
-```
+Expected: line 476 reads `P384`, line 697 reads `P256`.
 
 - [ ] **Step 3: Verify no accidental ECIES site was changed. Run:**
 
@@ -121,11 +124,10 @@ Expected: line 667 — function signature `pub fn generate_p256_keypair_for_ecie
 not touched in this task). The `PKCS_ECDSA_P256_SHA256` constant inside the function body (line 670) is
 verified in Task 2 Step 3 and Task 5 Step 3.
 
-- [ ] **Step 4: Check compilation of modified crates:**
+- [ ] **Step 4: Check compilation of modified crate:**
 
 ```bash
 cargo check -p uptrakit-controller-runtime --all-features 2>&1 | grep -E "^error" | head -20
-cargo check -p uptrakit-web-api --all-features 2>&1 | grep -E "^error" | head -20
 ```
 
 Expected: no errors.
@@ -133,9 +135,8 @@ Expected: no errors.
 - [ ] **Step 5: Commit:**
 
 ```bash
-git add crates/core/controller-runtime/src/pki.rs \
-        crates/ui/web-api/src/routes/server_cert.rs
-git commit -m "feat(pki): migrate CA bootstrap, server cert, and HTTP renewal keygen to P-384"
+git add crates/core/controller-runtime/src/pki.rs
+git commit -m "feat(pki): migrate CA bootstrap keygen to P-384 (server cert stays P-256)"
 ```
 
 ---
@@ -260,13 +261,14 @@ do
 done
 ```
 
-- [ ] **Step 2: Verify the production sites in pki.rs were already changed in Task 1 (no regression):**
+- [ ] **Step 2: Verify the production CA site in pki.rs was changed in Task 1 and server cert is still P-256:**
 
 ```bash
 grep -n "PKCS_ECDSA_P256_SHA256\|PKCS_ECDSA_P384_SHA384" crates/core/controller-runtime/src/pki.rs
 ```
 
-Expected: zero `P256` lines, five `P384` lines (two production + three test).
+Expected: line 476 (CA bootstrap) reads P384; line 697 (`generate_server_cert`) still reads P256; test sites
+at 1486/1495/1500 read P384 (changed in this task's sed).
 
 - [ ] **Step 3: Verify cert_signer.rs, crl_manager.rs, scheduler/mod.rs have no remaining P256:**
 
@@ -304,7 +306,8 @@ git commit -m "test(pki): migrate controller-runtime test keygen helpers to P-38
 
 **Files:**
 
-- Modify: `crates/ui/web-api/src/routes/server_cert.rs:335, 349`
+- Modify: `crates/ui/web-api/src/routes/server_cert.rs:335` (CA keygen in test helper only)
+- Do NOT modify: `crates/ui/web-api/src/routes/server_cert.rs:349` (`generate_test_server_cert` stays P-256)
 - Modify: `crates/ui/web-api/src/pki_utils.rs` (8 sites)
 - Modify: `crates/ui/web-api/src/extract.rs` (6 sites)
 - Modify: `crates/ui/web-api/src/lib.rs:153`
@@ -321,11 +324,17 @@ git commit -m "test(pki): migrate controller-runtime test keygen helpers to P-38
 - Modify: `crates/ui/web-api/src/test_harness/mod.rs:153`
 - Modify: `crates/ui/web-api/src/ocsp.rs:479, 491, 531, 641, 661` (test module sites)
 
-- [ ] **Step 1: Run sed substitution across all web-api source files:**
+- [ ] **Step 1: Run sed substitution across all web-api source files, then revert the server cert lines:**
 
 ```bash
 find crates/ui/web-api/src -name "*.rs" -exec \
   sed -i '' 's/PKCS_ECDSA_P256_SHA256/PKCS_ECDSA_P384_SHA384/g' {} \;
+
+# Revert server cert generators that must stay P-256
+sed -i '' '171s/PKCS_ECDSA_P384_SHA384/PKCS_ECDSA_P256_SHA256/' \
+  crates/ui/web-api/src/routes/server_cert.rs
+sed -i '' '349s/PKCS_ECDSA_P384_SHA384/PKCS_ECDSA_P256_SHA256/' \
+  crates/ui/web-api/src/routes/server_cert.rs
 ```
 
 - [ ] **Step 2: Verify the production ocsp.rs site was already changed in Task 2 (no regression):**
@@ -336,13 +345,13 @@ grep -n "ECDSA_P256_SHA256_ASN1_SIGNING\|ECDSA_P384_SHA384_ASN1_SIGNING" crates/
 
 Expected: zero `P256_ASN1_SIGNING` lines, one `P384_ASN1_SIGNING` line (production site at line 410).
 
-- [ ] **Step 3: Verify no P256 remains in web-api src:**
+- [ ] **Step 3: Verify only server cert generators retain P256 in web-api src:**
 
 ```bash
 grep -rn "PKCS_ECDSA_P256_SHA256" crates/ui/web-api/src/
 ```
 
-Expected: no output.
+Expected: exactly two hits — `server_cert.rs:171` and `server_cert.rs:349`. All other files: no output.
 
 - [ ] **Step 4: Check compilation and run unit tests:**
 
@@ -429,7 +438,7 @@ sed -n '665,675p' crates/shared/service-sdk/src/identity.rs
 
 Expected: line 670 still reads `PKCS_ECDSA_P256_SHA256`.
 
-- [ ] **Step 4: Verify no remaining P256 in the swept files:**
+- [ ] **Step 4: Verify only intentional P256 remains in the swept files:**
 
 ```bash
 grep -rn "PKCS_ECDSA_P256_SHA256" \
@@ -440,7 +449,8 @@ grep -rn "PKCS_ECDSA_P256_SHA256" \
   crates/core/integration-tests/tests/reverse_proxy/
 ```
 
-Expected: no output.
+Expected: exactly one hit — `reverse_proxy/pki.rs` server cert keygen (stays P-256 for Envoy compatibility).
+All other lines: no output.
 
 - [ ] **Step 5: Check compilation:**
 
@@ -478,13 +488,19 @@ git commit -m "test(pki): migrate service-sdk, cli, and integration-test keygen 
 - Modify: `docs/security/pki-certificates.md`
 - Check: `docs/development/coding-standards.md`
 
-- [ ] **Step 1: Open `docs/security/pki-certificates.md`. Find the asset lifetimes table or key algorithms section.
-      Update the algorithm column for CA, server cert, and service client certs from P-256 / `PKCS_ECDSA_P256_SHA256` to
-      P-384 / `PKCS_ECDSA_P384_SHA384`. Add a note:**
+- [ ] **Step 1: Open `docs/security/pki-certificates.md`. Find the asset lifetimes table. Update the
+      algorithm column:**
+  - CA certificate row → `P-384 / PKCS_ECDSA_P384_SHA384`
+  - Server HTTPS cert row → keep `P-256 / PKCS_ECDSA_P256_SHA256` (do NOT change)
+  - Agent/MQTT client cert row → `P-384 / PKCS_ECDSA_P384_SHA384`
+
+  Replace the key algorithm note with:
 
 ```markdown
-> **Key algorithm:** All newly generated keys use P-384 (ECDSA, SHA-384). Existing keys continue
-> to use P-256 until their normal renewal cycle. The semi-production deployment should trigger
+> **Key algorithms:** CA and agent/service client keys use P-384 (ECDSA, SHA-384). Server HTTPS
+> certificates use P-256 for broad reverse-proxy compatibility (e.g. Envoy ≤ 1.32 only supports
+> P-256 server certificates in static TLS config). Existing keys continue to use their current
+> algorithm until their normal renewal cycle. The semi-production deployment should trigger
 > `POST /api/v1/settings/rotate-ca` after deploying this change to accelerate CA renewal to P-384.
 ```
 
