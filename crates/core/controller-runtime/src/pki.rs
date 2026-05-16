@@ -694,7 +694,7 @@ pub(crate) async fn load_or_generate_server_cert(
 
 fn generate_server_cert(ca: &CaBundle, sans: &[String]) -> Result<ServerCertBundle> {
     let key_pair =
-        KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).context_to::<PkiError>()?;
+        KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context_to::<PkiError>()?;
 
     let sans = pki_utils::parse_san_list(sans);
 

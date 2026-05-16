@@ -13,11 +13,13 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 | Asset                  | Lifetime                      | Renewal Window                           | Key Algorithm                  |
 | ---------------------- | ----------------------------- | ---------------------------------------- | ------------------------------ |
 | CA certificate         | 5 years                       | Rotate 6 months before expiry            | P-384 / PKCS_ECDSA_P384_SHA384 |
-| Server HTTPS cert      | 90 days                       | Renew 30 days before expiry              | P-384 / PKCS_ECDSA_P384_SHA384 |
+| Server HTTPS cert      | 90 days                       | Renew 30 days before expiry              | P-256 / PKCS_ECDSA_P256_SHA256 |
 | Agent/MQTT client cert | 168 h (default, max 17 520 h) | `min(14 days, lifetime / 5)` — see below | P-384 / PKCS_ECDSA_P384_SHA384 |
 
-> **Key algorithm:** All newly generated keys use P-384 (ECDSA, SHA-384). Existing keys continue
-> to use P-256 until their normal renewal cycle. The semi-production deployment should trigger
+> **Key algorithms:** CA and agent/service client keys use P-384 (ECDSA, SHA-384). Server HTTPS
+> certificates use P-256 for broad reverse-proxy compatibility (e.g. Envoy ≤ 1.32 only supports
+> P-256 server certificates in static TLS config). Existing keys continue to use their current
+> algorithm until their normal renewal cycle. The semi-production deployment should trigger
 > `POST /api/v1/settings/rotate-ca` after deploying this change to accelerate CA renewal to P-384.
 
 ## Agent/MQTT Certificate Renewal Window
@@ -204,7 +206,7 @@ requests and returns signed OCSP responses:
 
 The responder supports both SHA-1 and SHA-256 hash algorithms in requests per RFC 6960. Nginx/OpenSSL always uses SHA-1
 (`1.3.14.3.2.26`) for OCSP requests. `ResponderID::ByKey` uses SHA-1 as required by RFC 6960 Section 2.3. Responses are
-signed with the active CA's private key using ECDSA P-256 SHA-256.
+signed with the active CA's private key using ECDSA P-384 SHA-384.
 
 Only Nginx natively supports OCSP verification of client certificates (via `ssl_ocsp` directive, since v1.19.0).
 HAProxy, Envoy, Traefik, and Caddy do not.
@@ -258,7 +260,7 @@ increasing across controller restarts.
 ### CRL Validity
 
 Each CRL is valid for 24 hours (`this_update` to `next_update`). CRLs are signed by the corresponding CA's
-private key using ECDSA P-256 SHA-256.
+private key using ECDSA P-384 SHA-384.
 
 ### Implementation Details
 

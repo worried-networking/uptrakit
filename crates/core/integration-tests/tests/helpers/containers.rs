@@ -115,7 +115,8 @@ level = "info"
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_exposed_port(CONTROLLER_PORT.tcp())
             .with_wait_for(WaitFor::Log(
-                LogWaitStrategy::stdout_or_stderr("HTTPS server listening on").with_times(1),
+                LogWaitStrategy::stdout_or_stderr("HTTPS server reusing inherited socket on")
+                    .with_times(1),
             ))
             .with_cmd(vec![
                 "uptrakit-controller-standalone".to_string(),

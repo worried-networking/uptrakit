@@ -13,6 +13,22 @@ fn scope_equality_tenant() {
 }
 
 // Task 3 tests added below.
+
+#[test]
+fn scope_tenant_serde_roundtrip() {
+    let id = uuid::Uuid::new_v4();
+    let scope = Scope::Tenant(id);
+    let json = serde_json::to_string(&scope).unwrap();
+    let back: Scope = serde_json::from_str(&json).unwrap();
+    assert_eq!(scope, back);
+}
+
+#[test]
+fn scope_global_serde_roundtrip() {
+    let json = serde_json::to_string(&Scope::Global).unwrap();
+    let back: Scope = serde_json::from_str(&json).unwrap();
+    assert_eq!(Scope::Global, back);
+}
 use uptrakit_config_reload::ConfigReloadError;
 
 #[test]

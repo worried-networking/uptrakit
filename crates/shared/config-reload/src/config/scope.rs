@@ -7,7 +7,7 @@ use uuid::Uuid;
 /// settings during config reload operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Scope {
     /// Global controller-wide settings.
     Global,

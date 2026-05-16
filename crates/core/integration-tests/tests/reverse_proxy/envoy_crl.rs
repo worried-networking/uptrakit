@@ -17,7 +17,7 @@ use super::server::TestServer;
 /// Validates that Envoy rejects client certificates that appear in a CRL
 /// while still accepting valid (non-revoked) certificates.
 #[tokio::test]
-#[ignore = "Docker integration test (envoyproxy/envoy:v1.31-latest). Run: cargo test -p uptrakit-integration-tests --test reverse_proxy envoy_crl -- --ignored"]
+#[ignore = "Docker integration test (envoyproxy/envoy:v1.32-latest). Run: cargo test -p uptrakit-integration-tests --test reverse_proxy envoy_crl -- --ignored"]
 async fn envoy_crl_rejects_revoked_cert() {
     let pki = TestPki::generate();
     let (revoked_cert_pem, revoked_key_pem, _revoked_id) = pki.generate_extra_agent_cert();
@@ -31,7 +31,7 @@ async fn envoy_crl_rejects_revoked_cert() {
     let tmp = TempDir::new().expect("tempdir");
     write_envoy_crl_config(&tmp, &pki, &crl_pem, server.port);
 
-    let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
+    let container = GenericImage::new("envoyproxy/envoy", "v1.32-latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr(
             "starting main dispatch loop",
