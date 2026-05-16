@@ -102,9 +102,7 @@
 	}
 
 	function allUpdatableHostsActive(item: SoftwareItemResponse): boolean {
-		const detail = itemDetailsById.get(item.id);
-		if (!detail) return false;
-		const updatable = detail.hosts.filter((h) => h.update_available && h.latest_version);
+		const updatable = filteredHosts(item).filter((h) => h.update_available && h.latest_version);
 		return updatable.length > 0 && updatable.every((h) => !!h.active_update_history_id);
 	}
 
