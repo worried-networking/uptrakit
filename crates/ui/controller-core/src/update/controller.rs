@@ -147,7 +147,13 @@ impl UpdateDispatcher for ControllerUpdateDispatcher {
         let dispatch_status_str = match trigger_result.initial_status {
             update_history::UpdateStatus::Pending => TriggerUpdateStatus::Pending.to_string(),
             update_history::UpdateStatus::Failed => TriggerUpdateStatus::Failed.to_string(),
-            _ => TriggerUpdateStatus::Queued.to_string(),
+            _ => {
+                tracing::warn!(
+                    status = ?trigger_result.initial_status,
+                    "unexpected initial_status after trigger; defaulting dispatch_status to queued"
+                );
+                TriggerUpdateStatus::Queued.to_string()
+            }
         };
 
         emit_update_audit(
