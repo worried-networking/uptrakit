@@ -51,6 +51,8 @@ pub mod surfaces;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;
 pub mod system_services;
+#[cfg(feature = "test-utils")]
+pub(crate) mod test_utils;
 pub mod update_batches;
 pub mod update_history;
 pub mod users;
