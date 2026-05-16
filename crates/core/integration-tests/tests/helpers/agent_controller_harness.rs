@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use super::api_client::ApiClient;
-use super::containers::{ControllerContainer, ServiceContainer, test_network_name};
+use crate::helpers::api_client::ApiClient;
+use crate::helpers::containers::{ControllerContainer, ServiceContainer, test_network_name};
 
 /// Options for starting an `AgentControllerHarness`.
 pub(crate) struct HarnessOptions {
@@ -36,7 +36,7 @@ pub(crate) struct AgentControllerHarness {
 
 /// Handle to the running controller — exposes test-utils API operations.
 pub(crate) struct ControllerHandle {
-    _container: ControllerContainer,
+    container: ControllerContainer,
     api: Arc<ApiClient>,
 }
 
@@ -80,10 +80,7 @@ impl AgentControllerHarness {
             .await;
 
         let api = Arc::new(api);
-        let controller = ControllerHandle {
-            _container: container,
-            api,
-        };
+        let controller = ControllerHandle { container, api };
 
         Self {
             network,
@@ -107,7 +104,7 @@ impl AgentControllerHarness {
 
         let container = ServiceContainer::start_agent(
             &self.network,
-            self.controller._container.container_name(),
+            self.controller.container.container_name(),
         )
         .await;
 
@@ -124,9 +121,11 @@ impl Drop for AgentControllerHarness {
     fn drop(&mut self) {
         // Containers are already stopped by their own Drop impls (testcontainers).
         // Remove the Docker network that was created by start_with.
-        let _ = std::process::Command::new("docker")
-            .args(["network", "rm", &self.network])
-            .status();
+        drop(
+            std::process::Command::new("docker")
+                .args(["network", "rm", &self.network])
+                .status(),
+        );
     }
 }
 
@@ -138,7 +137,10 @@ impl ControllerHandle {
             .raw_get(&format!("/api/v1/services/{service_id}"))
             .await;
         ServiceIdentity {
-            spiffe_id: body["spiffe_id"].as_str().map(str::to_owned),
+            spiffe_id: body
+                .get("spiffe_id")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
         }
     }
 
@@ -188,7 +190,7 @@ impl ControllerHandle {
                 .api
                 .raw_get(&format!("/api/v1/services/{service_id}"))
                 .await;
-            if body["status"].as_str() == Some("approved") {
+            if body.get("status").and_then(|v| v.as_str()) == Some("approved") {
                 return;
             }
             if tokio::time::Instant::now() >= deadline {
@@ -245,8 +247,8 @@ impl AgentHandle {
     pub(crate) async fn cert_serial_number(&self) -> String {
         let id = self.service_id();
         let body = self.api.raw_get(&format!("/api/v1/services/{id}")).await;
-        body["cert_serial_number"]
-            .as_str()
+        body.get("cert_serial_number")
+            .and_then(|v| v.as_str())
             .expect("cert_serial_number missing in service detail response")
             .to_owned()
     }
@@ -257,15 +259,14 @@ impl AgentHandle {
     pub(crate) async fn wait_for_cert_renewed(&self, before_serial: &str) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
-            if let Some(serial) = self
+            let body = self
                 .api
                 .raw_get(&format!("/api/v1/services/{}", self.service_id()))
-                .await["cert_serial_number"]
-                .as_str()
+                .await;
+            if let Some(serial) = body.get("cert_serial_number").and_then(|v| v.as_str())
+                && serial != before_serial
             {
-                if serial != before_serial {
-                    return;
-                }
+                return;
             }
             if tokio::time::Instant::now() >= deadline {
                 panic!("cert serial did not change from {before_serial} within 30s");
