@@ -1093,6 +1093,7 @@
 								id="software-name-filter"
 								type="search"
 								placeholder="Filter by name"
+								aria-label="Filter by name"
 								bind:value={nameFilter}
 								oninput={() => {
 									clearTimeout(nameFilterDebounce);
