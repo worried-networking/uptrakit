@@ -32,6 +32,13 @@ This ADR records the deferral so future contributors do not re-litigate the deci
 - External CA users get true SPKI pin durability today, no code change required.
 - Future Path A spec will revisit this ADR and supersede it.
 
+**2026-05-16 review:** No active deployments use `--tofu-spki`. The SPKI pin
+durability benefit (surviving CA rotation every ~5 years) does not justify the
+implementation cost (two-tier bootstrap, dual-trust-anchor transition period,
+intermediate cert chain threading through wire → Agent `CertifiedKey`).
+Deferral extended indefinitely. Revisit only when a concrete deployment with
+`--tofu-spki` requirements exists.
+
 ## Alternatives considered
 
 | Option                                                   | Outcome                                                                              |
