@@ -130,6 +130,40 @@ export async function extractErrorMessage(res: Response): Promise<string> {
 	return truncateError(text);
 }
 
+export class ApiError extends Error {
+	public readonly errorCode: string | null;
+	public readonly status: number;
+
+	constructor(message: string, status: number, errorCode: string | null) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+		this.errorCode = errorCode;
+	}
+}
+
+async function extractApiError(res: Response): Promise<ApiError> {
+	const text = await res.text();
+	let message: string = res.statusText;
+	let errorCode: string | null = null;
+	if (text) {
+		try {
+			const parsed = JSON.parse(text);
+			if (typeof parsed === 'object' && parsed !== null) {
+				if (typeof parsed.error === 'string') {
+					message = truncateError(parsed.error);
+				}
+				if (typeof parsed.error_code === 'string') {
+					errorCode = parsed.error_code;
+				}
+			}
+		} catch {
+			message = truncateError(text);
+		}
+	}
+	return new ApiError(message, res.status, errorCode);
+}
+
 function authHeaders(): Record<string, string> {
 	const token = getAccessToken();
 	return token ? { Authorization: `Bearer ${token}` } : {};
@@ -303,8 +337,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		throw err;
 	}
 	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
+		throw await extractApiError(res);
 	}
 	return res.json();
 }
@@ -323,8 +356,7 @@ async function requestVoid(path: string, options: RequestInit = {}): Promise<voi
 		throw err;
 	}
 	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
+		throw await extractApiError(res);
 	}
 }
 
