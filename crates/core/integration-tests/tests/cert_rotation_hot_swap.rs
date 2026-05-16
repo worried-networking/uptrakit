@@ -7,8 +7,18 @@
 //! docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
 //! cargo test -p uptrakit-integration-tests cert_rotation_hot_swap -- --ignored --nocapture
 //! ```
+// Shared helpers include members not used by this test (e.g. start_scheduler).
+#![expect(
+    dead_code,
+    reason = "shared test helpers include members not exercised by this test binary"
+)]
 
-use crate::helpers::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
+mod helpers;
+
+#[path = "helpers/agent_controller_harness.rs"]
+mod agent_controller_harness;
+
+use crate::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
 
 /// Verify that cert renewal via the resolver hot-swap path keeps the session
 /// alive and the new cert is presented on the next TLS handshake.

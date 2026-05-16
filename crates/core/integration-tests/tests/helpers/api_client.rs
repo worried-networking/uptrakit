@@ -7,7 +7,6 @@
     clippy::panic,
     reason = "integration test infrastructure: panics are acceptable in API test helpers"
 )]
-
 use std::time::Duration;
 
 use uptrakit_openapi_client::UptrakitClient;

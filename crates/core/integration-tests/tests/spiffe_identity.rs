@@ -6,8 +6,18 @@
 //! docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
 //! cargo test -p uptrakit-integration-tests spiffe_identity -- --ignored --nocapture
 //! ```
+// Shared helpers include members not used by this test (e.g. start_scheduler).
+#![expect(
+    dead_code,
+    reason = "shared test helpers include members not exercised by this test binary"
+)]
 
-use crate::helpers::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
+mod helpers;
+
+#[path = "helpers/agent_controller_harness.rs"]
+mod agent_controller_harness;
+
+use crate::agent_controller_harness::{AgentControllerHarness, HarnessOptions};
 
 /// Verify that an Agent enrolls with a SPIFFE URI SAN in its CSR, the Controller
 /// signs it preserving the SAN, and the Controller returns the SPIFFE identity
