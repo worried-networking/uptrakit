@@ -91,6 +91,8 @@
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
+	let nameFilter: string = $state(page.url.searchParams.get('query') ?? '');
+	let nameFilterDebounce: ReturnType<typeof setTimeout> | undefined;
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
 	const slotTabSurfaces = $derived(
@@ -244,6 +246,7 @@
 		parts.push(`tab=${activeTab}`);
 		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
 		if (isItemsTab && pluginTypeFilter) parts.push(`plugin_type=${encodeURIComponent(pluginTypeFilter)}`);
+		if (isItemsTab && nameFilter) parts.push(`query=${encodeURIComponent(nameFilter)}`);
 		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -329,6 +332,7 @@
 	});
 
 	onDestroy(() => {
+		clearTimeout(nameFilterDebounce);
 		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 		liveWsHandle?.disconnect();
@@ -365,7 +369,8 @@
 				featuredFilter(),
 				undefined,
 				showUpdatableOnly ? true : undefined,
-				pluginTypeFilter || undefined
+				pluginTypeFilter || undefined,
+				nameFilter || undefined
 			);
 			items = result.items;
 			const visibleIds = new Set(result.items.map((item) => item.id));
@@ -412,6 +417,9 @@
 		if (tab === 'all' || tab === 'featured' || tab === 'unfeatured') {
 			loadAll(1);
 		} else {
+			clearTimeout(nameFilterDebounce);
+			nameFilterDebounce = undefined;
+			nameFilter = '';
 			showUpdatableOnly = false;
 			pluginTypeFilter = '';
 		}
@@ -906,7 +914,8 @@
 					featuredFilter(),
 					undefined,
 					showUpdatableOnly ? true : undefined,
-					pluginTypeFilter || undefined
+					pluginTypeFilter || undefined,
+					nameFilter || undefined
 				);
 				for (const item of result.items) {
 					batchSelectedIds.add(item.id);
@@ -1080,6 +1089,19 @@
 									}}
 								/>
 							{/if}
+							<Input
+								id="software-name-filter"
+								type="search"
+								placeholder="Filter by name"
+								bind:value={nameFilter}
+								oninput={() => {
+									clearTimeout(nameFilterDebounce);
+									nameFilterDebounce = setTimeout(() => {
+										currentPage = 1;
+										loadAll(1);
+									}, 300);
+								}}
+							/>
 						</div>
 						{#if canManage}
 							<div class="shrink-0">
