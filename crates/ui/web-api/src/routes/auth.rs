@@ -961,7 +961,7 @@ mod tests {
 
         let rustls_cfg = {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
             let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
                 .unwrap()
                 .self_signed(&key_pair)

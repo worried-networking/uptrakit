@@ -2011,7 +2011,7 @@ mod tests {
             crate::cert_signer::SignedCertBundle,
             rootcause::Report<crate::cert_signer::CertSignerError>,
         > {
-            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
                 .expect("key generation should succeed");
             let cert = rcgen::CertificateParams::new(vec!["localhost".to_string()])
                 .expect("certificate params should be valid")
@@ -2070,7 +2070,7 @@ mod tests {
     }
 
     fn test_renewal_csr_pem() -> String {
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
             .expect("key generation should succeed");
         let mut params = rcgen::CertificateParams::default();
         params

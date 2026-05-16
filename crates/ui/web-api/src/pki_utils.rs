@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn cert_signed_by_ca_same_ca() -> Result<()> {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca key");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("ca key");
         let mut ca_params = rcgen::CertificateParams::default();
         ca_params
             .distinguished_name
@@ -244,7 +244,7 @@ mod tests {
 
         let issuer = rcgen::Issuer::new(ca_params, key_pair);
         let server_key =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("server key");
         let server_params =
             rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
         let server_cert = server_params
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn cert_signed_by_ca_different_ca() -> Result<()> {
         // Generate CA 1
-        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca1 key");
+        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("ca1 key");
         let mut ca1_params = rcgen::CertificateParams::default();
         ca1_params
             .distinguished_name
@@ -269,7 +269,7 @@ mod tests {
 
         let issuer1 = rcgen::Issuer::new(ca1_params, key1);
         let server_key =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("server key");
         let server_params =
             rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
         let server_cert = server_params
@@ -278,7 +278,7 @@ mod tests {
         let server_pem = server_cert.pem();
 
         // Generate CA 2
-        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca2 key");
+        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("ca2 key");
         let mut ca2_params = rcgen::CertificateParams::default();
         ca2_params
             .distinguished_name
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn cert_signed_by_ca_same_subject_wrong_key() -> Result<()> {
-        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca1 key");
+        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("ca1 key");
         let mut ca1_params = rcgen::CertificateParams::default();
         ca1_params
             .distinguished_name
@@ -305,7 +305,7 @@ mod tests {
 
         let issuer1 = rcgen::Issuer::new(ca1_params, key1);
         let server_key =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("server key");
         let server_params =
             rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
         let server_cert = server_params
@@ -313,7 +313,7 @@ mod tests {
             .expect("server cert");
         let server_pem = server_cert.pem();
 
-        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca2 key");
+        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("ca2 key");
         let mut ca2_params = rcgen::CertificateParams::default();
         ca2_params
             .distinguished_name

@@ -405,9 +405,9 @@ fn sign_response(
         .secret_pkcs8_der()
         .to_vec();
 
-    // Sign with ECDSA P-256 SHA-256 using aws-lc-rs
+    // Sign with ECDSA P-384 SHA-384 using aws-lc-rs
     let signing_key = aws_lc_rs::signature::EcdsaKeyPair::from_pkcs8(
-        &aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+        &aws_lc_rs::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
         &key_der,
     )
     .map_err(|e| report!(OcspError::KeyParse(e.to_string())))?;
@@ -476,7 +476,7 @@ mod tests {
         use rustls::pki_types::PrivatePkcs8KeyDer;
         use rustls::pki_types::pem::PemObject;
 
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let pem = key_pair.serialize_pem();
         let der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())
             .unwrap()
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn extract_ca_public_key_and_hash_works() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn responder_id_uses_sha1() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -638,7 +638,7 @@ mod tests {
         use der::Encode;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -658,7 +658,7 @@ mod tests {
         use der::Decode;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
