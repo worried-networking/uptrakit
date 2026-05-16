@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use aws_lc_rs::rand::SystemRandom;
-use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair};
+use aws_lc_rs::signature::{ECDSA_P384_SHA384_ASN1_SIGNING, EcdsaKeyPair};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Request, State};
@@ -35,7 +35,7 @@ const SHA256_OID: const_oid::ObjectIdentifier =
 /// Standalone HTTP and HTTPS OCSP responder for integration testing.
 ///
 /// Does NOT use the production OCSP code to avoid DB migrations.
-/// Signs responses with the CA key using ECDSA P-256 SHA-256.
+/// Signs responses with the CA key using ECDSA P-384 SHA-384.
 pub(crate) struct OcspResponder {
     port: u16,
     state: Arc<OcspState>,
@@ -430,7 +430,7 @@ fn sign_response(response_data: &ResponseData, ca_key_der: &[u8]) -> Result<Vec<
         .to_der()
         .map_err(|e| format!("DER encode: {e}"))?;
 
-    let signing_key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, ca_key_der)
+    let signing_key = EcdsaKeyPair::from_pkcs8(&ECDSA_P384_SHA384_ASN1_SIGNING, ca_key_der)
         .map_err(|e| format!("key parse: {e}"))?;
 
     let sig = signing_key
@@ -440,7 +440,7 @@ fn sign_response(response_data: &ResponseData, ca_key_der: &[u8]) -> Result<Vec<
     let signature = BitString::from_bytes(sig.as_ref()).map_err(|e| format!("BitString: {e}"))?;
 
     let algorithm = spki::AlgorithmIdentifierOwned {
-        oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_256,
+        oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_384,
         parameters: None,
     };
 

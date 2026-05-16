@@ -15,13 +15,13 @@ use super::server::{IdentityResponse, TestServer};
 
 /// Envoy L7 TLS termination integration test.
 ///
-/// Spins up a real envoyproxy/envoy:v1.31-latest container that terminates
+/// Spins up a real envoyproxy/envoy:v1.32-latest container that terminates
 /// TLS, requests client certificates, and forwards the XFCC
 /// (X-Forwarded-Client-Cert) header with `Subject` and `Cert` fields.
 /// The controller parses the `Cert` field (DER base64) to extract full
 /// identity including serial number.
 #[tokio::test]
-#[ignore = "Docker integration test (envoyproxy/envoy:v1.31-latest). Run: cargo test -p uptrakit-integration-tests --test reverse_proxy envoy_l7 -- --ignored"]
+#[ignore = "Docker integration test (envoyproxy/envoy:v1.32-latest). Run: cargo test -p uptrakit-integration-tests --test reverse_proxy envoy_l7 -- --ignored"]
 async fn envoy_l7_forwards_client_cert() {
     let pki = TestPki::generate();
     let server = TestServer::start(&pki, Some("X-Forwarded-Client-Cert"), None).await;
@@ -29,7 +29,7 @@ async fn envoy_l7_forwards_client_cert() {
     let tmp = TempDir::new().expect("tempdir");
     write_envoy_config(&tmp, &pki, server.port);
 
-    let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
+    let container = GenericImage::new("envoyproxy/envoy", "v1.32-latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr(
             "starting main dispatch loop",

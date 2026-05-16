@@ -36,9 +36,9 @@ pub(crate) struct TestPki {
 impl TestPki {
     /// Generate a complete PKI for integration tests.
     ///
-    /// - CA: CN=`Test CA`, ECDSA P-256, self-signed, 1-day validity
-    /// - Server cert: signed by CA, SANs = `localhost`, `host.docker.internal`, `127.0.0.1`
-    /// - Agent cert: signed by CA, CN = random UUID v7, EKU = ClientAuth
+    /// - CA: CN=`Test CA`, ECDSA P-384, self-signed, 1-day validity
+    /// - Server cert: ECDSA P-256 (Envoy ≤ 1.32 only supports P-256 server certs), signed by CA
+    /// - Agent cert: ECDSA P-384, signed by CA, CN = random UUID v7, EKU = ClientAuth
     pub(crate) fn generate() -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -68,7 +68,9 @@ impl TestPki {
             Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key).expect("CA issuer creation failed");
 
         // --- Server cert ---
-        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
+        // Kept at P-256: Envoy ≤ 1.32 hardcodes "only P-256 ECDSA certificates
+        // are supported" for static TLS config. CA and client certs use P-384.
+        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
             .expect("server key generation failed");
 
         let mut server_params = CertificateParams::new(vec![
