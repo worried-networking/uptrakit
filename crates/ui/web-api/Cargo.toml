@@ -13,6 +13,7 @@ oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:open
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats", "uptrakit-controller-core/nats"]
 interactive = []
+test-utils = []
 dashboard-icons = ["uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 notifications-telegram = ["uptrakit-surface-proxy/notifications-telegram"]
 notifications-email = ["uptrakit-surface-proxy/notifications-email"]

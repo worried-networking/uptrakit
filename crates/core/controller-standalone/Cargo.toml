@@ -17,6 +17,7 @@ db-postgres = ["uptrakit-controller-runtime/db-postgres"]
 db-all = ["uptrakit-controller-runtime/db-all"]
 notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
 notifications-email = ["uptrakit-controller-runtime/notifications-email"]
+test-utils = ["uptrakit-controller-runtime/test-utils"]
 
 [dependencies]
 uptrakit-controller-runtime = { workspace = true, features = [
