@@ -168,7 +168,7 @@ pub(crate) async fn renew_server_certificate_inner(
     let san_list: Vec<String> = state.settings.sans();
     let sans: SanCollection = pki_utils::parse_san_list(&san_list);
 
-    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
         .map_err(|e| report!(RenewCertError::KeyGeneration(e.to_string())))?;
 
     let mut params = rcgen::CertificateParams::new(sans.dns_names.clone())
@@ -332,7 +332,7 @@ mod tests {
     /// Generate a self-signed CA certificate and its key pair for testing.
     fn generate_test_ca() -> (String, rcgen::KeyPair) {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -346,7 +346,7 @@ mod tests {
     fn generate_test_server_cert(ca_pem: &str, ca_key: &rcgen::KeyPair) -> (String, String) {
         let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, ca_key).expect("issuer");
         let server_key =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params =
             rcgen::CertificateParams::new(vec!["localhost".to_string()]).expect("params");
         params

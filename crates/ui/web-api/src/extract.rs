@@ -477,7 +477,7 @@ mod tests {
         // Generate a test certificate with a UUID CN
         let service_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn identity_from_der_non_uuid_cn() {
         let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
@@ -510,7 +510,7 @@ mod spiffe_tests {
     use super::service_identity_from_der_with_trust_domain;
 
     fn make_cert_with_spiffe_san(service_id: uuid::Uuid, trust_domain: &str) -> Vec<u8> {
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -525,7 +525,7 @@ mod spiffe_tests {
     }
 
     fn make_cert_cn_only(service_id: uuid::Uuid) -> Vec<u8> {
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -534,7 +534,7 @@ mod spiffe_tests {
     }
 
     fn make_cert_non_spiffe_uri_san_no_uuid_cn() -> Vec<u8> {
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
@@ -546,7 +546,7 @@ mod spiffe_tests {
     }
 
     fn make_cert_non_spiffe_uri_san_with_uuid_cn(service_id: uuid::Uuid) -> Vec<u8> {
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
         let mut params = rcgen::CertificateParams::default();
         params
             .distinguished_name
