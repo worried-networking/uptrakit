@@ -89,4 +89,31 @@ describe('events.svelte — surfaces_changed handling', () => {
 		expect(received).toBe(true);
 		unsub();
 	});
+
+	it('two UpdateTriggered events with different software_item_id on same host are not debounced together', async () => {
+		const { subscribeToEvent } = await import('$lib/stores/events.svelte');
+
+		const received: unknown[] = [];
+		const unsub = subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
+			received.push(data);
+		});
+
+		capturedOnEvent?.(AdminEventType.UpdateTriggered, {
+			host_id: 'host-1',
+			software_item_id: 'item-A',
+			update_history_id: 'hist-A',
+			status: 'pending'
+		});
+		capturedOnEvent?.(AdminEventType.UpdateTriggered, {
+			host_id: 'host-1',
+			software_item_id: 'item-B',
+			update_history_id: 'hist-B',
+			status: 'pending'
+		});
+
+		await vi.advanceTimersByTimeAsync(200);
+		expect(received).toHaveLength(2);
+
+		unsub();
+	});
 });

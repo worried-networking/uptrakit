@@ -27,7 +27,7 @@ let subscriptions: Subscription[] = [];
 let disconnect: (() => void) | null = null;
 let connectionState: SseConnectionState = $state('disconnected');
 
-/** Recent event fingerprints for deduplication: "type:entityId" → timer */
+/** Recent event fingerprints for deduplication: "type:entityId:subId" → timer */
 const debounceTimers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 
 export function getConnectionState(): SseConnectionState {
@@ -89,12 +89,15 @@ function closeConnection() {
  * Dispatch an SSE event to matching subscribers with debouncing.
  *
  * Entity ID is extracted from `data.id`, `data.host_id`, or `data.task_id`
- * (whichever is present). Events with the same type + entity ID within
- * {@link DEBOUNCE_MS} are collapsed into a single callback invocation.
+ * (whichever is present). Sub-ID is extracted from `data.update_history_id`
+ * or `data.software_item_id` to distinguish events on the same entity but for
+ * different software items. Events with the same type + entity ID + sub-ID
+ * within {@link DEBOUNCE_MS} are collapsed into a single callback invocation.
  */
 function dispatchEvent(eventType: AdminEventType, data: Record<string, unknown>) {
 	const entityId = (data.id ?? data.host_id ?? data.task_id ?? '') as string;
-	const key = `${eventType}:${entityId}`;
+	const subId = (data.update_history_id ?? data.software_item_id ?? '') as string;
+	const key = `${eventType}:${entityId}:${subId}`;
 
 	// Clear existing debounce for this key.
 	const existing = debounceTimers.get(key);
