@@ -9,20 +9,25 @@ import type {
 	SoftwareItemResponse
 } from '$lib/types';
 import { Permission } from '$lib/types';
+import { ApiError } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
-	getSoftwareItems: vi.fn(),
-	deleteSoftwareItem: vi.fn(),
-	checkSoftwareItemVersions: vi.fn(),
-	updateSoftwareItem: vi.fn(),
-	listPluginTypes: vi.fn(),
-	getSoftwareItem: vi.fn(),
-	triggerSoftwareUpdate: vi.fn(),
-	batchSoftwareItems: vi.fn(),
-	executeBatchChunked: vi.fn(),
-	previewSoftwareItemMerge: vi.fn(),
-	executeSoftwareItemMerge: vi.fn()
-}));
+vi.mock('$lib/api', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api')>();
+	return {
+		getSoftwareItems: vi.fn(),
+		deleteSoftwareItem: vi.fn(),
+		checkSoftwareItemVersions: vi.fn(),
+		updateSoftwareItem: vi.fn(),
+		listPluginTypes: vi.fn(),
+		getSoftwareItem: vi.fn(),
+		triggerSoftwareUpdate: vi.fn(),
+		batchSoftwareItems: vi.fn(),
+		executeBatchChunked: vi.fn(),
+		previewSoftwareItemMerge: vi.fn(),
+		executeSoftwareItemMerge: vi.fn(),
+		ApiError: actual.ApiError
+	};
+});
 
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => null)
@@ -519,5 +524,92 @@ describe('Software Page Trigger Status Handling', () => {
 
 		const updateAllBtn = screen.getAllByRole('button', { name: /update all/i })[0];
 		expect(updateAllBtn).not.toHaveAttribute('aria-busy');
+	});
+
+	describe('active update status badge rendering', () => {
+		it('shows "In Progress" ActionBadge (not "Update") on a host row when active_update_history_id is set with in_progress status', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [
+				{
+					...makeHostSummary('host-1', 'host-one'),
+					active_update_history_id: 'hist-abc',
+					active_update_status: 'in_progress'
+				},
+				makeHostSummary('host-2', 'host-two')
+			];
+			const detail = makeDetail(item, hosts);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Multi-host: host rows are shown expanded by default; wait for detail to load
+			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
+			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
+
+			expect(within(hostRow).getByText('In Progress')).toBeInTheDocument();
+			expect(within(hostRow).queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+		});
+
+		it('shows "Queued" StatusBadge on a host row when active_update_status is queued', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [
+				{
+					...makeHostSummary('host-1', 'host-one'),
+					active_update_history_id: 'hist-abc',
+					active_update_status: 'queued'
+				},
+				makeHostSummary('host-2', 'host-two')
+			];
+			const detail = makeDetail(item, hosts);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
+			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
+
+			expect(within(hostRow).getByText('Queued')).toBeInTheDocument();
+		});
+
+		it('shows 409-specific toast when trigger returns update_already_active', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 1;
+			const host = makeHostSummary('host-1', 'host-one');
+			const detail = makeDetail(item, [host]);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.triggerSoftwareUpdate).mockRejectedValue(
+				new ApiError('Update already active', 409, 'trigger_update.update_already_active')
+			);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Single-host compact layout: Update button is in the header row
+			await waitFor(() => expect(screen.getAllByTestId('software-group-header-software-1').length).toBeGreaterThan(0));
+			const headerRow = screen.getAllByTestId('software-group-header-software-1')[0];
+			// Wait for detail to load so the Update button is enabled
+			const updateBtn = await within(headerRow).findByRole('button', { name: 'Update' });
+			await fireEvent.click(updateBtn);
+
+			// Confirm single-host modal
+			const confirmBtn = await screen.findByRole('button', {
+				name: /trigger update/i
+			});
+			await fireEvent.click(confirmBtn);
+
+			await waitFor(() =>
+				expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('An update is already active for this host')
+			);
+		});
 	});
 });

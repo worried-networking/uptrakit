@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
+		ApiError,
 		getSoftwareItems,
 		deleteSoftwareItem,
 		checkSoftwareItemVersions,
@@ -293,7 +294,54 @@
 				subscribeToEvent(AdminEventType.SoftwareItemUpdated, () => loadAll(currentPage, true)),
 				subscribeToEvent(AdminEventType.SoftwareItemCreated, () => loadAll(currentPage, true)),
 				subscribeToEvent(AdminEventType.VersionCheckCompleted, () => loadAll(currentPage, true)),
-				subscribeToEvent(AdminEventType.UpdateCompleted, () => loadAll(currentPage, true))
+				subscribeToEvent(AdminEventType.UpdateCompleted, (data) => {
+					const softwareItemId = data.software_item_id as string;
+					const hostId = data.host_id as string;
+					const detail = itemDetailsById.get(softwareItemId);
+					if (detail) {
+						itemDetailsById.set(softwareItemId, {
+							...detail,
+							hosts: detail.hosts.map((h) =>
+								h.host_id === hostId
+									? {
+											...h,
+											active_update_history_id: null,
+											active_update_status: null
+										}
+									: h
+							)
+						});
+					}
+					void loadAll(currentPage, true);
+				}),
+				subscribeToEvent(AdminEventType.UpdateTriggered, (data) => {
+					const softwareItemId = data.software_item_id as string;
+					const hostId = data.host_id as string;
+					const detail = itemDetailsById.get(softwareItemId);
+					if (!detail) return;
+					itemDetailsById.set(softwareItemId, {
+						...detail,
+						hosts: detail.hosts.map((h) =>
+							h.host_id === hostId
+								? {
+										...h,
+										active_update_history_id: data.update_history_id as string,
+										active_update_status: (data.status as string) ?? 'pending'
+									}
+								: h
+						)
+					});
+				}),
+				subscribeToEvent(AdminEventType.UpdateStarted, (data) => {
+					const softwareItemId = data.software_item_id as string;
+					const hostId = data.host_id as string;
+					const detail = itemDetailsById.get(softwareItemId);
+					if (!detail) return;
+					itemDetailsById.set(softwareItemId, {
+						...detail,
+						hosts: detail.hosts.map((h) => (h.host_id === hostId ? { ...h, active_update_status: 'in_progress' } : h))
+					});
+				})
 			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
@@ -590,7 +638,9 @@
 			} else {
 				updateModalItem = item;
 				updateModalDetail = detail;
-				selectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+				selectedHostIds = new Set(
+					detail.hosts.filter((h) => h.update_available && !h.active_update_history_id).map((h) => h.host_id)
+				);
 			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load host details.');
@@ -610,9 +660,14 @@
 		);
 		let succeeded = 0;
 		let failed = 0;
+		let alreadyActive = 0;
 		for (const result of results) {
 			if (result.status === 'rejected') {
-				failed += 1;
+				if (result.reason instanceof ApiError && result.reason.errorCode === 'trigger_update.update_already_active') {
+					alreadyActive += 1;
+				} else {
+					failed += 1;
+				}
 				continue;
 			}
 			if (result.value.status === 'failed') {
@@ -622,6 +677,7 @@
 			succeeded += 1;
 		}
 		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
+		if (alreadyActive > 0) showError(`${alreadyActive} host(s) already have an active update.`);
 		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
 		triggeringUpdate = false;
 		updateModalItem = null;
@@ -643,13 +699,17 @@
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			void loadAll(currentPage, true);
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to trigger update');
+			if (e instanceof ApiError && e.errorCode === 'trigger_update.update_already_active') {
+				showError('An update is already active for this host');
+			} else {
+				showError(e instanceof Error ? e.message : 'Failed to trigger update');
+			}
 		} finally {
 			singleHostUpdateTriggering = false;
 		}
 	}
 
-	function _openLiveModal(updateHistoryId: string, hostName: string, itemName: string) {
+	function openLiveModal(updateHistoryId: string, hostName: string, itemName: string) {
 		liveModal = { updateHistoryId, hostName, itemName };
 		liveStartedAt = Date.now();
 		liveWsState = 'connecting';
@@ -1168,7 +1228,7 @@
 							onOpenMenu={toggleMenu}
 							onOpenUpdateAllModal={openUpdateAllModal}
 							onOpenSingleHostUpdate={openSingleHostUpdate}
-							onOpenLiveModal={_openLiveModal}
+							onOpenLiveModal={openLiveModal}
 							onPageChange={loadAll}
 							onToggleFeatured={toggleFeatured}
 						/>
@@ -1354,11 +1414,13 @@
 			<ul class="space-y-2">
 				{#each updateModalDetail.hosts as host (host.host_id)}
 					{@const upToDate = !host.update_available}
-					<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
+					{@const alreadyActive = !!host.active_update_history_id}
+					{@const isDisabled = upToDate || alreadyActive}
+					<li class="flex items-start gap-3 {isDisabled ? 'opacity-50' : ''}">
 						<Checkbox
 							id="software-host-select-{host.host_id}"
 							class="mt-0.5"
-							disabled={upToDate}
+							disabled={isDisabled}
 							checked={selectedHostIds.has(host.host_id)}
 							onchange={(e) => {
 								const next = new Set(selectedHostIds);
@@ -1374,7 +1436,9 @@
 							<p class="text-sm font-medium truncate">
 								{host.friendly_name || host.hostname}
 							</p>
-							{#if upToDate}
+							{#if alreadyActive}
+								<p class="text-table-header text-[var(--text-muted)]">Update already active</p>
+							{:else if upToDate}
 								<p class="text-table-header text-[var(--text-muted)]">Already up to date</p>
 							{:else}
 								<p class="text-table-header text-[var(--text-muted)]">
