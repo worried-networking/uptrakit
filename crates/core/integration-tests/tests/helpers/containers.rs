@@ -56,14 +56,20 @@ pub(crate) struct ControllerContainer {
 
 impl ControllerContainer {
     /// Start a controller container on the given Docker network.
-    ///
-    /// The controller is configured via a TOML config file bind-mounted into the
-    /// container. Bootstrap enrollment tokens are passed via env vars. A
-    /// JetStream-enabled NATS sidecar is started first so its hostname is known
-    /// before the TOML is written.
-    ///
-    /// Waits for the "HTTPS server listening on" log message before returning.
     pub(crate) async fn start(network: &str) -> Self {
+        Self::start_internal(network, None).await
+    }
+
+    /// Start a controller container with a SPIFFE trust domain configured.
+    ///
+    /// Used by [`AgentControllerHarness`](super::agent_controller_harness::AgentControllerHarness)
+    /// when tests need SPIFFE URI SAN validation.
+    pub(crate) async fn start_with_trust_domain(network: &str, trust_domain: &str) -> Self {
+        Self::start_internal(network, Some(trust_domain)).await
+    }
+
+    /// Internal: start with an optional trust domain.
+    async fn start_internal(network: &str, trust_domain: Option<&str>) -> Self {
         let nats_name = format!("nats-{}", uuid::Uuid::now_v7());
         let nats_container = GenericImage::new("nats", "latest")
             .with_wait_for(WaitFor::Log(
@@ -80,6 +86,10 @@ impl ControllerContainer {
         let container_name = format!("controller-{}", uuid::Uuid::now_v7());
 
         let mut config_file = NamedTempFile::new().expect("create temp config file");
+        let tls_section = trust_domain
+            .filter(|d| !d.is_empty())
+            .map(|d| format!("\n[tls]\ntrust_domain = \"{d}\"\n"))
+            .unwrap_or_default();
         write!(
             config_file,
             r#"
@@ -104,7 +114,7 @@ retention_days = 90
 
 [log]
 path = "/data/state/controller.log"
-level = "info"
+level = "info"{tls_section}
 "#
         )
         .expect("write config file");
@@ -140,6 +150,7 @@ level = "info"
             )
             .with_env_var("UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_MAX_USES", "100")
             .with_env_var("UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_TTL", "3600")
+            .with_env_var("UPTRAKIT_TEST_UTILS_ENABLED", "true")
             .with_network(network)
             .with_container_name(&container_name)
             .with_hostname(&container_name)

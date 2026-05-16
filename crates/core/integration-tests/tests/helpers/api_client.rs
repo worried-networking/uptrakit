@@ -195,6 +195,28 @@ impl ApiClient {
         }
     }
 
+    /// Execute a raw GET to the given path and return the response body as JSON.
+    ///
+    /// Uses the authenticated client. Panics on network error.
+    pub(crate) async fn raw_get(&self, path: &str) -> serde_json::Value {
+        let resp = self
+            .authenticated()
+            .raw_request("GET", path, None)
+            .await
+            .expect("raw GET request");
+        resp.body
+    }
+
+    /// Execute a raw POST to the given path with no body and return the HTTP status code.
+    pub(crate) async fn raw_post(&self, path: &str) -> reqwest::StatusCode {
+        let resp = self
+            .authenticated()
+            .raw_request("POST", path, None)
+            .await
+            .expect("raw POST request");
+        resp.status
+    }
+
     /// Poll `GET /api/v1/services` until at least `min_count` services appear,
     /// or until `timeout` elapses.
     ///
