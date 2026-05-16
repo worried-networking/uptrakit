@@ -2,9 +2,9 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait, Set, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, FromQueryResult, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -613,35 +613,60 @@ pub async fn list_software_items(
         base_query = base_query.filter(Expr::exists(plugin_type_sub));
     }
 
-    let query = params
+    let non_ascii_query: Option<String> = if let Some(q) = params
         .query
         .as_deref()
         .map(str::trim)
-        .filter(|query| !query.is_empty());
+        .filter(|q| !q.is_empty())
+    {
+        let lower = q.to_lowercase();
+        if lower.is_ascii() {
+            // ASCII-only query: push filter to SQL so the function index is used and
+            // pagination counts are accurate without a full table scan.
+            let escaped = lower
+                .replace('\\', r"\\") // must be first — prevents \% from surviving as wildcard
+                .replace('%', r"\%")
+                .replace('_', r"\_");
+            let pattern = format!("%{escaped}%");
+            base_query = base_query.filter(
+                sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                    software_item::Column::Name,
+                ))
+                // '\' must be ASCII: sea-query Value::Char renders via `*v as u8` (truncates non-ASCII)
+                .like(sea_orm::sea_query::LikeExpr::new(pattern).escape('\\')),
+            );
+            None
+        } else {
+            // Non-ASCII query: SQLite LOWER() is ASCII-only and cannot case-fold Unicode
+            // characters (e.g. Ü → ü). Retain the pre-filter-push behaviour: load all rows
+            // from the tenant and apply a Unicode-aware in-memory retain before paginating.
+            Some(lower)
+        }
+    } else {
+        None
+    };
 
-    let (total, items): (u64, Vec<software_item::Model>) = if let Some(query) = query {
-        let mut items = base_query.all(tenant_db.db()).await.context_to()?;
-        let query = query.to_lowercase();
-        items.retain(|item| item.name.to_lowercase().contains(&query));
-
-        let total = items.len() as u64;
+    let (total, items): (u64, Vec<software_item::Model>) = if let Some(q) = non_ascii_query {
+        let mut rows = base_query.all(tenant_db.db()).await.context_to()?;
+        rows.retain(|item| item.name.to_lowercase().contains(&q));
+        let total = rows.len() as u64;
         let offset = pagination.offset() as usize;
         let per_page = pagination.per_page as usize;
-        let items: Vec<_> = items.into_iter().skip(offset).take(per_page).collect();
-        (total, items)
+        let rows: Vec<_> = rows.into_iter().skip(offset).take(per_page).collect();
+        (total, rows)
     } else {
         let total = base_query
             .clone()
             .count(tenant_db.db())
             .await
             .context_to()?;
-        let items = base_query
+        let rows = base_query
             .offset(Some(pagination.offset()))
             .limit(Some(pagination.per_page))
             .all(tenant_db.db())
             .await
             .context_to()?;
-        (total, items)
+        (total, rows)
     };
 
     if items.is_empty() {

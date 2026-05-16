@@ -380,6 +380,77 @@ async fn list_filters_query_with_pagination_and_total() {
 }
 
 #[tokio::test]
+async fn list_query_validates_max_length() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let long_query = "a".repeat(201);
+    let url = format!("/api/v1/software-items?query={long_query}");
+    let (status, _): (_, serde_json::Value) = client.get(&url).bearer(&token).send_json().await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_whitespace_only_query_returns_all() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in ["alpha", "beta"] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    // query = "   " (URL-encoded spaces) — whitespace only, must be treated as no filter
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=%20%20%20")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["total"], 2);
+}
+
+#[tokio::test]
+async fn list_treats_backslash_as_literal_in_query() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in ["pass\\%word", "password", "normal"] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    // query = `\%` (URL-encoded: %5C%25) — literal backslash-percent, not a wildcard
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=%5C%25")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "pass\\%word");
+}
+
+#[tokio::test]
 async fn get_returns_detail() {
     let app = TestApp::new().await;
     let client = app.client();
