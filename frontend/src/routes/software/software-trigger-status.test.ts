@@ -39,8 +39,8 @@ vi.mock('$lib/notifications.svelte', () => ({
 }));
 
 const { mockEventSubscriptions, mockSubscribeToEvent } = vi.hoisted(() => ({
-	mockEventSubscriptions: new Map<string, () => void>(),
-	mockSubscribeToEvent: vi.fn((eventName: string, callback: () => void) => {
+	mockEventSubscriptions: new Map<string, (data?: Record<string, unknown>) => void>(),
+	mockSubscribeToEvent: vi.fn((eventName: string, callback: (data?: Record<string, unknown>) => void) => {
 		mockEventSubscriptions.set(eventName, callback);
 		return () => {
 			mockEventSubscriptions.delete(eventName);
@@ -121,6 +121,7 @@ function makeHostSummary(hostId: string, name: string): SoftwareItemHostSummary 
 		latest_release_metadata: null,
 		update_available: true,
 		active_update_history_id: null,
+		active_update_status: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
 		plugins: []
@@ -610,6 +611,112 @@ describe('Software Page Trigger Status Handling', () => {
 			await waitFor(() =>
 				expect(vi.mocked(notifications.showError)).toHaveBeenCalledWith('An update is already active for this host')
 			);
+		});
+	});
+
+	describe('SSE in-place cache updates', () => {
+		it('UpdateTriggered sets active_update_history_id and status on matching host', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
+			const detail = makeDetail(item, hosts);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Multi-host: expanded host rows are shown; wait for detail to load
+			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
+			await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
+
+			// Fire SSE event
+			mockEventSubscriptions.get(AdminEventType.UpdateTriggered)?.({
+				software_item_id: 'software-1',
+				host_id: 'host-1',
+				update_history_id: 'hist-123',
+				status: 'pending'
+			});
+
+			// Host row should now show "Pending" badge
+			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
+			await waitFor(() => expect(within(hostRow).queryByText('Pending')).toBeInTheDocument());
+			expect(within(hostRow).queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+		});
+
+		it('UpdateStarted transitions active_update_status to in_progress', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [
+				{
+					...makeHostSummary('host-1', 'host-one'),
+					active_update_history_id: 'hist-123',
+					active_update_status: 'pending'
+				},
+				makeHostSummary('host-2', 'host-two')
+			];
+			const detail = makeDetail(item, hosts);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Wait for host rows with "Pending" badge
+			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
+			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
+			await waitFor(() => expect(within(hostRow).queryByText('Pending')).toBeInTheDocument());
+
+			// Fire UpdateStarted
+			mockEventSubscriptions.get(AdminEventType.UpdateStarted)?.({
+				software_item_id: 'software-1',
+				host_id: 'host-1',
+				update_history_id: 'hist-123'
+			});
+
+			await waitFor(() => expect(within(hostRow).queryByText('In Progress')).toBeInTheDocument());
+		});
+
+		it('UpdateCompleted clears active status and reloads', async () => {
+			const item = makeSoftwareItem('software-1', 'Demo App');
+			item.host_count = 2;
+			const hosts = [
+				{
+					...makeHostSummary('host-1', 'host-one'),
+					active_update_history_id: 'hist-123',
+					active_update_status: 'in_progress'
+				},
+				makeHostSummary('host-2', 'host-two')
+			];
+			const detail = makeDetail(item, hosts);
+			const detailAfter = makeDetail(item, [
+				makeHostSummary('host-1', 'host-one'),
+				makeHostSummary('host-2', 'host-two')
+			]);
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.getSoftwareItem).mockResolvedValueOnce(detail).mockResolvedValue(detailAfter);
+
+			render(SoftwarePage);
+			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+
+			// Wait for host rows with "In Progress" badge
+			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
+			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
+			await waitFor(() => expect(within(hostRow).queryByText('In Progress')).toBeInTheDocument());
+
+			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+
+			// Fire UpdateCompleted
+			mockEventSubscriptions.get(AdminEventType.UpdateCompleted)?.({
+				software_item_id: 'software-1',
+				host_id: 'host-1'
+			});
+
+			// Badge should clear (host row shows "Update" again after cache clear + reload)
+			await waitFor(() => expect(within(hostRow).queryByText('In Progress')).not.toBeInTheDocument());
 		});
 	});
 });
