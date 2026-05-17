@@ -21,6 +21,7 @@ time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "signal", "time"] }
 toml = { workspace = true }
 tracing = { workspace = true }
+uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
