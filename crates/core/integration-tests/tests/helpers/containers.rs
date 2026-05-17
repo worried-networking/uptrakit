@@ -122,6 +122,14 @@ level = "info"{tls_section}
 "#
         )
         .expect("write config file");
+        // NamedTempFile creates 0600 files; the container runs as a different UID so it
+        // cannot read a root-owned 0600 bind mount — make it world-readable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(config_file.path(), std::fs::Permissions::from_mode(0o644))
+                .expect("set config file permissions");
+        }
 
         // GenericImage methods (with_exposed_port, with_wait_for) must be called
         // before ImageExt methods (with_cmd, with_mount, with_network, etc.) because
