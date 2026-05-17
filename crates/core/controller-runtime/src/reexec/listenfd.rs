@@ -79,7 +79,7 @@ pub(crate) fn current_generation() -> u64 {
 /// the first would fail silently — the kernel would close all `FD_CLOEXEC`
 /// descriptors and the child would receive empty `LISTEN_FDS` slots.
 ///
-/// `T: AsFd` means the compiler enforces that the file descriptor is valid and
+/// `impl AsFd` means the compiler enforces that the file descriptor is valid and
 /// open for the lifetime of the call — no `unsafe` required.
 ///
 /// # Errors
