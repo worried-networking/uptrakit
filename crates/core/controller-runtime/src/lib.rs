@@ -99,7 +99,7 @@ struct ControllerReexecHook {
     /// Resolved from `std::env::current_exe()` at startup.
     current_exe: std::path::PathBuf,
     config_path: std::path::PathBuf,
-    master_key_file: Option<String>,
+    master_key_from: Option<String>,
     generation: u64,
     /// Number of bound listeners passed via `LISTEN_FDS` to the child process.
     /// 1 when PKI HTTP is disabled, 2 when enabled.
@@ -123,7 +123,7 @@ impl ReexecHook for ControllerReexecHook {
         let plan = reexec::ReexecPlan {
             current_exe: self.current_exe.clone(),
             config_path: self.config_path.clone(),
-            master_key_file: self.master_key_file.clone(),
+            master_key_from: self.master_key_from.clone(),
             listener_count: self.listener_count,
             generation: self.generation,
             first_listener_fd: self.first_listener_fd,
@@ -874,7 +874,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             .set_reexec_hook(Box::new(ControllerReexecHook {
                 current_exe,
                 config_path: config_path_for_coord.clone(),
-                master_key_file: args.master_key_from.clone(),
+                master_key_from: args.master_key_from.clone(),
                 generation: reexec::listenfd::current_generation(),
                 listener_count,
                 first_listener_fd,
@@ -969,7 +969,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let plan = reexec::ReexecPlan {
             current_exe,
             config_path: config_path_for_coord.clone(),
-            master_key_file: args.master_key_from.clone(),
+            master_key_from: args.master_key_from.clone(),
             listener_count,
             generation: reexec::listenfd::current_generation(),
             first_listener_fd,

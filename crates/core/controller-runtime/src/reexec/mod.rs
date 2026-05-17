@@ -17,7 +17,7 @@ pub(crate) struct ReexecPlan {
     /// Path to the TOML configuration file passed as `--config`.
     pub(crate) config_path: PathBuf,
     /// Value passed to `--master-key-from` for master key resolution (e.g. `env:VAR` or `file:/path`).
-    pub(crate) master_key_file: Option<String>,
+    pub(crate) master_key_from: Option<String>,
     /// Number of file descriptors that were bound and should be inherited via
     /// `LISTEN_FDS` by the new process generation.
     pub(crate) listener_count: usize,
@@ -57,7 +57,7 @@ pub(crate) fn perform_reexec(plan: &ReexecPlan) -> Result<std::convert::Infallib
     let mut cmd = std::process::Command::new(&plan.current_exe);
     cmd.arg("--config").arg(&plan.config_path);
 
-    if let Some(mk) = &plan.master_key_file {
+    if let Some(mk) = &plan.master_key_from {
         cmd.arg("--master-key-from").arg(mk);
     }
 
