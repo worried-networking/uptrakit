@@ -37,6 +37,8 @@ const SYSTEM_ENROLLMENT_TOKEN: &str = "test-system-token-do-not-use-in-prod";
 const CONTROLLER_PORT: u16 = 8443;
 /// NATS port inside the sidecar container.
 const NATS_PORT: u16 = 4222;
+/// PKI plain-HTTP port inside the container.
+const PKI_PORT: u16 = 8444;
 
 /// A running controller container with its mapped host port.
 pub(crate) struct ControllerContainer {
@@ -48,6 +50,8 @@ pub(crate) struct ControllerContainer {
     _config_file: NamedTempFile,
     /// Host port mapped to the controller's HTTPS port.
     host_port: u16,
+    /// Host port mapped to the controller's PKI plain-HTTP port.
+    pki_host_port: u16,
     /// Container name used for DNS resolution on the Docker network.
     container_name: String,
     /// One-time first-user registration token printed by the controller on startup.
@@ -103,7 +107,7 @@ path = "/tmp/dummy-overridden-by-cli"
 addr = "[::]:8443"
 
 [network.pki]
-addr = "[::]:8444"
+addr = "http://[::]:8444"
 
 [nats]
 url = "nats://{nats_name}:{NATS_PORT}"
@@ -124,6 +128,7 @@ level = "info"{tls_section}
         // ImageExt methods consume GenericImage into ContainerRequest.
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_exposed_port(CONTROLLER_PORT.tcp())
+            .with_exposed_port(PKI_PORT.tcp())
             .with_wait_for(WaitFor::Log(
                 LogWaitStrategy::stdout_or_stderr("HTTPS server reusing inherited socket on")
                     .with_times(1),
@@ -162,6 +167,10 @@ level = "info"{tls_section}
             .get_host_port_ipv4(CONTROLLER_PORT.tcp())
             .await
             .expect("get controller mapped port");
+        let pki_host_port = container
+            .get_host_port_ipv4(PKI_PORT.tcp())
+            .await
+            .expect("get PKI mapped port");
 
         let registration_token =
             container.stderr_to_vec().await.ok().and_then(|stderr| {
@@ -173,6 +182,7 @@ level = "info"{tls_section}
             _controller_container: container,
             _config_file: config_file,
             host_port,
+            pki_host_port,
             container_name,
             registration_token,
         }
@@ -181,6 +191,11 @@ level = "info"{tls_section}
     /// The host port mapped to the controller's HTTPS port.
     pub(crate) fn host_port(&self) -> u16 {
         self.host_port
+    }
+
+    /// The host port mapped to the controller's PKI plain-HTTP port.
+    pub(crate) fn pki_host_port(&self) -> u16 {
+        self.pki_host_port
     }
 
     /// The container name (used for DNS resolution by other containers).
