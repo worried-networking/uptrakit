@@ -114,3 +114,14 @@ for single-server deployments. NATS distribution can be added as a future extens
 
 - Spec: `docs/superpowers/specs/2026-05-12-graceful-reload-design.md`
 - Operator runbook: `docs/end-user/operator-runbook-reload.md`
+
+## Amendment — 2026-05-17: Config Schema Simplification
+
+The following config-format changes were applied to reduce section nesting and clarify field semantics.
+No reload behaviour or irreversibly-bound-key semantics changed.
+
+| Old key | New key | Notes |
+| --- | --- | --- |
+| `[master_key]` section + `path` field | Top-level `master_key` string | Accepts `file:<path>`, `env:<VAR>`, or inline 64-char hex. Inline form requires `chmod 0600` on the config file. |
+| `[network.https]` sub-section | Fields directly in `[network]` | `addr`, `trusted_proxies`, proxy-cert headers now at `network.*`. |
+| `[network.pki]` sub-section + `addr` field | `network.pki_addr` | Renamed to clarify it is an advertisement address (not necessarily the bind address). Accepts bare `host:port` or `http://` URL. `https://` rejected. |
