@@ -125,3 +125,6 @@ No reload behaviour or irreversibly-bound-key semantics changed.
 | `[master_key]` section + `path` field | Top-level `master_key` string | Accepts `file:<path>`, `env:<VAR>`, or inline 64-char hex. Inline form requires `chmod 0600` on the config file. |
 | `[network.https]` sub-section | Fields directly in `[network]` | `addr`, `trusted_proxies`, proxy-cert headers now at `network.*`. |
 | `[network.pki]` sub-section + `addr` field | `network.pki_addr` | Renamed to clarify it is an advertisement address (not necessarily the bind address). Accepts bare `host:port` or `http://` URL. `https://` rejected. |
+
+Irreversibly-bound key name updated: `master_key` (was `master_key.path`). The reexec trigger
+in `triage.rs` and the related documentation in `coding-standards.md` reflect this rename.

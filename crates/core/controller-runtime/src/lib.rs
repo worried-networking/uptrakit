@@ -258,13 +258,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         );
 
     // Initialise tracing. Log level from runtime.log in TOML; -v/-vv/-vvv on CLI overrides.
-    #[expect(
-        clippy::allow_attributes,
-        clippy::allow_attributes_without_reason,
-        reason = "feature-conditional: unused_mut fires only when the journald feature is disabled"
-    )]
-    #[allow(unused_mut)]
-    let mut builder = uptrakit_tracing_init::TracingBuilder::new()
+    let builder = uptrakit_tracing_init::TracingBuilder::new()
         .verbosity(args.verbose)
         .max_verbosity(3)
         .directives_for_verbosity(
@@ -288,7 +282,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // tracing layer filtered to the `uptrakit_audit` target so that structured
     // audit events reach the system journal alongside normal stdout logging.
     #[cfg(feature = "journald")]
-    {
+    let builder = {
         #[expect(
             clippy::expect_used,
             reason = "infallible at startup: journald layer construction failures are unrecoverable for the requested audit backend and must abort initialization"
@@ -296,8 +290,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let journald = tracing_journald::layer()
             .expect("failed to connect to journald")
             .with_filter(tracing_subscriber::EnvFilter::new("uptrakit_audit=info"));
-        builder = builder.extra_layer(Box::new(journald));
-    }
+        builder.extra_layer(Box::new(journald))
+    };
 
     builder.init();
 
@@ -1262,15 +1256,6 @@ async fn build_audit_logger(
     clippy::too_many_arguments,
     reason = "spawns all background service tasks; each parameter drives a distinct lifecycle phase"
 )]
-// `controller_installation_id` is only used behind `embedded-scheduler`
-// and `embedded-agent` feature flags; `has_external_tls_cert` is only used
-// behind the `nats` feature flag.
-#[expect(
-    clippy::allow_attributes,
-    clippy::allow_attributes_without_reason,
-    reason = "feature-conditional: some parameters only used inside embedded-scheduler/embedded-agent feature blocks"
-)]
-#[allow(unused_variables)]
 async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
     app_state: &Arc<AppState>,
@@ -1288,13 +1273,9 @@ async fn spawn_background_tasks(
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
 ) {
-    // Used only when embedded-scheduler or embedded-agent features are enabled.
-    #[cfg(not(any(
-        feature = "embedded-scheduler",
-        feature = "embedded-agent",
-        feature = "embedded-mqtt"
-    )))]
-    let _ = controller_installation_id;
+    // These params are only used inside feature-gated blocks; suppress unused
+    // warnings without feature-conditional attributes (both types are Copy).
+    let _ = (controller_installation_id, has_external_tls_cert);
 
     // CRL manager: uses the child cancellation token for cooperative shutdown.
     // Must use track() (not track_abort()) so the manager finishes its current
