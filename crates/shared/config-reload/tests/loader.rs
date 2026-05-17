@@ -282,6 +282,34 @@ fn loader_load_emits_extras_warnings() {
     assert!(loaded.warnings.iter().any(|w| w.contains("poool_size")));
 }
 
+#[test]
+fn loader_sample_file_parses_and_validates() {
+    let sample_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../docs/examples/controller.toml"
+    );
+    TomlConfigLoader::load(sample_path).unwrap_or_else(|e| {
+        panic!("docs/examples/controller.toml must parse and validate: {e}");
+    });
+}
+
+#[test]
+fn runtime_config_network_unknown_key_captured_in_extras() {
+    let raw = minimal_toml().replace(
+        "addr = \"0.0.0.0:8443\"",
+        "addr = \"0.0.0.0:8443\"\nnetwork_typo_key = \"value\"",
+    );
+    let cfg: RuntimeConfig = toml::from_str(&raw).unwrap();
+    assert_eq!(
+        cfg.network.https.addr, "0.0.0.0:8443",
+        "double-flatten: https.addr must be accessible via NetworkConfig"
+    );
+    assert!(
+        cfg.network.extra.contains_key("network_typo_key"),
+        "unknown [network] key must land in NetworkConfig.extra"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn loader_inline_master_key_rejects_permissive_config() {
