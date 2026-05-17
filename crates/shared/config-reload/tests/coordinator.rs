@@ -353,23 +353,20 @@ fn channels_boot_seeded_receiver_has_correct_value() {
 }
 
 const MINIMAL_RUNTIME_CONFIG_TOML: &str = r#"
+master_key = "file:/etc/uptrakit/master.key"
+
 [db]
 url = "sqlite://test.db"
 pool_size = 16
 acquire_timeout_ms = 5000
 
-[master_key]
-path = "/etc/uptrakit/master.key"
-
-[network.https]
+[network]
 addr = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8444"
 trusted_proxies = []
 real_ip_header = "x-forwarded-for"
 forwarded_client_cert_info_header = "x-fcc"
 forwarded_client_cert_pem_header = "x-fcc-pem"
-
-[network.pki]
-addr = "0.0.0.0:8444"
 
 [tls]
 cert_path = "/etc/uptrakit/cert.pem"
