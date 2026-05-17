@@ -97,17 +97,14 @@ impl ControllerContainer {
         write!(
             config_file,
             r#"
+master_key = "file:/tmp/dummy-overridden-by-cli"
+
 [db]
 url = "sqlite:///data/state/controller.db?mode=rwc"
 
-[master_key]
-path = "/tmp/dummy-overridden-by-cli"
-
-[network.https]
+[network]
 addr = "[::]:8443"
-
-[network.pki]
-addr = "http://[::]:8444"
+pki_addr = "http://[::]:8444"
 
 [nats]
 url = "nats://{nats_name}:{NATS_PORT}"

@@ -281,3 +281,41 @@ fn loader_load_emits_extras_warnings() {
     assert!(!loaded.warnings.is_empty());
     assert!(loaded.warnings.iter().any(|w| w.contains("poool_size")));
 }
+
+#[cfg(unix)]
+#[test]
+fn loader_inline_master_key_rejects_permissive_config() {
+    use std::os::unix::fs::PermissionsExt;
+    let toml_content = minimal_toml().replace(
+        "master_key = \"file:/etc/uptrakit/master.key\"",
+        "master_key = \"0000000000000000000000000000000000000000000000000000000000000001\"",
+    );
+    let mut f = NamedTempFile::new().unwrap();
+    write!(f, "{toml_content}").unwrap();
+    std::fs::set_permissions(f.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    let result = TomlConfigLoader::load(f.path());
+    assert!(
+        result.is_err(),
+        "permissive config with inline key must fail"
+    );
+    let err = result.err().expect("expected error").to_string();
+    assert!(
+        err.contains("chmod 0600"),
+        "error must mention chmod 0600: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn loader_inline_master_key_accepts_strict_config() {
+    use std::os::unix::fs::PermissionsExt;
+    let toml_content = minimal_toml().replace(
+        "master_key = \"file:/etc/uptrakit/master.key\"",
+        "master_key = \"0000000000000000000000000000000000000000000000000000000000000001\"",
+    );
+    let mut f = NamedTempFile::new().unwrap();
+    write!(f, "{toml_content}").unwrap();
+    std::fs::set_permissions(f.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+    TomlConfigLoader::load(f.path())
+        .expect("strict permissions with inline key must load successfully");
+}
