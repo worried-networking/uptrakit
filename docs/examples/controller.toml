@@ -1,0 +1,117 @@
+# uptrakit controller configuration
+#
+# master_key  — encryption master key source (string, required unless --master-key-from is passed at startup)
+#
+# Three forms accepted:
+#   file:<path>    — read the 64-char hex key from an absolute file path (recommended)
+#   env:<VAR>      — read the key from an environment variable
+#   <64-hex-chars> — inline key material (requires chmod 0600 on this file)
+master_key = "file:/etc/uptrakit/master.key"
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+[db]
+# Database connection URL.  SQLite and PostgreSQL are supported.
+# SQLite example:   sqlite:///var/lib/uptrakit/controller.db
+# PostgreSQL example: postgres://user:pass@localhost/uptrakit
+url = "sqlite:///var/lib/uptrakit/controller.db"
+
+# Maximum number of connections in the connection pool.  (integer, default: 16)
+# pool_size = 16
+
+# Maximum time in milliseconds to wait for a pool connection.  (integer, default: 5000)
+# acquire_timeout_ms = 5000
+
+# ── Network ───────────────────────────────────────────────────────────────────
+
+[network]
+# TCP address for the HTTPS listener.  (string, required)
+addr = "0.0.0.0:8443"
+
+# PKI advertisement address.  Accepts a bare host:port socket address (used as
+# both bind and advertised address) or an http:// URL (advertised only).
+# https:// is not accepted here.  (string, default: "")
+# pki_addr = "0.0.0.0:8444"
+
+# CIDR ranges of trusted reverse proxies.  (array of strings, default: [])
+# trusted_proxies = ["10.0.0.0/8"]
+
+# Header carrying the real client IP from the reverse proxy.  (string, default: "x-forwarded-for")
+# real_ip_header = "x-forwarded-for"
+
+# Header carrying forwarded TLS client-certificate info.  (string, default: "x-forwarded-client-cert")
+# forwarded_client_cert_info_header = "x-forwarded-client-cert"
+
+# Header carrying the forwarded TLS client-certificate PEM.  (string, default: "x-forwarded-client-cert-pem")
+# forwarded_client_cert_pem_header = "x-forwarded-client-cert-pem"
+
+# ── TLS ───────────────────────────────────────────────────────────────────────
+
+[tls]
+# Path to the PEM-encoded TLS certificate.  When both cert_path and key_path are
+# empty the controller uses a self-managed CA (default mode).  (string, default: "")
+# cert_path = "/etc/uptrakit/tls/cert.pem"
+
+# Path to the PEM-encoded TLS private key.  Must be set together with cert_path.
+# (string, default: "")
+# key_path = "/etc/uptrakit/tls/key.pem"
+
+# Subject alternative names embedded in the managed certificate.  (array of strings, default: [])
+# sans = ["controller.example.com"]
+
+# SPIFFE trust domain for mTLS service identity.  When set, the controller embeds
+# a spiffe://<trust_domain>/service/<id> URI SAN in every signed service certificate.
+# Characters: lowercase letters, digits, dots, hyphens only.  (string, default: "")
+# trust_domain = "uptrakit.example.com"
+
+# ── NATS ──────────────────────────────────────────────────────────────────────
+
+[nats]
+# NATS server URL.  (string, required)
+url = "nats://localhost:4222"
+
+# ── Audit log ─────────────────────────────────────────────────────────────────
+
+[audit]
+# Event filter.  One of: "all", "mutations", "none".  (string, default: "all")
+# filter = "all"
+
+# Number of days to retain audit log entries.  (integer, default: 90)
+# retention_days = 90
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+[log]
+# Path to the log file.  Empty string means log to stdout.  (string, default: "")
+# path = "/var/log/uptrakit/controller.log"
+
+# Log level.  One of: "trace", "debug", "info", "warn", "error".  (string, default: "info")
+# level = "info"
+
+# ── Zero-configuration discovery ──────────────────────────────────────────────
+
+[zeroconf]
+# Enable mDNS/DNS-SD auto-discovery of agents on the local network.
+# When enabled, url and pki_addr must be set.  (bool, default: false)
+# enabled = false
+
+# Controller URL advertised to auto-discovered agents.  (string, required when enabled = true)
+# url = "https://controller.local:8443"
+
+# PKI advertisement address for auto-discovered agents.  (string, default: "")
+# pki_addr = "controller.local:8444"
+
+# ── Embedded services ─────────────────────────────────────────────────────────
+
+[embedded_services]
+# Run the Agent service inside the controller binary.  (bool, default: false)
+# agent = false
+
+# Run the Agent-SSH service inside the controller binary.  (bool, default: false)
+# agent_ssh = false
+
+# Run the MQTT broker inside the controller binary.  (bool, default: false)
+# mqtt = false
+
+# Run the Scheduler service inside the controller binary.  (bool, default: false)
+# scheduler = false
