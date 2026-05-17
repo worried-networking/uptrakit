@@ -980,6 +980,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/test/services/{id}/disconnect",
             axum::routing::post(crate::routes::test_utils::disconnect_service),
         );
+        router = router.route(
+            "/test/force-reexec",
+            axum::routing::post(crate::routes::test_utils::force_reexec),
+        );
     }
 
     // Always serve the raw OpenAPI JSON at a stable URL.
