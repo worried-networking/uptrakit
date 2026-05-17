@@ -103,6 +103,10 @@ impl Reloadable for PkiListenerReloadable {
     /// # Errors
     ///
     /// Always returns `Ok(())`.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
+    )]
     async fn apply(&self, new: Arc<NetworkConfig>) -> Result<(), Report> {
         let current = self.tx.borrow().clone();
         {
@@ -111,7 +115,7 @@ impl Reloadable for PkiListenerReloadable {
         } // guard dropped before the send/.await boundary
 
         tracing::info!(addr = %new.pki_addr, "pki listener config applied");
-        self.tx.send(Arc::new(new.pki_addr.clone())).ok();
+        let _ = self.tx.send(Arc::new(new.pki_addr.clone()));
         Ok(())
     }
 
@@ -120,11 +124,15 @@ impl Reloadable for PkiListenerReloadable {
     /// # Errors
     ///
     /// Always returns `Ok(())`.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
+    )]
     async fn revert(&self) -> Result<(), Report> {
         let prior = self.snapshot.lock().clone();
         if let Some(prior) = prior {
             tracing::info!(addr = %prior, "pki listener config reverted");
-            self.tx.send(prior).ok();
+            let _ = self.tx.send(prior);
         }
         Ok(())
     }
