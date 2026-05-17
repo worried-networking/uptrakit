@@ -41,6 +41,12 @@ impl SecretString {
     }
 }
 
+impl Default for SecretString {
+    fn default() -> Self {
+        Self(String::new())
+    }
+}
+
 impl fmt::Debug for SecretString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SecretString(***)")
