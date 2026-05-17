@@ -302,27 +302,16 @@ async fn run_server(args: cli::Args) -> Result<()> {
     builder.init();
 
     // Phase 1: Master key initialization — reads from --master-key-from or TOML
-    // master_key.path as a fallback.
+    // master_key as a fallback. The TOML value already carries the full source
+    // string (file:, env:, or inline hex) so no prefix injection is needed.
+    let toml_key = runtime.master_key.expose_secret();
     let master_key_source = args.master_key_from.as_deref().or_else(|| {
-        let p = runtime.master_key.path.as_str();
-        if p.is_empty() { None } else { Some(p) }
-    });
-    // Build a `file:` prefixed source if we got a bare path from TOML.
-    let master_key_from_toml_buf;
-    let master_key_source = if let Some(src) = master_key_source {
-        if !src.starts_with("file:")
-            && !src.starts_with("env:")
-            && !runtime.master_key.path.is_empty()
-            && src == runtime.master_key.path.as_str()
-        {
-            master_key_from_toml_buf = format!("file:{src}");
-            Some(master_key_from_toml_buf.as_str())
+        if toml_key.is_empty() {
+            None
         } else {
-            Some(src)
+            Some(toml_key)
         }
-    } else {
-        None
-    };
+    });
     let master_key_hex = startup::init_master_key(master_key_source)?;
 
     // Phase 2: Application directories — use platform defaults (no CLI overrides).
@@ -817,7 +806,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         let (https_reloadable, _https_rx) =
             reload::https_listener::HttpsListenerReloadable::new(b.runtime.network.https.clone());
         let (pki_reloadable, _pki_rx) =
-            reload::pki_listener::PkiListenerReloadable::new(b.runtime.network.pki.clone());
+            reload::pki_listener::PkiListenerReloadable::new(b.runtime.network.pki_addr.clone());
         let (audit_reloadable, audit_log_filter_rx) = reload::audit::AuditDispatcherReloadable::new(
             audit_dispatcher.clone(),
             b.runtime.audit.clone(),

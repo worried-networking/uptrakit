@@ -64,7 +64,7 @@ pub(crate) fn validate_configuration(
                     Some(port)
                 } else {
                     tracing::warn!(
-                        "network.pki.addr uses http:// scheme but has no explicit port; \
+                        "network.pki_addr uses http:// scheme but has no explicit port; \
                          the built-in PKI HTTP listener will not start"
                     );
                     None
@@ -73,7 +73,7 @@ pub(crate) fn validate_configuration(
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    "network.pki.addr URL could not be parsed; PKI HTTP listener disabled"
+                    "network.pki_addr URL could not be parsed; PKI HTTP listener disabled"
                 );
                 None
             }
