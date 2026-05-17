@@ -7,10 +7,11 @@
 use std::sync::Arc;
 
 use tokio::sync::watch;
+use uptrakit_shared_types::SecretString;
 
 use crate::config::{
-    AuditConfig, DbConfig, EmbeddedServicesConfig, LogConfig, MasterKeyConfig, NatsConfig,
-    NetworkConfig, RuntimeConfig, TlsConfig, ZeroconfConfig,
+    AuditConfig, DbConfig, EmbeddedServicesConfig, LogConfig, NatsConfig, NetworkConfig,
+    RuntimeConfig, TlsConfig, ZeroconfConfig,
 };
 
 /// Senders for all runtime config sections.
@@ -29,10 +30,10 @@ pub struct RuntimeConfigChannels {
     pub tls: watch::Sender<Arc<TlsConfig>>,
     /// Audit config sender.
     pub audit: watch::Sender<Arc<AuditConfig>>,
-    /// Boot-time only. Log path changes require reexec (Plan 3); no live delta variant.
+    /// Boot-time only. Log path changes require reexec; no live delta variant.
     pub log: watch::Sender<Arc<LogConfig>>,
-    /// Boot-time only. Master key path changes require reexec (Plan 3); no live delta variant.
-    pub master_key: watch::Sender<Arc<MasterKeyConfig>>,
+    /// Boot-time only. Master key changes require reexec; no live delta variant.
+    pub master_key: watch::Sender<Arc<SecretString>>,
     /// Embedded services config sender.
     pub embedded_services: watch::Sender<Arc<EmbeddedServicesConfig>>,
     /// Zero-configuration auto-discovery config sender.
@@ -55,10 +56,10 @@ pub struct RuntimeConfigReceivers {
     pub tls: watch::Receiver<Arc<TlsConfig>>,
     /// Audit config receiver.
     pub audit: watch::Receiver<Arc<AuditConfig>>,
-    /// Boot-time only. Log path changes require reexec (Plan 3); no live delta variant.
+    /// Boot-time only. Log path changes require reexec; no live delta variant.
     pub log: watch::Receiver<Arc<LogConfig>>,
-    /// Boot-time only. Master key path changes require reexec (Plan 3); no live delta variant.
-    pub master_key: watch::Receiver<Arc<MasterKeyConfig>>,
+    /// Boot-time only. Master key changes require reexec; no live delta variant.
+    pub master_key: watch::Receiver<Arc<SecretString>>,
     /// Embedded services config receiver.
     pub embedded_services: watch::Receiver<Arc<EmbeddedServicesConfig>>,
     /// Zero-configuration auto-discovery config receiver.
