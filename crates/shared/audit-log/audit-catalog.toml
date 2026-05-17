@@ -690,3 +690,19 @@ action = "user.update"
 [[entries]]
 site = "uptrakit_web_api::routes::users::update_user_roles"
 action = "user.update"
+
+# ---------------------------------------------------------------------------
+# Test utilities (only compiled with test-utils feature)
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::router::request_service_renewal"
+skip = "test-utils endpoint; forces certificate renewal for testing, no persistent state change, no AuditEntry emitted"
+
+[[entries]]
+site = "uptrakit_web_api::router::disconnect_service"
+skip = "test-utils endpoint; forces WebSocket disconnect for testing, no persistent state change, no AuditEntry emitted"
+
+[[entries]]
+site = "uptrakit_web_api::router::force_reexec"
+skip = "test-utils endpoint; triggers process reexec for testing, no domain state change, no AuditEntry emitted"
