@@ -395,6 +395,13 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // This must happen before the coordinator block so that `listener_count` and
     // `https_std`/`pki_std_for_spawn` are in scope when the reexec hook is
     // constructed and when the server task is spawned.
+    //
+    // CONSECUTIVE-FD INVARIANT: `perform_reexec` sets `LISTEN_FDS_FIRST_FD` to the
+    // raw fd of the HTTPS socket and `LISTEN_FDS` to the listener count (1 or 2).
+    // The `listenfd` crate maps slot N to fd `FIRST + N`, so it assumes HTTPS and
+    // PKI fds are consecutive (no gap). This holds as long as no fd-allocating call
+    // (file open, socket, dup, etc.) executes between the HTTPS bind and the PKI bind
+    // below. Do not insert any such call in this block.
     let inherited = reexec::listenfd::take_inherited_listeners().unwrap_or_else(|e| {
         tracing::warn!("LISTEN_FDS claim failed: {e}; falling back to fresh bind");
         None
