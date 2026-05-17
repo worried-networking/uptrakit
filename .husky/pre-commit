@@ -24,6 +24,19 @@ FRONTEND_ESLINT_FILES=()
 FRONTEND_PRETTIER_FILES=()
 ROUTES_RS_FILES=()
 ACTIONS_FILES=()
+WEBSITE_DOCS_TOUCHED=0
+
+WEBSITE_DOC_PREFIXES=()
+REPO_ROOT=$(git rev-parse --show-toplevel)
+if [[ -d website/content/docs ]]; then
+  while IFS= read -r -d '' link; do
+    target=$(readlink "$link") || continue
+    # Two-cd sequence resolves relative symlink targets correctly on macOS (BSD readlink lacks -f).
+    abs=$(cd "$(dirname "$link")" && cd "$target" 2>/dev/null && pwd) || continue
+    rel="${abs#"$REPO_ROOT/"}"
+    [[ "$rel" != "$abs" ]] && WEBSITE_DOC_PREFIXES+=("$rel/")
+  done < <(find website/content/docs -maxdepth 1 -type l -print0 2>/dev/null || true)
+fi
 
 for path in "${STAGED_PATHS[@]}"; do
   case "$path" in
@@ -41,6 +54,16 @@ for path in "${STAGED_PATHS[@]}"; do
       ;;
   esac
   [[ "$path" =~ ^crates/ui/web-api/src/routes/.*\.rs$ ]] && ROUTES_RS_FILES+=("$path")
+  if [[ "$path" == website/* ]]; then
+    WEBSITE_DOCS_TOUCHED=1
+  else
+    for prefix in "${WEBSITE_DOC_PREFIXES[@]}"; do
+      if [[ "$path" == "$prefix"* ]]; then
+        WEBSITE_DOCS_TOUCHED=1
+        break
+      fi
+    done
+  fi
 done
 
 require_worktree_paths() {
@@ -110,6 +133,18 @@ if (( ${#ACTIONS_FILES[@]} > 0 )); then
     require_worktree_paths 'Actions' "${ACTIONS_FILES[@]}"
     echo '[pre-commit] Running actionlint on staged workflow files...'
     actionlint "${ACTIONS_FILES[@]}"
+  fi
+fi
+
+if (( WEBSITE_DOCS_TOUCHED )); then
+  if ! command -v zola >/dev/null 2>&1; then
+    printf '[pre-commit] WARNING: zola not installed — skipping website link check.\n' >&2
+    printf '[pre-commit] Install: https://www.getzola.org/documentation/getting-started/installation/\n' >&2
+  else
+    echo '[pre-commit] Running zola check...'
+    # --skip-external-links: external link verification runs in CI; avoid network I/O in pre-commit.
+    # zola check validates the whole site — pre-existing broken links in unrelated docs will also fail.
+    ( cd website && zola check --skip-external-links )
   fi
 fi
 

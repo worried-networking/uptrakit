@@ -1,3 +1,7 @@
++++
+title = "MCP OAuth 2.1 — Security Guide"
++++
+
 # MCP OAuth 2.1 — Security Guide
 
 This guide is for security reviewers and auditors evaluating the MCP OAuth 2.1 implementation.

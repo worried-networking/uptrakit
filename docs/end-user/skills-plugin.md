@@ -1,3 +1,7 @@
++++
+title = "Agent Skills Plugin"
++++
+
 # Agent Skills Plugin
 
 The **Agent Skills** plugin discovers, tracks, and updates LLM-agent Skills installed globally

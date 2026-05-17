@@ -1,3 +1,7 @@
++++
+title = "Connecting MCP Clients to the Controller"
++++
+
 # Connecting MCP Clients to the Controller
 
 This guide explains how to connect browser-capable MCP clients (Claude Desktop, Cursor, MCP Inspector)
