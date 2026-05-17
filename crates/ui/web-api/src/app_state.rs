@@ -1163,6 +1163,16 @@ impl AppState {
     ) -> Option<Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateHook>> {
         self.plugin.plugin_ops.controller_update_hook()
     }
+
+    /// Returns the reexec notify handle used by the `POST /test/force-reexec`
+    /// endpoint, if the `test-utils` feature is enabled and
+    /// `UPTRAKIT_TEST_UTILS_ENABLED=true` was set at startup.
+    ///
+    /// The returned `Arc` keeps the `Notify` alive independently of `AppState`.
+    #[cfg(feature = "test-utils")]
+    pub fn test_reexec_notify(&self) -> Option<Arc<tokio::sync::Notify>> {
+        self.test_reexec_notify.as_ref().map(Arc::clone)
+    }
 }
 
 /// Allows Axum to extract [`DbState`] from `Arc<AppState>` via the blanket

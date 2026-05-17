@@ -440,6 +440,9 @@ async fn run_server(args: cli::Args) -> Result<()> {
             l
         }
     };
+    // ORDERING: call clear_cloexec AFTER take_inherited_listeners(); listenfd
+    // re-arms FD_CLOEXEC on every claimed socket, so clearing it again here is
+    // required to ensure the fd survives exec() in subsequent reexec generations.
     reexec::listenfd::clear_cloexec(&https_std)
         .map_err(|e| report!(AppError::Config(format!("clear_cloexec HTTPS: {e}"))))?;
 
@@ -461,6 +464,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
                     l
                 }
             };
+            // ORDERING: same invariant as the HTTPS clear_cloexec above.
+            // Both sockets must be cleared after take_inherited_listeners().
             reexec::listenfd::clear_cloexec(&pki_std)
                 .map_err(|e| report!(AppError::Config(format!("clear_cloexec PKI: {e}"))))?;
             (2, Some(pki_std))
@@ -935,6 +940,44 @@ async fn run_server(args: cli::Args) -> Result<()> {
             .build()
             .map_err(|e| report!(AppError::Config(format!("failed to build AppState: {e}"))))?,
     );
+
+    #[cfg(feature = "test-utils")]
+    if let Some(notify) = app_state.test_reexec_notify() {
+        // current_exe was moved into ControllerReexecHook at set_reexec_hook() above.
+        // Call current_exe() a second time — the OS call is cheap at startup.
+        let current_exe = std::env::current_exe().map_err(|e| {
+            report!(AppError::Config(format!(
+                "resolve current_exe (test-utils): {e}"
+            )))
+        })?;
+        let plan = reexec::ReexecPlan {
+            current_exe,
+            config_path: config_path_for_coord.clone(),
+            master_key_file: args.master_key_from.clone(),
+            listener_count,
+            generation: reexec::listenfd::current_generation(),
+        };
+        tokio::spawn(async move {
+            notify.notified().await;
+            tracing::warn!(
+                "test-utils force_reexec: triggering unconditional reexec at generation {}; \
+                 a concurrent coordinator-driven reexec at this moment would produce an \
+                 unexpected generation number in the integration test",
+                plan.generation
+            );
+            // Brief pause to allow the 202 ACCEPTED response to be flushed by the HTTP
+            // layer before exec() replaces the process image. Without this, the response
+            // can be dropped by the kernel mid-send on multi-threaded runtimes.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // perform_reexec returns Result<Infallible, _>; the Ok branch is unreachable.
+            // On Err, exec() itself failed (binary not at path) — process stays alive
+            // and the integration test times out rather than hanging forever.
+            match reexec::perform_reexec(&plan) {
+                Ok(infallible) => match infallible {},
+                Err(e) => tracing::error!(error = %e, "test-utils force_reexec: exec failed"),
+            }
+        });
+    }
 
     uptrakit_web_api::global_providers::github::emit_global_github_provider_diagnostic_if_needed(
         app_state.db(),
