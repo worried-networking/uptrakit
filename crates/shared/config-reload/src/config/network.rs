@@ -6,20 +6,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigReloadError;
 
-/// Top-level network configuration grouping HTTPS and PKI listener settings.
+/// Network listener settings — HTTPS and PKI advertisement address.
+///
+/// In TOML all fields appear directly under `[network]`:
+/// ```toml
+/// [network]
+/// addr    = "0.0.0.0:8443"
+/// pki_addr = "http://controller.example.com:8444"
+/// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[non_exhaustive]
 pub struct NetworkConfig {
-    /// HTTPS listener configuration.
+    /// HTTPS listener settings (addr, proxy headers, …).
+    ///
+    /// Flattened into `[network]` in TOML — callers read e.g. `config.network.https.addr`.
+    #[serde(flatten)]
     pub https: HttpsConfig,
-    /// PKI (certificate authority) listener configuration.
-    pub pki: PkiConfig,
+    /// PKI advertisement address.
+    ///
+    /// Accepts either a bare `host:port` socket address (used as both bind and
+    /// advertised address) or an `http://` URL (advertised only; the actual
+    /// listener is managed separately). `https://` is explicitly rejected.
+    #[serde(default)]
+    pub pki_addr: String,
     /// Unknown keys collected for `warn_about_extras`.
     #[serde(flatten)]
     pub extra: HashMap<String, toml::Value>,
 }
 
-/// HTTPS listener settings.
+/// HTTPS listener settings (embedded inside [`NetworkConfig`] via `#[serde(flatten)]`).
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[non_exhaustive]
 pub struct HttpsConfig {
@@ -37,20 +52,7 @@ pub struct HttpsConfig {
     /// Header carrying the forwarded client certificate PEM.
     #[serde(default = "default_fcc_pem")]
     pub forwarded_client_cert_pem_header: String,
-    /// Unknown keys collected for `warn_about_extras`.
-    #[serde(flatten)]
-    pub extra: HashMap<String, toml::Value>,
-}
-
-/// PKI (internal CA) listener settings.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[non_exhaustive]
-pub struct PkiConfig {
-    /// TCP address and port to listen on (e.g. `0.0.0.0:8444`).
-    pub addr: String,
-    /// Unknown keys collected for `warn_about_extras`.
-    #[serde(flatten)]
-    pub extra: HashMap<String, toml::Value>,
+    // No `extra` field: NetworkConfig.extra is the single flatten catch-all.
 }
 
 fn default_real_ip() -> String {
@@ -68,22 +70,24 @@ impl NetworkConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if `https.addr` or `pki.addr` is not a valid
-    /// `SocketAddr`, or if the two addrs are identical.
+    /// - `addr` is not a valid `SocketAddr`
+    /// - `pki_addr` uses the `https://` scheme (must be `http://` or a bare socket address)
+    /// - `pki_addr` (bare socket addr form) collides with `addr`
     pub fn validate(&self) -> Result<(), Report> {
         self.https.addr.parse::<SocketAddr>().map_err(|e| {
             report!(ConfigReloadError::Validate(format!(
-                "network.https.addr invalid: {e}"
+                "network.addr invalid: {e}"
             )))
         })?;
-        // network.pki.addr is the public PKI URL (e.g. `http://hostname:8080`),
-        // not a bind address — SocketAddr parsing does not apply. We still
-        // reject the collision case where a misconfigured deployment puts
-        // both listeners on the same string addr (would race for the port).
-        if !self.pki.addr.is_empty() && self.pki.addr == self.https.addr {
+        if self.pki_addr.starts_with("https://") {
+            bail!(ConfigReloadError::Validate(
+                "network.pki_addr must not use https:// scheme; use http:// or a bare socket address".into()
+            ));
+        }
+        if !self.pki_addr.is_empty() && self.pki_addr == self.https.addr {
             bail!(ConfigReloadError::Validate(format!(
-                "network.pki.addr ({}) collides with network.https.addr",
-                self.pki.addr,
+                "network.pki_addr ({}) collides with network.addr",
+                self.pki_addr,
             )));
         }
         Ok(())

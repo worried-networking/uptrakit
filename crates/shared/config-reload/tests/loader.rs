@@ -40,41 +40,45 @@ unknown_key = "value"
 // ── NetworkConfig tests ─────────────────────────────────────────────────────
 
 #[test]
-fn network_parses_https_and_pki() {
+fn network_parses_flat_fields() {
     let raw = r#"
-[https]
 addr = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8444"
 trusted_proxies = ["127.0.0.1/32"]
 real_ip_header = "x-forwarded-for"
 forwarded_client_cert_info_header = "x-fcc"
 forwarded_client_cert_pem_header  = "x-fcc-pem"
-
-[pki]
-addr = "0.0.0.0:8444"
 "#;
     let parsed: NetworkConfig = toml::from_str(raw).unwrap();
     assert_eq!(parsed.https.addr, "0.0.0.0:8443");
-    assert_eq!(parsed.pki.addr, "0.0.0.0:8444");
+    assert_eq!(parsed.pki_addr, "0.0.0.0:8444");
     parsed.validate().unwrap();
+}
+
+#[test]
+fn network_rejects_https_scheme_pki_addr() {
+    let raw = r#"
+addr    = "0.0.0.0:8443"
+pki_addr = "https://controller.example.com:8444"
+"#;
+    let parsed: NetworkConfig = toml::from_str(raw).unwrap();
+    let err = parsed.validate().unwrap_err();
+    assert!(
+        err.to_string().contains("https://"),
+        "error must mention https://"
+    );
 }
 
 #[test]
 fn network_rejects_collision() {
     let raw = r#"
-[https]
-addr = "0.0.0.0:8443"
-trusted_proxies = []
-real_ip_header = "x-forwarded-for"
-forwarded_client_cert_info_header = "x-fcc"
-forwarded_client_cert_pem_header  = "x-fcc-pem"
-
-[pki]
-addr = "0.0.0.0:8443"
+addr    = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8443"
 "#;
     let parsed: NetworkConfig = toml::from_str(raw).unwrap();
     assert!(
         parsed.validate().is_err(),
-        "https and pki on same addr must fail"
+        "same addr for https and pki must fail"
     );
 }
 
@@ -186,23 +190,20 @@ fn zeroconf_enabled_requires_url_and_pki_addr() {
 
 fn minimal_toml() -> String {
     r#"
+master_key = "file:/etc/uptrakit/master.key"
+
 [db]
 url = "sqlite://var/lib/uptrakit/controller.db"
 pool_size = 16
 acquire_timeout_ms = 5000
 
-[master_key]
-path = "/etc/uptrakit/master.key"
-
-[network.https]
+[network]
 addr = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8444"
 trusted_proxies = []
 real_ip_header = "x-forwarded-for"
 forwarded_client_cert_info_header = "x-fcc"
 forwarded_client_cert_pem_header  = "x-fcc-pem"
-
-[network.pki]
-addr = "0.0.0.0:8444"
 
 [tls]
 cert_path = "/etc/uptrakit/tls/cert.pem"
