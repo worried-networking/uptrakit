@@ -284,6 +284,8 @@ mod tests {
             reject_dangerous_commands: false,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+            #[cfg(feature = "test-utils")]
+            test_reexec_notify: None,
             update_dispatcher: std::sync::Arc::new(
                 uptrakit_controller_core::update::NoopUpdateDispatcher,
             ),
