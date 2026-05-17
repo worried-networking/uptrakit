@@ -1,3 +1,7 @@
++++
+title = "Setting Up Two-Factor Authentication"
++++
+
 # Setting Up Two-Factor Authentication
 
 Two-factor authentication (2FA) adds a second verification step to your login, protecting
