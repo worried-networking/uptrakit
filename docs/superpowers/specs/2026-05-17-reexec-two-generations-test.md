@@ -116,8 +116,9 @@ can race. Use a process-global mutex to serialize env-mutation tests:
 ```rust
 // Env vars are process-global; serialize against any other test that touches
 // UPTRAKIT_REEXEC_GENERATION in the same test binary run.
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+// parking_lot::Mutex::new() is const fn — valid in a static initializer.
+static ENV_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+let _guard = ENV_LOCK.lock(); // lock() returns guard directly; no .unwrap()
 std::env::remove_var("UPTRAKIT_REEXEC_GENERATION");
 // ... then call healthz() and assert X-Reexec-Generation: 0
 ```
@@ -193,21 +194,26 @@ No builder setter method is needed. The value is constructed inside `build()` �
 pattern as `interactive_sessions`. lib.rs accesses the notify from the built `Arc<AppState>`
 after construction (see Change 5).
 
-**c. Update all raw `AppState { ... }` struct literal sites (~18 sites in test modules).**
+**c. Update raw `AppState { ... }` struct literal sites that do NOT use struct-update syntax.**
 
-Every existing site that constructs `AppState { ... }` directly (not via `AppStateBuilder::build()`)
-must add this field, following the established pattern for `interactive_sessions` (e.g. `auth.rs`
-line 1095-1096):
+Let the compiler enumerate the exact sites that need updating:
+
+```bash
+cargo check --all-features 2>&1 | grep "missing field \`test_reexec_notify\`"
+```
+
+Each error points to a full struct literal that needs one new field. Sites using struct-update
+syntax (`..(*state).clone()` or `..(**state).clone()`) auto-inherit the new field and do not
+appear in the error list — do not modify them. Add the following to each erroring site,
+following the `interactive_sessions` pattern (e.g. `auth.rs` line 1095-1096):
 
 ```rust
 #[cfg(feature = "test-utils")]
 test_reexec_notify: None,
 ```
 
-The affected files are in `crates/ui/web-api/src/` — route unit tests and middleware tests.
-Run `grep -rn "Arc::new(AppState {" crates/ui/web-api/src/` to enumerate all sites. Without
-this change, `cargo check --all-features` fails with "missing field `test_reexec_notify`" at
-every literal site.
+Approximately 18 total `Arc::new(AppState {` sites exist in `crates/ui/web-api/src/`; roughly
+11 are full literals that will error and ~7 use struct-update syntax that will not.
 
 ### 5. `crates/core/controller-runtime/src/lib.rs` — background reexec task
 
@@ -397,7 +403,26 @@ pub(crate) async fn wait_for_pki_generation(&self, expected: u64, timeout: Durat
 }
 ```
 
-### 7. `crates/core/integration-tests/tests/helpers/containers.rs` — expose PKI port
+### 7. `crates/core/integration-tests/tests/helpers/containers.rs` — enable and expose PKI port
+
+**First: fix the TOML template to enable the PKI HTTP listener.**
+
+The config template currently has `addr = "[::]:8444"` for `[network.pki]`. The startup
+validation at `startup/validation.rs:57-58` gates `pki_http_port = Some(_)` on
+`url.starts_with("http://")`. With the current `"[::]:8444"` value, `pki_http_port = None`,
+`spawn_pki_http` early-returns, port 8444 is never bound, and
+`container.get_host_port_ipv4(8444)` would panic. Change the template line to:
+
+```toml
+[network.pki]
+addr = "http://[::]:8444"
+```
+
+This makes `pki_http_port = Some(8444)` and `listener_count = 2` (both HTTPS and PKI sockets
+are inherited via `LISTEN_FDS`). This change affects all `ControllerContainer`-based tests —
+they all gain a running PKI HTTP server, which is additive and safe (existing tests ignore it).
+
+**Second: add `PKI_PORT` constant, expose the port, and add the accessor.**
 
 Add `PKI_PORT: u16 = 8444` constant (alongside the existing `CONTROLLER_PORT = 8443`). Add
 `pki_host_port: u16` field to `ControllerContainer`. In `start()`:
@@ -508,6 +533,16 @@ order, the socket arrives at `exec()` with `FD_CLOEXEC` set again — gen 0→1 
 (fresh-bind path has no `mark_cloexec`), but gen 1→2 fails silently. The implementation MUST
 preserve this ordering and add an inline comment explaining it for both call sites.
 
+**Known limitation — liveness vs. inheritance at gen 1→2:** `wait_for_generation(2)` and
+`wait_for_pki_generation(2)` prove server liveness, not socket inheritance specifically. If
+`clear_cloexec` is absent and the socket fd is closed by exec, `take_inherited_listeners()`
+may fall back to fresh-bind (via `unwrap_or_else` at lib.rs:395) on the same port — the server
+comes up, the test passes, and the inheritance bug goes undetected. The same weakness applies to
+the HTTPS gen 1→2 check. Stronger verification (checking the "reusing inherited socket on" log
+line after each reexec) would require bollard log streaming and is deferred to a follow-up spec.
+This test remains valuable: it prevents regressions in scenarios where fresh-bind is not
+available (port in use, OS timing) and ensures the startup chain completes at gen 2.
+
 ## Quality Gates
 
 ```bash
@@ -533,6 +568,9 @@ the OpenAPI spec. No ADR updates required. No external documentation changes.
 
 - Three-or-more-generation coverage (gen 0→1→2→3) — diminishing returns after 0→1→2 covers
   both distinct `clear_cloexec` call sites (HTTPS + PKI).
+- Log-line inheritance proof for gen 1→2 — checking "reusing inherited socket on" after the
+  second reexec would prove inheritance rather than liveness. Requires bollard log streaming in
+  the test harness; deferred to a follow-up spec.
 - Making `X-Reexec-Generation` part of the OpenAPI spec or visible to production clients.
 - Adding `force_reexec` to any non-test code path (the `test-utils` feature gate ensures it
   cannot appear in production builds).
