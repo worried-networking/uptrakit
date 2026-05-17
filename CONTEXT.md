@@ -193,7 +193,7 @@ sections.
 
 **Irreversibly-bound key**:
 Configuration key whose change cannot be applied to a running process without compromising
-correctness, safety, or operability. Current set: `db.url`, `master_key.path`, `log.path`,
+correctness, safety, or operability. Current set: `db.url`, `master_key`, `log.path`,
 embedded-services topology. Set membership changes are ADR amendments.
 
 **Reexec**:
