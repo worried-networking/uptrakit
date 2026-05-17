@@ -7465,6 +7465,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "uptrakit-shared-types",
  "uuid",
 ]
 

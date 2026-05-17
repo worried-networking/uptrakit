@@ -305,7 +305,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // master_key as a fallback. The TOML value already carries the full source
     // string (file:, env:, or inline hex) so no prefix injection is needed.
     let toml_key = runtime.master_key.expose_secret();
-    let master_key_source = args.master_key_from.as_deref().or_else(|| {
+    let master_key_source = args.master_key_from.as_deref().or({
         if toml_key.is_empty() {
             None
         } else {
