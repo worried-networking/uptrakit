@@ -164,8 +164,8 @@ pub(crate) async fn reconcile_all_settings(
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
-    // PKI addr from TOML [network.pki].
-    let toml_pki_addr = runtime.network.pki.addr.clone();
+    // PKI addr from TOML [network].
+    let toml_pki_addr = runtime.network.pki_addr.clone();
     let pki_addr_opt = reconcile_nullable_string(
         db,
         "network.pki_addr",

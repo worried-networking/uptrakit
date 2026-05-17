@@ -6,7 +6,7 @@
 //!
 //! - `db.url` — database connection string; the pool must be torn down and
 //!   rebuilt against the new URL, which requires a fresh process.
-//! - `master_key.path` — master encryption key path; the crypto subsystem
+//! - `master_key` — master encryption key source; the crypto subsystem
 //!   does not support swapping keys at runtime.
 //! - `log.path` — log file path; the tracing subscriber is initialized once
 //!   at startup and cannot be re-pointed.
@@ -39,8 +39,8 @@ pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecisi
     if prior.db.url != new.db.url {
         reasons.push("db.url");
     }
-    if prior.master_key.path != new.master_key.path {
-        reasons.push("master_key.path");
+    if prior.master_key != new.master_key {
+        reasons.push("master_key");
     }
     if prior.log.path != new.log.path {
         reasons.push("log.path");
@@ -58,15 +58,16 @@ pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecisi
 #[cfg(test)]
 mod tests {
     use uptrakit_config_reload::config::{
-        DbConfig, EmbeddedServicesConfig, LogConfig, MasterKeyConfig, RuntimeConfig,
+        DbConfig, EmbeddedServicesConfig, LogConfig, RuntimeConfig,
     };
+    use uptrakit_shared_types::SecretString;
 
     use super::decide;
 
     fn base_config() -> RuntimeConfig {
         let mut cfg = RuntimeConfig::default();
         cfg.db = DbConfig::new("sqlite:///var/lib/uptrakit/test.db");
-        cfg.master_key = MasterKeyConfig::new("/etc/uptrakit/master.key");
+        cfg.master_key = SecretString::new("file:/etc/uptrakit/master.key");
         cfg.log = LogConfig::new("/var/log/uptrakit/controller.log", "info");
         cfg.embedded_services = EmbeddedServicesConfig::default();
         cfg
@@ -91,13 +92,13 @@ mod tests {
     }
 
     #[test]
-    fn master_key_path_change_requires_reexec() {
+    fn master_key_change_requires_reexec() {
         let prior = base_config();
         let mut new = prior.clone();
-        new.master_key = MasterKeyConfig::new("/etc/uptrakit/new.key");
+        new.master_key = SecretString::new("file:/etc/uptrakit/new.key");
         let decision = decide(&prior, &new);
         assert!(decision.needed);
-        assert!(decision.reasons.contains(&"master_key.path"));
+        assert!(decision.reasons.contains(&"master_key"));
     }
 
     #[test]
@@ -127,7 +128,7 @@ mod tests {
         let prior = base_config();
         let mut new = prior.clone();
         new.db = DbConfig::new("sqlite:///var/lib/uptrakit/other.db");
-        new.master_key = MasterKeyConfig::new("/etc/uptrakit/new.key");
+        new.master_key = SecretString::new("file:/etc/uptrakit/new.key");
         let decision = decide(&prior, &new);
         assert!(decision.needed);
         assert_eq!(decision.reasons.len(), 2);
