@@ -19,6 +19,7 @@ use crate::config::{
 /// Held by the [`crate::coordinator::ReloadCoordinator`] — it calls
 /// [`watch::Sender::send`] after a successful reload apply to push the new
 /// values to all subscribers.
+#[non_exhaustive]
 pub struct RuntimeConfigChannels {
     /// Database config sender.
     pub db: watch::Sender<Arc<DbConfig>>,
@@ -45,6 +46,7 @@ pub struct RuntimeConfigChannels {
 /// Distributed to subsystems at startup. Each subsystem calls
 /// [`watch::Receiver::borrow`] to read the current value or awaits
 /// [`watch::Receiver::changed`] to react to live updates.
+#[non_exhaustive]
 pub struct RuntimeConfigReceivers {
     /// Database config receiver.
     pub db: watch::Receiver<Arc<DbConfig>>,

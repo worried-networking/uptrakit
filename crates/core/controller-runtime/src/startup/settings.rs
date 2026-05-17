@@ -69,7 +69,7 @@ pub(crate) async fn reconcile_all_settings(
     // thereafter).  We use `force = false` so DB wins on subsequent starts.
     let force = false;
 
-    // Trusted proxies: parse from TOML [network.https] trusted_proxies strings.
+    // Trusted proxies: parse from TOML network.trusted_proxies strings.
     let toml_proxies: Vec<IpNet> = runtime
         .network
         .https
@@ -255,7 +255,7 @@ pub(crate) async fn reconcile_all_settings(
     };
     settings.set_sans(sans.clone()).await;
 
-    // HTTPS addr from TOML [network.https].
+    // HTTPS addr from TOML network.addr.
     let toml_https_addr: Option<SocketAddr> = if runtime.network.https.addr.is_empty() {
         None
     } else {

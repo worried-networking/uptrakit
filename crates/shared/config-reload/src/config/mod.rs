@@ -122,17 +122,16 @@ impl RuntimeConfig {
 /// Validate the master key source string.
 ///
 /// Accepts:
-/// - `""` (empty) — valid; means the key will be supplied via CLI `--master-key-from`
 /// - `"file:<path>"` — the path portion must be non-empty
 /// - `"env:<VAR>"` — the variable name must be non-empty
 /// - `"<64-hex-chars>"` — exactly 64 lowercase or uppercase hex characters
 ///
 /// # Errors
 ///
-/// Returns an error if the value is present but structurally invalid.
+/// Returns an error if the value is empty or structurally invalid.
 pub fn validate_master_key(key: &str) -> Result<(), Report> {
     if key.is_empty() {
-        return Ok(());
+        bail!(ConfigReloadError::Validate("master_key is empty".into()));
     }
     if let Some(path) = key.strip_prefix("file:") {
         if path.is_empty() {

@@ -541,7 +541,7 @@ impl ReloadCoordinator {
 
 /// Diff `prior` and `new`; return the minimal set of in-process deltas.
 ///
-/// Irreversibly-bound keys (`db.url`, `master_key.path`, `log.path`,
+/// Irreversibly-bound keys (`db.url`, `master_key`, `log.path`,
 /// embedded topology) are checked by the reexec hook BEFORE this function
 /// is called. `EmbeddedServices` is never emitted as a delta.
 fn build_deltas(prior: &RuntimeConfig, new: &RuntimeConfig) -> Vec<RuntimeConfigDelta> {

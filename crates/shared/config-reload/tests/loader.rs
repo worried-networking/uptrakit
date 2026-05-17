@@ -82,6 +82,24 @@ pki_addr = "0.0.0.0:8443"
     );
 }
 
+#[test]
+fn network_unknown_key_captured_in_extras() {
+    let raw = r#"
+addr = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8444"
+trusted_proxies = []
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header = "x-fcc-pem"
+addrr = "typo"
+"#;
+    let parsed: NetworkConfig = toml::from_str(raw).unwrap();
+    assert!(
+        parsed.extra.contains_key("addrr"),
+        "unknown key must land in NetworkConfig.extra, not silently dropped"
+    );
+}
+
 // ── AuditConfig tests ───────────────────────────────────────────────────────
 
 #[test]
@@ -288,9 +306,14 @@ fn loader_sample_file_parses_and_validates() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../docs/examples/controller.toml"
     );
-    TomlConfigLoader::load(sample_path).unwrap_or_else(|e| {
+    let loaded = TomlConfigLoader::load(sample_path).unwrap_or_else(|e| {
         panic!("docs/examples/controller.toml must parse and validate: {e}");
     });
+    assert!(
+        loaded.warnings.is_empty(),
+        "sample file must produce no unknown-key warnings: {:?}",
+        loaded.warnings
+    );
 }
 
 #[test]
