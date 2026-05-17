@@ -24,7 +24,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 ///   comparisons where timing side channels are a concern; use a constant-time
 ///   comparison function instead (e.g., `subtle::ConstantTimeEq` or
 ///   `argon2::password_hash::PasswordVerifier`).
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
 pub struct SecretString(String);
@@ -38,12 +38,6 @@ impl SecretString {
     /// Borrow the plaintext secret.
     pub fn expose_secret(&self) -> &str {
         &self.0
-    }
-}
-
-impl Default for SecretString {
-    fn default() -> Self {
-        Self(String::new())
     }
 }
 
