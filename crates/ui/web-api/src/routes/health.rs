@@ -7,9 +7,24 @@ use serde::Serialize;
 
 use crate::app_state::{CertState, DbState};
 
+/// Health check. Returns `200 OK` with body `"ok"` and the `X-Reexec-Generation`
+/// response header. The header reflects how many times the controller has re-exec'd
+/// in-process since original launch (0 = initial, 1 = first reexec, …). Internal
+/// diagnostics only — not part of the public OpenAPI spec.
 #[tracing::instrument(skip_all)]
 pub async fn healthz() -> impl IntoResponse {
-    "ok"
+    let generation: u64 = std::env::var("UPTRAKIT_REEXEC_GENERATION")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    (
+        axum::http::StatusCode::OK,
+        [(
+            axum::http::HeaderName::from_static("x-reexec-generation"),
+            generation.to_string(),
+        )],
+        "ok",
+    )
 }
 
 #[derive(Serialize)]
@@ -59,11 +74,13 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::routing::get;
-    use http::Request as HttpRequest;
+    use http::{Request as HttpRequest, header::HeaderName};
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn healthz_returns_ok() {
+    async fn healthz_returns_ok_with_generation_header() {
+        // No env var set → handler's unwrap_or(0) yields generation 0.
+        // No env mutation needed; no lock required.
         let app = Router::new().route("/healthz", get(healthz));
         let response = app
             .oneshot(
@@ -76,5 +93,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+        let gen_header = response
+            .headers()
+            .get(HeaderName::from_static("x-reexec-generation"))
+            .expect("X-Reexec-Generation header must be present");
+        assert_eq!(
+            gen_header, "0",
+            "generation is 0 when UPTRAKIT_REEXEC_GENERATION is unset"
+        );
     }
 }
