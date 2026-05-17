@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.2...uptrakit-scheduler-v0.0.3) - 2026-05-17
+
+### Added
+
+- *(scheduler)* wire global_provider_lookup to FetchReleasesExecutor via ReleaseFetchContext
+- *(audit-v2)* thread correlation_id through batch dispatch / scheduler
+- *(2fa)* settings_auth two_factor_required + MFA challenge cleanup
+- *(scheduler-runtime)* declare engine modules in lib.rs
+- *(scheduler-runtime)* copy engine source files (pre-integration)
+
+### Fixed
+
+- *(cli)* update stale --tofu references to --tofu-insecure in agent/agent-ssh/scheduler tests
+- *(scheduler,web-api-queries)* remove dep on deleted scheduler-engine crate
+- *(infra)* address verify-pass findings in agent-skills-a-infra
+- *(audit-v2)* add correlation_id: None to existing AuditEventPayload literals
+- *(audit-v2)* quality gate fixes
+- *(scheduler-runtime)* add new entity fields to auth_cleanup ActiveModel literals
+- *(scheduler-runtime)* fix standards violations in engine-sourced files
+- *(scheduler-runtime)* switch engine imports to crate-local paths
+
+### Other
+
+- *(scheduler-runtime)* rename StandaloneSchedulerHandler to SchedulerHandler
+- *(pki,ocsp,identity)* migrate x509-parser introspection to x509-cert
+- *(scheduler-runtime)* absorb engine deps ahead of merge
+- *(scheduler)* migrate StandaloneSchedulerHandler to dyn ServiceTransport
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.1...uptrakit-scheduler-v0.0.2) - 2026-05-05
 
 ### Added
