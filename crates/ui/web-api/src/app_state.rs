@@ -306,10 +306,6 @@ pub struct AppState {
     /// Notified by `POST /test/force-reexec` to trigger an unconditional reexec.
     /// `None` when `UPTRAKIT_TEST_UTILS_ENABLED` is not `"true"` at startup.
     #[cfg(feature = "test-utils")]
-    #[expect(
-        dead_code,
-        reason = "used by force_reexec handler (test_utils.rs) and background task (lib.rs); remove this attribute after those are implemented"
-    )]
     pub(crate) test_reexec_notify: Option<Arc<tokio::sync::Notify>>,
     /// Update dispatcher: runs pre-update protection then dispatches to the agent.
     ///

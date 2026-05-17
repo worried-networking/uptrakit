@@ -57,3 +57,24 @@ pub(crate) async fn disconnect_service(
         .await;
     StatusCode::OK.into_response()
 }
+
+/// Trigger an unconditional reexec without going through config-triage.
+///
+/// Returns 202 immediately. The reexec fires asynchronously from a background
+/// task; the HTTP connection will be closed when exec() replaces the process
+/// image. The caller must poll GET /healthz (checking X-Reexec-Generation) to
+/// know when the new generation is ready.
+///
+/// Returns 404 if UPTRAKIT_TEST_UTILS_ENABLED is not "true".
+/// Returns 503 if the notify handle is not installed (env var not set at startup).
+pub(crate) async fn force_reexec(State(state): State<Arc<AppState>>) -> Response {
+    if !test_utils_allowed() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Some(notify) = &state.test_reexec_notify {
+        notify.notify_one();
+        StatusCode::ACCEPTED.into_response()
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE.into_response()
+    }
+}

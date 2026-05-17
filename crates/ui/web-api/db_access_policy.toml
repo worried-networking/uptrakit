@@ -545,6 +545,7 @@ stream_update_output = "full-state"
 [routes."test_utils.rs"]
 request_service_renewal = "full-state"
 disconnect_service = "full-state"
+force_reexec = "full-state"
 
 [routes."users.rs"]
 build_user_response = "ignore"
