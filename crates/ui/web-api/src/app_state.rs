@@ -303,6 +303,14 @@ pub struct AppState {
     /// Registry of active interactive update sessions (single-writer enforcement).
     #[cfg(feature = "interactive")]
     pub interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry,
+    /// Notified by `POST /test/force-reexec` to trigger an unconditional reexec.
+    /// `None` when `UPTRAKIT_TEST_UTILS_ENABLED` is not `"true"` at startup.
+    #[cfg(feature = "test-utils")]
+    #[expect(
+        dead_code,
+        reason = "used by force_reexec handler (test_utils.rs) and background task (lib.rs); remove this attribute after those are implemented"
+    )]
+    pub(crate) test_reexec_notify: Option<Arc<tokio::sync::Notify>>,
     /// Update dispatcher: runs pre-update protection then dispatches to the agent.
     ///
     /// Defaults to [`ControllerUpdateDispatcher`] wired from the state's own fields.
@@ -1079,6 +1087,14 @@ impl AppStateBuilder {
             reject_dangerous_commands: self.reject_dangerous_commands,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
+            #[cfg(feature = "test-utils")]
+            test_reexec_notify: if std::env::var("UPTRAKIT_TEST_UTILS_ENABLED").as_deref()
+                == Ok("true")
+            {
+                Some(Arc::new(tokio::sync::Notify::new()))
+            } else {
+                None
+            },
             update_dispatcher,
             instance_plugin_snapshot: self.instance_plugin_snapshot.unwrap_or_else(|| {
                 Arc::new(arc_swap::ArcSwap::from_pointee(
