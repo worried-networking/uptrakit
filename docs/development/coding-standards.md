@@ -2018,7 +2018,7 @@ Rules:
 
 ## Reexec Hook Pattern
 
-When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key.path`,
+When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key`,
 `log.path`, embedded-service topology), the coordinator delegates the decision to a `ReexecHook`
 implementation registered at startup.
 
