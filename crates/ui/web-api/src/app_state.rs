@@ -343,10 +343,9 @@ pub struct AppState {
     /// Log config watch receiver.
     pub log_config_rx:
         tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_config_reload::config::LogConfig>>,
-    /// Master key config watch receiver.
-    pub master_key_config_rx: tokio::sync::watch::Receiver<
-        std::sync::Arc<uptrakit_config_reload::config::MasterKeyConfig>,
-    >,
+    /// Master key watch receiver (boot-time only; changes require reexec).
+    pub master_key_config_rx:
+        tokio::sync::watch::Receiver<std::sync::Arc<uptrakit_shared_types::SecretString>>,
     /// Embedded services config watch receiver.
     pub embedded_services_config_rx: tokio::sync::watch::Receiver<
         std::sync::Arc<uptrakit_config_reload::config::EmbeddedServicesConfig>,

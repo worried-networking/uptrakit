@@ -125,7 +125,7 @@ fn render_network(state: &AppState) -> serde_json::Value {
     let cfg = state.network_config_rx.borrow();
     serde_json::json!({
         "https_addr": cfg.https.addr,
-        "pki_addr": cfg.pki.addr,
+        "pki_addr": cfg.pki_addr,
     })
 }
 
