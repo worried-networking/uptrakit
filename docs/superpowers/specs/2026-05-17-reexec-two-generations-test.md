@@ -3,8 +3,9 @@
 **Date:** 2026-05-17
 **Scope:** `controller-runtime` (test-utils feature), `web-api` (test-utils routes), integration test
 harness
-**Effort:** Medium (~140 lines net change, seven files — four production files behind `test-utils`
-feature gate, plus ~18 test struct-literal sites that need a new feature-gated field)
+**Effort:** Medium (~165 lines net change, eight files — four production files behind `test-utils`
+feature gate, plus ~18 test struct-literal sites that need a new feature-gated field, plus PKI
+port exposure in `ControllerContainer`)
 **Follows up:** `docs/superpowers/specs/2026-05-16-remove-listenfd-unsafe.md` — Task 5 Step 6 (not
 implemented in original plan; deferred with documented rationale)
 
@@ -260,10 +261,23 @@ Both methods are added to the existing file, which already carries `#![expect(cl
 clippy::panic, reason = "integration test infrastructure: ...")]` at the module level. The
 `.expect()` and `panic!()` calls below are covered by that existing suppression.
 
-Both helpers use `reqwest::Client` directly rather than `UptrakitClient`. Justification:
+All helpers use `reqwest::Client` directly rather than `UptrakitClient`. Justification:
 `UptrakitClient` wraps the HTTP response and does not expose raw response headers;
 `X-Reexec-Generation` is not modelled in the OpenAPI client. `reqwest` is already a
 dev-dependency.
+
+Add `pki_base_url: Option<String>` field to `ApiClient` (initialized to `None` in `new()`) and a
+builder-style setter so existing callers are unaffected:
+
+```rust
+pub(crate) fn with_pki_port(mut self, pki_port: u16) -> Self {
+    self.pki_base_url = Some(format!("http://127.0.0.1:{pki_port}"));
+    self
+}
+```
+
+The PKI server listens on plain HTTP (not TLS) — `reqwest::Client` for PKI requests does NOT
+need `danger_accept_invalid_certs`.
 
 **`force_reexec` (fire-and-forget):**
 
@@ -332,7 +346,89 @@ pub(crate) async fn wait_for_generation(&self, expected: u64, timeout: Duration)
 }
 ```
 
-### 7. `crates/core/integration-tests/tests/system/controller_startup.rs` — test
+**`wait_for_pki_generation`:**
+
+Mirrors `wait_for_generation` but targets the plain-HTTP PKI port. Panics if `pki_base_url` was
+not set via `with_pki_port`.
+
+```rust
+/// Poll GET /healthz on the PKI port every 500ms until X-Reexec-Generation equals `expected`.
+///
+/// PKI server is plain HTTP — no TLS. Panics if `with_pki_port` was not called.
+pub(crate) async fn wait_for_pki_generation(&self, expected: u64, timeout: Duration) {
+    let pki_url = format!(
+        "{}/healthz",
+        self.pki_base_url
+            .as_deref()
+            .expect("pki_base_url not set — call with_pki_port first")
+    );
+    let deadline = tokio::time::Instant::now() + timeout;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("build reqwest client");
+
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "PKI server did not reach generation {} within {}s",
+                expected,
+                timeout.as_secs()
+            );
+        }
+        match client.get(&pki_url).send().await {
+            Ok(resp) => {
+                let gen: u64 = resp
+                    .headers()
+                    .get("x-reexec-generation")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if gen == expected {
+                    return;
+                }
+            }
+            Err(e) => {
+                tracing::trace!(error = %e, "wait_for_pki_generation: connection error (expected during reexec gap)");
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+```
+
+### 7. `crates/core/integration-tests/tests/helpers/containers.rs` — expose PKI port
+
+Add `PKI_PORT: u16 = 8444` constant (alongside the existing `CONTROLLER_PORT = 8443`). Add
+`pki_host_port: u16` field to `ControllerContainer`. In `start()`:
+
+1. Chain `.with_exposed_port(PKI_PORT.tcp())` before the `ImageExt` calls (same placement
+   constraint as `CONTROLLER_PORT` — `GenericImage` methods must precede `ImageExt` calls).
+2. After the container starts, call `container.get_host_port_ipv4(PKI_PORT.tcp()).await` and
+   store in `pki_host_port`.
+
+```rust
+const PKI_PORT: u16 = 8444;
+
+// In ControllerContainer struct:
+pki_host_port: u16,
+
+// In start(), port query (after container starts):
+let pki_host_port = container
+    .get_host_port_ipv4(PKI_PORT.tcp())
+    .await
+    .expect("get mapped PKI port");
+
+// In ControllerContainer { ... } literal:
+pki_host_port,
+
+// New accessor:
+pub(crate) fn pki_host_port(&self) -> u16 {
+    self.pki_host_port
+}
+```
+
+### 8. `crates/core/integration-tests/tests/system/controller_startup.rs` — test
 
 Do NOT add `start_paused = true` to `#[tokio::test]`. This is a Docker-backed system test; the
 tokio time driver must run in real-wall-clock mode. The `start_paused` attribute is only for tests
@@ -340,11 +436,11 @@ that advance fake time; inserting it here would freeze the `sleep` calls in `wai
 and deadlock the test.
 
 ```rust
-/// Verify that the HTTPS port remains reachable after two sequential reexecs.
+/// Verify that the HTTPS and PKI ports remain reachable after two sequential reexecs.
 ///
 /// Exercises the gen 1→2 inherited-socket path (clear_cloexec on an
-/// already-inherited fd) — the code path added by the remove-listenfd-unsafe
-/// refactor that was previously untested.
+/// already-inherited fd) for both sockets — lib.rs:443 (HTTPS) and lib.rs:464 (PKI)
+/// are separate call sites using the same function; both are verified here.
 ///
 /// The gen 0→1 path is covered implicitly by ControllerContainer::start's
 /// WaitFor guard ("HTTPS server reusing inherited socket on").
@@ -353,18 +449,23 @@ and deadlock the test.
 async fn reexec_two_generations_inherit_sockets() {
     let network = test_network_name();
     let controller = ControllerContainer::start(&network).await;
-    let client = ApiClient::new(controller.host_port());
+    let client = ApiClient::new(controller.host_port())
+        .with_pki_port(controller.pki_host_port());
 
     // Generation 0 is healthy when ControllerContainer::start returns.
     client.wait_for_generation(0, Duration::from_secs(30)).await;
+    client.wait_for_pki_generation(0, Duration::from_secs(30)).await;
 
     // Gen 0 → 1: force reexec via test-utils endpoint (no triage, no TOML mutation).
     client.force_reexec().await;
     client.wait_for_generation(1, Duration::from_secs(60)).await;
+    client.wait_for_pki_generation(1, Duration::from_secs(60)).await;
 
-    // Gen 1 → 2: second reexec — exercises the inherited-socket clear_cloexec path.
+    // Gen 1 → 2: second reexec — exercises the inherited-socket clear_cloexec path
+    // on both lib.rs:443 (HTTPS) and lib.rs:464 (PKI).
     client.force_reexec().await;
     client.wait_for_generation(2, Duration::from_secs(60)).await;
+    client.wait_for_pki_generation(2, Duration::from_secs(60)).await;
 
     // Final sanity: HTTPS still accepts requests at generation 2.
     client.wait_for_ready(Duration::from_secs(5)).await;
@@ -373,36 +474,39 @@ async fn reexec_two_generations_inherit_sockets() {
 
 Timeout is 60s per generation (not 30s): two full controller startup chains (DB init, PKI,
 NATS, plugin catalog) can exceed 30s on constrained CI runners. The overall test budget is
-~155s, well within the default Rust test timeout.
+~185s, well within the default Rust test timeout.
 
 ## File Map
 
-| File                                                               | Change                                                                                     | Production code?           |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------- |
-| `crates/ui/web-api/src/routes/health.rs`                           | Add `X-Reexec-Generation` header; update unit test (env var isolation)                     | Yes (always)               |
-| `crates/ui/web-api/src/routes/test_utils.rs`                       | Add `force_reexec` handler (no per-fn cfg)                                                 | `test-utils` feature only  |
-| `crates/ui/web-api/src/router.rs`                                  | Register `/test/force-reexec` route                                                        | `test-utils` feature only  |
-| `crates/ui/web-api/src/app_state.rs`                               | Add `test_reexec_notify` field + `build()` initialization; update ~18 struct literal sites | `test-utils` feature only  |
-| `crates/core/controller-runtime/src/lib.rs`                        | Spawn background reexec task from `state.test_reexec_notify` after `Arc::new(state)`       | `test-utils` feature only  |
-| `crates/core/integration-tests/tests/helpers/api_client.rs`        | Add `force_reexec`, `wait_for_generation`                                                  | Test-only (dev-dependency) |
-| `crates/core/integration-tests/tests/system/controller_startup.rs` | Add `reexec_two_generations_inherit_sockets`                                               | Test-only (dev-dependency) |
+| File                                                               | Change                                                                                                      | Production code?           |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `crates/ui/web-api/src/routes/health.rs`                           | Add `X-Reexec-Generation` header; update unit test (env var isolation)                                      | Yes (always)               |
+| `crates/ui/web-api/src/routes/test_utils.rs`                       | Add `force_reexec` handler (no per-fn cfg)                                                                  | `test-utils` feature only  |
+| `crates/ui/web-api/src/router.rs`                                  | Register `/test/force-reexec` route                                                                         | `test-utils` feature only  |
+| `crates/ui/web-api/src/app_state.rs`                               | Add `test_reexec_notify` field + `build()` initialization; update ~18 struct literal sites                  | `test-utils` feature only  |
+| `crates/core/controller-runtime/src/lib.rs`                        | Spawn background reexec task from `state.test_reexec_notify` after `Arc::new(state)`                        | `test-utils` feature only  |
+| `crates/core/integration-tests/tests/helpers/api_client.rs`        | Add `pki_base_url` field, `with_pki_port`, `force_reexec`, `wait_for_generation`, `wait_for_pki_generation` | Test-only (dev-dependency) |
+| `crates/core/integration-tests/tests/helpers/containers.rs`        | Add `PKI_PORT` constant, expose port 8444, add `pki_host_port` field + accessor to `ControllerContainer`    | Test-only (dev-dependency) |
+| `crates/core/integration-tests/tests/system/controller_startup.rs` | Add `reexec_two_generations_inherit_sockets`                                                                | Test-only (dev-dependency) |
 
 ## Safety Invariants Verified by This Test
 
-| Invariant                                               | How verified                                            |
-| ------------------------------------------------------- | ------------------------------------------------------- |
-| `clear_cloexec(&https_std)` on fresh-bind path          | Every existing test — ControllerContainer WaitFor guard |
-| `clear_cloexec(&https_std)` on inherited path (gen 0→1) | ControllerContainer WaitFor guard                       |
-| `clear_cloexec(&https_std)` on inherited path (gen 1→2) | **`wait_for_generation(2)` in this test**               |
-| HTTPS port survives two sequential `exec()` calls       | **`wait_for_ready` at generation 2 in this test**       |
+| Invariant                                               | How verified                                               |
+| ------------------------------------------------------- | ---------------------------------------------------------- |
+| `clear_cloexec(&https_std)` on fresh-bind path          | Every existing test — ControllerContainer WaitFor guard    |
+| `clear_cloexec(&https_std)` on inherited path (gen 0→1) | ControllerContainer WaitFor guard                          |
+| `clear_cloexec(&https_std)` on inherited path (gen 1→2) | **`wait_for_generation(2)` in this test** (lib.rs:443)     |
+| `clear_cloexec(&pki_std)` on inherited path (gen 1→2)   | **`wait_for_pki_generation(2)` in this test** (lib.rs:464) |
+| HTTPS port survives two sequential `exec()` calls       | **`wait_for_ready` at generation 2 in this test**          |
+| PKI port survives two sequential `exec()` calls         | **`wait_for_pki_generation(2)` in this test**              |
 
 **Call-ordering invariant:** `take_inherited_listeners()` (via `listenfd`) actively re-arms
 `FD_CLOEXEC` on every socket it claims (`mark_cloexec` at `listenfd/src/unix.rs`). The test's
-correctness therefore depends on `clear_cloexec(&https_std)` being called _after_
-`take_inherited_listeners()` returns in `lib.rs`. If a refactor swaps this order, the socket
-arrives at `exec()` with `FD_CLOEXEC` set again — gen 0→1 still works (fresh-bind path has no
-`mark_cloexec`), but gen 1→2 fails silently. The implementation MUST preserve this ordering and
-add an inline comment explaining it.
+correctness depends on `clear_cloexec` being called _after_ `take_inherited_listeners()` returns
+in `lib.rs` — for both sockets (lib.rs:443 HTTPS and lib.rs:464 PKI). If a refactor swaps this
+order, the socket arrives at `exec()` with `FD_CLOEXEC` set again — gen 0→1 still works
+(fresh-bind path has no `mark_cloexec`), but gen 1→2 fails silently. The implementation MUST
+preserve this ordering and add an inline comment explaining it for both call sites.
 
 ## Quality Gates
 
@@ -428,9 +532,7 @@ the OpenAPI spec. No ADR updates required. No external documentation changes.
 ## Out of Scope
 
 - Three-or-more-generation coverage (gen 0→1→2→3) — diminishing returns after 0→1→2 covers
-  both distinct code paths.
-- PKI listener socket inheritance verification — same `clear_cloexec` call pattern; not a
-  separate code path.
+  both distinct `clear_cloexec` call sites (HTTPS + PKI).
 - Making `X-Reexec-Generation` part of the OpenAPI spec or visible to production clients.
 - Adding `force_reexec` to any non-test code path (the `test-utils` feature gate ensures it
   cannot appear in production builds).
