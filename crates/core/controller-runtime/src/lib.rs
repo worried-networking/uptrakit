@@ -104,6 +104,8 @@ struct ControllerReexecHook {
     /// Number of bound listeners passed via `LISTEN_FDS` to the child process.
     /// 1 when PKI HTTP is disabled, 2 when enabled.
     listener_count: usize,
+    /// Raw fd of the first (HTTPS) bound listener, passed as LISTEN_FDS_FIRST_FD.
+    first_listener_fd: std::os::unix::io::RawFd,
 }
 
 impl ReexecHook for ControllerReexecHook {
@@ -124,6 +126,7 @@ impl ReexecHook for ControllerReexecHook {
             master_key_file: self.master_key_file.clone(),
             listener_count: self.listener_count,
             generation: self.generation,
+            first_listener_fd: self.first_listener_fd,
         };
 
         match reexec::perform_reexec(&plan) {
@@ -445,6 +448,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // required to ensure the fd survives exec() in subsequent reexec generations.
     reexec::listenfd::clear_cloexec(&https_std)
         .map_err(|e| report!(AppError::Config(format!("clear_cloexec HTTPS: {e}"))))?;
+
+    // Record the fd so perform_reexec can set LISTEN_FDS_FIRST_FD.
+    // The database was opened before the socket, so sockets are not at fd 3.
+    use std::os::unix::io::AsRawFd as _;
+    let first_listener_fd = https_std.as_raw_fd();
 
     // Obtain the PKI socket (if enabled) — either freshly bound or inherited.
     // Same invariant as HTTPS: clear_cloexec is required on both paths.
@@ -862,6 +870,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 master_key_file: args.master_key_from.clone(),
                 generation: reexec::listenfd::current_generation(),
                 listener_count,
+                first_listener_fd,
             }));
 
         let coordinator_handle = b.coordinator.handle();
@@ -956,6 +965,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
             master_key_file: args.master_key_from.clone(),
             listener_count,
             generation: reexec::listenfd::current_generation(),
+            first_listener_fd,
         };
         tokio::spawn(async move {
             notify.notified().await;
