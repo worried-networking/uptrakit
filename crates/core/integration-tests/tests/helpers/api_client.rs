@@ -23,6 +23,7 @@ use uptrakit_openapi_client::types::system_services::{
 pub(crate) struct ApiClient {
     base_url: String,
     client: Option<UptrakitClient>,
+    pki_base_url: Option<String>,
 }
 
 impl ApiClient {
@@ -32,6 +33,136 @@ impl ApiClient {
         Self {
             base_url,
             client: None,
+            pki_base_url: None,
+        }
+    }
+
+    /// Set the PKI plain-HTTP port. Required before calling `wait_for_pki_generation`.
+    pub(crate) fn with_pki_port(mut self, pki_port: u16) -> Self {
+        self.pki_base_url = Some(format!("http://127.0.0.1:{pki_port}"));
+        self
+    }
+
+    /// POST /test/force-reexec — triggers an unconditional reexec.
+    ///
+    /// The endpoint responds with 202 ACCEPTED before the background task calls exec().
+    /// If the response is received, assert it is 2xx to catch mis-wired routes early.
+    /// Connection errors after a 2xx response (exec drop) are ignored.
+    /// Follow with `wait_for_generation` to confirm the new generation is up.
+    pub(crate) async fn force_reexec(&self) {
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("build reqwest client");
+        match client
+            .post(format!("{}/test/force-reexec", self.base_url))
+            .send()
+            .await
+        {
+            Ok(resp) => assert!(
+                resp.status().is_success(),
+                "force_reexec: expected 2xx, got {} — \
+                 check UPTRAKIT_TEST_UTILS_ENABLED and route registration",
+                resp.status()
+            ),
+            // Connection reset/EOF after exec() replaces the process image is expected.
+            Err(e) => tracing::trace!(error = %e, "force_reexec: connection dropped (expected)"),
+        }
+    }
+
+    /// Poll GET /healthz every 500ms until X-Reexec-Generation equals `expected`.
+    ///
+    /// Connection errors are logged at trace level (expected during the reexec gap).
+    /// Panics if `timeout` elapses without seeing the expected generation.
+    pub(crate) async fn wait_for_generation(&self, expected: u64, timeout: Duration) {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("build reqwest client");
+        let url = format!("{}/healthz", self.base_url);
+
+        loop {
+            match client.get(&url).send().await {
+                Ok(resp) => {
+                    let generation: u64 = resp
+                        .headers()
+                        .get("x-reexec-generation")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    if generation == expected {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    tracing::trace!(
+                        error = %e,
+                        "wait_for_generation: connection error (expected during reexec gap)"
+                    );
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "controller did not reach generation {} within {}s",
+                    expected,
+                    timeout.as_secs()
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+
+    /// Poll GET /healthz on the PKI plain-HTTP port every 500ms until
+    /// X-Reexec-Generation equals `expected`.
+    ///
+    /// PKI server is plain HTTP — no TLS required.
+    /// Panics if `with_pki_port` was not called, or if `timeout` elapses.
+    pub(crate) async fn wait_for_pki_generation(&self, expected: u64, timeout: Duration) {
+        let pki_base = self
+            .pki_base_url
+            .as_deref()
+            .expect("pki_base_url not set — call with_pki_port first");
+        let url = format!("{pki_base}/healthz");
+        let deadline = tokio::time::Instant::now() + timeout;
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("build reqwest client");
+
+        loop {
+            match client.get(&url).send().await {
+                Ok(resp) => {
+                    let generation: u64 = resp
+                        .headers()
+                        .get("x-reexec-generation")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    if generation == expected {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    tracing::trace!(
+                        error = %e,
+                        "wait_for_pki_generation: connection error (expected during reexec gap)"
+                    );
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "PKI server did not reach generation {} within {}s",
+                    expected,
+                    timeout.as_secs()
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 
