@@ -16,7 +16,7 @@ pub(crate) struct ReexecPlan {
     pub(crate) current_exe: PathBuf,
     /// Path to the TOML configuration file passed as `--config`.
     pub(crate) config_path: PathBuf,
-    /// Path to the master key file, if one was provided via `--master-key-file`.
+    /// Value passed to `--master-key-from` for master key resolution (e.g. `env:VAR` or `file:/path`).
     pub(crate) master_key_file: Option<String>,
     /// Number of file descriptors that were bound and should be inherited via
     /// `LISTEN_FDS` by the new process generation.
@@ -24,6 +24,12 @@ pub(crate) struct ReexecPlan {
     /// Current process generation counter.  The new process will receive
     /// `generation + 1` via `UPTRAKIT_REEXEC_GENERATION`.
     pub(crate) generation: u64,
+    /// Raw fd of the first (HTTPS) bound listener.
+    ///
+    /// The `listenfd` crate defaults `LISTEN_FDS_FIRST_FD` to 3, but the controller
+    /// opens a database connection in Phase 3 (before socket binding in Phase 8b), so
+    /// sockets are not at fd 3. Setting this env var tells the child where to find them.
+    pub(crate) first_listener_fd: std::os::unix::io::RawFd,
 }
 
 /// Replace the current process image with a new instance of the same binary.
@@ -52,10 +58,11 @@ pub(crate) fn perform_reexec(plan: &ReexecPlan) -> Result<std::convert::Infallib
     cmd.arg("--config").arg(&plan.config_path);
 
     if let Some(mk) = &plan.master_key_file {
-        cmd.arg("--master-key-file").arg(mk);
+        cmd.arg("--master-key-from").arg(mk);
     }
 
     cmd.env("LISTEN_FDS", plan.listener_count.to_string());
+    cmd.env("LISTEN_FDS_FIRST_FD", plan.first_listener_fd.to_string());
     cmd.env("LISTEN_PID", std::process::id().to_string());
     cmd.env(
         "UPTRAKIT_REEXEC_GENERATION",
