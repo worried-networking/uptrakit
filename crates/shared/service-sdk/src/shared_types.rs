@@ -157,13 +157,10 @@ pub trait ServiceHandler: Send {
     /// Use [`std::convert::Infallible`] for services with no custom select arms.
     type ServiceEvent: Send;
 
-    /// Called after the WebSocket connection is established.
+    /// Called after the WebSocket connection is established (standalone) or after
+    /// the embedded service starts (embedded).
     ///
     /// Send initial messages (e.g. `ReportHosts`, `Register`) here.
-    ///
-    /// Note: **not called** by `run_embedded_service`. Embedded handlers must
-    /// perform any initialization that would normally happen here inside their
-    /// constructor.
     async fn on_connected(
         &mut self,
         conn: &mut dyn ServiceTransport,

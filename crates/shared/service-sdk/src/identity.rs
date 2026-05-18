@@ -129,6 +129,41 @@ impl ServiceIdentityState {
         }
     }
 
+    /// Create an in-memory identity for an embedded service running in-process.
+    ///
+    /// Sets `service_id` and `keypair` directly from the supplied values.
+    /// The `config_dir` and `state_dir` fields are set to empty [`PathBuf`]
+    /// sentinels and are **never used for I/O** — embedded services do not
+    /// read from or write to disk.
+    ///
+    /// # Arguments
+    ///
+    /// * `service_id` — UUID assigned by the controller on behalf of the
+    ///   embedded service.
+    /// * `keypair` — Pre-generated ECDSA P-256 keypair.  Use
+    ///   [`generate_p256_keypair_for_ecies`] or
+    ///   `rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)` to
+    ///   produce one.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "call site added in a subsequent task (run_embedded_service)"
+        )
+    )]
+    pub(crate) fn for_embedded(service_id: Uuid, keypair: rcgen::KeyPair) -> Self {
+        Self {
+            config_dir: std::path::PathBuf::new(), // sentinel — never used for I/O
+            state_dir: std::path::PathBuf::new(),  // sentinel — never used for I/O
+            service_id: Some(service_id),
+            tenant_id: None,
+            enrollment_secret: None,
+            keypair: Some(keypair),
+            certificate_pem: None,
+            ca_cert_pem: None,
+        }
+    }
+
     /// Load existing identity from disk (if any).
     ///
     /// Creates both directories if they do not exist.
@@ -752,6 +787,43 @@ pub fn sweep_tmp_siblings(base: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod for_embedded_tests {
+    use super::ServiceIdentityState;
+    use uuid::Uuid;
+
+    #[test]
+    fn for_embedded_returns_correct_service_id() {
+        let id = Uuid::new_v4();
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let identity = ServiceIdentityState::for_embedded(id, kp);
+        assert_eq!(identity.service_id(), Some(id));
+    }
+
+    #[test]
+    fn for_embedded_public_key_raw_is_uncompressed_p256_point() {
+        let id = Uuid::new_v4();
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let identity = ServiceIdentityState::for_embedded(id, kp);
+        let raw = identity
+            .public_key_raw()
+            .expect("public key must be present");
+        assert_eq!(raw.len(), 65, "expected 65-byte uncompressed P-256 point");
+        assert_eq!(raw[0], 0x04, "expected 0x04 uncompressed prefix");
+    }
+
+    #[test]
+    fn for_embedded_private_key_pkcs8_der_is_non_empty() {
+        let id = Uuid::new_v4();
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let identity = ServiceIdentityState::for_embedded(id, kp);
+        let der = identity
+            .private_key_pkcs8_der()
+            .expect("private key DER must be present");
+        assert!(!der.is_empty());
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
