@@ -491,12 +491,7 @@ where
             self.pending_initial_host_report = false;
 
             for (host_machine_id, update) in &self.in_flight_updates {
-                #[cfg(feature = "interactive")]
-                let interactive = update.stdin_tx.is_some();
-                #[cfg(feature = "interactive")]
-                let _ = update;
-                #[cfg(not(feature = "interactive"))]
-                let interactive = false;
+                let interactive = cfg!(feature = "interactive") && update.stdin_tx.is_some();
 
                 tracing::debug!(
                     %host_machine_id,
@@ -1251,7 +1246,9 @@ pub use handler::AgentSshHandler;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
 
     use serde_json::Map;
     use serde_json::json;
@@ -1277,7 +1274,6 @@ mod tests {
         fn call_count(&self, name: &str) -> usize {
             self.state
                 .lock()
-                .expect("lock")
                 .calls
                 .iter()
                 .filter(|entry| **entry == name)
@@ -1285,16 +1281,11 @@ mod tests {
         }
 
         fn set_fail_register_surfaces(&self, fail: bool) {
-            self.state.lock().expect("lock").fail_register_surfaces = fail;
+            self.state.lock().fail_register_surfaces = fail;
         }
 
         fn last_surface_request_tenant_id(&self) -> Option<Option<uuid::Uuid>> {
-            self.state
-                .lock()
-                .expect("lock")
-                .surface_request_tenant_ids
-                .last()
-                .copied()
+            self.state.lock().surface_request_tenant_ids.last().copied()
         }
     }
 
@@ -1304,11 +1295,7 @@ mod tests {
             &self,
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("report_enrolled_hosts");
+            self.state.lock().calls.push("report_enrolled_hosts");
             transport.transport_send(ServiceMessage::Unknown).await
         }
 
@@ -1319,7 +1306,7 @@ mod tests {
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
             let fail_register_surfaces = {
-                let mut state = self.state.lock().expect("lock");
+                let mut state = self.state.lock();
                 state.calls.push("register_surfaces");
                 state.fail_register_surfaces
             };
@@ -1330,11 +1317,7 @@ mod tests {
         }
 
         async fn list_host_snapshots(&self) -> Result<Vec<HostSnapshot>, String> {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("list_host_snapshots");
+            self.state.lock().calls.push("list_host_snapshots");
             Ok(Vec::new())
         }
 
@@ -1345,22 +1328,17 @@ mod tests {
         ) -> Result<(), TransportError> {
             self.state
                 .lock()
-                .expect("lock")
                 .calls
                 .push("report_hosts_after_config_change");
             Ok(())
         }
 
         async fn evict_host(&self, _host_id: uuid::Uuid) {
-            self.state.lock().expect("lock").calls.push("evict_host");
+            self.state.lock().calls.push("evict_host");
         }
 
         async fn disconnect_all(&self) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("disconnect_all");
+            self.state.lock().calls.push("disconnect_all");
         }
 
         fn spawn_check_versions(
@@ -1368,11 +1346,7 @@ mod tests {
             _payload: CheckVersionsPayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("spawn_check_versions");
+            self.state.lock().calls.push("spawn_check_versions");
         }
 
         async fn handle_execute_update(
@@ -1382,11 +1356,7 @@ mod tests {
             _aggregate_tx: &tokio::sync::mpsc::Sender<(String, UpdateEvent)>,
             _transport: &mut dyn ServiceTransport,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("handle_execute_update");
+            self.state.lock().calls.push("handle_execute_update");
         }
 
         fn spawn_execute_batch_update(
@@ -1394,11 +1364,7 @@ mod tests {
             _payload: ExecuteBatchUpdatePayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("spawn_execute_batch_update");
+            self.state.lock().calls.push("spawn_execute_batch_update");
         }
 
         fn spawn_discover_software(
@@ -1406,11 +1372,7 @@ mod tests {
             _payload: DiscoverSoftwarePayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("spawn_discover_software");
+            self.state.lock().calls.push("spawn_discover_software");
         }
 
         fn spawn_config_test(
@@ -1418,11 +1380,7 @@ mod tests {
             _payload: TestPluginConfigPayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("spawn_config_test");
+            self.state.lock().calls.push("spawn_config_test");
         }
 
         #[cfg(feature = "interactive")]
@@ -1431,11 +1389,7 @@ mod tests {
             _payload: uptrakit_wire::UpdateStdinDataPayload,
             _in_flight_updates: &HashMap<String, SshInFlightUpdate>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("handle_update_stdin_data");
+            self.state.lock().calls.push("handle_update_stdin_data");
         }
 
         async fn handle_report_plugin_config_response(
@@ -1444,17 +1398,12 @@ mod tests {
         ) {
             self.state
                 .lock()
-                .expect("lock")
                 .calls
                 .push("handle_report_plugin_config_response");
         }
 
         async fn handle_reset_data(&self) -> bool {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("handle_reset_data");
+            self.state.lock().calls.push("handle_reset_data");
             true
         }
 
@@ -1465,7 +1414,7 @@ mod tests {
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
             _transport: &mut dyn ServiceTransport,
         ) {
-            let mut state = self.state.lock().expect("lock");
+            let mut state = self.state.lock();
             state.calls.push("handle_surface_action_request");
             state
                 .surface_request_tenant_ids
@@ -1475,7 +1424,6 @@ mod tests {
         fn handle_surface_action_response(&self, _response: SurfaceActionResponse) {
             self.state
                 .lock()
-                .expect("lock")
                 .calls
                 .push("handle_surface_action_response");
         }
@@ -1485,19 +1433,11 @@ mod tests {
             _session_state: &RuntimeSessionState,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("spawn_post_report_hooks");
+            self.state.lock().calls.push("spawn_post_report_hooks");
         }
 
         async fn persist_tenant_id(&self, _tenant_id: uuid::Uuid) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("persist_tenant_id");
+            self.state.lock().calls.push("persist_tenant_id");
         }
     }
 
@@ -1548,13 +1488,13 @@ mod tests {
 
     impl RecordingForwarder {
         fn events(&self) -> Vec<RuntimeAuditEvent> {
-            self.events.lock().expect("lock").clone()
+            self.events.lock().clone()
         }
     }
 
     impl RuntimeAuditForwarder for RecordingForwarder {
         fn forward(&self, event: &RuntimeAuditEvent) {
-            self.events.lock().expect("lock").push(event.clone());
+            self.events.lock().push(event.clone());
         }
     }
 

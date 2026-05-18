@@ -352,7 +352,7 @@ impl EmbeddedServiceHost {
         registry: Option<&ServiceConnectionRegistry>,
     ) {
         let mut ids = handle.yielding_service_ids.lock();
-        let was_yielded = handle.yielded.load(Ordering::Relaxed);
+        let was_yielded = handle.yielded.load(Ordering::Acquire);
 
         if Self::should_yield(handle, info) {
             ids.insert(info.service_id);
@@ -433,7 +433,7 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
                     "embedded service resuming (no more active yielders)"
                 );
             }
-            if !ids.is_empty() || !handle.yielded.load(Ordering::Relaxed) {
+            if !ids.is_empty() || !handle.yielded.load(Ordering::Acquire) {
                 handle.yield_state_changed.notify_one();
             }
         }
@@ -467,7 +467,7 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
                     |capabilities| capabilities.contains(capability),
                 );
 
-            has_capability && handle.yielded.load(Ordering::Relaxed)
+            has_capability && handle.yielded.load(Ordering::Acquire)
         })
     }
 }
