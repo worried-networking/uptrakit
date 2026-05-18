@@ -140,10 +140,8 @@ impl ServiceIdentityState {
     ///
     /// * `service_id` — UUID assigned by the controller on behalf of the
     ///   embedded service.
-    /// * `keypair` — Pre-generated ECDSA P-256 keypair.  Use
-    ///   [`generate_p256_keypair_for_ecies`] or
-    ///   `rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)` to
-    ///   produce one.
+    /// * `keypair` — Pre-generated ECDSA P-256 keypair produced via
+    ///   `rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)`.
     pub(crate) fn for_embedded(service_id: Uuid, keypair: rcgen::KeyPair) -> Self {
         Self {
             config_dir: std::path::PathBuf::new(), // sentinel — never used for I/O
