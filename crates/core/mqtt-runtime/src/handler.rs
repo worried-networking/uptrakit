@@ -18,21 +18,12 @@ use uptrakit_wire::{
 
 pub struct MqttHandler {
     runtime: MqttRuntime,
-    embedded_identity: Option<MqttRuntimeIdentity>,
 }
 
 impl MqttHandler {
     pub fn new() -> Self {
         Self {
             runtime: MqttRuntime::new(),
-            embedded_identity: None,
-        }
-    }
-
-    pub fn new_embedded(identity: MqttRuntimeIdentity) -> Self {
-        Self {
-            runtime: MqttRuntime::new(),
-            embedded_identity: Some(identity),
         }
     }
 }
@@ -101,12 +92,6 @@ impl ServiceHandler for MqttHandler {
         conn: &mut dyn ServiceTransport,
         agreed_capabilities: &BTreeSet<Capability>,
     ) {
-        if let Some(identity) = self.embedded_identity.take()
-            && let Err(e) = self.runtime.on_connected(conn, identity).await
-        {
-            tracing::error!(error = %e, "embedded MQTT: failed to initialize runtime");
-            return;
-        }
         self.runtime
             .apply_settings(
                 MqttRuntimeSettings {
@@ -204,8 +189,6 @@ mod tests {
     };
     use uuid::Uuid;
 
-    use crate::MqttRuntimeIdentity;
-
     use super::MqttHandler;
 
     // ---------------------------------------------------------------------------
@@ -283,21 +266,6 @@ mod tests {
         settings
     }
 
-    /// Generate a minimal ECIES identity for `MqttHandler::new_embedded`.
-    fn make_identity() -> MqttRuntimeIdentity {
-        use base64::Engine as _;
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-            .expect("P-256 key generation must succeed in tests");
-        let private_der = key_pair.serialize_der();
-        let public_b64 =
-            base64::engine::general_purpose::STANDARD.encode(key_pair.public_key_raw());
-        MqttRuntimeIdentity {
-            service_id: None,
-            private_key_der: Some(private_der),
-            encryption_public_key: Some(public_b64),
-        }
-    }
-
     // ---------------------------------------------------------------------------
     // Test 1 – drain-triggered shutdown sends Disconnecting
     // ---------------------------------------------------------------------------
@@ -310,8 +278,7 @@ mod tests {
     /// is invoked on drain (not on transport close), so the trigger is the drain token.
     #[tokio::test]
     async fn drain_shutdown_sends_disconnecting() {
-        let identity = make_identity();
-        let handler = MqttHandler::new_embedded(identity);
+        let handler = MqttHandler::new();
         let (transport, ctrl_tx, mut svc_rx) = make_transport();
         let drain = CancellationToken::new();
         let abort = CancellationToken::new();
@@ -362,8 +329,7 @@ mod tests {
     /// message whose `effective_tenant_binding.tenant_id` matches the tenant.
     #[tokio::test]
     async fn embedded_mqtt_registers_surface_with_default_tenant_binding() {
-        let identity = make_identity();
-        let handler = MqttHandler::new_embedded(identity);
+        let handler = MqttHandler::new();
         let (transport, ctrl_tx, mut svc_rx) = make_transport();
         let drain = CancellationToken::new();
         let abort = CancellationToken::new();

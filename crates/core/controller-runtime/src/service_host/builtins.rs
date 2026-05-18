@@ -375,8 +375,7 @@ pub(crate) async fn register_mqtt(
     let mqtt_caps = crate::mqtt::mqtt_capabilities();
     let default_tenant_id = app_state.default_tenant_id;
 
-    let identity = crate::mqtt::generate_ecies_keypair()?;
-    let handler = uptrakit_mqtt_runtime::MqttHandler::new_embedded(identity);
+    let handler = uptrakit_mqtt_runtime::MqttHandler::new();
 
     let add_result = host
         .add(
