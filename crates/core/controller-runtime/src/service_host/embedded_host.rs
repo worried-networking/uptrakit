@@ -1,3 +1,9 @@
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 use std::sync::Arc;
 
 #[cfg(any(
@@ -59,22 +65,22 @@ use crate::tasks::BackgroundTasks;
 ))]
 use super::builtins::BuiltinRegistration;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 pub(crate) struct BuiltinServiceHost {
-    #[cfg_attr(
-        not(any(
-            feature = "embedded-scheduler",
-            feature = "embedded-agent",
-            feature = "embedded-ssh-agent",
-            feature = "embedded-mqtt"
-        )),
-        expect(
-            dead_code,
-            reason = "field only accessed when at least one embedded service feature is enabled"
-        )
-    )]
     embedded: Arc<crate::embedded::EmbeddedServiceHost>,
 }
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 impl BuiltinServiceHost {
     pub(crate) fn new(embedded: Arc<crate::embedded::EmbeddedServiceHost>) -> Self {
         Self { embedded }

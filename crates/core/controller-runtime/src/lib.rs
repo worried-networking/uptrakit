@@ -322,6 +322,12 @@ async fn run_server(args: cli::Args) -> Result<()> {
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
+    #[cfg(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
+    ))]
     let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
     // Phase 3: Database — URL and pool size from TOML [db].
@@ -734,8 +740,14 @@ async fn run_server(args: cli::Args) -> Result<()> {
     );
 
     // Create the embedded service host before AppState so it can be stored
-    // in the state. The host's `add()` is called later in spawn_background_tasks.
+    // in the state. The host's `add()` is called later for embedded service registration.
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
+    #[cfg(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
+    ))]
     let builtin_host = service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
 
     let builder = AppState::builder()
@@ -1117,18 +1129,78 @@ async fn run_server(args: cli::Args) -> Result<()> {
         &app_state,
         &crl_manager,
         ca_managed,
-        ca_tx,
+        &ca_tx,
         initial_ca_version,
-        controller_id,
-        controller_installation_id,
         has_external_tls_cert,
         &service_connections,
-        &builtin_host,
-        app_dirs.state_dir().to_path_buf(),
         #[cfg(feature = "nats")]
         &nats_transport,
     )
     .await;
+
+    // Embedded service registration. Failures are fatal — a broken embedded
+    // service should not leave the deployment in an indeterminate state.
+    #[cfg(feature = "embedded-scheduler")]
+    service_host::builtins::register_scheduler(
+        &builtin_host,
+        &app_state,
+        &mut bg,
+        controller_id,
+        controller_installation_id,
+        ca_managed,
+        &ca_tx,
+    )
+    .await
+    .map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to start embedded scheduler: {e}"
+        )))
+    })?;
+
+    #[cfg(feature = "embedded-agent")]
+    service_host::builtins::register_agent(
+        &builtin_host,
+        &app_state,
+        &mut bg,
+        controller_installation_id,
+        app_dirs.state_dir().to_path_buf(),
+        None,
+    )
+    .await
+    .map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to start embedded agent: {e}"
+        )))
+    })?;
+
+    #[cfg(feature = "embedded-ssh-agent")]
+    service_host::builtins::register_agent_ssh(
+        &builtin_host,
+        &app_state,
+        &mut bg,
+        controller_installation_id,
+        app_dirs.state_dir().to_path_buf(),
+    )
+    .await
+    .map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to start embedded SSH agent: {e}"
+        )))
+    })?;
+
+    #[cfg(feature = "embedded-mqtt")]
+    service_host::builtins::register_mqtt(
+        &builtin_host,
+        &app_state,
+        &mut bg,
+        controller_installation_id,
+    )
+    .await
+    .map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to start embedded MQTT service: {e}"
+        )))
+    })?;
 
     // Set up signal handlers
     let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
@@ -1250,33 +1322,26 @@ async fn build_audit_logger(
     ))
 }
 
-/// Spawn all background tasks: CRL manager, denylist cleanup, settings reload,
-/// CA reload/rotation, scheduler, server cert renewal, and NATS consumer.
+/// Spawn background tasks: CRL manager, denylist cleanup, CA reload/rotation,
+/// server cert renewal, and NATS consumer. Embedded service registration is
+/// handled by the caller after this function returns.
 #[expect(
     clippy::too_many_arguments,
-    reason = "spawns all background service tasks; each parameter drives a distinct lifecycle phase"
+    reason = "spawns background infrastructure tasks; each parameter drives a distinct lifecycle phase"
 )]
 async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
     app_state: &Arc<AppState>,
     crl_manager: &Arc<crl_manager::CrlManager>,
     ca_managed: bool,
-    ca_tx: tokio::sync::watch::Sender<pki::CaSnapshot>,
+    ca_tx: &tokio::sync::watch::Sender<pki::CaSnapshot>,
     initial_ca_version: i64,
-    controller_id: uuid::Uuid,
-    controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
-    builtin_host: &service_host::BuiltinServiceHost,
-    state_dir: std::path::PathBuf,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
 ) {
-    // These params are only used inside feature-gated blocks; suppress unused
-    // warnings without feature-conditional attributes (both types are Copy).
-    let _ = (controller_installation_id, has_external_tls_cert);
-
     // CRL manager: uses the child cancellation token for cooperative shutdown.
     // Must use track() (not track_abort()) so the manager finishes its current
     // cycle and writes the final TLS config before the process exits.
@@ -1299,87 +1364,11 @@ async fn spawn_background_tasks(
         bg.track("ca-reload", h);
     }
 
-    // Centralised task scheduler (HA-safe via optimistic locking).
-    // Only compiled when the `embedded-scheduler` feature is enabled.
-    // When an external scheduler service is deployed, the controller does NOT
-    // need this feature — the external scheduler handles all scheduled tasks.
-    #[cfg(feature = "embedded-scheduler")]
-    {
-        if let Err(e) = service_host::builtins::register_scheduler(
-            builtin_host,
-            app_state,
-            bg,
-            controller_id,
-            controller_installation_id,
-            ca_managed,
-            &ca_tx,
-        )
-        .await
-        {
-            tracing::error!(error = %e, "failed to start embedded scheduler");
-        }
-    }
-
-    // Embedded agent: run a local agent inside the controller process.
-    // Only available in single-tenant deployments (uses default_tenant_id).
-    #[cfg(feature = "embedded-agent")]
-    {
-        if let Err(e) = service_host::builtins::register_agent(
-            builtin_host,
-            app_state,
-            bg,
-            controller_installation_id,
-            state_dir.clone(),
-            None, // pid_file removed from CLI
-        )
-        .await
-        {
-            tracing::error!(error = %e, "failed to start embedded agent");
-        }
-    }
-
-    // Embedded SSH agent: manage remote hosts over SSH from within the controller.
-    // Only available in single-tenant deployments (uses default_tenant_id).
-    #[cfg(feature = "embedded-ssh-agent")]
-    {
-        if let Err(e) = service_host::builtins::register_agent_ssh(
-            builtin_host,
-            app_state,
-            bg,
-            controller_installation_id,
-            state_dir.clone(),
-        )
-        .await
-        {
-            tracing::error!(error = %e, "failed to start embedded SSH agent");
-        }
-    }
-
-    #[cfg(feature = "embedded-mqtt")]
-    {
-        if let Err(e) = service_host::builtins::register_mqtt(
-            builtin_host,
-            app_state,
-            bg,
-            controller_installation_id,
-        )
-        .await
-        {
-            tracing::error!(error = %e, "failed to start embedded mqtt");
-        }
-    }
-
-    // Suppress unused-variable warnings in feature combinations where the
-    // embedded service blocks above do not consume these values.
-    let _ = controller_id;
-    let _ = controller_installation_id;
-    let _ = &state_dir;
-
     if ca_managed {
         let h = tasks::spawn_ca_rotation(
             bg.child_token(),
             Arc::clone(app_state),
-            ca_tx,
+            ca_tx.clone(),
             Arc::clone(crl_manager),
         );
         bg.track("ca-rotation", h);
