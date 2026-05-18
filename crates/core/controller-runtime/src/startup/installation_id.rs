@@ -1,3 +1,10 @@
+#![cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
+
 use std::path::Path;
 
 use rootcause::prelude::*;
