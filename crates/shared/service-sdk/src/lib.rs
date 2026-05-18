@@ -40,8 +40,7 @@
 //! - Entry points: [`run_lifecycle_and_handle_errors`],
 //!   [`run_service_lifecycle`], [`run_embedded_service`].
 //! - Trait: [`ServiceHandler`] (impl this on your Service).
-//! - Identity helpers: [`ServiceIdentityState`],
-//!   [`generate_p256_keypair_for_ecies`].
+//! - Identity helpers: [`ServiceIdentityState`].
 //! - Shutdown: [`ShutdownCause`], [`default_resolve_shutdown`].
 //! - Errors: [`LoopError`], [`LoopOutcome`], [`LoopResult`].
 
@@ -105,7 +104,7 @@ pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,
     is_rustls_cert_expired,
 };
-pub use identity::{ServiceIdentityState, generate_p256_keypair_for_ecies};
+pub use identity::ServiceIdentityState;
 pub use lifecycle::{default_resolve_shutdown, run_service_lifecycle};
 pub use main_helper::{init_crypto, print_build_info, run_lifecycle_and_handle_errors};
 #[cfg(feature = "sensitive-params")]
