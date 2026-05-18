@@ -84,7 +84,7 @@ regex = "1"
 semver = "1"
 tokio-stream = "0.1"
 tokio-util = "0.7"
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 async-stream = "0.3"
 async-trait = "0.1"
 bollard = { version = "0.20", default-features = false, features = ["http", "pipe"] }
@@ -178,7 +178,7 @@ nix = { version = "0.31", default-features = false }
 notify-debouncer-full = "0.7"
 # Plan 3 (reexec) consumers; declared here for license review
 listenfd = "1"
-sd-notify = "0.4"
+sd-notify = "0.5"
 rust-embed = { version = "8", default-features = false }
 mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.6", default-features = false }
