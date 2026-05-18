@@ -210,7 +210,8 @@ pub(crate) async fn register_scheduler(
             None,
             controller_installation_id,
             map_yield_policy(&SCHEDULER, None),
-            move |transport, tokens| {
+            move |service_id, transport, tokens| {
+                let _ = service_id;
                 Box::pin(async move {
                     let yield_check: Box<dyn Fn() -> bool + Send + Sync> =
                         if let Some(notifier_arc) = embedded_notifier_ref {
@@ -278,7 +279,8 @@ pub(crate) async fn register_agent(
             Some(default_tenant_id),
             controller_installation_id,
             map_yield_policy(&AGENT, Some(local_machine_id)),
-            move |transport, tokens| {
+            move |service_id, transport, tokens| {
+                let _ = service_id;
                 Box::pin(crate::agent::run_embedded_agent(
                     transport,
                     tokens.abort,
@@ -341,8 +343,9 @@ pub(crate) async fn register_agent_ssh(
             Some(default_tenant_id),
             controller_installation_id,
             map_yield_policy(&AGENT_SSH, None),
-            move |transport, tokens| {
+            move |service_id, transport, tokens| {
                 Box::pin(uptrakit_service_sdk::run_embedded_service(
+                    service_id,
                     handler,
                     transport,
                     tokens.drain,
@@ -393,8 +396,9 @@ pub(crate) async fn register_mqtt(
             None,
             controller_installation_id,
             map_yield_policy(&MQTT, None),
-            move |transport, tokens| {
+            move |service_id, transport, tokens| {
                 Box::pin(uptrakit_service_sdk::run_embedded_service(
+                    service_id,
                     handler,
                     transport,
                     tokens.drain,
