@@ -359,18 +359,46 @@ mod tests {
         )
         .await;
 
-        let mut registrations = Vec::new();
+        let mut messages = Vec::new();
         svc_rx.close();
         while let Some(msg) = svc_rx.recv().await {
-            if let ServiceMessage::SurfaceRegistration(reg) = msg {
-                registrations.push(reg);
-            }
+            messages.push(msg);
         }
 
+        let register_pos = messages
+            .iter()
+            .position(|m| matches!(m, ServiceMessage::Register(_)));
+        let surface_pos = messages
+            .iter()
+            .position(|m| matches!(m, ServiceMessage::SurfaceRegistration(_)));
+
+        assert!(
+            register_pos.is_some(),
+            "expected ServiceMessage::Register from on_connected; got: {messages:?}"
+        );
+        assert!(
+            surface_pos.is_some(),
+            "expected ServiceMessage::SurfaceRegistration from on_settings; got: {messages:?}"
+        );
+        assert!(
+            register_pos < surface_pos,
+            "Register must be sent before SurfaceRegistration (on_connected before on_settings)"
+        );
+
+        let registrations: Vec<_> = messages
+            .iter()
+            .filter_map(|m| {
+                if let ServiceMessage::SurfaceRegistration(reg) = m {
+                    Some(reg)
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(
             registrations.len(),
             1,
-            "expected exactly one SurfaceRegistration; got {registrations:?}"
+            "expected exactly one SurfaceRegistration; got {messages:?}"
         );
         let registration = &registrations[0];
         let expected_tenant = default_tenant_id.to_string();
