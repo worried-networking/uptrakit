@@ -99,6 +99,7 @@ impl BuiltinServiceHost {
         embedded_owner_key: Uuid,
         coexistence_policy: crate::embedded::types::CoexistencePolicy,
         run_fn: impl FnOnce(
+            uuid::Uuid,
             crate::embedded::types::EmbeddedTransport,
             crate::embedded::EmbeddedShutdownTokens,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>

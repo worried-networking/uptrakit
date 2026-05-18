@@ -327,7 +327,14 @@ mod tests {
             .expect("settings send must succeed");
         drain.cancel();
 
-        uptrakit_service_sdk::run_embedded_service(handler, transport, drain, abort).await;
+        uptrakit_service_sdk::run_embedded_service(
+            uuid::Uuid::nil(),
+            handler,
+            transport,
+            drain,
+            abort,
+        )
+        .await;
 
         // Collect all outbound messages.
         let mut messages = Vec::new();
@@ -377,7 +384,14 @@ mod tests {
         // processed, causing the event loop to exit naturally.
         drop(ctrl_tx);
 
-        uptrakit_service_sdk::run_embedded_service(handler, transport, drain, abort).await;
+        uptrakit_service_sdk::run_embedded_service(
+            uuid::Uuid::nil(),
+            handler,
+            transport,
+            drain,
+            abort,
+        )
+        .await;
 
         let mut registrations = Vec::new();
         svc_rx.close();

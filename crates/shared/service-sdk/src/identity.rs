@@ -144,13 +144,6 @@ impl ServiceIdentityState {
     ///   [`generate_p256_keypair_for_ecies`] or
     ///   `rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)` to
     ///   produce one.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "call site added in a subsequent task (run_embedded_service)"
-        )
-    )]
     pub(crate) fn for_embedded(service_id: Uuid, keypair: rcgen::KeyPair) -> Self {
         Self {
             config_dir: std::path::PathBuf::new(), // sentinel — never used for I/O

@@ -165,6 +165,7 @@ impl EmbeddedServiceHost {
         embedded_owner_key: Uuid,
         coexistence_policy: CoexistencePolicy,
         run_fn: impl FnOnce(
+            Uuid,
             EmbeddedTransport,
             EmbeddedShutdownTokens,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
@@ -287,7 +288,7 @@ impl EmbeddedServiceHost {
             drain: drain_token.clone(),
             abort: abort_token,
         };
-        let service_handle = tokio::spawn(run_fn(transport, tokens));
+        let service_handle = tokio::spawn(run_fn(service_id, transport, tokens));
         bg.mark_embedded(service_id, drain_token);
         match service_task_timeout {
             Some(t) => bg.track_with_timeout(label, service_handle, t),

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::shared_types::{LoopOutcome, ServiceHandler, ShutdownCause};
 use crate::wire_api::{Capability, ControllerMessage, ServiceSettingsPayload, ServiceTransport};
@@ -24,14 +25,19 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(120);
 ///
 /// Startup sequence:
 /// 1. Wait up to 10 s for the controller to send `ServiceSettings` (first message).
-/// 2. Compute agreed capabilities (intersection of handler's and controller's).
-/// 3. Call `on_settings` — first handler callback (no `on_connected` for embedded).
-/// 4. Call `on_yield_change` with the transport's current yield state.
-/// 5. Enter the two-phase event loop.
+/// 2. Generate an ephemeral P-256 keypair and build a [`ServiceIdentityState`].
+/// 3. Call `on_connected` with the identity — mirrors the standalone lifecycle.
+/// 4. Compute agreed capabilities (intersection of handler's and controller's).
+/// 5. Call `on_settings`.
+/// 6. Call `on_yield_change` with the transport's current yield state.
+/// 7. Enter the two-phase event loop.
 ///
 /// Exits when: drain fires (graceful via `on_shutdown`), abort fires
 /// (immediate), transport closes, or a handler callback requests exit.
+///
+/// [`ServiceIdentityState`]: crate::identity::ServiceIdentityState
 pub async fn run_embedded_service<H: ServiceHandler>(
+    service_id: Uuid,
     mut handler: H,
     mut transport: impl ServiceTransport,
     drain: CancellationToken,
@@ -80,6 +86,32 @@ pub async fn run_embedded_service<H: ServiceHandler>(
     let mut shutdown_timeout = settings
         .shutdown_timeout
         .unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
+
+    // ── Identity + on_connected ─────────────────────────────────────────────
+    {
+        // P-256 is intentional: sealed_box_decrypt in sensitive_params.rs is
+        // hardcoded to ECDH_P256. Migration to P-384 is a separate future spec.
+        let keypair = match rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256) {
+            Ok(kp) => kp,
+            Err(e) => {
+                tracing::error!(
+                    service = H::SERVICE_LABEL,
+                    error = %e,
+                    "failed to generate embedded service keypair; aborting"
+                );
+                return;
+            }
+        };
+        let identity = crate::identity::ServiceIdentityState::for_embedded(service_id, keypair);
+        if let Err(e) = handler.on_connected(&mut transport, &identity).await {
+            tracing::error!(
+                service = H::SERVICE_LABEL,
+                error = %e,
+                "embedded on_connected failed; aborting"
+            );
+            return;
+        }
+    } // identity and keypair dropped here
 
     let agreed = compute_agreed_capabilities(&handler, &settings);
 
@@ -315,6 +347,7 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct CallLog {
+        call_order: Vec<&'static str>,
         on_settings_called: bool,
         on_shutdown_called: bool,
         on_yield_change_called: bool,
@@ -323,12 +356,32 @@ mod tests {
 
     struct MockHandler {
         log: std::sync::Arc<parking_lot::Mutex<CallLog>>,
+        on_connected_result: LoopResult<()>,
     }
 
     impl MockHandler {
         fn new() -> (Self, std::sync::Arc<parking_lot::Mutex<CallLog>>) {
             let log = std::sync::Arc::new(parking_lot::Mutex::new(CallLog::default()));
-            (Self { log: log.clone() }, log)
+            (
+                Self {
+                    log: log.clone(),
+                    on_connected_result: Ok(()),
+                },
+                log,
+            )
+        }
+
+        fn new_failing_connected() -> (Self, std::sync::Arc<parking_lot::Mutex<CallLog>>) {
+            let log = std::sync::Arc::new(parking_lot::Mutex::new(CallLog::default()));
+            (
+                Self {
+                    log: log.clone(),
+                    on_connected_result: Err(rootcause::report!(
+                        crate::shared_types::LoopError::Other("on_connected failed".to_string())
+                    )),
+                },
+                log,
+            )
         }
     }
 
@@ -345,7 +398,13 @@ mod tests {
             _conn: &mut dyn ServiceTransport,
             _identity: &crate::identity::ServiceIdentityState,
         ) -> LoopResult<()> {
-            Ok(())
+            self.log.lock().call_order.push("on_connected");
+            match &self.on_connected_result {
+                Ok(()) => Ok(()),
+                Err(e) => Err(rootcause::report!(crate::shared_types::LoopError::Other(
+                    e.to_string()
+                ))),
+            }
         }
 
         async fn on_message(
@@ -363,7 +422,9 @@ mod tests {
             _conn: &mut dyn ServiceTransport,
             _agreed: &BTreeSet<Capability>,
         ) {
-            self.log.lock().on_settings_called = true;
+            let mut log = self.log.lock();
+            log.on_settings_called = true;
+            log.call_order.push("on_settings");
         }
 
         async fn poll_service_event(&mut self) -> Self::ServiceEvent {
@@ -406,7 +467,7 @@ mod tests {
         let drain = CancellationToken::new();
         let abort = CancellationToken::new();
 
-        run_embedded_service(handler, transport, drain, abort).await;
+        run_embedded_service(uuid::Uuid::nil(), handler, transport, drain, abort).await;
 
         let log = log.lock();
         assert!(!log.on_settings_called, "on_settings must not be called");
@@ -422,7 +483,7 @@ mod tests {
         let abort = CancellationToken::new();
         abort.cancel();
 
-        run_embedded_service(handler, transport, drain, abort).await;
+        run_embedded_service(uuid::Uuid::nil(), handler, transport, drain, abort).await;
 
         assert!(!log.lock().on_settings_called);
     }
@@ -441,7 +502,7 @@ mod tests {
             .expect("send settings");
         drain.cancel();
 
-        run_embedded_service(handler, transport, drain, abort).await;
+        run_embedded_service(uuid::Uuid::nil(), handler, transport, drain, abort).await;
 
         let log = log.lock();
         assert!(log.on_settings_called, "on_settings must be called");
@@ -459,7 +520,13 @@ mod tests {
         let drain = CancellationToken::new();
         let abort = CancellationToken::new();
 
-        let task = tokio::spawn(run_embedded_service(handler, transport, drain, abort));
+        let task = tokio::spawn(run_embedded_service(
+            uuid::Uuid::nil(),
+            handler,
+            transport,
+            drain,
+            abort,
+        ));
 
         tokio::time::advance(Duration::from_secs(11)).await;
 
@@ -487,7 +554,7 @@ mod tests {
             .expect("send unknown");
         drop(ctrl_tx);
 
-        run_embedded_service(handler, transport, drain, abort).await;
+        run_embedded_service(uuid::Uuid::nil(), handler, transport, drain, abort).await;
 
         let log = log.lock();
         assert!(log.on_settings_called, "on_settings must be called");
@@ -498,6 +565,60 @@ mod tests {
         assert!(
             !log.on_shutdown_called,
             "on_shutdown not called on transport close"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_connected_called_before_on_settings() {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings()))
+            .await
+            .expect("send settings");
+        drain.cancel();
+
+        run_embedded_service(uuid::Uuid::new_v4(), handler, transport, drain, abort).await;
+
+        let log = log.lock();
+        let connected_pos = log.call_order.iter().position(|&s| s == "on_connected");
+        let settings_pos = log.call_order.iter().position(|&s| s == "on_settings");
+        let ci = connected_pos.expect("on_connected must be in call_order");
+        let si = settings_pos.expect("on_settings must be in call_order");
+        assert!(ci < si, "on_connected must be called before on_settings");
+    }
+
+    #[tokio::test]
+    async fn abort_when_on_connected_returns_err() {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(4);
+        let transport = make_transport(ctrl_rx);
+        let (handler, log) = MockHandler::new_failing_connected();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+
+        ctrl_tx
+            .send(ControllerMessage::ServiceSettings(make_settings()))
+            .await
+            .expect("send settings");
+
+        run_embedded_service(uuid::Uuid::new_v4(), handler, transport, drain, abort).await;
+
+        let log = log.lock();
+        assert!(
+            log.call_order.contains(&"on_connected"),
+            "on_connected must be called"
+        );
+        assert!(
+            !log.on_settings_called,
+            "on_settings must NOT be called when on_connected fails"
+        );
+        assert!(
+            !log.on_shutdown_called,
+            "on_shutdown must NOT be called when on_connected fails"
         );
     }
 }
