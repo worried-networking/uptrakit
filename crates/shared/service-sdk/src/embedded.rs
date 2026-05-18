@@ -90,7 +90,7 @@ pub async fn run_embedded_service<H: ServiceHandler>(
     // ── Identity + on_connected ─────────────────────────────────────────────
     {
         // P-256 is intentional: sealed_box_decrypt in sensitive_params.rs is
-        // hardcoded to ECDH_P256. Migration to P-384 is a separate future spec.
+        // hardcoded to ECDH_P256.
         let keypair = match rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256) {
             Ok(kp) => kp,
             Err(e) => {
