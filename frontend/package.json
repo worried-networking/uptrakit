@@ -54,7 +54,7 @@
 		"vitest": "^4.1.4"
 	},
 	"dependencies": {
-		"dompurify": "^3.4.2",
+		"dompurify": "^3.4.5",
 		"lucide-svelte": "^1.0.1",
 		"markdown-it": "^14.1.1",
 		"markdown-it-emoji": "^3.0.0",
