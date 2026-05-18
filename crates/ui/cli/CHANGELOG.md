@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.2...uptrakit-cli-v0.0.3) - 2026-05-18
+
+### Added
+
+- *(pki)* migrate service CSR keygen, CLI CA trust keygen, and OCSP signing to P-384
+- *(api)* add active_update_status to SoftwareItemHostSummary
+- *(audit-v2)* surface V2 fields in frontend, CLI, and API
+- *(cli)* add ca_fingerprint to auth status output
+- *(cli)* add --tofu flag to auth login with CA trust bootstrap
+- *(cli)* add establish_ca_trust shared function with fingerprint verification
+- *(cli)* add parse_fingerprint for --tofu flag validation
+- *(cli)* thread ca_pem from config through authenticated_client and auth functions
+- *(openapi-client)* add ca_pem to UptrakitClient::new/with_token with tls_certs_only
+- *(cli)* add ca_pem field to Config with non_exhaustive
+- *(2fa)* settings_auth two_factor_required + MFA challenge cleanup
+- *(api)* spiffe_id field on service responses
+- *(cli)* rewrite auth login against RFC 8628 token endpoint with typed error matching
+
+### Fixed
+
+- *(audit-v2)* address /verify findings — rootcause import placement and missing frontend filters
+- *(cli)* align validate_url_scheme/open_url with crate standards and fix unsupported-OS UX
+- *(cli)* use parking_lot::Mutex in client tests, document establish_ca_trust return type
+- *(cli)* add #[non_exhaustive] to CaCommands and tidy test lint suppressions
+- *(cli)* add error_for_status to CA fetch and tidy establish_ca_trust
+- *(cli)* add #[non_exhaustive] to Credentials and fix stale lint suppressions
+- *(verify)* SAN preservation, --tofu-insecure in tests, trust_domain in settings API, #[non_exhaustive] on public types
+- *(cli)* remove needless struct-update spread in poll_for_token
+- *(openapi-client)* move OAuth paths to mod oauth, add non_exhaustive to device.rs structs
+
+### Other
+
+- *(services)* migrate ServiceResponse struct literals to ::new() constructor
+- *(cli)* extract pem_fingerprint helper and include error detail in PEM parse failures
+- *(cli)* add resolve_server_and_token unit tests
+- *(cli)* note gap for slow_down/access_denied/verification_uri_complete (no mock harness yet)
+- *(rfc8628)* fix quality gate issues and stub Plan-2 callsites
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.1...uptrakit-cli-v0.0.2) - 2026-05-05
 
 ### Added
