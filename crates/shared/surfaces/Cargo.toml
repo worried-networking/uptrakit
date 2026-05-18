@@ -12,6 +12,8 @@ description = "Shared surface contracts for built-in and provider UI integration
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
