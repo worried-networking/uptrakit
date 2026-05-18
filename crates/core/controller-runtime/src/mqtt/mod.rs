@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use uptrakit_mqtt_runtime::{MqttRuntimeIdentity, mqtt_capabilities as runtime_capabilities};
+use uptrakit_mqtt_runtime::mqtt_capabilities as runtime_capabilities;
 use uptrakit_wire::{Capability, ControllerMessage};
 
 pub(crate) fn mqtt_capabilities() -> BTreeSet<Capability> {
@@ -50,21 +50,6 @@ pub(crate) async fn send_initial_service_config(
             ),
         )
         .await;
-}
-
-pub(crate) fn generate_ecies_keypair() -> rootcause::Result<MqttRuntimeIdentity> {
-    use rootcause::prelude::*;
-    let (private_der, public_b64) = uptrakit_service_sdk::generate_p256_keypair_for_ecies()
-        .map_err(|e| {
-            report!(std::io::Error::other(format!(
-                "embedded MQTT: ECIES keygen failed: {e}"
-            )))
-        })?;
-    Ok(MqttRuntimeIdentity {
-        service_id: None,
-        private_key_der: Some(private_der),
-        encryption_public_key: Some(public_b64),
-    })
 }
 
 #[cfg(test)]
