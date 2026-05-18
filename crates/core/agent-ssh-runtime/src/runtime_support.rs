@@ -24,7 +24,6 @@ pub struct AgentSshRuntimeSupport {
     pool: ssh_pool::SshConnectionPool,
     surface_proxy: Arc<ServiceSurfaceProxy>,
     infra_bundles: Arc<Vec<InfraBundle>>,
-    persist_tenant_id: bool,
 }
 
 impl AgentSshRuntimeSupport {
@@ -34,7 +33,6 @@ impl AgentSshRuntimeSupport {
         pool: ssh_pool::SshConnectionPool,
         surface_proxy: Arc<ServiceSurfaceProxy>,
         infra_bundles: Arc<Vec<InfraBundle>>,
-        persist_tenant_id: bool,
     ) -> Self {
         Self {
             db,
@@ -42,7 +40,6 @@ impl AgentSshRuntimeSupport {
             pool,
             surface_proxy,
             infra_bundles,
-            persist_tenant_id,
         }
     }
 
@@ -359,12 +356,11 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
     }
 
     async fn persist_tenant_id(&self, tenant_id: uuid::Uuid) {
-        if !self.persist_tenant_id {
-            return;
-        }
-
         let mut identity =
             uptrakit_service_sdk::ServiceIdentityState::new_single_dir(&self.state_dir);
+        // For embedded services: state_dir contains no service.json (never enrolled).
+        // load() succeeds with all fields None; save_tenant_id() returns Ok(()) early
+        // when service_id is None — no disk write occurs.
         if let Err(error) = identity.load().await {
             tracing::warn!(error = %error, "failed to load identity for tenant_id persistence");
             return;
@@ -435,7 +431,6 @@ mod tests {
             crate::ssh_pool::SshConnectionPool::new(),
             Arc::new(crate::ServiceSurfaceProxy::new()),
             Arc::new(Vec::new()),
-            false,
         );
         let session_state = RuntimeSessionState {
             service_id: Some(uuid::Uuid::now_v7()),

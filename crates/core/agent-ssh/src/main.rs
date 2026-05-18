@@ -5,8 +5,8 @@ use clap::Parser;
 use rootcause::prelude::*;
 
 use uptrakit_agent_ssh_runtime::{
-    AgentSshHandler, AgentSshMode, db, init_ssh_data_key_ring, reencrypt_ssh_to_v3,
-    register_ssh_column_aad, rotate_ssh_master_key,
+    AgentSshHandler, db, init_ssh_data_key_ring, reencrypt_ssh_to_v3, register_ssh_column_aad,
+    rotate_ssh_master_key,
 };
 use uptrakit_service_sdk::run_lifecycle_and_handle_errors;
 
@@ -117,7 +117,7 @@ async fn main() {
         rotate_ssh_master_key(&local_db, new_key_path).await;
     }
 
-    let mut handler = AgentSshHandler::new(local_db, state_dir, AgentSshMode::Binary, None);
+    let mut handler = AgentSshHandler::new(local_db, state_dir);
 
     run_lifecycle_and_handle_errors("uptrakit-agent-ssh", &args.common, &mut handler).await;
 }

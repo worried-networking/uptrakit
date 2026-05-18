@@ -262,7 +262,6 @@ pub struct SshAgentIdentity {
 pub struct SshAgentSettings {
     pub tenant_id: Option<uuid::Uuid>,
     pub ui_surfaces_enabled: bool,
-    pub persist_tenant_id: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -469,9 +468,7 @@ where
     ) -> Result<(), TransportError> {
         if let Some(tenant_id) = settings.tenant_id {
             self.session_state.tenant_id = Some(tenant_id);
-            if settings.persist_tenant_id {
-                self.support.persist_tenant_id(tenant_id).await;
-            }
+            self.support.persist_tenant_id(tenant_id).await;
         }
 
         if self.pending_initial_host_report {
@@ -1250,7 +1247,7 @@ pub async fn rotate_ssh_master_key(
     );
 }
 
-pub use handler::{AgentSshHandler, AgentSshMode, EciesKeypair};
+pub use handler::AgentSshHandler;
 
 #[cfg(test)]
 mod tests {
@@ -1739,7 +1736,6 @@ mod tests {
                 SshAgentSettings {
                     tenant_id: Some(tenant_id),
                     ui_surfaces_enabled: false,
-                    persist_tenant_id: false,
                 },
                 &mut transport,
             )
