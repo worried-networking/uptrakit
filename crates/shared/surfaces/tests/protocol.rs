@@ -729,3 +729,12 @@ fn provider_encryption_algorithm_other_round_trips() {
     let back: ProviderEncryptionAlgorithm = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, original);
 }
+
+#[test]
+fn provider_encryption_algorithm_known_variants_round_trip() {
+    for v in ProviderEncryptionAlgorithm::KNOWN_VARIANTS {
+        let json = serde_json::to_string(v).expect("serialize");
+        let back: ProviderEncryptionAlgorithm = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(*v, back);
+    }
+}
