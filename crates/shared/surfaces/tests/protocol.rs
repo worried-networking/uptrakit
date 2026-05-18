@@ -12,11 +12,11 @@ use uptrakit_surfaces::{
     DataSourcePagination, DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams,
     FormFieldDescriptor, FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange,
     InteractionConfirmation, InteractionDescriptor, InteractionId, InteractionKind,
-    InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderIdentity, ProviderKind,
-    RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SchemaContract, Scope,
-    SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
-    SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting,
-    WorkflowStepDescriptor,
+    InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderEncryptionAlgorithm,
+    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS,
+    SLOT_SURFACE_PAGE, SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId,
+    SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy,
+    SurfaceTab, SurfaceTabId, Targeting, WorkflowStepDescriptor,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -695,4 +695,37 @@ fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("workflow step submit interaction id should be validated");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn provider_encryption_algorithm_ecies_p256_serializes_correctly() {
+    let val = ProviderEncryptionAlgorithm::EciesP256;
+    let json = serde_json::to_string(&val).expect("serialize");
+    assert_eq!(json, "\"ecies_p256\"");
+}
+
+#[test]
+fn provider_encryption_algorithm_ecies_p256_deserializes_correctly() {
+    let val: ProviderEncryptionAlgorithm =
+        serde_json::from_str("\"ecies_p256\"").expect("deserialize");
+    assert_eq!(val, ProviderEncryptionAlgorithm::EciesP256);
+}
+
+#[test]
+fn provider_encryption_algorithm_unknown_deserializes_to_other() {
+    let val: ProviderEncryptionAlgorithm =
+        serde_json::from_str("\"ecies_p384\"").expect("deserialize unknown");
+    assert_eq!(
+        val,
+        ProviderEncryptionAlgorithm::Other("ecies_p384".to_string())
+    );
+}
+
+#[test]
+fn provider_encryption_algorithm_other_round_trips() {
+    let original = ProviderEncryptionAlgorithm::Other("ecies_p384".to_string());
+    let json = serde_json::to_string(&original).expect("serialize");
+    assert_eq!(json, "\"ecies_p384\"");
+    let back: ProviderEncryptionAlgorithm = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, original);
 }

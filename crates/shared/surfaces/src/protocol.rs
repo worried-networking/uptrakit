@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use thiserror::Error;
+use uptrakit_shared_macros::wire_safe_enum;
 use uuid::Uuid;
 
 use crate::{
@@ -756,10 +757,20 @@ pub struct ProviderEncryptionMetadata {
     pub public_key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderEncryptionAlgorithm {
-    EciesP256,
+wire_safe_enum! {
+    /// Encryption algorithm used for ECIES sealed-box parameter encryption.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum ProviderEncryptionAlgorithm {
+        EciesP256 => "ecies_p256",
+    }
+    parse_error = ParseProviderEncryptionAlgorithmError("invalid provider encryption algorithm");
+}
+
+impl ProviderEncryptionAlgorithm {
+    /// All known (non-`Other`) variants. Used in tests for exhaustive iteration
+    /// (`strum::EnumIter` is incompatible with the `Other(String)` tuple variant).
+    pub const KNOWN_VARIANTS: &'static [ProviderEncryptionAlgorithm] =
+        &[ProviderEncryptionAlgorithm::EciesP256];
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
