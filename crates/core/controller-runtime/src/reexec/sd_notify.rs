@@ -7,7 +7,7 @@ use sd_notify::NotifyState;
 /// supervisor) the call is a no-op.  Also prints `READY` to stdout so that
 /// non-systemd supervisors (e.g. s6, runit) can detect readiness via pipe.
 pub(crate) fn signal_ready() {
-    drop(sd_notify::notify(false, &[NotifyState::Ready]));
+    drop(sd_notify::notify(&[NotifyState::Ready]));
     println!("READY");
 }
 
@@ -17,5 +17,5 @@ pub(crate) fn signal_ready() {
 /// otherwise.
 #[expect(dead_code, reason = "wired in a later graceful-reload task")]
 pub(crate) fn signal_status(text: &str) {
-    drop(sd_notify::notify(false, &[NotifyState::Status(text)]));
+    drop(sd_notify::notify(&[NotifyState::Status(text)]));
 }
