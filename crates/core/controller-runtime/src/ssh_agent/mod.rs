@@ -9,17 +9,6 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     runtime_capabilities()
 }
 
-pub(crate) fn generate_ecies_keypair() -> rootcause::Result<(Option<Vec<u8>>, String)> {
-    use rootcause::prelude::*;
-    let (private_der, public_b64) = uptrakit_service_sdk::generate_p256_keypair_for_ecies()
-        .map_err(|e| {
-            report!(std::io::Error::other(format!(
-                "embedded SSH agent: ECIES keygen failed: {e}"
-            )))
-        })?;
-    Ok((Some(private_der), public_b64))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -19,30 +19,12 @@ use crate::{
     SshAgentSettings, ssh_agent_capabilities,
 };
 
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentSshMode {
-    Binary,
-    Embedded,
-}
-
-pub struct EciesKeypair {
-    pub private_key_der: Option<Vec<u8>>,
-    pub encryption_public_key: String,
-}
-
 pub struct AgentSshHandler {
     runtime: SshAgentRuntime<AgentSshRuntimeSupport>,
-    ecies_keypair: Option<EciesKeypair>,
 }
 
 impl AgentSshHandler {
-    pub fn new(
-        db: DatabaseConnection,
-        state_dir: PathBuf,
-        mode: AgentSshMode,
-        ecies_keypair: Option<EciesKeypair>,
-    ) -> Self {
+    pub fn new(db: DatabaseConnection, state_dir: PathBuf) -> Self {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
         #[expect(
             clippy::expect_used,
@@ -56,24 +38,19 @@ impl AgentSshHandler {
         .expect("plugin catalog must build successfully");
         let infra_bundles = Arc::new(catalog.create_infra_bundles(&catalog_config));
         let surface_proxy = Arc::new(ServiceSurfaceProxy::new());
-        let is_standalone = matches!(mode, AgentSshMode::Binary);
         let support = AgentSshRuntimeSupport::new(
             db,
             state_dir.clone(),
             SshConnectionPool::new(),
             surface_proxy,
             infra_bundles,
-            is_standalone,
         );
         let runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::with_audit_emitter(
             support,
             state_dir.join("update-freeze"),
             RuntimeAuditEmitter::new(),
         ));
-        Self {
-            runtime,
-            ecies_keypair,
-        }
+        Self { runtime }
     }
 }
 
@@ -90,25 +67,16 @@ impl ServiceHandler for AgentSshHandler {
         conn: &mut dyn ServiceTransport,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
-        let (private_key_der, encryption_public_key) = match &self.ecies_keypair {
-            Some(kp) => (
-                kp.private_key_der.clone(),
-                Some(kp.encryption_public_key.clone()),
-            ),
-            None => {
-                let enc_pub = identity
-                    .public_key_raw()
-                    .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
-                (identity.private_key_pkcs8_der(), enc_pub)
-            }
-        };
+        let enc_pub = identity
+            .public_key_raw()
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
         self.runtime
             .on_connected(
                 conn,
                 SshAgentIdentity {
                     service_id: identity.service_id(),
-                    private_key_der,
-                    encryption_public_key,
+                    private_key_der: identity.private_key_pkcs8_der(),
+                    encryption_public_key: enc_pub,
                 },
             )
             .await
@@ -136,7 +104,6 @@ impl ServiceHandler for AgentSshHandler {
                 SshAgentSettings {
                     tenant_id: settings.tenant_id,
                     ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
-                    persist_tenant_id: self.ecies_keypair.is_none(),
                 },
                 conn,
             )
