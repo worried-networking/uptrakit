@@ -68,17 +68,14 @@ The discrepancy was introduced when the two functions were treated as independen
 
 ## Prerequisite Dependency
 
-The embedded-service-identity spec removes `ssh_agent::generate_ecies_keypair()` and
-`mqtt::generate_ecies_keypair()` — the only callers of `generate_p256_keypair_for_ecies()`.
-This spec depends on those removals being in place before it ships; otherwise the deletion
-of `generate_p256_keypair_for_ecies()` will fail to compile.
-
-After the prerequisite ships:
+**Prerequisite shipped.** The embedded-service-identity spec has been merged and removed
+`ssh_agent::generate_ecies_keypair()` and `mqtt::generate_ecies_keypair()` — the only
+callers of `generate_p256_keypair_for_ecies()`. Current state:
 
 - Embedded services use `ServiceIdentityState::for_embedded(service_id, keypair)` where
   `keypair` is a freshly generated P-256 key inside `run_embedded_service`. No separate
   ECIES keypair generation in the controller.
-- `generate_p256_keypair_for_ecies()` has no callers and can be safely deleted.
+- `generate_p256_keypair_for_ecies()` has no external callers and can be safely deleted.
 
 ---
 
@@ -88,7 +85,7 @@ After the prerequisite ships:
 
 Two sites in `crates/shared/service-sdk/src/identity.rs`:
 
-**`ensure_keypair()` (line 325):**
+**`ensure_keypair()` (line 345):**
 
 ```rust
 // Before
@@ -98,7 +95,7 @@ rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)
 rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
 ```
 
-**`generate_keypair_and_csr()` (line 614):**
+**`generate_keypair_and_csr()` (line 621):**
 
 ```rust
 // Before
@@ -116,7 +113,7 @@ Update the module-level doc comment (line 7) to match:
 
 ### 2 — Delete `generate_p256_keypair_for_ecies()`
 
-Remove the function `generate_p256_keypair_for_ecies()` (lines 667–678) and its
+Remove the function `generate_p256_keypair_for_ecies()` (line 693) and its
 re-export from `lib.rs`:
 
 ```rust
@@ -126,7 +123,7 @@ pub use identity::ServiceIdentityState;
 ```
 
 Remove the corresponding test `generate_p256_keypair_for_ecies_produces_valid_pair`
-(lines 1303–1322).
+(line 1366).
 
 ### 3 — `ProviderEncryptionAlgorithm` wire-safe migration
 
@@ -218,10 +215,10 @@ Tests in `identity.rs` that construct a service keypair with P-384 must be updat
 
 | Test                                          | Location  | Change                                              |
 | --------------------------------------------- | --------- | --------------------------------------------------- |
-| `certificate_save_clears_enrollment_secret`   | line 890  | `PKCS_ECDSA_P384_SHA384` → `PKCS_ECDSA_P256_SHA256` |
-| `is_cert_expired_works`                       | line 1112 | Same substitution                                   |
-| `tenant_id_preserved_across_certificate_save` | line 1199 | Same substitution                                   |
-| `pem_to_der_real_certificate`                 | line 1022 | Same substitution                                   |
+| `certificate_save_clears_enrollment_secret`   | line 953  | `PKCS_ECDSA_P384_SHA384` → `PKCS_ECDSA_P256_SHA256` |
+| `is_cert_expired_works`                       | line 1175 | Same substitution                                   |
+| `tenant_id_preserved_across_certificate_save` | line 1262 | Same substitution                                   |
+| `pem_to_der_real_certificate`                 | line 1085 | Same substitution                                   |
 
 These tests use a P-384 key to sign a synthetic certificate for testing cert parsing and
 expiry logic. The algorithm is incidental — changing to P-256 has identical test coverage.
