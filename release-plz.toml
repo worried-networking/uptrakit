@@ -28,6 +28,14 @@ release = false
 name = "uptrakit-shared-macros"
 release = false
 
+# Proc-macro for audit-log. Declared as a direct path dep (not workspace) in
+# audit-log/Cargo.toml. With release = false, release-plz leaves the dep
+# declaration untouched; audit-log/Cargo.toml carries version = "0.0.1"
+# explicitly so cargo package manifest validation passes.
+[[package]]
+name = "uptrakit-audit-log-derive"
+release = false
+
 [[package]]
 name = "uptrakit-backoff"
 release = false
