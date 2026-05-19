@@ -605,7 +605,7 @@ INFO: task started by user 'root@pam!uptrakit'
 INFO: Snapshot created
 --- end ---
 
-Proxmox snapshot 'utk-<id>' created successfully.
+Proxmox snapshot 'upk-<id>' created successfully.
 ```
 
 **Backup:**
