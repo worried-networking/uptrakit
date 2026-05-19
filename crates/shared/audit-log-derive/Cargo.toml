@@ -18,7 +18,7 @@ proc-macro2 = { workspace = true }
 [dev-dependencies]
 uuid = { workspace = true, features = ["v7", "serde"] }
 time = { workspace = true, features = ["serde"] }
-uptrakit-audit-log = { path = "../audit-log" }
+uptrakit-audit-log = { path = "../audit-log", version = "0.0.1" }
 serde_json = { workspace = true }
 
 [lints]
