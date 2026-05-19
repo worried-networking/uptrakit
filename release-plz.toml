@@ -29,6 +29,10 @@ name = "uptrakit-shared-macros"
 release = false
 
 [[package]]
+name = "uptrakit-audit-log-derive"
+release = false
+
+[[package]]
 name = "uptrakit-backoff"
 release = false
 
@@ -199,6 +203,9 @@ name = "uptrakit-plugin-package-manager-pacman"
 name = "uptrakit-plugin-package-manager-pkg"
 
 [[package]]
+name = "uptrakit-plugin-package-manager-skills"
+
+[[package]]
 name = "uptrakit-package-manager-routeros"
 
 [[package]]
@@ -216,46 +223,36 @@ name = "uptrakit-plugin-releases-github"
 [[package]]
 name = "uptrakit-plugin-releases-gitlab"
 
-# ===== Runtime crates: tagged so binary dep-bumps propagate; no own
-# changelog (rolled into the binaries that depend on them) =====
+# ===== Runtime crates: version-bumped with commits; no own changelog
+# (rolled into the binaries that depend on them); no git tags =====
 [[package]]
 name = "uptrakit-frontend"
 git_only = true
-git_tag_enable = true
 git_release_enable = false
-git_tag_name = "uptrakit-frontend-v{{ version }}"
 publish = false
 
 [[package]]
 name = "uptrakit-agent-runtime"
 git_only = true
-git_tag_enable = true
 git_release_enable = false
-git_tag_name = "uptrakit-agent-runtime-v{{ version }}"
 publish = false
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
 git_only = true
-git_tag_enable = true
 git_release_enable = false
-git_tag_name = "uptrakit-agent-ssh-runtime-v{{ version }}"
 publish = false
 
 [[package]]
 name = "uptrakit-mqtt-runtime"
 git_only = true
-git_tag_enable = true
 git_release_enable = false
-git_tag_name = "uptrakit-mqtt-runtime-v{{ version }}"
 publish = false
 
 [[package]]
 name = "uptrakit-scheduler-runtime"
 git_only = true
-git_tag_enable = true
 git_release_enable = false
-git_tag_name = "uptrakit-scheduler-runtime-v{{ version }}"
 publish = false
 
 # controller-runtime is a library (lib backing both controller and
@@ -312,6 +309,7 @@ changelog_include = [
   "uptrakit-plugin-package-manager-pkg",
   "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-package-manager-skills",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
   "uptrakit-plugin-releases-github",
@@ -368,6 +366,7 @@ changelog_include = [
   "uptrakit-plugin-package-manager-pkg",
   "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
+  "uptrakit-plugin-package-manager-skills",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
   "uptrakit-plugin-releases-github",
