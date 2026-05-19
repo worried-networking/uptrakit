@@ -725,7 +725,7 @@ fn plugin_internal<E: std::fmt::Display>(error: E) -> Report<PluginError> {
 ///
 /// The output is ASCII-safe and at most 40 chars.
 pub fn snapshot_name_for_update_history(update_history_id: Uuid) -> String {
-    format!("utk-{}", update_history_id.simple())
+    format!("upk-{}", update_history_id.simple())
 }
 
 #[cfg(test)]
@@ -874,7 +874,7 @@ mod tests {
             mode: ProtectionMode::Snapshot,
             status: "succeeded".to_string(),
             artifact_kind: Some("snapshot".to_string()),
-            artifact_ref: Some("utk-abc".to_string()),
+            artifact_ref: Some("upk-abc".to_string()),
             backup_target_key: None,
             detail: None,
             error_message: None,
@@ -900,7 +900,7 @@ mod tests {
             mode: ProtectionMode::Snapshot,
             status: "succeeded".to_string(),
             artifact_kind: Some("snapshot".to_string()),
-            artifact_ref: Some("utk-abc".to_string()),
+            artifact_ref: Some("upk-abc".to_string()),
             backup_target_key: None,
             detail: None,
             error_message: None,
