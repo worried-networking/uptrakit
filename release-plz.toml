@@ -29,10 +29,6 @@ name = "uptrakit-shared-macros"
 release = false
 
 [[package]]
-name = "uptrakit-audit-log-derive"
-release = false
-
-[[package]]
 name = "uptrakit-backoff"
 release = false
 

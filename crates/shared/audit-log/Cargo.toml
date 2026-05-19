@@ -30,7 +30,7 @@ sea-orm = { workspace = true, optional = true }
 uptrakit-shared-db = { workspace = true, optional = true }
 futures-util = { workspace = true, features = ["alloc"] }
 tracing-journald = { workspace = true, optional = true }
-uptrakit-audit-log-derive = { path = "../audit-log-derive" }
+uptrakit-audit-log-derive = { path = "../audit-log-derive", version = "0.0.1" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
