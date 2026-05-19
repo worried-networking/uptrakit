@@ -3,7 +3,13 @@ name: docker
 on:
   push:
     branches: [main]
-    tags: ["uptrakit-*-v*"]
+    tags:
+      - "uptrakit-controller-v*"
+      - "uptrakit-controller-standalone-v*"
+      - "uptrakit-scheduler-v*"
+      - "uptrakit-mqtt-v*"
+      - "uptrakit-agent-ssh-v*"
+      - "uptrakit-cli-v*"
   pull_request:
     branches: [main]
 
