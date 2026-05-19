@@ -3,6 +3,16 @@
 # Skip with: git commit --no-verify
 set -euo pipefail
 
+_GIT_DIR=$(git rev-parse --git-dir)
+if [[ -f "$_GIT_DIR/MERGE_HEAD" ]]; then
+  echo "[pre-commit] Merge commit — skipping checks."
+  exit 0
+fi
+if [[ -f "$_GIT_DIR/REVERT_HEAD" ]]; then
+  echo "[pre-commit] Revert commit — skipping checks."
+  exit 0
+fi
+
 die() { printf '[pre-commit] %s\n' "$1" >&2; exit 1; }
 cleanup_pre_commit_tmp() { rm -f ${TYPE_CHANGED_TMP:+"$TYPE_CHANGED_TMP"} ${STAGED_PATHS_TMP:+"$STAGED_PATHS_TMP"}; }
 trap cleanup_pre_commit_tmp EXIT

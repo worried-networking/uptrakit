@@ -3,6 +3,22 @@
 # Skip with: git push --no-verify
 set -euo pipefail
 
+# Slurp stdin: lines are "<local-ref> <local-sha1> <remote-ref> <remote-sha1>"
+# Skip early when there is nothing to verify:
+#   - Branch deletions: local-sha1 == 0000...0000
+#   - Tag-only pushes:  every local-ref starts with refs/tags/
+PUSH_STDIN=$(cat)
+ZERO_SHA="0000000000000000000000000000000000000000"
+if [[ -z "$PUSH_STDIN" ]] || \
+   ! awk -v zero="$ZERO_SHA" 'NF>=2 && $2!=zero {found=1; exit} END {exit !found}' <<<"$PUSH_STDIN"; then
+  echo "[pre-push] Branch deletion (or empty push) — skipping checks."
+  exit 0
+fi
+if ! awk '$1 !~ /^refs\/tags\// {found=1; exit} END {exit !found}' <<<"$PUSH_STDIN"; then
+  echo "[pre-push] Tag-only push — skipping checks."
+  exit 0
+fi
+
 echo "[pre-push] Running cargo fmt check..."
 cargo fmt --all -- --check
 
