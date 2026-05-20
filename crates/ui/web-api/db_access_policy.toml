@@ -471,6 +471,11 @@ update_network_settings_inner = "ignore"
 [routes."settings_reset.rs"]
 reset_data = "full-state"
 
+[routes."settings_oauth.rs"]
+load_oauth_settings_from_db = "ignore"
+get_oauth_settings = "full-state"
+update_oauth_settings = "full-state"
+
 [routes."settings_zeroconf.rs"]
 get_zeroconf_settings = "full-state"
 update_zeroconf_settings = "full-state"

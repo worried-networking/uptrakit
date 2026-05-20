@@ -398,6 +398,20 @@ struct ApiDoc;
 )]
 struct ZeroconfApiDoc;
 
+/// OAuth global-settings OpenAPI paths and schemas.
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        crate::routes::settings_oauth::get_oauth_settings,
+        crate::routes::settings_oauth::update_oauth_settings,
+    ),
+    components(schemas(
+        crate::routes::settings_oauth::OAuthSettingsResponse,
+        crate::routes::settings_oauth::UpdateOAuthSettingsRequest,
+    ))
+)]
+struct OAuthSettingsApiDoc;
+
 /// NATS-specific OpenAPI paths and schemas, merged conditionally.
 #[cfg(feature = "nats")]
 #[derive(OpenApi)]
@@ -799,6 +813,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         crate::routes::settings_zeroconf::update_zeroconf_settings
     ));
 
+    // OAuth global settings
+    let auth_routes = auth_routes.routes(routes!(
+        crate::routes::settings_oauth::get_oauth_settings,
+        crate::routes::settings_oauth::update_oauth_settings
+    ));
+
     // Reset data
     #[cfg(feature = "reset-data")]
     let auth_routes = auth_routes.routes(routes!(crate::routes::settings_reset::reset_data));
@@ -884,6 +904,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let openapi = {
         let mut openapi = ApiDoc::openapi();
         openapi.merge(ZeroconfApiDoc::openapi());
+        openapi.merge(OAuthSettingsApiDoc::openapi());
         openapi
     };
 
