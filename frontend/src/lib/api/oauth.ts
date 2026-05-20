@@ -140,3 +140,29 @@ export async function revokeMyConsent(consentId: string): Promise<void> {
 		method: 'DELETE'
 	});
 }
+
+export interface OAuthSettingsResponse {
+	mcp_enabled: boolean;
+	dcr_enabled: boolean;
+	cimd_enabled: boolean;
+	canonical_host: string | null;
+	restart_required: boolean;
+}
+
+export interface UpdateOAuthSettingsRequest {
+	mcp_enabled?: boolean;
+	dcr_enabled?: boolean;
+	cimd_enabled?: boolean;
+	canonical_host?: string;
+}
+
+export async function getOAuthSettings(): Promise<OAuthSettingsResponse> {
+	return oauthRequest('/api/v1/global-settings/oauth');
+}
+
+export async function updateOAuthSettings(body: UpdateOAuthSettingsRequest): Promise<OAuthSettingsResponse> {
+	return oauthRequest('/api/v1/global-settings/oauth', {
+		method: 'PUT',
+		body: JSON.stringify(body)
+	});
+}

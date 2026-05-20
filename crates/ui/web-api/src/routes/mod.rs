@@ -42,6 +42,7 @@ pub mod settings_global_combined;
 #[cfg(feature = "nats")]
 pub mod settings_nats;
 pub mod settings_network;
+pub mod settings_oauth;
 pub mod settings_provider_github;
 #[cfg(feature = "reset-data")]
 pub mod settings_reset;

@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { KeyRound } from 'lucide-svelte';
-	import { listOAuthClients, revokeOAuthClient, trustOAuthClient } from '$lib/api/oauth';
-	import type { OAuthClient } from '$lib/api/oauth';
+	import {
+		listOAuthClients,
+		revokeOAuthClient,
+		trustOAuthClient,
+		getOAuthSettings,
+		updateOAuthSettings
+	} from '$lib/api/oauth';
+	import type { OAuthClient, OAuthSettingsResponse } from '$lib/api/oauth';
 	import { getUser } from '$lib/auth.svelte';
 	import { hasPermissionValue, Permission } from '$lib/types';
 	import {
@@ -32,9 +37,8 @@
 	let detailClient = $state<OAuthClient | null>(null);
 
 	// OAuth settings state
-	let mcpEnabled = $state(false);
-	let dcrEnabled = $state(false);
-	let cimdEnabled = $state(false);
+	let oauthSettings = $state<OAuthSettingsResponse | null>(null);
+	let settingsLoading = $state(false);
 	let settingsError = $state<string | null>(null);
 	let savingSettings = $state(false);
 
@@ -49,6 +53,7 @@
 
 	onMount(() => {
 		if (canManage) void loadClients();
+		if (canManageGlobalSettings) void loadOAuthSettings();
 	});
 
 	async function loadClients() {
@@ -111,10 +116,28 @@
 		return 'Manual';
 	}
 
-	async function handleMcpToggle() {
-		// Pre-flight: warn when enabling (canonical_host check is deferred to Plan D)
-		// For now just reflect the toggle — actual save deferred until Plan D ships
+	async function loadOAuthSettings() {
+		settingsLoading = true;
 		settingsError = null;
+		try {
+			oauthSettings = await getOAuthSettings();
+		} catch (e) {
+			settingsError = e instanceof Error ? e.message : 'Failed to load OAuth settings';
+		} finally {
+			settingsLoading = false;
+		}
+	}
+
+	async function handleSettingsChange(patch: Parameters<typeof updateOAuthSettings>[0]) {
+		savingSettings = true;
+		settingsError = null;
+		try {
+			oauthSettings = await updateOAuthSettings(patch);
+		} catch (e) {
+			settingsError = e instanceof Error ? e.message : 'Failed to save OAuth settings';
+		} finally {
+			savingSettings = false;
+		}
 	}
 </script>
 
@@ -219,50 +242,79 @@
 			{/if}
 		</SectionCard>
 
-		{#if browser && import.meta.env.VITE_OAUTH_TOGGLE_PREVIEW}
-			{#if canManageGlobalSettings}
-				<SectionCard title="OAuth settings">
+		{#if canManageGlobalSettings}
+			<SectionCard title="OAuth settings">
+				{#if settingsLoading}
+					<p class="py-4 text-center text-sm text-[var(--text-secondary)]">Loading…</p>
+				{:else if oauthSettings !== null}
 					<div class="space-y-4">
 						<label class="flex items-center gap-3">
 							<input
 								type="checkbox"
-								bind:checked={mcpEnabled}
+								checked={oauthSettings.mcp_enabled}
 								disabled={savingSettings}
 								class="h-4 w-4"
-								onchange={() => handleMcpToggle()}
+								onchange={() => void handleSettingsChange({ mcp_enabled: !oauthSettings?.mcp_enabled })}
 							/>
 							<span class="text-sm text-[var(--text-primary)]">Enable MCP OAuth (master switch)</span>
 						</label>
-						{#if mcpEnabled}
+						{#if oauthSettings.mcp_enabled && !oauthSettings.canonical_host}
 							<Callout
 								tone="warning"
-								message="Ensure oauth.canonical_host is configured before enabling MCP OAuth. Tokens minted without a canonical host will be invalid."
+								message="oauth.canonical_host must be set before enabling MCP OAuth. Tokens minted without a canonical host will be invalid."
 							/>
 						{/if}
 						<label class="flex items-center gap-3">
 							<input
 								type="checkbox"
-								bind:checked={dcrEnabled}
-								disabled={savingSettings || !mcpEnabled}
+								checked={oauthSettings.dcr_enabled}
+								disabled={savingSettings || !oauthSettings.mcp_enabled}
 								class="h-4 w-4"
+								onchange={() => void handleSettingsChange({ dcr_enabled: !oauthSettings?.dcr_enabled })}
 							/>
 							<span class="text-sm text-[var(--text-primary)]">Enable Dynamic Client Registration (DCR)</span>
 						</label>
 						<label class="flex items-center gap-3">
 							<input
 								type="checkbox"
-								bind:checked={cimdEnabled}
-								disabled={savingSettings || !mcpEnabled}
+								checked={oauthSettings.cimd_enabled}
+								disabled={savingSettings || !oauthSettings.mcp_enabled}
 								class="h-4 w-4"
+								onchange={() => void handleSettingsChange({ cimd_enabled: !oauthSettings?.cimd_enabled })}
 							/>
 							<span class="text-sm text-[var(--text-primary)]">Enable Client Initiated Metadata Discovery (CIMD)</span>
 						</label>
+						<div>
+							<label class="block">
+								<span class="mb-1 block text-xs text-[var(--text-muted)]"
+									>Canonical host (required when MCP OAuth is enabled)</span
+								>
+								<div class="flex gap-2">
+									<input
+										type="text"
+										value={oauthSettings.canonical_host ?? ''}
+										class="h-8 flex-1"
+										placeholder="auth.example.com"
+										disabled={savingSettings}
+										onchange={(e) =>
+											void handleSettingsChange({
+												canonical_host: (e.currentTarget as HTMLInputElement).value
+											})}
+									/>
+								</div>
+							</label>
+						</div>
+						{#if oauthSettings.restart_required}
+							<Callout tone="info" message="Settings saved. Changes take effect after the controller is restarted." />
+						{/if}
 						{#if settingsError}
 							<Callout tone="danger" message={settingsError} />
 						{/if}
 					</div>
-				</SectionCard>
-			{/if}
+				{:else if settingsError}
+					<Callout tone="danger" message={settingsError} />
+				{/if}
+			</SectionCard>
 		{/if}
 	{/if}
 </PageShell>
