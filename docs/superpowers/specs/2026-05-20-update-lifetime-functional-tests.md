@@ -68,7 +68,6 @@ version = "0.0.1"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish = false
 
 [dev-dependencies]
 uptrakit-controller-core                = { workspace = true, features = ["testing", "plugin-ops"] }
@@ -94,6 +93,22 @@ uuid                                    = { workspace = true, features = ["v7"] 
 [lints]
 workspace = true
 ```
+
+## `release-plz.toml` Change
+
+Add a stanza identical to `uptrakit-integration-tests` — no publish, no release:
+
+```toml
+# Functional tests are runtime-only verification.
+[[package]]
+name = "uptrakit-functional-tests"
+release = false
+```
+
+The workspace `Cargo.toml` default is `publish = ["uptrakit-private"]`; the
+`release-plz.toml` global `publish = false` already prevents crates.io publishing
+for the whole workspace. `release = false` additionally suppresses changelog
+generation and git tags for this crate, matching the integration-tests pattern.
 
 ## `controller-core` Change: Expose `run_protection_and_dispatch`
 

@@ -20,6 +20,11 @@ changelog_update = false
 name = "uptrakit-integration-tests"
 release = false
 
+# Functional tests are runtime-only verification.
+[[package]]
+name = "uptrakit-functional-tests"
+release = false
+
 # Internal infrastructure utility crates: their commits are mechanical
 # (retry math, exec wrappers, encryption helpers, build-time metadata,
 # tracing init, etc.) and don't merit user-visible changelog entries.
