@@ -299,6 +299,13 @@
 					<SecuritySection />
 				</div>
 			{/if}
+
+			<SectionCard title="Authorized Applications">
+				<p class="mb-4 text-sm text-[var(--text-secondary)]">
+					View and revoke OAuth applications that have been granted access to your account.
+				</p>
+				<Button variant="secondary" href="/settings/account/authorized-apps">Manage authorized apps</Button>
+			</SectionCard>
 		{/if}
 
 		{#if showChangeEmailModal}

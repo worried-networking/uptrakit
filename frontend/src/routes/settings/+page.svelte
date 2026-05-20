@@ -61,6 +61,7 @@
 			Permission.ManageAgentCerts
 		)
 	);
+	const canManageOAuthClients = $derived(hasPermissionValue(getUser(), Permission.ManageAuthSettings));
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canViewTypeSettings = $derived(
 		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
@@ -319,6 +320,15 @@
 							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
+				{/if}
+				{#if canManageOAuthClients}
+					<SectionCard title="OAuth Clients">
+						<p class="mb-4 text-sm text-[var(--text-secondary)]">
+							Manage OAuth 2.1 clients used for MCP (Model Context Protocol) access. Trust, revoke, or manually register
+							clients, and configure the MCP authorization server settings.
+						</p>
+						<Button variant="secondary" href="/settings/authentication/oauth-clients">Manage OAuth clients</Button>
+					</SectionCard>
 				{/if}
 				<OidcProvidersSettings
 					providers={oidcProviders}
