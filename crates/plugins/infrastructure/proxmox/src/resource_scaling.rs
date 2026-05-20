@@ -50,6 +50,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     %update_history_id, error = %e,
                     "resource scaling: failed to load host mapping"
                 );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!("[Resource scaling] Failed to load host mapping: {e}\n")
+                                .into_bytes(),
+                        ),
+                    );
+                }
                 return;
             }
         };
@@ -69,6 +77,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     %update_history_id, error = %e,
                     "resource scaling: failed to load effective scaling policy"
                 );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!("[Resource scaling] Failed to load scaling policy: {e}\n")
+                                .into_bytes(),
+                        ),
+                    );
+                }
                 return;
             }
         };
@@ -88,6 +104,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     %update_history_id, error = %e,
                     "resource scaling: failed to load plugin config payload"
                 );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!("[Resource scaling] Failed to load plugin config: {e}\n")
+                                .into_bytes(),
+                        ),
+                    );
+                }
                 return;
             }
         };
@@ -98,6 +122,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     %update_history_id, error = %e,
                     "resource scaling: failed to deserialize ProxmoxConfig"
                 );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!("[Resource scaling] Failed to parse Proxmox config: {e}\n")
+                                .into_bytes(),
+                        ),
+                    );
+                }
                 return;
             }
         };
@@ -110,6 +142,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                     %update_history_id, error = %e,
                     "resource scaling: failed to create Proxmox client"
                 );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!("[Resource scaling] Failed to connect to Proxmox: {e}\n")
+                                .into_bytes(),
+                        ),
+                    );
+                }
                 return;
             }
         };
@@ -119,82 +159,143 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
 
         // Read current config, check hotplug (QEMU only), extract original values.
         // original_cores_opt: None = LXC container with no CPU limit set (valid).
-        let (original_cores_opt, original_memory_u64): (Option<u32>, u64) =
-            match mapping.proxmox_type.as_str() {
-                "qemu" => {
-                    let config = match client.get_qemu_config(node, vmid).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!(
-                                %update_history_id, node, vmid, error = %e,
-                                "resource scaling: failed to read QEMU config"
-                            );
-                            return;
-                        }
-                    };
-                    if !config.supports_live_resource_scaling() {
+        let (original_cores_opt, original_memory_u64): (Option<u32>, u64) = match mapping
+            .proxmox_type
+            .as_str()
+        {
+            "qemu" => {
+                let config = match client.get_qemu_config(node, vmid).await {
+                    Ok(c) => c,
+                    Err(e) => {
                         tracing::warn!(
-                            %update_history_id, node, vmid,
-                            "QEMU VM does not support hotplug — skipping resource scaling"
+                            %update_history_id, node, vmid, error = %e,
+                            "resource scaling: failed to read QEMU config"
                         );
+                        if let Some(tx) = &ctx.output_tx {
+                            drop(tx.send(
+                                    format!(
+                                        "[Resource scaling] Failed to read QEMU config ({node}/{vmid}): {e}\n"
+                                    )
+                                    .into_bytes(),
+                                ));
+                        }
                         return;
                     }
-                    match (config.cores, config.memory) {
-                        (Some(c), Some(m)) => (Some(c), m),
-                        _ => {
-                            tracing::warn!(
-                                %update_history_id, node, vmid,
-                                "resource scaling: QEMU config missing cores or memory field"
-                            );
-                            return;
-                        }
-                    }
-                }
-                "lxc" => {
-                    let lxc_memory_scaling = match scaling_policy.mode {
-                        ScalingMode::Absolute => scaling_policy.absolute_memory_mb.is_some(),
-                        ScalingMode::Delta => scaling_policy.delta_memory_mb.is_some(),
-                        ScalingMode::None => false,
-                    };
-                    if lxc_memory_scaling {
-                        tracing::warn!(
-                            %update_history_id, node, vmid,
-                            "resource scaling: LXC memory scaling may only take effect on next \
-                             container restart — kernel cgroup live memory resize is not guaranteed"
+                };
+                if !config.supports_live_resource_scaling() {
+                    tracing::warn!(
+                        %update_history_id, node, vmid,
+                        "QEMU VM does not support hotplug — skipping resource scaling"
+                    );
+                    if let Some(tx) = &ctx.output_tx {
+                        drop(
+                            tx.send(
+                                format!(
+                                    "[Resource scaling] QEMU VM {vmid} on {node} does not support \
+                                     hotplug — skipping\n"
+                                )
+                                .into_bytes(),
+                            ),
                         );
                     }
-                    let config = match client.get_lxc_config(node, vmid).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!(
-                                %update_history_id, node, vmid, error = %e,
-                                "resource scaling: failed to read LXC config"
-                            );
-                            return;
-                        }
-                    };
-                    // cores may be None (container has no CPU limit) — that is valid.
-                    // Only abort if memory is absent (always required).
-                    let memory = match config.memory {
-                        Some(m) => m,
-                        None => {
-                            tracing::warn!(
-                                %update_history_id, node, vmid,
-                                "resource scaling: LXC config missing memory field"
-                            );
-                            return;
-                        }
-                    };
-                    (config.cores, memory)
-                }
-                other => {
-                    tracing::warn!(
-                        %update_history_id, vm_type = other,
-                        "resource scaling: unrecognized vm_type — skipping"
-                    );
                     return;
                 }
-            };
+                match (config.cores, config.memory) {
+                    (Some(c), Some(m)) => (Some(c), m),
+                    _ => {
+                        tracing::warn!(
+                            %update_history_id, node, vmid,
+                            "resource scaling: QEMU config missing cores or memory field"
+                        );
+                        if let Some(tx) = &ctx.output_tx {
+                            drop(
+                                tx.send(
+                                    format!(
+                                        "[Resource scaling] QEMU config for {vmid} on {node} \
+                                         missing cores or memory field\n"
+                                    )
+                                    .into_bytes(),
+                                ),
+                            );
+                        }
+                        return;
+                    }
+                }
+            }
+            "lxc" => {
+                let lxc_memory_scaling = match scaling_policy.mode {
+                    ScalingMode::Absolute => scaling_policy.absolute_memory_mb.is_some(),
+                    ScalingMode::Delta => scaling_policy.delta_memory_mb.is_some(),
+                    ScalingMode::None => false,
+                };
+                if lxc_memory_scaling {
+                    tracing::warn!(
+                        %update_history_id, node, vmid,
+                        "resource scaling: LXC memory scaling may only take effect on next \
+                         container restart — kernel cgroup live memory resize is not guaranteed"
+                    );
+                }
+                let config = match client.get_lxc_config(node, vmid).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(
+                            %update_history_id, node, vmid, error = %e,
+                            "resource scaling: failed to read LXC config"
+                        );
+                        if let Some(tx) = &ctx.output_tx {
+                            drop(tx.send(
+                                    format!(
+                                        "[Resource scaling] Failed to read LXC config ({node}/{vmid}): {e}\n"
+                                    )
+                                    .into_bytes(),
+                                ));
+                        }
+                        return;
+                    }
+                };
+                // cores may be None (container has no CPU limit) — that is valid.
+                // Only abort if memory is absent (always required).
+                let memory = match config.memory {
+                    Some(m) => m,
+                    None => {
+                        tracing::warn!(
+                            %update_history_id, node, vmid,
+                            "resource scaling: LXC config missing memory field"
+                        );
+                        if let Some(tx) = &ctx.output_tx {
+                            drop(
+                                tx.send(
+                                    format!(
+                                        "[Resource scaling] LXC config for {vmid} on {node} \
+                                         missing memory field\n"
+                                    )
+                                    .into_bytes(),
+                                ),
+                            );
+                        }
+                        return;
+                    }
+                };
+                (config.cores, memory)
+            }
+            other => {
+                tracing::warn!(
+                    %update_history_id, vm_type = other,
+                    "resource scaling: unrecognized vm_type — skipping"
+                );
+                if let Some(tx) = &ctx.output_tx {
+                    drop(
+                        tx.send(
+                            format!(
+                                "[Resource scaling] Unrecognized VM type '{other}' — skipping\n"
+                            )
+                            .into_bytes(),
+                        ),
+                    );
+                }
+                return;
+            }
+        };
 
         // Defense-in-depth: policy dimensions are validated (≥ 1) at save time,
         // but guard against corrupt DB state here before calling the Proxmox API.
@@ -215,6 +316,15 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                 "resource scaling: policy dimension < 1 reached the hook (corrupt DB?) \
                  — aborting scale-up"
             );
+            if let Some(tx) = &ctx.output_tx {
+                drop(
+                    tx.send(
+                        b"[Resource scaling] Scaling policy has invalid dimension (< 1) \
+                      \xe2\x80\x94 aborting\n"
+                            .to_vec(),
+                    ),
+                );
+            }
             return;
         }
 
@@ -251,6 +361,14 @@ impl ControllerUpdateHook for ControllerUpdateHookPlugin {
                 %update_history_id, error = %e,
                 "resource scaling: failed to persist scaling record — aborting scale-up"
             );
+            if let Some(tx) = &ctx.output_tx {
+                drop(
+                    tx.send(
+                        format!("[Resource scaling] Failed to persist scaling record: {e}\n")
+                            .into_bytes(),
+                    ),
+                );
+            }
             return;
         }
 
