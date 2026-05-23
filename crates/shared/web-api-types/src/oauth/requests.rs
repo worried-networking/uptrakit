@@ -24,7 +24,10 @@ pub struct AuthorizeRequest {
     pub state: String,
     pub code_challenge: String,
     pub code_challenge_method: String,
-    pub resource: String,
+    /// RFC 8707 resource indicator. Optional — when absent, the server defaults
+    /// to its primary MCP resource (`https://<canonical_host>/mcp`).
+    #[serde(default)]
+    pub resource: Option<String>,
 }
 
 impl Validate for AuthorizeRequest {
@@ -53,12 +56,6 @@ impl Validate for AuthorizeRequest {
                 message: "state is required".to_string(),
             });
         }
-        if self.resource.is_empty() {
-            return Err(ValidationError {
-                field: "resource",
-                message: "resource indicator is required (RFC 8707)".to_string(),
-            });
-        }
         Ok(())
     }
 }
@@ -76,14 +73,20 @@ pub enum TokenRequest {
         redirect_uri: String,
         client_id: String,
         code_verifier: String,
-        resource: String,
+        /// RFC 8707 resource indicator. Optional — defaults to primary resource
+        /// when absent (same policy as the authorization endpoint).
+        #[serde(default)]
+        resource: Option<String>,
     },
     RefreshToken {
         refresh_token: String,
         client_id: String,
         #[serde(default)]
         scope: Option<String>,
-        resource: String,
+        /// RFC 8707 resource indicator. Optional — defaults to primary resource
+        /// when absent.
+        #[serde(default)]
+        resource: Option<String>,
     },
 }
 
@@ -93,7 +96,6 @@ impl Validate for TokenRequest {
             TokenRequest::AuthorizationCode {
                 code,
                 code_verifier,
-                resource,
                 ..
             } => {
                 if code.is_empty() {
@@ -108,29 +110,13 @@ impl Validate for TokenRequest {
                         message: "code_verifier is required (PKCE)".to_string(),
                     });
                 }
-                if resource.is_empty() {
-                    return Err(ValidationError {
-                        field: "resource",
-                        message: "resource indicator is required (RFC 8707)".to_string(),
-                    });
-                }
                 Ok(())
             }
-            TokenRequest::RefreshToken {
-                refresh_token,
-                resource,
-                ..
-            } => {
+            TokenRequest::RefreshToken { refresh_token, .. } => {
                 if refresh_token.is_empty() {
                     return Err(ValidationError {
                         field: "refresh_token",
                         message: "refresh_token is required".to_string(),
-                    });
-                }
-                if resource.is_empty() {
-                    return Err(ValidationError {
-                        field: "resource",
-                        message: "resource indicator is required (RFC 8707)".to_string(),
                     });
                 }
                 Ok(())
@@ -178,7 +164,7 @@ mod tests {
             state: "s".into(),
             code_challenge: "c".into(),
             code_challenge_method: "S256".into(),
-            resource: "https://x/mcp".into(),
+            resource: Some("https://x/mcp".into()),
         }
     }
 
@@ -216,10 +202,10 @@ mod tests {
     }
 
     #[test]
-    fn authorize_request_requires_resource() {
+    fn authorize_request_omitting_resource_passes_validate() {
         let mut req = valid_authorize();
-        req.resource = String::new();
-        assert!(req.validate().is_err());
+        req.resource = None;
+        assert!(req.validate().is_ok());
     }
 
     #[test]
@@ -229,7 +215,19 @@ mod tests {
             redirect_uri: "https://x/cb".into(),
             client_id: "x".into(),
             code_verifier: "v".into(),
-            resource: "https://x/mcp".into(),
+            resource: Some("https://x/mcp".into()),
+        };
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn token_request_authorization_code_validates_without_resource() {
+        let r = TokenRequest::AuthorizationCode {
+            code: "c".into(),
+            redirect_uri: "https://x/cb".into(),
+            client_id: "x".into(),
+            code_verifier: "v".into(),
+            resource: None,
         };
         assert!(r.validate().is_ok());
     }
@@ -241,7 +239,7 @@ mod tests {
             redirect_uri: "https://x/cb".into(),
             client_id: "x".into(),
             code_verifier: "v".into(),
-            resource: "https://x/mcp".into(),
+            resource: None,
         };
         assert!(r.validate().is_err());
     }
@@ -252,7 +250,7 @@ mod tests {
             refresh_token: String::new(),
             client_id: "x".into(),
             scope: None,
-            resource: "https://x/mcp".into(),
+            resource: None,
         };
         assert!(r.validate().is_err());
     }

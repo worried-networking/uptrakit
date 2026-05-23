@@ -256,6 +256,9 @@ pub async fn mcp_token(
         return oauth_400("invalid_request", &e.to_string());
     }
 
+    // Resolve resource default once — reused in both grant arms.
+    let default_resource = state.oauth.canonical.primary_resource().as_str().to_owned();
+
     // Step 3 — dispatch on grant_type.
     match req {
         TokenRequest::AuthorizationCode {
@@ -265,6 +268,9 @@ pub async fn mcp_token(
             code_verifier,
             resource,
         } => {
+            let resource = resource
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| default_resource.clone());
             authorization_code_grant(
                 state,
                 code,
@@ -280,7 +286,12 @@ pub async fn mcp_token(
             client_id,
             scope,
             resource,
-        } => refresh_token_grant(state, resource, refresh_token, client_id, scope).await,
+        } => {
+            let resource = resource
+                .filter(|s| !s.is_empty())
+                .unwrap_or(default_resource);
+            refresh_token_grant(state, resource, refresh_token, client_id, scope).await
+        }
         _ => {
             tracing::warn!("unhandled TokenRequest variant; returning unsupported_grant_type");
             oauth_400("unsupported_grant_type", "grant type not supported")
