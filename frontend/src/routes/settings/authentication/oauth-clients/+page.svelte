@@ -21,6 +21,7 @@
 		StatusBadge,
 		type DataTableColumn
 	} from '$lib/components/ui';
+	import { Checkbox, FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import RegisterClientDialog from './RegisterClientDialog.svelte';
 
@@ -41,6 +42,24 @@
 	let settingsLoading = $state(false);
 	let settingsError = $state<string | null>(null);
 	let savingSettings = $state(false);
+
+	interface DraftOAuthSettings {
+		mcp_enabled: boolean;
+		dcr_enabled: boolean;
+		cimd_enabled: boolean;
+		canonical_host: string | null;
+	}
+
+	let draft = $state<DraftOAuthSettings | null>(null);
+
+	const isDirty = $derived(
+		draft !== null &&
+			oauthSettings !== null &&
+			(draft.mcp_enabled !== oauthSettings.mcp_enabled ||
+				draft.dcr_enabled !== oauthSettings.dcr_enabled ||
+				draft.cimd_enabled !== oauthSettings.cimd_enabled ||
+				(draft.canonical_host ?? null) !== oauthSettings.canonical_host)
+	);
 
 	const columns: DataTableColumn[] = [
 		{ key: 'client_name', label: 'Name', mobileTitle: true },
@@ -121,6 +140,12 @@
 		settingsError = null;
 		try {
 			oauthSettings = await getOAuthSettings();
+			draft = {
+				mcp_enabled: oauthSettings!.mcp_enabled,
+				dcr_enabled: oauthSettings!.dcr_enabled,
+				cimd_enabled: oauthSettings!.cimd_enabled,
+				canonical_host: oauthSettings!.canonical_host ?? null
+			};
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to load OAuth settings';
 		} finally {
@@ -128,15 +153,35 @@
 		}
 	}
 
-	async function handleSettingsChange(patch: Parameters<typeof updateOAuthSettings>[0]) {
+	async function handleSettingsChange(patch: DraftOAuthSettings) {
 		savingSettings = true;
 		settingsError = null;
 		try {
-			oauthSettings = await updateOAuthSettings(patch);
+			oauthSettings = await updateOAuthSettings({
+				...patch,
+				canonical_host: patch.canonical_host ?? undefined
+			});
+			draft = {
+				mcp_enabled: oauthSettings!.mcp_enabled,
+				dcr_enabled: oauthSettings!.dcr_enabled,
+				cimd_enabled: oauthSettings!.cimd_enabled,
+				canonical_host: oauthSettings!.canonical_host ?? null
+			};
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to save OAuth settings';
 		} finally {
 			savingSettings = false;
+		}
+	}
+
+	function handleDiscard() {
+		if (oauthSettings !== null) {
+			draft = {
+				mcp_enabled: oauthSettings!.mcp_enabled,
+				dcr_enabled: oauthSettings!.dcr_enabled,
+				cimd_enabled: oauthSettings!.cimd_enabled,
+				canonical_host: oauthSettings!.canonical_host ?? null
+			};
 		}
 	}
 </script>
@@ -246,70 +291,79 @@
 			<SectionCard title="OAuth settings">
 				{#if settingsLoading}
 					<p class="py-4 text-center text-sm text-[var(--text-secondary)]">Loading…</p>
-				{:else if oauthSettings !== null}
+				{:else if draft !== null && oauthSettings !== null}
 					<div class="space-y-4">
-						<label class="flex items-center gap-3">
-							<input
-								type="checkbox"
-								checked={oauthSettings.mcp_enabled}
-								disabled={savingSettings}
-								class="h-4 w-4"
-								onchange={() => void handleSettingsChange({ mcp_enabled: !oauthSettings?.mcp_enabled })}
-							/>
+						<label class="flex items-center gap-3" for="mcp_enabled">
+							<Checkbox id="mcp_enabled" bind:checked={draft.mcp_enabled} disabled={savingSettings} />
 							<span class="text-sm text-[var(--text-primary)]">Enable MCP OAuth (master switch)</span>
 						</label>
-						{#if oauthSettings.mcp_enabled && !oauthSettings.canonical_host}
+
+						{#if draft.mcp_enabled && !draft.canonical_host}
 							<Callout
 								tone="warning"
 								message="oauth.canonical_host must be set before enabling MCP OAuth. Tokens minted without a canonical host will be invalid."
 							/>
 						{/if}
-						<label class="flex items-center gap-3">
-							<input
-								type="checkbox"
-								checked={oauthSettings.dcr_enabled}
-								disabled={savingSettings || !oauthSettings.mcp_enabled}
-								class="h-4 w-4"
-								onchange={() => void handleSettingsChange({ dcr_enabled: !oauthSettings?.dcr_enabled })}
+
+						<label class="flex items-center gap-3" for="dcr_enabled">
+							<Checkbox
+								id="dcr_enabled"
+								bind:checked={draft.dcr_enabled}
+								disabled={savingSettings || !draft.mcp_enabled}
 							/>
 							<span class="text-sm text-[var(--text-primary)]">Enable Dynamic Client Registration (DCR)</span>
 						</label>
-						<label class="flex items-center gap-3">
-							<input
-								type="checkbox"
-								checked={oauthSettings.cimd_enabled}
-								disabled={savingSettings || !oauthSettings.mcp_enabled}
-								class="h-4 w-4"
-								onchange={() => void handleSettingsChange({ cimd_enabled: !oauthSettings?.cimd_enabled })}
+
+						<label class="flex items-center gap-3" for="cimd_enabled">
+							<Checkbox
+								id="cimd_enabled"
+								bind:checked={draft.cimd_enabled}
+								disabled={savingSettings || !draft.mcp_enabled}
 							/>
-							<span class="text-sm text-[var(--text-primary)]">Enable Client Initiated Metadata Discovery (CIMD)</span>
+							<span class="text-sm text-[var(--text-primary)]">Enable Client-Initiated Metadata Discovery (CIMD)</span>
 						</label>
-						<div>
-							<label class="block">
-								<span class="mb-1 block text-xs text-[var(--text-muted)]"
-									>Canonical host (required when MCP OAuth is enabled)</span
-								>
-								<div class="flex gap-2">
-									<input
-										type="text"
-										value={oauthSettings.canonical_host ?? ''}
-										class="h-8 flex-1"
-										placeholder="auth.example.com"
-										disabled={savingSettings}
-										onchange={(e) =>
-											void handleSettingsChange({
-												canonical_host: (e.currentTarget as HTMLInputElement).value
-											})}
-									/>
-								</div>
-							</label>
-						</div>
+
+						<FormFieldRow
+							label="Canonical host"
+							hint="Required when MCP OAuth is enabled (e.g. auth.example.com)"
+							inputId="canonical_host"
+						>
+							<Input
+								id="canonical_host"
+								type="text"
+								value={draft.canonical_host ?? ''}
+								placeholder="auth.example.com"
+								disabled={savingSettings}
+								oninput={(e) => {
+									const v = (e.currentTarget as HTMLInputElement).value.trim();
+									draft!.canonical_host = v === '' ? null : v;
+								}}
+							/>
+						</FormFieldRow>
+
 						{#if oauthSettings.restart_required}
 							<Callout tone="info" message="Settings saved. Changes take effect after the controller is restarted." />
 						{/if}
+
 						{#if settingsError}
 							<Callout tone="danger" message={settingsError} />
 						{/if}
+
+						<div class="flex gap-2">
+							<Button
+								variant="primary"
+								disabled={!isDirty || savingSettings}
+								loading={savingSettings}
+								onclick={() => {
+									if (draft !== null) void handleSettingsChange(draft);
+								}}
+							>
+								Save
+							</Button>
+							{#if isDirty}
+								<Button variant="ghost" disabled={savingSettings} onclick={handleDiscard}>Discard</Button>
+							{/if}
+						</div>
 					</div>
 				{:else if settingsError}
 					<Callout tone="danger" message={settingsError} />
