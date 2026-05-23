@@ -63,6 +63,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_config_reload::{ReexecHook, ReexecOutcome};
 use uptrakit_web_api::AppState;
+use uptrakit_web_api::oauth::boot::boot_oauth_state;
 use uptrakit_web_api::settings::Settings;
 
 #[derive(Debug, Error)]
@@ -375,6 +376,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
 
     // Phase 7c: OAuth settings defaults
     startup::seed_oauth_defaults(&db_conn).await?;
+
+    // Phase 7d: OAuth boot — wire OAuthState when mcp_enabled resolves to true.
+    let oauth_state = boot_oauth_state(&db_conn)
+        .await
+        .map_err(|e| report!(AppError::Config(format!("OAuth boot failed: {e}"))))?;
 
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(runtime, &reconciled)?;
@@ -787,7 +793,8 @@ async fn run_server(args: cli::Args) -> Result<()> {
         .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)
         .instance_plugin_snapshot(std::sync::Arc::clone(&instance_plugin_snapshot_handle))
-        .reject_dangerous_commands(true);
+        .reject_dangerous_commands(true)
+        .oauth(oauth_state);
 
     // Wire config-reload coordinator and receivers.
     //
