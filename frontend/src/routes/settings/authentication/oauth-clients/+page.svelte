@@ -39,6 +39,7 @@
 
 	// OAuth settings state
 	let oauthSettings = $state<OAuthSettingsResponse | null>(null);
+	let oauthSettingsEtag = $state<string | null>(null);
 	let settingsLoading = $state(false);
 	let settingsError = $state<string | null>(null);
 	let savingSettings = $state(false);
@@ -139,12 +140,14 @@
 		settingsLoading = true;
 		settingsError = null;
 		try {
-			oauthSettings = await getOAuthSettings();
+			const result = await getOAuthSettings();
+			oauthSettings = result.data;
+			oauthSettingsEtag = result.etag;
 			draft = {
-				mcp_enabled: oauthSettings!.mcp_enabled,
-				dcr_enabled: oauthSettings!.dcr_enabled,
-				cimd_enabled: oauthSettings!.cimd_enabled,
-				canonical_host: oauthSettings!.canonical_host ?? null
+				mcp_enabled: oauthSettings.mcp_enabled,
+				dcr_enabled: oauthSettings.dcr_enabled,
+				cimd_enabled: oauthSettings.cimd_enabled,
+				canonical_host: oauthSettings.canonical_host ?? null
 			};
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to load OAuth settings';
@@ -157,15 +160,17 @@
 		savingSettings = true;
 		settingsError = null;
 		try {
-			oauthSettings = await updateOAuthSettings({
-				...patch,
-				canonical_host: patch.canonical_host ?? undefined
-			});
+			const result = await updateOAuthSettings(
+				{ ...patch, canonical_host: patch.canonical_host ?? undefined },
+				oauthSettingsEtag
+			);
+			oauthSettings = result.data;
+			oauthSettingsEtag = result.etag;
 			draft = {
-				mcp_enabled: oauthSettings!.mcp_enabled,
-				dcr_enabled: oauthSettings!.dcr_enabled,
-				cimd_enabled: oauthSettings!.cimd_enabled,
-				canonical_host: oauthSettings!.canonical_host ?? null
+				mcp_enabled: oauthSettings.mcp_enabled,
+				dcr_enabled: oauthSettings.dcr_enabled,
+				cimd_enabled: oauthSettings.cimd_enabled,
+				canonical_host: oauthSettings.canonical_host ?? null
 			};
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to save OAuth settings';
