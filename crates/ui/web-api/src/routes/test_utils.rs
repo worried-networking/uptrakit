@@ -11,7 +11,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::utf8_percent_encode;
 use uptrakit_wire::{ControllerMessage, RequestCertRenewalPayload};
 use uuid::Uuid;
 
@@ -21,6 +21,33 @@ use crate::oauth::services::authorization_code::{
 };
 use crate::oauth::services::authorization_request::OAuthAuthorizationRequestService;
 use crate::oauth::services::consent::OAuthConsentService;
+
+/// Percent-encoding set for OAuth redirect URI query parameter values.
+///
+/// Encodes characters unsafe in query components while preserving RFC 3986 unreserved
+/// characters (`A-Za-z0-9 - . _ ~`). This is critical for authorization codes (format
+/// `upc_` + base64url, which uses `-` and `_`) and state values: if those characters
+/// were encoded, the test consumer would receive a percent-encoded code and pass it
+/// double-encoded to the token endpoint, causing `code_not_found`.
+const OAUTH_QUERY_VALUE: percent_encoding::AsciiSet = percent_encoding::CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'&')
+    .add(b'+')
+    .add(b'<')
+    .add(b'>')
+    .add(b'=')
+    .add(b'?')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
 
 fn test_utils_allowed() -> bool {
     std::env::var("UPTRAKIT_TEST_UTILS_ENABLED").as_deref() == Ok("true")
@@ -160,8 +187,8 @@ pub(crate) async fn oauth_auto_approve_consent(
         "{}{}code={}&state={}",
         row.redirect_uri,
         sep,
-        utf8_percent_encode(code.as_str(), NON_ALPHANUMERIC),
-        utf8_percent_encode(&row.state, NON_ALPHANUMERIC),
+        utf8_percent_encode(code.as_str(), &OAUTH_QUERY_VALUE),
+        utf8_percent_encode(&row.state, &OAUTH_QUERY_VALUE),
     );
 
     (
