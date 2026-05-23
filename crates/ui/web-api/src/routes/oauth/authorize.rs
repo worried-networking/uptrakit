@@ -177,10 +177,10 @@ pub async fn authorize(
     let user = match auth_user {
         Some(Extension(u)) => u,
         None => {
-            // Not logged in — redirect to /login with return_to pointing here.
+            // Not logged in — redirect to /login with redirect pointing here.
             let original_uri = build_authorize_uri(&req, &resource);
             let encoded = percent_encode(&original_uri);
-            let location = format!("/login?return_to={encoded}&_auth_context=oauth");
+            let location = format!("/login?redirect={encoded}&_auth_context=oauth");
             return redirect_302(&location);
         }
     };
@@ -303,7 +303,7 @@ fn is_loopback_url(url: &url::Url) -> bool {
 
 /// Build the `GET /oauth/authorize?...` URI from the parsed request struct.
 ///
-/// Used to reconstruct the original URL for the `return_to` redirect when the
+/// Used to reconstruct the original URL for the `redirect` redirect when the
 /// user is not authenticated.
 fn build_authorize_uri(req: &AuthorizeRequest, resource: &str) -> String {
     format!(
@@ -654,7 +654,7 @@ mod tests {
             .to_str()
             .expect("location is utf8");
         assert!(
-            location.starts_with("/login?return_to="),
+            location.starts_with("/login?redirect="),
             "expected /login redirect, got: {location}"
         );
         assert!(

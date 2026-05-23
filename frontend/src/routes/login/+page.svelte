@@ -51,7 +51,7 @@
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
 			hasRedirected = true;
-			goto('/');
+			goto(safeRedirect());
 		}
 	});
 
