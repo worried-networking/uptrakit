@@ -63,7 +63,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_config_reload::{ReexecHook, ReexecOutcome};
 use uptrakit_web_api::AppState;
-use uptrakit_web_api::oauth::boot::boot_oauth_state;
+use uptrakit_web_api::oauth::boot::{boot_oauth_state, deregister_oauth_instance};
 use uptrakit_web_api::settings::Settings;
 
 #[derive(Debug, Error)]
@@ -107,6 +107,8 @@ struct ControllerReexecHook {
     listener_count: usize,
     /// Raw fd of the first (HTTPS) bound listener, passed as LISTEN_FDS_FIRST_FD.
     first_listener_fd: std::os::unix::io::RawFd,
+    /// OAuth instance to deregister before exec. `None` when OAuth is disabled.
+    oauth_instance: Option<(uuid::Uuid, sea_orm::DatabaseConnection)>,
 }
 
 impl ReexecHook for ControllerReexecHook {
@@ -129,6 +131,28 @@ impl ReexecHook for ControllerReexecHook {
             generation: self.generation,
             first_listener_fd: self.first_listener_fd,
         };
+
+        // INVARIANT: block_in_place requires the multi_thread Tokio runtime (panics on
+        // current_thread). Tests exercising check_and_trigger must use
+        // #[tokio::test(flavor = "multi_thread")].
+        if let Some((instance_id, ref db)) = self.oauth_instance {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    if tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        deregister_oauth_instance(db, instance_id),
+                    )
+                    .await
+                    .is_err()
+                    {
+                        tracing::warn!(
+                            %instance_id,
+                            "oauth deregister timed out before reexec; stale row will expire in ~90s"
+                        );
+                    }
+                });
+            });
+        }
 
         match reexec::perform_reexec(&plan) {
             Ok(infallible) => match infallible {},
@@ -381,6 +405,11 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let oauth_state = boot_oauth_state(&db_conn)
         .await
         .context(AppError::Config("OAuth boot failed".into()))?;
+    // Capture before oauth_state is consumed by the builder; used for graceful cleanup
+    // on both the SIGTERM/SIGINT path and the reexec path.
+    let oauth_instance_for_shutdown = oauth_state
+        .enabled
+        .then_some((oauth_state.instance_id, db_conn.clone()));
 
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(runtime, &reconciled)?;
@@ -880,6 +909,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
                 generation: reexec::listenfd::current_generation(),
                 listener_count,
                 first_listener_fd,
+                oauth_instance: oauth_instance_for_shutdown.clone(),
             }));
 
         let coordinator_handle = b.coordinator.handle();
@@ -1278,6 +1308,10 @@ async fn run_server(args: cli::Args) -> Result<()> {
     let shutdown_timeout = Duration::from_secs(30);
     bg.shutdown(server_handle, service_connections, shutdown_timeout)
         .await;
+
+    if let Some((instance_id, ref db)) = oauth_instance_for_shutdown {
+        deregister_oauth_instance(db, instance_id).await;
+    }
 
     Ok(())
 }
