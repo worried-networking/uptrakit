@@ -82,6 +82,14 @@ pub async fn authorize(
         return oauth_400("invalid_request", &e.to_string());
     }
 
+    // Resolve resource: default to primary MCP resource when client omits it.
+    let resource = req
+        .resource
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| state.oauth.canonical.primary_resource().as_str())
+        .to_owned();
+
     // Step 2.5 — CIMD resolution for URL-shaped client_id.
     //
     // Per spec §11.3: URL-shaped client_id triggers CIMD fetch + upsert
@@ -136,6 +144,10 @@ pub async fn authorize(
     };
 
     // Step 4 — validate redirect_uri against registered list.
+    //
+    // RFC 8252 §7.3: for loopback redirect URIs (http://localhost or
+    // http://127.0.0.1) the port MUST be ignored — native apps use ephemeral
+    // ports chosen at runtime and cannot pre-register a specific port.
     let registered_uris: Vec<String> = match serde_json::from_str(&client.redirect_uris) {
         Ok(v) => v,
         Err(e) => {
@@ -143,7 +155,10 @@ pub async fn authorize(
             return oauth_400("invalid_client", "malformed client registration");
         }
     };
-    if !registered_uris.contains(&req.redirect_uri) {
+    if !registered_uris
+        .iter()
+        .any(|r| redirect_uri_matches(r, &req.redirect_uri))
+    {
         return oauth_400(
             "invalid_redirect_uri",
             "redirect_uri not registered for this client",
@@ -151,7 +166,7 @@ pub async fn authorize(
     }
 
     // Step 5 — validate resource indicator.
-    if !state.oauth.canonical.accepts_audience(&req.resource) {
+    if !state.oauth.canonical.accepts_audience(&resource) {
         return oauth_400(
             "invalid_target",
             "resource indicator not accepted by this server",
@@ -163,7 +178,7 @@ pub async fn authorize(
         Some(Extension(u)) => u,
         None => {
             // Not logged in — redirect to /login with return_to pointing here.
-            let original_uri = build_authorize_uri(&req);
+            let original_uri = build_authorize_uri(&req, &resource);
             let encoded = percent_encode(&original_uri);
             let location = format!("/login?return_to={encoded}&_auth_context=oauth");
             return redirect_302(&location);
@@ -198,7 +213,7 @@ pub async fn authorize(
             state: req.state.clone(),
             code_challenge: req.code_challenge.clone(),
             code_challenge_method: req.code_challenge_method.clone(),
-            resource: req.resource.clone(),
+            resource: resource.clone(),
         })
         .await
     {
@@ -224,7 +239,7 @@ pub async fn authorize(
                 scope: req.scope.clone(),
                 code_challenge: req.code_challenge.clone(),
                 code_challenge_method: req.code_challenge_method.clone(),
-                resource: req.resource.clone(),
+                resource: resource.clone(),
             })
             .await
         {
@@ -259,11 +274,38 @@ pub async fn authorize(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// RFC 8252 §7.3 loopback redirect URI matching.
+///
+/// Exact equality always matches. For http://localhost and http://127.0.0.1
+/// URIs the port is ignored — native clients pick an ephemeral port at runtime
+/// and cannot register a specific port in advance.
+fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
+    if registered == requested {
+        return true;
+    }
+    let Ok(reg) = url::Url::parse(registered) else {
+        return false;
+    };
+    let Ok(req) = url::Url::parse(requested) else {
+        return false;
+    };
+    is_loopback_url(&reg)
+        && is_loopback_url(&req)
+        && reg.scheme() == req.scheme()
+        && reg.host_str() == req.host_str()
+        && reg.path() == req.path()
+        && reg.query() == req.query()
+}
+
+fn is_loopback_url(url: &url::Url) -> bool {
+    url.scheme() == "http" && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
+}
+
 /// Build the `GET /oauth/authorize?...` URI from the parsed request struct.
 ///
 /// Used to reconstruct the original URL for the `return_to` redirect when the
 /// user is not authenticated.
-fn build_authorize_uri(req: &AuthorizeRequest) -> String {
+fn build_authorize_uri(req: &AuthorizeRequest, resource: &str) -> String {
     format!(
         "/oauth/authorize?response_type={}&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method={}&resource={}",
         percent_encode(&req.response_type),
@@ -273,8 +315,74 @@ fn build_authorize_uri(req: &AuthorizeRequest) -> String {
         percent_encode(&req.state),
         percent_encode(&req.code_challenge),
         percent_encode(&req.code_challenge_method),
-        percent_encode(&req.resource),
+        percent_encode(resource),
     )
+}
+
+// ---------------------------------------------------------------------------
+// redirect_uri_matches unit tests (RFC 8252 §7.3)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod loopback_tests {
+    use super::redirect_uri_matches;
+
+    #[test]
+    fn exact_match_passes() {
+        assert!(redirect_uri_matches(
+            "https://app.example.com/callback",
+            "https://app.example.com/callback"
+        ));
+    }
+
+    #[test]
+    fn non_loopback_port_mismatch_fails() {
+        assert!(!redirect_uri_matches(
+            "https://app.example.com/callback",
+            "https://app.example.com:8443/callback"
+        ));
+    }
+
+    #[test]
+    fn loopback_localhost_different_port_matches() {
+        assert!(redirect_uri_matches(
+            "http://localhost/callback",
+            "http://localhost:53017/callback"
+        ));
+    }
+
+    #[test]
+    fn loopback_127_0_0_1_different_port_matches() {
+        assert!(redirect_uri_matches(
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:8080/callback"
+        ));
+    }
+
+    #[test]
+    fn loopback_path_mismatch_fails() {
+        assert!(!redirect_uri_matches(
+            "http://localhost/callback",
+            "http://localhost:53017/other"
+        ));
+    }
+
+    #[test]
+    fn loopback_https_not_exempt() {
+        // Only http loopback gets port exemption (RFC 8252 §7.3).
+        assert!(!redirect_uri_matches(
+            "https://localhost/callback",
+            "https://localhost:53017/callback"
+        ));
+    }
+
+    #[test]
+    fn loopback_host_mismatch_fails() {
+        assert!(!redirect_uri_matches(
+            "http://localhost/callback",
+            "http://127.0.0.1:53017/callback"
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -693,11 +801,14 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 5 — missing / empty resource returns 400
+    // Test 5 — resource defaulting and rejection
     // -----------------------------------------------------------------------
 
+    // When `resource` is absent or empty the server defaults to its primary
+    // resource. An unknown `client_id` is still rejected, but the error is
+    // `invalid_client`, not `invalid_request`.
     #[tokio::test]
-    async fn authorize_missing_resource_returns_400() {
+    async fn authorize_missing_resource_defaults_to_primary() {
         use axum::body::Body;
         use http::Request;
         use http_body_util::BodyExt;
@@ -705,7 +816,6 @@ mod tests {
 
         let (_app, router) = app_with_oauth().await;
 
-        // `resource` is intentionally an empty string — should fail validate().
         let uri = format!(
             "/oauth/authorize\
                    ?response_type=code\
@@ -714,8 +824,7 @@ mod tests {
                    &scope=mcp%3Aread\
                    &state=s\
                    &code_challenge={TEST_CODE_CHALLENGE}\
-                   &code_challenge_method=S256\
-                   &resource=",
+                   &code_challenge_method=S256",
             encode_redirect_uri(TEST_REDIRECT_URI)
         );
 
@@ -730,7 +839,47 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
         let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
-        assert_eq!(body["error"], "invalid_request");
+        // Resource defaulted → passed audience check; failed on unknown client_id.
+        assert_eq!(body["error"], "invalid_client");
+    }
+
+    // An explicitly unrecognized resource indicator is rejected.
+    // The client must be registered — client lookup precedes resource validation.
+    #[tokio::test]
+    async fn authorize_unrecognized_resource_returns_400() {
+        use axum::body::Body;
+        use http::Request;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let (app, router) = app_with_oauth().await;
+        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI).await;
+
+        let uri = format!(
+            "/oauth/authorize\
+                   ?response_type=code\
+                   &client_id={client_id}\
+                   &redirect_uri={}\
+                   &scope=mcp%3Aread\
+                   &state=s\
+                   &code_challenge={TEST_CODE_CHALLENGE}\
+                   &code_challenge_method=S256\
+                   &resource=https%3A%2F%2Fwrong.example.com%2Fmcp",
+            encode_redirect_uri(TEST_REDIRECT_URI)
+        );
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = router.oneshot(req).await.expect("oneshot");
+
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
+        assert_eq!(body["error"], "invalid_target");
     }
 
     // -----------------------------------------------------------------------
