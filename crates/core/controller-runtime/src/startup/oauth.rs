@@ -1,6 +1,6 @@
 //! Phase 7c: OAuth settings defaults.
 //!
-//! Seeds the 19 OAuth-related global settings on every boot if they are not
+//! Seeds the 18 OAuth-related global settings on every boot if they are not
 //! already present. Uses [`insert_global_setting_if_absent`] so that operator
 //! customisations written after the initial boot are never overwritten.
 
@@ -9,7 +9,7 @@ use uptrakit_web_api::SettingKey;
 
 use crate::AppError;
 
-/// Seed all 19 OAuth global settings with their spec defaults if absent.
+/// Seed all 18 OAuth global settings with their spec defaults if absent.
 ///
 /// Idempotent: each call to [`insert_global_setting_if_absent`] is a no-op
 /// when the row already exists, so this function may be called on every boot.
