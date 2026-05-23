@@ -22,7 +22,6 @@ pub(crate) async fn seed_oauth_defaults(db: &sea_orm::DatabaseConnection) -> cra
         };
     }
 
-    seed!(SettingKey::OauthMcpEnabled, serde_json::json!(false));
     seed!(SettingKey::OauthDcrEnabled, serde_json::json!(false));
     seed!(SettingKey::OauthCimdEnabled, serde_json::json!(false));
     seed!(SettingKey::OauthCanonicalHost, serde_json::Value::Null);
