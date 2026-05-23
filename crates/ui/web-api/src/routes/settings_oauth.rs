@@ -27,15 +27,22 @@ use crate::extract::Validated;
 use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
+use crate::oauth::resolve_mcp_enabled;
 use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
 
 /// Load all four OAuth settings from DB. Missing keys fall back to defaults.
 async fn load_oauth_settings_from_db(state: &AppState) -> OAuthSettingsFromDb {
-    let mcp = load_global_setting_raw(state.db(), "oauth.mcp_enabled")
+    let canonical_host = load_global_setting_raw(state.db(), "oauth.canonical_host")
         .await
         .unwrap_or(None)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .and_then(|v| v.as_str().map(ToOwned::to_owned));
+
+    let mcp_raw: Option<bool> = load_global_setting_raw(state.db(), "oauth.mcp_enabled")
+        .await
+        .unwrap_or(None)
+        .and_then(|v| v.as_bool());
+    let mcp = resolve_mcp_enabled(mcp_raw, canonical_host.as_deref());
+
     let dcr = load_global_setting_raw(state.db(), "oauth.dcr_enabled")
         .await
         .unwrap_or(None)
@@ -46,10 +53,6 @@ async fn load_oauth_settings_from_db(state: &AppState) -> OAuthSettingsFromDb {
         .unwrap_or(None)
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let canonical_host = load_global_setting_raw(state.db(), "oauth.canonical_host")
-        .await
-        .unwrap_or(None)
-        .and_then(|v| v.as_str().map(ToOwned::to_owned));
 
     OAuthSettingsFromDb {
         mcp,
