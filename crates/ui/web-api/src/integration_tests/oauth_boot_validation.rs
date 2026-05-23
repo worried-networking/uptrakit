@@ -4,7 +4,10 @@
 // Task 24: minimal config boot succeeds; multi-controller guard rejects a
 //          different fingerprint.
 
-use crate::oauth::boot::{OAuthBootError, OAuthBootSettings, validate_and_register};
+use crate::oauth::boot::{
+    OAuthBootError, OAuthBootSettings, boot_oauth_state, validate_and_register,
+};
+use crate::settings_store::upsert_global_setting_raw;
 use crate::test_harness::{insert_default_tenant, setup_migrated_db};
 
 // ── Task 23 ─────────────────────────────────────────────────────────────────
@@ -80,4 +83,39 @@ async fn multi_controller_guard_rejects_different_fingerprint() {
         ),
         "unexpected error: {err:?}",
     );
+}
+
+// ── boot_oauth_state tests ───────────────────────────────────────────────────
+
+/// When `canonical_host` is set and no `mcp_enabled` row exists,
+/// `boot_oauth_state` must return a live (enabled) `OAuthState`.
+#[tokio::test]
+async fn boot_oauth_state_auto_enables_when_canonical_host_set() {
+    let db = setup_migrated_db().await;
+    let _ = insert_default_tenant(&db).await;
+    upsert_global_setting_raw(
+        &db,
+        "oauth.canonical_host",
+        serde_json::json!("example.com"),
+    )
+    .await
+    .expect("write canonical_host");
+    // No mcp_enabled row — auto-enable should fire.
+    let state = boot_oauth_state(&db)
+        .await
+        .expect("boot_oauth_state must succeed");
+    assert!(state.enabled, "OAuthState must be enabled");
+    assert!(!state.instance_id.is_nil(), "instance_id must not be nil");
+}
+
+/// When no `canonical_host` is set and no `mcp_enabled` row exists,
+/// `boot_oauth_state` returns a disabled `OAuthState`.
+#[tokio::test]
+async fn boot_oauth_state_disabled_when_no_host_and_no_explicit_flag() {
+    let db = setup_migrated_db().await;
+    let _ = insert_default_tenant(&db).await;
+    let state = boot_oauth_state(&db)
+        .await
+        .expect("boot_oauth_state must succeed");
+    assert!(!state.enabled, "OAuthState must be disabled");
 }

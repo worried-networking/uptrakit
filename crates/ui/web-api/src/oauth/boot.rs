@@ -7,9 +7,10 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set,
+    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::oauth_controller_instance;
@@ -205,6 +206,136 @@ pub fn spawn_heartbeat(db: DatabaseConnection, instance_id: Uuid) {
             }
         }
     });
+}
+
+/// Boot-time OAuth state initialisation.
+///
+/// Reads the DB to resolve whether MCP OAuth should be enabled, then (when
+/// enabled) generates or reloads the JWT signing secret and registers this
+/// controller instance — all within a single `BEGIN IMMEDIATE` transaction
+/// to prevent split-brain on rapid restart loops.
+///
+/// Returns `OAuthState::disabled()` fast-path when resolved-enabled is false.
+pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthState> {
+    use rand::Rng;
+
+    // ── Step 1: Read resolve inputs (no transaction needed — reads only) ──
+    let mcp_raw: Option<bool> =
+        crate::settings_store::load_global_setting_raw(db, "oauth.mcp_enabled")
+            .await
+            .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?
+            .and_then(|v| v.as_bool());
+    let canonical_host_str: Option<String> =
+        crate::settings_store::load_global_setting_raw(db, "oauth.canonical_host")
+            .await
+            .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?
+            .and_then(|v| v.as_str().map(ToOwned::to_owned));
+
+    // ── Step 2: Resolve → fast-path disabled ──
+    if !super::resolve_mcp_enabled(mcp_raw, canonical_host_str.as_deref()) {
+        return Ok(super::OAuthState::disabled());
+    }
+
+    if mcp_raw.is_none() {
+        tracing::warn!(
+            canonical_host = canonical_host_str.as_deref().unwrap_or(""),
+            "OAuth auto-enabling: oauth.mcp_enabled row absent but canonical_host is \
+             configured; to disable, write oauth.mcp_enabled = false"
+        );
+    }
+
+    // ── Step 3: Read-only settings (outside tx) ──
+    let accepted_audience_hosts: Vec<String> =
+        crate::settings_store::load_global_setting_raw(db, "oauth.accepted_audience_hosts")
+            .await
+            .unwrap_or(None)
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+    let allow_multi =
+        crate::settings_store::load_global_setting_raw(db, "oauth.allow_multi_controller_unsafe")
+            .await
+            .unwrap_or(None)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+    let dcr_enabled = crate::settings_store::load_global_setting_raw(db, "oauth.dcr_enabled")
+        .await
+        .unwrap_or(None)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let cimd_enabled = crate::settings_store::load_global_setting_raw(db, "oauth.cimd_enabled")
+        .await
+        .unwrap_or(None)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // ── Step 4: BEGIN IMMEDIATE — secret read-or-generate + peer registration ──
+    let tx = db
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .context_to()?;
+
+    let signing_secret: Vec<u8> = {
+        let raw = crate::settings_store::load_global_setting_raw(&tx, "oauth.jwt_signing_secret")
+            .await
+            .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
+        let existing = raw.and_then(|v| v.as_str().and_then(|s| hex::decode(s).ok()));
+        match existing {
+            Some(bytes) => bytes,
+            None => {
+                let mut bytes = [0u8; 32];
+                rand::rng().fill(&mut bytes);
+                crate::settings_store::upsert_global_setting_raw(
+                    &tx,
+                    "oauth.jwt_signing_secret",
+                    serde_json::json!(hex::encode(bytes)),
+                )
+                .await
+                .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
+                bytes.to_vec()
+            }
+        }
+    };
+
+    let boot_settings = OAuthBootSettings::new(
+        canonical_host_str,
+        accepted_audience_hosts,
+        signing_secret.clone(),
+        allow_multi,
+    );
+    let instance_id = validate_and_register(&tx, &boot_settings, OffsetDateTime::now_utc()).await?;
+
+    tx.commit().await.context_to()?;
+
+    // ── Step 5: Spawn heartbeat and construct live OAuthState ──
+    spawn_heartbeat(db.clone(), instance_id);
+
+    let canonical = super::canonical_url::load_canonical_url_config(db)
+        .await
+        .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
+    let issuer = canonical.issuer().as_str().to_owned();
+
+    Ok(super::OAuthState {
+        enabled: true,
+        canonical,
+        signer: Arc::new(super::jwt::McpOAuthJwtSigner::new(&signing_secret)),
+        verifier: Arc::new(super::jwt::McpOAuthJwtVerifier::new(
+            &signing_secret,
+            issuer,
+            vec![],
+        )),
+        clock: Arc::new(OffsetDateTime::now_utc),
+        instance_id,
+        dcr_enabled,
+        cimd_enabled,
+    })
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]
