@@ -10,7 +10,7 @@
 		handleOidcLink,
 		handleOidcLogin
 	} from '$lib/auth.svelte';
-	import { setAccessToken, setSessionExpired } from '$lib/token-store.svelte';
+	import { getAccessToken, setAccessToken, setSessionExpired } from '$lib/token-store.svelte';
 	import { setUser } from '$lib/auth.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import type { AuthMethodsResponse, MfaChallengeResponse, AuthResponse } from '$lib/types';
@@ -51,6 +51,25 @@
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
 			hasRedirected = true;
+			if (_authContext === 'oauth') {
+				const redirectTarget = page.url.searchParams.get('redirect');
+				const token = getAccessToken();
+				if (redirectTarget && token) {
+					fetch(safeRedirectFn(redirectTarget), {
+						headers: { Authorization: `Bearer ${token}` }
+					})
+						.then((res) => {
+							try {
+								const u = new URL(res.url);
+								goto(u.pathname + u.search + u.hash);
+							} catch {
+								goto('/');
+							}
+						})
+						.catch(() => goto('/'));
+					return;
+				}
+			}
 			goto(safeRedirect());
 		}
 	});
