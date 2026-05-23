@@ -6,8 +6,8 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -73,6 +73,8 @@ pub enum OAuthBootError {
     PeerWithSameFingerprintNotPermitted,
     #[error("database error")]
     Database(sea_orm::DbErr),
+    #[error("OAuth settings error: {0}")]
+    Settings(String),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<OAuthBootError>>;
@@ -86,20 +88,23 @@ impl_report_conversion! {
 /// Steps performed:
 /// 1. Assert `canonical_host` is non-empty.
 /// 2. Derive a SHA-256 fingerprint from `jwt_signing_secret`.
-/// 3. Open a `BEGIN IMMEDIATE` transaction (prevents `SQLITE_BUSY_SNAPSHOT`).
-/// 4. Prune rows older than 24 h.
-/// 5. Scan for rows with `last_seen_at` within the last 90 s (fresh peers).
-/// 6. Reject boot if a peer with a **different** fingerprint is found.
-/// 7. Reject boot if a peer with the **same** fingerprint is found and
+/// 3. Prune rows older than 24 h.
+/// 4. Scan for rows with `last_seen_at` within the last 90 s (fresh peers).
+/// 5. Reject boot if a peer with a **different** fingerprint is found.
+/// 6. Reject boot if a peer with the **same** fingerprint is found and
 ///    `allow_multi_controller_unsafe = false`.
-/// 8. Insert this controller's row and commit.
+/// 7. Insert this controller's row.
 ///
 /// Returns the newly generated `instance_id` on success.
 ///
 /// The `now` parameter is injectable so tests can set a deterministic clock
 /// without relying on wall-clock time.
+///
+/// Accepts any [`ConnectionTrait`] implementation so that callers can pass
+/// either a bare [`DatabaseConnection`] or an already-open transaction,
+/// making the secret-write and peer-check atomic when required.
 pub async fn validate_and_register(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     settings: &OAuthBootSettings,
     now: OffsetDateTime,
 ) -> Result<Uuid> {
@@ -112,59 +117,47 @@ pub async fn validate_and_register(
     let fp = fingerprint(&settings.jwt_signing_secret);
     let instance_id = Uuid::now_v7();
 
-    // 3. BEGIN IMMEDIATE — read-then-write, avoids SQLITE_BUSY_SNAPSHOT.
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
-
-    // 4. Prune rows older than 24 h.
+    // 3. Prune rows older than 24 h.
     let stale_cutoff = now - time::Duration::hours(STALE_TTL_HOURS);
     oauth_controller_instance::Entity::delete_many()
         .filter(oauth_controller_instance::Column::LastSeenAt.lt(stale_cutoff))
-        .exec(&txn)
+        .exec(db)
         .await
         .context_to()?;
 
-    // 5. Scan for active rows (last_seen_at within the last 90 s).
+    // 4. Scan for active rows (last_seen_at within the last 90 s).
     let fresh_cutoff = now - time::Duration::seconds(HEARTBEAT_FRESH_SECONDS);
     let peers = oauth_controller_instance::Entity::find()
         .filter(oauth_controller_instance::Column::LastSeenAt.gte(fresh_cutoff))
-        .all(&txn)
+        .all(db)
         .await
         .context_to()?;
 
-    // 6. Check peers.
+    // 5. Check peers.
     for peer in &peers {
         if peer.jwt_secret_fingerprint != fp {
             bail!(OAuthBootError::PeerWithDifferentFingerprint);
         }
-        // Same fingerprint — check the unsafe bypass flag.
         if !settings.allow_multi_controller_unsafe {
             bail!(OAuthBootError::PeerWithSameFingerprintNotPermitted);
         }
-        // allow_multi_controller_unsafe = true: warn and continue.
         tracing::warn!(
             peer_instance_id = %peer.instance_id,
             "multi-controller unsafe mode: peer with same fingerprint active"
         );
     }
 
-    // 7. INSERT this controller's row.
+    // 6. INSERT this controller's row.
     oauth_controller_instance::ActiveModel {
         instance_id: Set(instance_id),
         jwt_secret_fingerprint: Set(fp),
         started_at: Set(now),
         last_seen_at: Set(now),
     }
-    .insert(&txn)
+    .insert(db)
     .await
     .context_to()?;
 
-    txn.commit().await.context_to()?;
     Ok(instance_id)
 }
 
