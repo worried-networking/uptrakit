@@ -24,6 +24,7 @@ pub(crate) struct ApiClient {
     base_url: String,
     client: Option<UptrakitClient>,
     pki_base_url: Option<String>,
+    pub(crate) api_token: Option<String>,
 }
 
 impl ApiClient {
@@ -34,6 +35,7 @@ impl ApiClient {
             base_url,
             client: None,
             pki_base_url: None,
+            api_token: None,
         }
     }
 
@@ -241,6 +243,7 @@ impl ApiClient {
         };
 
         let token = auth_resp.access_token.expose_secret().to_string();
+        self.api_token = Some(token.clone());
 
         // Verify login works too.
         let login_req = LoginRequest {
@@ -374,5 +377,108 @@ impl ApiClient {
 
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    /// PUT /api/v1/global-settings/oauth — enable OAuth for E2E tests.
+    ///
+    /// Sets `canonical_host` (triggers auto-enable of `mcp_enabled`) and sets `dcr_enabled = true`
+    /// so Dynamic Client Registration works. First GETs current settings to capture the ETag,
+    /// then PUTs with `If-Match: <etag>`. The `IfMatch` extractor does strict string comparison.
+    ///
+    /// Requires a valid API token (call `register_and_login_with_token` first).
+    /// Panics if any request fails or the server returns a non-2xx status.
+    pub(crate) async fn update_oauth_settings(&self, canonical_host: &str) {
+        let token = self
+            .api_token
+            .as_deref()
+            .expect("must call register_and_login_with_token first");
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .expect("build reqwest client");
+
+        let get_resp = client
+            .get(format!("{}/api/v1/global-settings/oauth", self.base_url))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("GET /api/v1/global-settings/oauth");
+        assert!(
+            get_resp.status().is_success(),
+            "GET oauth settings: expected 2xx, got {}",
+            get_resp.status()
+        );
+        let etag = get_resp
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .expect("ETag header on GET oauth settings")
+            .to_string();
+
+        let put_resp = client
+            .put(format!("{}/api/v1/global-settings/oauth", self.base_url))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("If-Match", &etag)
+            .json(&serde_json::json!({
+                "canonical_host": canonical_host,
+                "dcr_enabled": true
+            }))
+            .send()
+            .await
+            .expect("PUT /api/v1/global-settings/oauth");
+        assert!(
+            put_resp.status().is_success(),
+            "update_oauth_settings: expected 2xx, got {}",
+            put_resp.status()
+        );
+    }
+
+    /// POST /oauth/test/auto-approve/{request_id}
+    ///
+    /// Approves the pending OAuth consent request, returning the authorization code
+    /// extracted from the `code=` query parameter of the returned `redirect_uri`.
+    ///
+    /// Panics if the request fails, returns non-2xx, or `code=` is absent in the URI.
+    pub(crate) async fn auto_approve_consent(&self, request_id: &str) -> String {
+        let token = self
+            .api_token
+            .as_deref()
+            .expect("must call register_and_login_with_token first");
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .expect("build reqwest client");
+        let resp = client
+            .post(format!(
+                "{}/oauth/test/auto-approve/{request_id}",
+                self.base_url
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("POST /oauth/test/auto-approve");
+        assert!(
+            resp.status().is_success(),
+            "auto_approve_consent: expected 2xx, got {}",
+            resp.status()
+        );
+        let body: serde_json::Value = resp.json().await.expect("parse auto-approve response");
+        let redirect_uri = body
+            .get("redirect_uri")
+            .and_then(|v| v.as_str())
+            .expect("redirect_uri in response");
+        redirect_uri
+            .split('?')
+            .nth(1)
+            .and_then(|q| {
+                q.split('&')
+                    .find(|p| p.starts_with("code="))
+                    .map(|p| p.trim_start_matches("code=").to_owned())
+            })
+            .expect("code= parameter in redirect_uri")
     }
 }
