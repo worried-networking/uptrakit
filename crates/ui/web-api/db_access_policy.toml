@@ -551,6 +551,7 @@ stream_update_output = "full-state"
 request_service_renewal = "full-state"
 disconnect_service = "full-state"
 force_reexec = "full-state"
+oauth_auto_approve_consent = "full-state"
 
 [routes."users.rs"]
 build_user_response = "ignore"

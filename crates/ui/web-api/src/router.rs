@@ -1005,6 +1005,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/test/force-reexec",
             axum::routing::post(crate::routes::test_utils::force_reexec),
         );
+        router = router.route(
+            "/oauth/test/auto-approve/{request_id}",
+            axum::routing::post(crate::routes::test_utils::oauth_auto_approve_consent),
+        );
     }
 
     // Always serve the raw OpenAPI JSON at a stable URL.
