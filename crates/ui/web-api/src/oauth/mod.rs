@@ -86,3 +86,33 @@ impl OAuthState {
         }
     }
 }
+
+/// Resolve whether MCP OAuth is enabled, applying the auto-enable rule:
+/// when no explicit row exists and `canonical_host` is set, treat it as enabled.
+pub fn resolve_mcp_enabled(explicit: Option<bool>, canonical_host: Option<&str>) -> bool {
+    match explicit {
+        Some(v) => v,
+        None => canonical_host.is_some(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_mcp_enabled_all_table_rows() {
+        // Row absent, no host → false
+        assert!(!resolve_mcp_enabled(None, None));
+        // Row absent, host set → true (auto-enable)
+        assert!(resolve_mcp_enabled(None, Some("example.com")));
+        // Explicit false, host set → false (operator override wins)
+        assert!(!resolve_mcp_enabled(Some(false), Some("example.com")));
+        // Explicit false, no host → false
+        assert!(!resolve_mcp_enabled(Some(false), None));
+        // Explicit true, host set → true
+        assert!(resolve_mcp_enabled(Some(true), Some("example.com")));
+        // Explicit true, no host → true (CanonicalHostMissing fires during boot)
+        assert!(resolve_mcp_enabled(Some(true), None));
+    }
+}
