@@ -187,6 +187,150 @@ async fn get_returns_etag_header() {
     );
 }
 
+// ── OAuth global settings (/api/v1/global-settings/oauth) ────────────────────
+
+/// PUT OAuth settings without `If-Match` → 428 Precondition Required.
+#[tokio::test]
+async fn put_oauth_settings_without_if_match_returns_428() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let status = client
+        .put_json(
+            "/api/v1/global-settings/oauth",
+            &serde_json::json!({ "mcp_enabled": true }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(status, http::StatusCode::PRECONDITION_REQUIRED);
+}
+
+/// PUT OAuth settings with stale `If-Match` → 409 Conflict.
+#[tokio::test]
+async fn put_oauth_settings_with_stale_etag_returns_409() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // Advance global cache to version 1 so v0 is stale.
+    app.state.settings_version_cache.update(Scope::Global, 1);
+
+    let status = client
+        .put_json(
+            "/api/v1/global-settings/oauth",
+            &serde_json::json!({ "mcp_enabled": true }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"global-settings-v0\"")
+        .send_status()
+        .await;
+
+    assert_eq!(status, http::StatusCode::CONFLICT);
+}
+
+/// GET OAuth settings returns an `ETag` header.
+#[tokio::test]
+async fn get_oauth_settings_returns_etag_header() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .get("/api/v1/global-settings/oauth")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present")
+        .to_str()
+        .expect("ETag is ASCII")
+        .to_string();
+    assert!(
+        etag.contains("global-settings-v"),
+        "expected global-settings-v in ETag, got {etag:?}"
+    );
+}
+
+/// PUT all-None body (no-op path) still returns an `ETag` header.
+#[tokio::test]
+async fn put_oauth_settings_noop_returns_etag() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .put_json("/api/v1/global-settings/oauth", &serde_json::json!({}))
+        .bearer(&token)
+        .header("if-match", "W/\"global-settings-v0\"")
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    assert!(
+        resp.headers().contains_key("etag"),
+        "ETag header must be present on no-op PUT response"
+    );
+}
+
+/// Full GET → ETag → PUT round-trip: current ETag accepted, stale ETag rejected after write.
+#[tokio::test]
+async fn oauth_settings_get_etag_put_round_trip() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // GET → capture ETag.
+    let get_resp = client
+        .get("/api/v1/global-settings/oauth")
+        .bearer(&token)
+        .send()
+        .await;
+    assert_eq!(get_resp.status(), http::StatusCode::OK);
+    let etag = get_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+
+    // PUT with captured ETag → 200.
+    let (put_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            "/api/v1/global-settings/oauth",
+            &serde_json::json!({ "mcp_enabled": false }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send_json()
+        .await;
+    assert_eq!(put_status, http::StatusCode::OK);
+
+    // Old ETag now stale → 409.
+    let stale_status = client
+        .put_json(
+            "/api/v1/global-settings/oauth",
+            &serde_json::json!({ "mcp_enabled": false }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send_status()
+        .await;
+    assert_eq!(stale_status, http::StatusCode::CONFLICT);
+}
+
 /// After a successful PUT, the ETag version increments so the old value is stale.
 #[tokio::test]
 async fn put_increments_etag_version() {

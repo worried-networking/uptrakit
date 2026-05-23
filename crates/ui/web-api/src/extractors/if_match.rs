@@ -132,3 +132,19 @@ impl EtagSource for SettingsVersion {
         Ok(format!("W/\"settings-v{version}\""))
     }
 }
+
+/// [`EtagSource`] backed by the global-settings version counter.
+///
+/// Returns a weak ETag of the form `W/"global-settings-v{n}"` where `n` is
+/// `Scope::Global` from [`uptrakit_config_reload::SettingsVersionCache`].
+/// Use this for endpoints that read/write `global_settings` (not per-tenant
+/// `settings`), where the reconciler tracks changes under [`Scope::Global`].
+pub struct GlobalSettingsVersion;
+
+#[async_trait::async_trait]
+impl EtagSource for GlobalSettingsVersion {
+    async fn current_etag(_parts: &Parts, state: &AppState) -> Result<String, rootcause::Report> {
+        let version = state.settings_version_cache.get(Scope::Global).unwrap_or(0);
+        Ok(format!("W/\"global-settings-v{version}\""))
+    }
+}
