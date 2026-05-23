@@ -4,40 +4,25 @@
 //!
 //! This test drives the full MCP OAuth flow against a live controller running
 //! inside the `uptrakit-test:latest` Docker image:
+#![expect(
+    dead_code,
+    reason = "shared test helpers are used by other test binaries (system, cert_rotation, \
+              spiffe_identity) — dead_code is expected from this binary's perspective"
+)]
 //!
 //! ```text
 //! 1. Start controller container.
 //! 2. Register a test user and obtain an upk_ API token via /api/v1/auth/register.
-//! 3. Enable the MCP OAuth server via PUT /api/v1/settings/oauth
-//!    (sets oauth.mcp_enabled = true, sets canonical_host).
-//! 4. Register an OAuth client via POST /oauth/register (RFC 7591 DCR).
-//! 5. Drive GET /oauth/authorize with PKCE code_challenge.
-//!    - This step normally redirects to a consent UI.
-//!    - INFRASTRUCTURE GAP: no headless-browser / server-side auto-approve helper
-//!      exists yet; this step is a todo!() placeholder.
-//! 6. Simulate consent approval via POST /oauth/consent/{request_id}/approve
-//!    using the admin session cookie.
-//!    - INFRASTRUCTURE GAP: ApiClient does not yet expose cookie-jar support
-//!      needed to reuse the login session across redirects.
-//! 7. Exchange the authorization code for an access token via POST /oauth/token.
-//! 8. Call the MCP `get_current_user` tool at POST /mcp with
+//! 3. Enable the MCP OAuth server via PUT /api/v1/global-settings/oauth
+//!    (sets canonical_host → auto-enables mcp_enabled; sets dcr_enabled = true).
+//! 4. Force reexec so OAuth boots live; wait for new generation via GET /healthz.
+//! 5. Register an OAuth client via POST /oauth/register (RFC 7591 DCR).
+//! 6. Drive GET /oauth/authorize with PKCE code_challenge.
+//! 7. Bypass consent UI via POST /oauth/test/auto-approve/{request_id}.
+//! 8. Exchange the authorization code for an access token via POST /oauth/token.
+//! 9. Call the MCP `get_current_user` tool at POST /mcp with
 //!    `Authorization: Bearer <access_token>`.
-//! 9. Assert: HTTP 200, tool result contains `auth_method = "OAuth"`.
-//!
-//! Steps 5–6 require either:
-//! (a) A server-side test-only "auto-approve" endpoint (bypass consent for
-//!     test clients), or
-//! (b) A cookie-jar-aware HTTP client that can follow the redirect chain,
-//!     submit the consent form, and capture the redirect back.
-//!
-//! Until one of those is implemented, steps 5–6 carry `todo!()` markers.
-//! The rest of the test skeleton compiles and documents the full intended flow.
-
-#![expect(
-    dead_code,
-    reason = "infrastructure gaps documented in module-level doc; \
-              shared test helpers include members not yet exercised by this stub test"
-)]
+//! ```
 
 use std::time::Duration;
 
@@ -69,18 +54,12 @@ fn generate_pkce_pair() -> (String, String) {
 // ---------------------------------------------------------------------------
 
 /// Full OAuth 2.1 authorization-code + PKCE round-trip followed by an
-/// authenticated MCP `get_current_user` tool call verified to have used
-/// the `OAuth` auth method.
-///
-/// Steps 5–6 (consent UI redirect + form submission) require browser-automation
-/// or a server-side test-bypass hook that does not yet exist. Those steps are
-/// marked with `todo!()` — see module-level doc for the full gap analysis.
+/// authenticated MCP `get_current_user` tool call.
 ///
 /// **Requires:** `uptrakit-test:latest` Docker image.
-/// **Run:** `cargo test -p uptrakit-integration-tests -- --ignored`
+/// **Run:** `cargo test -p uptrakit-integration-tests -- oauth_end_to_end_mcp_rs_round_trip --nocapture`
 #[tokio::test]
 #[ignore = "System integration test (requires uptrakit-test:latest Docker image). \
-            Steps 5-6 also require consent-bypass infrastructure not yet implemented. \
             Run: cargo test -p uptrakit-integration-tests -- --ignored"]
 async fn oauth_end_to_end_mcp_rs_round_trip() {
     // -----------------------------------------------------------------------
@@ -89,7 +68,6 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
     let network = test_network_name();
     let controller = ControllerContainer::start(&network).await;
     let port = controller.host_port();
-    let _base_url = format!("https://127.0.0.1:{port}");
 
     // -----------------------------------------------------------------------
     // Step 2 — Register a test user; obtain an upk_ API token.
@@ -100,153 +78,169 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .register_and_login_with_token(controller.registration_token())
         .await;
 
-    // A raw reqwest client will be needed for OAuth endpoints once Step 3 is
-    // implemented (see the step 3 gap comment below). It will be built as:
-    //
-    //   let http = Client::builder()
-    //       .danger_accept_invalid_certs(true)
-    //       .connect_timeout(Duration::from_secs(10))
-    //       .timeout(Duration::from_secs(60))
-    //       .redirect(reqwest::redirect::Policy::none())
-    //       .build()
-    //       .expect("build reqwest client");
+    let http = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("build reqwest client");
 
     // -----------------------------------------------------------------------
-    // Step 3 — Enable the MCP OAuth server.
-    //
-    // INFRASTRUCTURE GAP: `UptrakitClient` and `ApiClient` do not yet expose an
-    // `update_oauth_settings` method. The raw HTTP call below documents the
-    // intended wire format; the actual settings PUT path and request body must
-    // match the server's `PUT /api/v1/settings/oauth` handler once it is
-    // implemented (see the oauth.boot module for the relevant setting keys:
-    // `oauth.mcp_enabled` and `oauth.canonical_host`).
-    //
-    //   PUT /api/v1/settings/oauth
-    //   Body: { "mcp_enabled": true, "canonical_host": "127.0.0.1:<port>" }
-    //
+    // Step 3 — Enable the MCP OAuth server via canonical_host auto-enable.
     // -----------------------------------------------------------------------
+    api_client
+        .update_oauth_settings(&format!("127.0.0.1:{port}"))
+        .await;
 
     // -----------------------------------------------------------------------
-    // Step 4 — Register an OAuth client via DCR (POST /oauth/register).
-    //
-    // INFRASTRUCTURE GAP: Step 3 must succeed first (OAuth must be enabled).
-    // Until Step 3 is implemented the DCR call will return 404.
-    //
-    //   let resp = _http
-    //       .post(format!("{_base_url}/oauth/register"))
-    //       .json(&serde_json::json!({
-    //           "client_name": "e2e-test-client",
-    //           "redirect_uris": ["https://localhost/callback"],
-    //           "grant_types": ["authorization_code"],
-    //           "response_types": ["code"],
-    //           "token_endpoint_auth_method": "none",
-    //           "scope": "mcp:read"
-    //       }))
-    //       .send()
-    //       .await
-    //       .expect("POST /oauth/register");
-    //   assert_eq!(resp.status().as_u16(), 201, ...);
-    //   let _dcr_response: Value = resp.json().await.expect("parse DCR response body");
-    //
+    // Step 4 — Force reexec so OAuth boots live, then wait for new generation.
     // -----------------------------------------------------------------------
+    let current_gen: u64 = {
+        let healthz_resp = http
+            .get(format!("https://127.0.0.1:{port}/healthz"))
+            .send()
+            .await
+            .expect("GET /healthz");
+        healthz_resp
+            .headers()
+            .get("x-reexec-generation")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    };
+    api_client.force_reexec().await;
+    api_client
+        .wait_for_generation(current_gen + 1, Duration::from_secs(30))
+        .await;
 
     // -----------------------------------------------------------------------
-    // Step 5 — GET /oauth/authorize with PKCE.
-    //
-    // INFRASTRUCTURE GAP: this endpoint redirects to /login (unauthenticated)
-    // and then to /oauth/consent/<id>. Automating the full redirect chain
-    // requires either:
-    //   (a) A server-side test-bypass endpoint (e.g. POST /oauth/test/auto-approve),
-    //   (b) A cookie-jar-aware HTTP client that can follow the login + consent
-    //       redirect chain and extract the `code` from the final redirect URI.
-    // Neither is available yet.
+    // Step 5 — Register an OAuth client via Dynamic Client Registration.
     // -----------------------------------------------------------------------
-    let (_code_verifier, _code_challenge) = generate_pkce_pair();
+    let dcr_resp = http
+        .post(format!("https://127.0.0.1:{port}/oauth/register"))
+        .json(&serde_json::json!({
+            "client_name": "e2e-test-client",
+            "redirect_uris": ["https://localhost/callback"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "scope": "mcp:read"
+        }))
+        .send()
+        .await
+        .expect("POST /oauth/register");
+    assert_eq!(
+        dcr_resp.status().as_u16(),
+        201,
+        "DCR must return 201, got: {}",
+        dcr_resp.status()
+    );
+    let dcr_body: serde_json::Value = dcr_resp.json().await.expect("parse DCR response");
+    let client_id = dcr_body["client_id"]
+        .as_str()
+        .expect("client_id in DCR response")
+        .to_string();
 
-    // Steps 5–9 require infrastructure that has not landed yet (consent-bypass
-    // endpoint or cookie-jar HTTP helper — see module-level doc). Until it
-    // lands, this test smoke-checks Steps 1–2 only: container boots, user
-    // registers, API token is issued. That is genuinely useful coverage for
-    // the controller's startup + auth-register path, so we exit cleanly
-    // rather than panicking and red-lighting the integration-test gate.
-    eprintln!(
-        "oauth_end_to_end_mcp_rs_round_trip: Steps 5–9 skipped — \
-         awaiting consent-bypass infrastructure (see module docs)."
+    // -----------------------------------------------------------------------
+    // Step 6 — Drive GET /oauth/authorize with PKCE.
+    // -----------------------------------------------------------------------
+    let (code_verifier, code_challenge) = generate_pkce_pair();
+
+    let api_token = api_client
+        .api_token
+        .as_deref()
+        .expect("api_token populated after register_and_login_with_token");
+    let auth_resp = http
+        .get(format!("https://127.0.0.1:{port}/oauth/authorize"))
+        .header("Authorization", format!("Bearer {api_token}"))
+        .query(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", "https://localhost/callback"),
+            ("scope", "mcp:read"),
+            ("state", "test-state-e2e"),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("resource", &format!("https://127.0.0.1:{port}/mcp")),
+        ])
+        .send()
+        .await
+        .expect("GET /oauth/authorize");
+
+    let location = auth_resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .expect("authorize must 302 to /oauth/consent/<id>")
+        .to_string();
+    assert!(
+        location.starts_with("/oauth/consent/"),
+        "expected /oauth/consent/<id>, got: {location}"
+    );
+    assert!(
+        !location.contains("code="),
+        "consent must not be pre-granted — revoke existing grants or use a fresh client"
     );
 
-    // Steps 6–9 are unreachable until Step 5 is implemented; they are
-    // documented here for reference.
-    //
+    let request_id = location.trim_start_matches("/oauth/consent/").to_string();
+
     // -----------------------------------------------------------------------
-    // Step 6 — Approve consent via POST /oauth/consent/{request_id}/approve.
-    //
-    //   let approve_resp = http
-    //       .post(format!("{base_url}/oauth/consent/{request_id}/approve"))
-    //       .header("Authorization", format!("Bearer {api_token}"))
-    //       .send()
-    //       .await
-    //       .expect("POST /oauth/consent/…/approve");
-    //   let redirect_location = approve_resp
-    //       .headers()
-    //       .get("location")
-    //       .expect("consent approve must return a redirect");
-    //   let code = extract_code_from_redirect(redirect_location.to_str().unwrap());
-    //
+    // Step 7 — Bypass consent UI via test-utils endpoint.
     // -----------------------------------------------------------------------
-    // Step 7 — Exchange the authorization code for an access token.
-    //
-    //   let token_resp = http
-    //       .post(format!("{base_url}/oauth/token"))
-    //       .form(&[
-    //           ("grant_type", "authorization_code"),
-    //           ("code", &code),
-    //           ("redirect_uri", "https://localhost/callback"),
-    //           ("client_id", &client_id),
-    //           ("code_verifier", &code_verifier),
-    //           ("resource", &format!("{base_url}/mcp")),
-    //       ])
-    //       .send()
-    //       .await
-    //       .expect("POST /oauth/token");
-    //   assert_eq!(token_resp.status().as_u16(), 200);
-    //   let token_body: Value = token_resp.json().await.expect("parse token response");
-    //   let access_token = token_body["access_token"]
-    //       .as_str()
-    //       .expect("access_token in response")
-    //       .to_string();
-    //
+    let code = api_client.auto_approve_consent(&request_id).await;
+
     // -----------------------------------------------------------------------
-    // Step 8 — Call MCP `get_current_user` with the OAuth access token.
-    //
-    //   let mcp_resp = http
-    //       .post(format!("{base_url}/mcp"))
-    //       .header("Authorization", format!("Bearer {access_token}"))
-    //       .header("Content-Type", "application/json")
-    //       .json(&serde_json::json!({
-    //           "jsonrpc": "2.0",
-    //           "id": 1,
-    //           "method": "tools/call",
-    //           "params": {
-    //               "name": "get_current_user",
-    //               "arguments": {}
-    //           }
-    //       }))
-    //       .send()
-    //       .await
-    //       .expect("POST /mcp (get_current_user)");
-    //   assert_eq!(mcp_resp.status().as_u16(), 200,
-    //       "MCP tool call must succeed with OAuth token");
-    //
+    // Step 8 — Exchange the authorization code for an access token.
     // -----------------------------------------------------------------------
-    // Step 9 — Verify McpAuthMethod::OAuth evidence in the response.
-    //
-    //   let mcp_body: Value = mcp_resp.json().await.expect("parse MCP response");
-    //   // The get_current_user tool currently does not expose auth_method in its
-    //   // JSON output; asserting HTTP 200 is the observable success signal for
-    //   // the RS layer. A future `auth_method` field (spec §19) would allow:
-    //   //
-    //   //   let result = &mcp_body["result"]["content"][0]["text"];
-    //   //   let user_info: Value = serde_json::from_str(result.as_str().unwrap()).unwrap();
-    //   //   assert_eq!(user_info["auth_method"], "OAuth",
-    //   //       "MCP RS must record OAuth auth method");
+    let token_resp = http
+        .post(format!("https://127.0.0.1:{port}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", "https://localhost/callback"),
+            ("client_id", client_id.as_str()),
+            ("code_verifier", code_verifier.as_str()),
+            ("resource", &format!("https://127.0.0.1:{port}/mcp")),
+        ])
+        .send()
+        .await
+        .expect("POST /oauth/token");
+    assert_eq!(
+        token_resp.status().as_u16(),
+        200,
+        "token exchange must return 200, got: {}",
+        token_resp.status()
+    );
+    let token_body: serde_json::Value = token_resp.json().await.expect("parse token response");
+    let access_token = token_body["access_token"]
+        .as_str()
+        .expect("access_token in token response")
+        .to_string();
+
+    // -----------------------------------------------------------------------
+    // Step 9 — Call MCP with the OAuth access token; assert HTTP 200.
+    // -----------------------------------------------------------------------
+    let mcp_resp = http
+        .post(format!("https://127.0.0.1:{port}/mcp"))
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_current_user",
+                "arguments": {}
+            }
+        }))
+        .send()
+        .await
+        .expect("POST /mcp with OAuth bearer");
+    assert_eq!(
+        mcp_resp.status().as_u16(),
+        200,
+        "MCP tool call with OAuth token must return 200, got: {}",
+        mcp_resp.status()
+    );
 }
