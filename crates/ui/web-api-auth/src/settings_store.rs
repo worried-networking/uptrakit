@@ -509,6 +509,71 @@ pub async fn bump_revocation_version(db: &impl ConnectionTrait, tenant_id: Uuid)
 
 // ── JWT key management ───────────────────────────────────────────────────────
 
+const OAUTH_JWT_SECRET_AAD: &str = "uptrakit:settings:oauth_jwt_signing_secret";
+const OAUTH_JWT_SECRET_LENGTH: usize = 32;
+
+/// Load or generate the MCP OAuth JWT signing secret from the database.
+///
+/// The secret is a 32-byte random value stored encrypted at rest. Accepts any
+/// [`ConnectionTrait`] so the caller can pass either a bare connection or an
+/// already-open `BEGIN IMMEDIATE` transaction — enabling atomic
+/// secret-generation + peer-registration in a single transaction.
+///
+/// Legacy plaintext entries (e.g., hex-encoded from a pre-encrypted write) are
+/// transparently re-encrypted on read.
+pub async fn load_or_generate_oauth_signing_secret(db: &impl ConnectionTrait) -> Result<Vec<u8>> {
+    let b64_engine = base64::engine::general_purpose::STANDARD;
+
+    if let Some(value) = load_global_setting(db, SettingKey::OauthJwtSigningSecret).await?
+        && let Some(stored) = value.as_str()
+        && !stored.is_empty()
+    {
+        let b64 = if is_encrypted(stored) {
+            decrypt_str(stored, OAUTH_JWT_SECRET_AAD).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to decrypt OAuth JWT signing secret: {e}"
+                )))
+            })?
+        } else {
+            // Legacy plaintext — re-encrypt in place.
+            tracing::info!("migrating OAuth JWT signing secret to encrypted storage");
+            let encrypted = encrypt_str(stored, OAUTH_JWT_SECRET_AAD).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to encrypt legacy OAuth JWT signing secret: {e}"
+                )))
+            })?;
+            upsert_global_setting(
+                db,
+                SettingKey::OauthJwtSigningSecret,
+                serde_json::json!(encrypted),
+            )
+            .await?;
+            stored.to_string()
+        };
+        return b64_engine.decode(&b64).map_err(|e| {
+            report!(AuthError::Internal(format!(
+                "failed to decode OAuth JWT signing secret: {e}"
+            )))
+        });
+    }
+
+    let mut bytes = vec![0u8; OAUTH_JWT_SECRET_LENGTH];
+    rand::Rng::fill(&mut rand::rng(), &mut bytes[..]);
+    let b64 = b64_engine.encode(&bytes);
+    let encrypted = encrypt_str(&b64, OAUTH_JWT_SECRET_AAD).map_err(|e| {
+        report!(AuthError::Internal(format!(
+            "failed to encrypt new OAuth JWT signing secret: {e}"
+        )))
+    })?;
+    upsert_global_setting(
+        db,
+        SettingKey::OauthJwtSigningSecret,
+        serde_json::json!(encrypted),
+    )
+    .await?;
+    Ok(bytes)
+}
+
 /// Load or generate the JWT signing key from the database.
 ///
 /// The JWT signing key is a global setting stored in the `global_settings` table.

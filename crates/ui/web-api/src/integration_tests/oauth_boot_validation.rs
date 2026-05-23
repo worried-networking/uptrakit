@@ -91,6 +91,7 @@ async fn multi_controller_guard_rejects_different_fingerprint() {
 /// `boot_oauth_state` must return a live (enabled) `OAuthState`.
 #[tokio::test]
 async fn boot_oauth_state_auto_enables_when_canonical_host_set() {
+    uptrakit_crypto::enable_plaintext_mode();
     let db = setup_migrated_db().await;
     let _ = insert_default_tenant(&db).await;
     upsert_global_setting_raw(
@@ -112,6 +113,7 @@ async fn boot_oauth_state_auto_enables_when_canonical_host_set() {
 /// `boot_oauth_state` returns a disabled `OAuthState`.
 #[tokio::test]
 async fn boot_oauth_state_disabled_when_no_host_and_no_explicit_flag() {
+    uptrakit_crypto::enable_plaintext_mode();
     let db = setup_migrated_db().await;
     let _ = insert_default_tenant(&db).await;
     let state = boot_oauth_state(&db)

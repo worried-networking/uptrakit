@@ -380,7 +380,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
     // Phase 7d: OAuth boot — wire OAuthState when mcp_enabled resolves to true.
     let oauth_state = boot_oauth_state(&db_conn)
         .await
-        .map_err(|e| report!(AppError::Config(format!("OAuth boot failed: {e}"))))?;
+        .context(AppError::Config("OAuth boot failed".into()))?;
 
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(runtime, &reconciled)?;

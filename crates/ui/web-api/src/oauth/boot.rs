@@ -25,7 +25,6 @@ const STALE_TTL_HOURS: i64 = 24;
 /// `#[non_exhaustive]`: new fields may be added as the OAuth implementation
 /// grows. Callers must construct via [`OAuthBootSettings::new`].
 #[non_exhaustive]
-#[derive(Debug)]
 pub struct OAuthBootSettings {
     /// The canonical host for this controller (e.g. `controller.example.com`).
     /// `None` means the setting is absent; boot will fail with
@@ -39,6 +38,20 @@ pub struct OAuthBootSettings {
     /// When `true`, a peer with the same fingerprint does not abort boot.
     /// Intended for intentional multi-controller active/active deployments.
     pub allow_multi_controller_unsafe: bool,
+}
+
+impl std::fmt::Debug for OAuthBootSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthBootSettings")
+            .field("canonical_host", &self.canonical_host)
+            .field("accepted_audience_hosts", &self.accepted_audience_hosts)
+            .field("jwt_signing_secret", &"[REDACTED]")
+            .field(
+                "allow_multi_controller_unsafe",
+                &self.allow_multi_controller_unsafe,
+            )
+            .finish()
+    }
 }
 
 impl OAuthBootSettings {
@@ -217,8 +230,6 @@ pub fn spawn_heartbeat(db: DatabaseConnection, instance_id: Uuid) {
 ///
 /// Returns `OAuthState::disabled()` fast-path when resolved-enabled is false.
 pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthState> {
-    use rand::Rng;
-
     // ── Step 1: Read resolve inputs (no transaction needed — reads only) ──
     let mcp_raw: Option<bool> =
         crate::settings_store::load_global_setting_raw(db, "oauth.mcp_enabled")
@@ -282,32 +293,14 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
         .await
         .context_to()?;
 
-    let signing_secret: Vec<u8> = {
-        let raw = crate::settings_store::load_global_setting_raw(&tx, "oauth.jwt_signing_secret")
-            .await
-            .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
-        let existing = raw.and_then(|v| v.as_str().and_then(|s| hex::decode(s).ok()));
-        match existing {
-            Some(bytes) => bytes,
-            None => {
-                let mut bytes = [0u8; 32];
-                rand::rng().fill(&mut bytes);
-                crate::settings_store::upsert_global_setting_raw(
-                    &tx,
-                    "oauth.jwt_signing_secret",
-                    serde_json::json!(hex::encode(bytes)),
-                )
-                .await
-                .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
-                bytes.to_vec()
-            }
-        }
-    };
+    let signing_secret = crate::settings_store::load_or_generate_oauth_signing_secret(&tx)
+        .await
+        .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
 
     let boot_settings = OAuthBootSettings::new(
         canonical_host_str,
         accepted_audience_hosts,
-        signing_secret.clone(),
+        signing_secret,
         allow_multi,
     );
     let instance_id = validate_and_register(&tx, &boot_settings, OffsetDateTime::now_utc()).await?;
@@ -325,9 +318,11 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
     Ok(super::OAuthState {
         enabled: true,
         canonical,
-        signer: Arc::new(super::jwt::McpOAuthJwtSigner::new(&signing_secret)),
+        signer: Arc::new(super::jwt::McpOAuthJwtSigner::new(
+            &boot_settings.jwt_signing_secret,
+        )),
         verifier: Arc::new(super::jwt::McpOAuthJwtVerifier::new(
-            &signing_secret,
+            &boot_settings.jwt_signing_secret,
             issuer,
             vec![],
         )),
