@@ -63,7 +63,8 @@ pub async fn resolve_proxy_headers(
     }
 
     // --- Part B: External base URL ---
-    let base_url = resolve_external_base_url(req.headers(), from_trusted_proxy);
+    let base_url = resolve_external_base_url(req.headers(), from_trusted_proxy)
+        .or_else(|| base_url_from_h2_uri(req.uri(), from_trusted_proxy));
     if let Some(url) = base_url {
         req.extensions_mut().insert(ExternalBaseUrl(url));
     }
@@ -357,6 +358,27 @@ fn resolve_external_base_url(headers: &HeaderMap, from_trusted_proxy: bool) -> O
         .map(|h| format!("https://{}", h.trim_end_matches('/')))
 }
 
+/// Extract base URL from URI authority for HTTP/2 direct connections.
+///
+/// In HTTP/2, browsers send `:authority` instead of `Host`. hyper 1.x (h2 0.4+)
+/// populates `req.uri().authority()` from `:authority` and does NOT synthesize a
+/// `Host` header. Only used for direct (non-proxied) connections: for trusted proxies
+/// the URI authority is the backend's internal address, not the external-facing URL
+/// — those should use X-Forwarded-Host or Origin instead (steps 1–3).
+///
+/// `scheme_str()` returns `Some("https")` for TLS-negotiated HTTP/2. The
+/// `unwrap_or("https")` fallback is safe here: OIDC is TLS-only by design, so
+/// a missing scheme means the TLS layer is absent — defaulting to https is correct.
+fn base_url_from_h2_uri(uri: &http::Uri, from_trusted_proxy: bool) -> Option<String> {
+    if from_trusted_proxy {
+        return None;
+    }
+    // OIDC requires HTTPS; TLS connections always carry :scheme https in HTTP/2.
+    let scheme = uri.scheme_str().unwrap_or("https");
+    uri.authority()
+        .map(|a| format!("{}://{}", scheme, a.as_str().trim_end_matches('/')))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +522,27 @@ mod tests {
     fn external_base_url_no_headers() {
         let headers = HeaderMap::new();
         let url = resolve_external_base_url(&headers, false);
+        assert_eq!(url, None);
+    }
+
+    #[test]
+    fn external_base_url_h2_uri_direct_connection() {
+        // HTTP/2: no Host header, authority exposed via req.uri() from :authority pseudo-header.
+        let uri = "https://app.example.com:8443/api/v1/auth/oidc/authorize"
+            .parse::<http::Uri>()
+            .unwrap();
+        let url = base_url_from_h2_uri(&uri, false);
+        assert_eq!(url, Some("https://app.example.com:8443".to_string()));
+    }
+
+    #[test]
+    fn external_base_url_h2_uri_ignored_for_trusted_proxy() {
+        // For trusted proxies the URI authority is the backend's internal address;
+        // X-Forwarded-Host/Origin should be used instead (handled by steps 1–3).
+        let uri = "https://localhost:3000/some/path"
+            .parse::<http::Uri>()
+            .unwrap();
+        let url = base_url_from_h2_uri(&uri, true);
         assert_eq!(url, None);
     }
 }
