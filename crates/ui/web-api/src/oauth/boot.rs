@@ -221,6 +221,31 @@ pub fn spawn_heartbeat(db: DatabaseConnection, instance_id: Uuid) {
     });
 }
 
+/// Delete this controller's instance row on graceful shutdown or before reexec.
+///
+/// Allows an immediate restart without hitting the 90-second peer-freshness window.
+pub async fn deregister_oauth_instance(db: &impl ConnectionTrait, instance_id: Uuid) {
+    debug_assert!(
+        !instance_id.is_nil(),
+        "deregister called with nil instance_id"
+    );
+    match oauth_controller_instance::Entity::delete_by_id(instance_id)
+        .exec(db)
+        .await
+    {
+        Ok(res) => tracing::debug!(
+            %instance_id,
+            rows_affected = res.rows_affected,
+            "oauth controller instance deregistered"
+        ),
+        Err(e) => tracing::warn!(
+            error = %e,
+            %instance_id,
+            "oauth controller instance deregister failed"
+        ),
+    }
+}
+
 /// Boot-time OAuth state initialisation.
 ///
 /// Reads the DB to resolve whether MCP OAuth should be enabled, then (when
@@ -499,5 +524,24 @@ mod tests {
             .await
             .expect("db query should succeed");
         assert!(count.is_none(), "stale row must be pruned");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Test 7 — deregister deletes the instance row
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn deregister_removes_instance_row() {
+        let db = setup_migrated_db().await;
+        let _ = insert_default_tenant(&db).await;
+        let id = validate_and_register(&db, &minimal_settings(), now())
+            .await
+            .expect("boot should succeed");
+        deregister_oauth_instance(&db, id).await;
+        let row = oauth_controller_instance::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .expect("db query should succeed");
+        assert!(row.is_none(), "row must be deleted after deregister");
     }
 }
