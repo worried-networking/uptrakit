@@ -128,6 +128,37 @@ grace window.
 Never emit audit events with `target: "security_audit"`. Use the structured `AuditEntry` builder with
 the typed `AuditActionType` constant.
 
+## OAuth boot sequence
+
+`boot_oauth_state` in `crates/ui/web-api/src/oauth/boot.rs` is called during Phase 7d of controller
+startup — after `seed_oauth_defaults` and before `validate_configuration` — in
+`crates/core/controller-runtime/src/lib.rs`.
+
+`resolve_mcp_enabled(explicit: Option<bool>, canonical_host: Option<&str>) -> bool` determines
+whether the OAuth surface is active. The truth table is:
+
+| `explicit` | `canonical_host` | Result  | Reason                                 |
+| ---------- | ---------------- | ------- | -------------------------------------- |
+| absent     | absent           | `false` | Nothing configured                     |
+| absent     | set              | `true`  | Auto-enable                            |
+| `false`    | set              | `false` | Operator override wins                 |
+| `true`     | absent           | `true`  | Explicit; `CanonicalHostMissing` fires |
+| `true`     | set              | `true`  | Normal enabled path                    |
+
+Boot runs a single `BEGIN IMMEDIATE` transaction that reads or generates `oauth.jwt_signing_secret`
+(32 random bytes, hex-encoded) and then calls `validate_and_register` in the same transaction. Using
+`BEGIN IMMEDIATE` prevents split-brain on rapid restart loops: a second process cannot observe a
+partially-written secret between the read and the write.
+
+### Integration test pattern
+
+```rust
+api_client.update_oauth_settings("127.0.0.1:<port>").await;
+let current_gen = /* read X-Reexec-Generation from GET /healthz */;
+api_client.force_reexec().await;
+api_client.wait_for_generation(current_gen + 1, Duration::from_secs(30)).await;
+```
+
 ## Test Patterns
 
 ### Clock injection

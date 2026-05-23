@@ -17,7 +17,8 @@ Complete these steps in order before exposing the MCP OAuth surface to users.
    trailing slash. Examples: `controller.example.com`, `controller.example.com:9443`. This value is
    used to derive the AS issuer (`https://<canonical_host>`) and the MCP resource URL
    (`https://<canonical_host>/mcp`). If this setting is unset when `oauth.mcp_enabled = true`, the
-   controller refuses to start.
+   controller refuses to start. On a fresh installation, setting `oauth.canonical_host` is sufficient
+   to auto-enable OAuth — no separate `oauth.mcp_enabled = true` step is required.
 
 2. **Set `oauth.accepted_audience_hosts`** if the controller is behind a reverse proxy or split DNS,
    or if clients reach it under a different hostname than the primary. The RS validates that the token
@@ -39,9 +40,12 @@ Complete these steps in order before exposing the MCP OAuth surface to users.
    invalidates all issued tokens — all MCP clients must re-authenticate after each restart. For
    production deployments, always set a stable secret.
 
-4. **Flip `oauth.mcp_enabled = true`.** This enables all OAuth surface: AS routes, RS OAuth-token
-   path, PRM and AS-metadata well-known endpoints, Operator OAuth Clients UI, and end-user Authorized
-   Apps view.
+4. **(Optional for new installs) Flip `oauth.mcp_enabled = true`.** On a fresh installation,
+   `oauth.canonical_host` alone auto-enables OAuth — no explicit flag is required. Set this to `true`
+   only if you are upgrading an existing deployment that already has `oauth.mcp_enabled = false` in the
+   database, or if you want an explicit on/off toggle that is not affected by the presence of
+   `oauth.canonical_host`. To explicitly disable OAuth on a deployment with `canonical_host` set, write
+   `oauth.mcp_enabled = false`.
 
 5. **(Optional) Enable DCR and/or CIMD** after reading `docs/security/oauth-mcp.md`. Both default to
    off because they expand the phishing surface of the consent screen. Enable them only if your MCP
