@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getAuthMethods, extractErrorMessage, loginRaw } from '$lib/api';
+	import { getAuthMethods, extractErrorMessage, loginRaw, authenticatedFetch } from '$lib/api';
 	import {
 		getUser,
 		handleOidcCallback,
@@ -51,7 +51,41 @@
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
 			hasRedirected = true;
-			goto(safeRedirect());
+			if (page.url.searchParams.get('_auth_context') === 'oauth') {
+				// goto() for /oauth/authorize falls back to a hard browser reload (SvelteKit
+				// throws "Not found"), which carries no Authorization header → server redirects
+				// back to /login → infinite loop → Chrome 20-redirect limit → file download.
+				// Use authenticatedFetch so the Bearer token is sent. The server may redirect
+				// to an internal consent page (/oauth/consent/…) or directly to the external
+				// redirect_uri (returning users with existing consent). Handle both cases.
+				const controller = new AbortController();
+				authenticatedFetch(safeRedirect(), { signal: controller.signal })
+					.then((res) => {
+						// When fetch follows the redirect, res.url is the final URL.
+						// When the 302 is not followed (some test environments), fall back
+						// to the Location header.
+						const loc = res.headers.get('location');
+						const href = res.ok || res.redirected ? res.url : loc ? new URL(loc, window.location.href).href : '';
+						if (!href) {
+							bannerError = 'OAuth authorization failed';
+							return;
+						}
+						const dest = new URL(href);
+						if (dest.origin === window.location.origin) {
+							goto(dest.pathname + dest.search + dest.hash);
+						} else {
+							// External redirect_uri (e.g. consent was previously granted).
+							window.location.href = href;
+						}
+					})
+					.catch((err: unknown) => {
+						if (err instanceof DOMException && err.name === 'AbortError') return;
+						bannerError = 'OAuth authorization failed';
+					});
+				return () => controller.abort();
+			} else {
+				goto(safeRedirect());
+			}
 		}
 	});
 
