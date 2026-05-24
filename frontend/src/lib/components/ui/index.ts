@@ -16,6 +16,7 @@ export { default as ContextMenuItem } from './ContextMenuItem.svelte';
 export { default as TableFooterBar } from './TableFooterBar.svelte';
 export { default as ModalShell } from '../Modal.svelte';
 export { default as ContextMenuShell } from '../ContextMenu.svelte';
+export { default as Tooltip } from './Tooltip.svelte';
 
 export type { TabStripItem } from './TabStrip.svelte';
 export type { CalloutTone } from './Callout.svelte';
