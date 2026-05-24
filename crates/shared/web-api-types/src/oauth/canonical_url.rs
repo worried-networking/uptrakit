@@ -200,6 +200,17 @@ impl CanonicalUrlConfig {
     pub fn accepts_audience(&self, aud: &str) -> bool {
         self.accepted_resources.iter().any(|r| r.as_str() == aud)
     }
+
+    /// Returns the accepted audience URL strings (primary resource + all aliases).
+    ///
+    /// Pass directly to [`McpOAuthJwtVerifier::new`] as `accepted_audiences`.
+    #[must_use]
+    pub fn accepted_resources_strings(&self) -> Vec<String> {
+        self.accepted_resources
+            .iter()
+            .map(|r| r.as_str().to_owned())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +291,28 @@ mod tests {
     fn config_missing_host_errors() {
         let err = CanonicalUrlConfig::new(String::new(), vec![]).unwrap_err();
         assert!(matches!(err, CanonicalUrlConfigError::Missing));
+    }
+
+    #[test]
+    fn accepted_resources_strings_includes_primary_and_aliases() {
+        let cfg = CanonicalUrlConfig::new(
+            "controller.example.com".into(),
+            vec!["legacy.example.com".into()],
+        )
+        .unwrap();
+        let strings = cfg.accepted_resources_strings();
+        assert!(strings.contains(&"https://controller.example.com/mcp".to_owned()));
+        assert!(strings.contains(&"https://legacy.example.com/mcp".to_owned()));
+        assert_eq!(strings.len(), 2);
+    }
+
+    #[test]
+    fn accepted_resources_strings_no_aliases() {
+        let cfg = CanonicalUrlConfig::new("controller.example.com".into(), vec![]).unwrap();
+        let strings = cfg.accepted_resources_strings();
+        assert_eq!(
+            strings,
+            vec!["https://controller.example.com/mcp".to_owned()]
+        );
     }
 }
