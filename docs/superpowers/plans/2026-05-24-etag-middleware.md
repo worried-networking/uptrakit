@@ -81,24 +81,8 @@ call site in `if_match.rs` until Task 2 fixes them.
 
   Expected: errors about missing `parts` arg and missing `refresh_etag`. That is correct; Task 2 fixes them.
 
-- [ ] **Step 3: Commit**
-
-  ```bash
-  git add crates/ui/web-api/src/extractors/etag_source.rs
-  git commit -m "$(cat <<'EOF'
-  refactor(web-api): drop &Parts from EtagSource and add refresh_etag stub
-
-  Removes the unused axum Parts argument from EtagSource::current_etag —
-  no implementation references it and it is incompatible with middleware
-  context. Adds refresh_etag for post-write DB re-reads; impls follow in
-  the next commit.
-
-  Compilation is intentionally broken until if_match.rs is updated.
-
-  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-  EOF
-  )"
-  ```
+  > **Note:** Do NOT commit yet. Task 1 and Task 2 are committed together in Task 2 Step 7 to
+  > avoid leaving a broken-compilation state in history.
 
 ---
 
@@ -123,7 +107,6 @@ Fix the call site and add `refresh_etag` implementations. After this task the cr
   use axum::http::StatusCode;
   use axum::http::header::IF_MATCH;
   use axum::http::request::Parts;
-  use rootcause::report;
   use uptrakit_config_reload::config::Scope;
   use uptrakit_web_api_types::error::ErrorResponse;
 
@@ -222,18 +205,21 @@ Fix the call site and add `refresh_etag` implementations. After this task the cr
 
   Expected: all pass (unchanged behaviour; `IfMatch<S>` extractor still works).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Commit both Task 1 and Task 2 together**
 
   ```bash
-  git add crates/ui/web-api/src/extractors/if_match.rs
+  git add crates/ui/web-api/src/extractors/etag_source.rs \
+          crates/ui/web-api/src/extractors/if_match.rs
   git commit -m "$(cat <<'EOF'
-  refactor(web-api): update EtagSource impls — drop async_trait, add refresh_etag
+  refactor(web-api): drop &Parts from EtagSource and add refresh_etag impls
 
-  Removes #[async_trait] from SettingsVersion and GlobalSettingsVersion
-  (edition 2024 native async fn in traits). Removes the &Parts argument
-  from current_etag call site. Adds refresh_etag to both impls: reads the
-  committed version from the DB, syncs the in-memory cache, and returns
-  the new ETag string. Marks both with SINGLE-TENANT ASSUMPTION comments.
+  Removes the unused axum Parts argument from EtagSource::current_etag —
+  no implementation references it and it is incompatible with middleware
+  context. Removes #[async_trait] from SettingsVersion and
+  GlobalSettingsVersion (edition 2024 native async fn in traits). Adds
+  refresh_etag to both impls: reads the committed version from the DB,
+  syncs the in-memory cache, and returns the new ETag string. Marks both
+  with SINGLE-TENANT ASSUMPTION comments.
 
   IfMatch<S> extractor and IfMatch::for_test() are kept — plugin_configs
   still depends on them.
@@ -282,7 +268,9 @@ Write the middleware now; wiring happens next.
   use axum::http::{Method, Request, StatusCode};
   use axum::middleware::Next;
   use axum::response::{IntoResponse, Response};
+  use axum::routing::Route;
   use axum::Json;
+  use tower::Layer;
   use uptrakit_web_api_types::error::ErrorResponse;
 
   use crate::app_state::AppState;
@@ -292,14 +280,7 @@ Write the middleware now; wiring happens next.
       s.trim_start_matches("W/").trim_matches('"')
   }
 
-  pub fn etag_layer<S>(
-      state: Arc<AppState>,
-  ) -> axum::middleware::FromFnLayer<
-      impl Fn(State<Arc<AppState>>, Request<Body>, Next) -> impl std::future::Future<Output = Response> + Send
-          + Clone,
-      Arc<AppState>,
-      (State<Arc<AppState>>, Request<Body>, Next),
-  >
+  pub fn etag_layer<S>(state: Arc<AppState>) -> impl Layer<Route> + Clone
   where
       S: EtagSource,
   {
@@ -397,11 +378,6 @@ Write the middleware now; wiring happens next.
       response
   }
   ```
-
-  > **Note on return type**: if the `FromFnLayer` signature causes type-inference issues at the
-  > use site, replace the explicit return type with `impl tower::Layer<axum::routing::Route> + Clone`
-  > (add `use tower::Layer; use axum::routing::Route;`). Both spellings compile; the opaque form is
-  > simpler if the concrete form requires additional imports.
 
 - [ ] **Step 3: Check compilation**
 
@@ -503,6 +479,20 @@ Move tenant settings routes into an ETag sub-router and strip the manual ETag co
   ```rust
   let auth_routes = auth_routes.merge(tenant_settings);
   ```
+
+  > **Ordering is critical.** The final structure must be:
+  >
+  > ```text
+  > auth_routes (all routes)
+  >   .merge(tenant_settings)   ← has route_layer(etag_layer::<SettingsVersion>)
+  >   .merge(global_settings)   ← has route_layer(etag_layer::<GlobalSettingsVersion>)
+  >   .route_layer(require_auth) ← outermost: applied last, runs first on inbound request
+  > ```
+  >
+  > Both merges happen **before** the final `.route_layer(require_auth)` call.
+  > Merging after `require_auth` would leave the ETag sub-routers unprotected.
+  > In axum, `route_layer` applied to a merged router wraps all routes in that router,
+  > including those brought in by prior merges.
 
   The `.route_layer(require_auth)` stays at the very end of the `auth_routes` chain (after all
   merges). This ensures require_auth still applies to everything including the ETag sub-router
@@ -616,6 +606,20 @@ Move tenant settings routes into an ETag sub-router and strip the manual ETag co
   use crate::extractors::{IfMatch, SettingsVersion};
   ```
 
+  Also **delete** any `#[tokio::test]` functions in `settings_access.rs` that either:
+  - call `IfMatch::for_test()` (will no longer compile), or
+  - assert on the `ETag` response header directly (ETag is now injected by the middleware,
+    not the handler; direct handler calls in unit tests bypass the middleware).
+
+  Search with:
+
+  ```shell
+  grep -n "IfMatch::for_test\|ETAG\|\"etag\"" crates/ui/web-api/src/routes/settings_access.rs
+
+  ```
+
+  Delete each enclosing `#[tokio::test]` block found. Coverage moves to integration tests in Task 6.
+
 - [ ] **Step 5: Clean `update_agent_certificate_settings` in settings_agent_certs.rs**
 
   Remove `_if_match: IfMatch<SettingsVersion>` parameter from the handler signature.
@@ -636,9 +640,9 @@ Move tenant settings routes into an ETag sub-router and strip the manual ETag co
 
   ```
 
-  Expected: no compilation errors. Some tests will now fail for `settings_access` GET (no ETag
-  returned without the middleware in place for unit tests — but integration tests via TestApp will
-  pass since they go through the router). Confirm existing integration tests pass.
+  Expected: clean compile. All remaining unit tests pass. Integration tests via TestApp pass
+  (they go through the full router including the ETag middleware). If any test fails due to an
+  ETag assertion on a direct handler call, it was missed in Step 4 — delete it now.
 
 - [ ] **Step 7: Commit**
 
@@ -726,18 +730,18 @@ wrong-scope handlers in the process.
   ));
   ```
 
-  And the `rotate_ca` route (currently at line ~606):
-
-  ```rust
-  .routes(routes!(crate::routes::settings_ca::rotate_ca))
-  ```
+  > **`rotate_ca` stays in `auth_routes`** (not moved to global sub-router) because it is
+  > unknown whether `rotate_ca` calls `bump_global_settings_version`. Including it in the
+  > ETag sub-router without a version bump would cause `refresh_etag` to return a stale
+  > ETag on success — semantically misleading. ETag support for `rotate_ca` is deferred
+  > until the version-bump is confirmed or added.
 
 - [ ] **Step 2: Add global settings sub-router**
 
   Before the `auth_routes` declaration, add:
 
   ```rust
-  let mut global_settings = OpenApiRouter::new()
+  let global_settings = OpenApiRouter::new()
       .routes(routes!(
           crate::routes::settings_global_combined::get_global_combined_settings
       ))
@@ -757,15 +761,14 @@ wrong-scope handlers in the process.
           crate::routes::settings_oauth::get_oauth_settings,
           crate::routes::settings_oauth::update_oauth_settings
       ))
-      .routes(routes!(crate::routes::settings_ca::rotate_ca));
+      ;
 
+  // Idiomatic rebind pattern — matches existing router.rs #[cfg] style (lines 819–823).
   #[cfg(feature = "nats")]
-  {
-      global_settings = global_settings.routes(routes!(
-          crate::routes::settings_nats::get_nats_settings,
-          crate::routes::settings_nats::update_nats_settings
-      ));
-  }
+  let global_settings = global_settings.routes(routes!(
+      crate::routes::settings_nats::get_nats_settings,
+      crate::routes::settings_nats::update_nats_settings
+  ));
 
   let global_settings =
       global_settings.route_layer(etag_layer::<GlobalSettingsVersion>(Arc::clone(&state)));
@@ -779,11 +782,37 @@ wrong-scope handlers in the process.
 
 ### Handler cleanup — settings_oauth.rs
 
-- [ ] **Step 3: Remove `_if_match` from `update_oauth_settings`**
+- [ ] **Step 3: Clean `get_oauth_settings` manual ETag construction**
+
+  The GET handler currently reads the cache and constructs an ETag manually. Once it's in the
+  `global_settings` sub-router, the middleware injects the ETag — leaving the manual code will
+  produce a duplicate `ETag` header. Remove:
+
+  ```rust
+  let version = state.settings_version_cache.get(Scope::Global).unwrap_or(0);
+  let etag = format!("W/\"global-settings-v{version}\"");
+  (
+      StatusCode::OK,
+      [(axum::http::header::ETAG, etag)],
+      Json(response),
+  )
+      .into_response()
+  ```
+
+  Replace the return with:
+
+  ```rust
+  (StatusCode::OK, Json(response)).into_response()
+  ```
+
+  Also remove the `Scope` import from this handler if it becomes unused after both ETag-related
+  uses (GET and PUT) are stripped.
+
+- [ ] **Step 5: Remove `_if_match` from `update_oauth_settings`**
 
   Remove `_if_match: IfMatch<GlobalSettingsVersion>` from the parameter list.
 
-- [ ] **Step 4: Remove early-return ETag construction in `update_oauth_settings`**
+- [ ] **Step 6: Remove early-return ETag construction in `update_oauth_settings`**
 
   In the "Nothing to update" early return block, remove:
 
@@ -807,7 +836,7 @@ wrong-scope handlers in the process.
   return (StatusCode::OK, Json(db_state.into_response(&state))).into_response();
   ```
 
-- [ ] **Step 5: Remove post-commit cache-sync and ETag from `update_oauth_settings`**
+- [ ] **Step 7: Remove post-commit cache-sync and ETag from `update_oauth_settings`**
 
   After `hook.flush_after_commit().await;`, remove the entire cache-sync block:
 
@@ -839,7 +868,7 @@ wrong-scope handlers in the process.
 
 ### Handler cleanup — wrong-scope handlers
 
-- [ ] **Step 6: Fix `settings_network.rs`**
+- [ ] **Step 8: Fix `settings_network.rs`**
 
   The handler currently has:
 
@@ -854,26 +883,26 @@ wrong-scope handlers in the process.
   **Delete** the two `#[tokio::test]` functions in this file that call `IfMatch::for_test()`
   (lines ~673 and ~731).
 
-- [ ] **Step 7: Fix `settings_zeroconf.rs`**
+- [ ] **Step 9: Fix `settings_zeroconf.rs`**
 
   Remove `_if_match: IfMatch<SettingsVersion>` from `update_zeroconf_settings`.
   Remove `use crate::extractors::{IfMatch, SettingsVersion};` import.
   **Delete** the one `#[tokio::test]` function that calls `IfMatch::for_test()` (line ~480).
 
-- [ ] **Step 8: Fix `settings_provider_github.rs`**
+- [ ] **Step 10: Fix `settings_provider_github.rs`**
 
   Remove `_if_match: IfMatch<SettingsVersion>` from `update_github_provider_settings`.
   Remove `use crate::extractors::{IfMatch, SettingsVersion};` import.
   (No `for_test()` unit test call sites to delete in this file.)
 
-- [ ] **Step 9: Fix `settings_nats.rs`**
+- [ ] **Step 11: Fix `settings_nats.rs`**
 
   Remove `_if_match: IfMatch<SettingsVersion>` from `update_nats_settings`.
   Remove `use crate::extractors::{IfMatch, SettingsVersion};` import.
   **Delete** all `#[tokio::test]` functions that call `IfMatch::for_test()` (the spec identifies
   ~7; search for `for_test()` in the file and delete each enclosing test function).
 
-- [ ] **Step 10: Check compilation and run tests**
+- [ ] **Step 12: Check compilation and run tests**
 
   ```shell
   cargo check --all-features
@@ -883,7 +912,7 @@ wrong-scope handlers in the process.
 
   Expected: clean compile, existing tests pass.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 13: Commit**
 
   ```bash
   git add crates/ui/web-api/src/router.rs \
@@ -1062,7 +1091,69 @@ Add tests for previously untested endpoints and a scope-bug regression test.
   }
   ```
 
-- [ ] **Step 3: Add scope-bug regression test**
+- [ ] **Step 3: Add global-settings GET→ETag→PUT round-trip test**
+
+  This exercises the `GlobalSettingsVersion::refresh_etag` path end-to-end — the path that
+  queries the DB after a successful mutation and returns the committed version.
+
+  ```rust
+  // ── Global settings round-trip (/api/v1/global-settings/network) ─────────────
+
+  /// Full GET→ETag→PUT round-trip for network settings (GlobalSettingsVersion scope).
+  ///
+  /// This test exercises GlobalSettingsVersion::refresh_etag — the DB re-read path
+  /// triggered after a successful mutation. Ensures the PUT response carries an ETag.
+  #[tokio::test]
+  async fn network_settings_get_etag_put_round_trip() {
+      ensure_crypto_provider();
+      let app = TestApp::new().await;
+      let client = app.client();
+      let token = register_and_get_token(&client).await;
+
+      // GET → capture ETag.
+      let get_resp = client
+          .get("/api/v1/global-settings/network")
+          .bearer(&token)
+          .send()
+          .await;
+      assert_eq!(get_resp.status(), http::StatusCode::OK);
+      let etag = get_resp
+          .headers()
+          .get("etag")
+          .expect("ETag on GET")
+          .to_str()
+          .expect("ASCII")
+          .to_string();
+      assert!(
+          etag.contains("global-settings-v"),
+          "expected global-settings-v prefix, got {etag:?}"
+      );
+
+      // PUT with captured ETag → 200 with new ETag.
+      let put_resp = client
+          .put_json("/api/v1/global-settings/network", &serde_json::json!({}))
+          .bearer(&token)
+          .header("if-match", &etag)
+          .send()
+          .await;
+      assert_eq!(put_resp.status(), http::StatusCode::OK);
+      assert!(
+          put_resp.headers().contains_key("etag"),
+          "PUT response must carry ETag (from refresh_etag DB re-read)"
+      );
+
+      // Old ETag now stale → 409.
+      let stale = client
+          .put_json("/api/v1/global-settings/network", &serde_json::json!({}))
+          .bearer(&token)
+          .header("if-match", &etag)
+          .send_status()
+          .await;
+      assert_eq!(stale, http::StatusCode::CONFLICT);
+  }
+  ```
+
+- [ ] **Step 4: Add scope-bug regression test**
 
   This is the critical regression test for the 4 wrong-scope fixes. A tenant-scoped ETag
   (`W/"settings-v0"`) must be rejected by global-settings endpoints (which expect
@@ -1104,15 +1195,7 @@ Add tests for previously untested endpoints and a scope-bug regression test.
           "tenant-scoped ETag must be rejected by global-settings endpoint"
       );
 
-      // Sending the correct global-scoped ETag → 200.
-      let status_ok = client
-          .put_json("/api/v1/global-settings/network", &serde_json::json!({}))
-          .bearer(&token)
-          .header("if-match", "W/\"global-settings-v5\"")
-          .send_status()
-          .await;
-
-      assert_eq!(status_ok, http::StatusCode::OK);
+      // The full correct-scope round-trip is covered by network_settings_get_etag_put_round_trip.
   }
 
   /// PUT /global-settings/zeroconf with a tenant-scoped ETag → 409 Conflict.
@@ -1141,7 +1224,7 @@ Add tests for previously untested endpoints and a scope-bug regression test.
   }
   ```
 
-- [ ] **Step 4: Run all integration tests**
+- [ ] **Step 5: Run all integration tests**
 
   ```shell
   cargo test -p uptrakit-web-api --no-default-features --features db-sqlite --test if_match 2>&1 | tail -30
@@ -1150,7 +1233,7 @@ Add tests for previously untested endpoints and a scope-bug regression test.
 
   Expected: all tests pass, including new ones.
 
-- [ ] **Step 5: Run full test suite**
+- [ ] **Step 6: Run full test suite**
 
   ```shell
   cargo test --all-features 2>&1 | tail -40
@@ -1159,7 +1242,19 @@ Add tests for previously untested endpoints and a scope-bug regression test.
 
   Expected: no failures.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Quality gates**
+
+  ```shell
+  cargo fmt --all -- --check
+  cargo clippy --all-targets --no-default-features --features db-sqlite
+  cargo clippy --all-targets --all-features
+  cargo deny check
+
+  ```
+
+  Expected: no warnings, no errors, no advisories.
+
+- [ ] **Step 8: Commit**
 
   ```bash
   git add crates/ui/web-api/src/integration_tests/if_match.rs
@@ -1171,6 +1266,7 @@ Add tests for previously untested endpoints and a scope-bug regression test.
   - GET→ETag→PUT round-trip for agent-certificates
   - GET /global-settings/network returns ETag
   - PUT /global-settings/network without If-Match → 428
+  - GET→ETag→PUT round-trip for network (exercises GlobalSettingsVersion::refresh_etag)
   - Scope regression: global endpoints reject tenant-scoped ETags (network,
     zeroconf) — verifies the 4 wrong-scope bug fixes hold
 
@@ -1244,6 +1340,13 @@ Write the ADR and update the coding standards guide.
     It is a candidate for removal in a future spec that migrates those handlers to the layer pattern.
   - New resources outside settings may adopt the same pattern by implementing `EtagSource` and
     calling `etag_layer::<NewResourceVersion>(state)` in the router.
+  - **Correctness gap (pre-existing):** `upsert_*_raw` calls `bump_*_settings_version` inside
+    the same transaction but treats bump failure as non-fatal (logs `warn`, continues). If the
+    bump fails, the write succeeds but the version counter is not incremented. `refresh_etag`
+    cannot detect this — it returns the pre-write version, so the ETag on the mutation response
+    encodes stale state. A subsequent client using the returned ETag would pass `If-Match`
+    validation even though the counter did not advance. This is pre-existing behaviour this ADR
+    does not change; a future improvement would make bump failures transaction-fatal.
   ```
 
 - [ ] **Step 2: Update `docs/development/coding-standards.md`**
@@ -1311,24 +1414,25 @@ Write the ADR and update the coding standards guide.
 
 **Spec coverage:**
 
-| Spec requirement                                                           | Task                                     |
-| -------------------------------------------------------------------------- | ---------------------------------------- |
-| All settings GET endpoints return `ETag`                                   | Task 3 (middleware) + Tasks 4–5 (wiring) |
-| All settings PUT endpoints require `If-Match`, validate, return new `ETag` | Task 3 + Tasks 4–5                       |
-| `POST /ca/rotate` returns new `ETag`                                       | Task 5 (included in global sub-router)   |
-| No ETag code in handler bodies                                             | Tasks 4–5                                |
-| Opt-in declared at the router                                              | Tasks 4–5                                |
-| Fix 4 wrong-scope bugs                                                     | Task 5 (network, nats, zeroconf, github) |
-| `IfMatch<S>` extractor and `for_test()` kept                               | Task 2 (unchanged)                       |
-| `#[async_trait]` removed from `EtagSource` impls                           | Task 2                                   |
-| `&Parts` removed from trait                                                | Task 1                                   |
-| `refresh_etag` for post-write DB re-read                                   | Task 2                                   |
-| `SINGLE-TENANT ASSUMPTION` comments                                        | Task 2                                   |
-| Integration tests for scope regression                                     | Task 6                                   |
-| ~12 handler-direct unit tests deleted                                      | Tasks 4–5                                |
-| ADR-0017                                                                   | Task 7                                   |
-| `coding-standards.md` update                                               | Task 7                                   |
-| `POST /settings/reset-data` excluded from ETag layer                       | Task 5 (not added to global sub-router)  |
+| Spec requirement                                                           | Task                                                                          |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| All settings GET endpoints return `ETag`                                   | Task 3 (middleware) + Tasks 4–5 (wiring)                                      |
+| All settings PUT endpoints require `If-Match`, validate, return new `ETag` | Task 3 + Tasks 4–5                                                            |
+| `POST /ca/rotate` returns new `ETag`                                       | **Deferred** — stays in auth_routes; requires version-bump verification first |
+| No ETag code in handler bodies                                             | Tasks 4–5                                                                     |
+| Opt-in declared at the router                                              | Tasks 4–5                                                                     |
+| Fix 4 wrong-scope bugs                                                     | Task 5 (network, nats, zeroconf, github)                                      |
+| `get_oauth_settings` GET ETag construction removed                         | Task 5 Step 3                                                                 |
+| `IfMatch<S>` extractor and `for_test()` kept                               | Task 2 (unchanged)                                                            |
+| `#[async_trait]` removed from `EtagSource` impls                           | Task 2                                                                        |
+| `&Parts` removed from trait                                                | Task 1                                                                        |
+| `refresh_etag` for post-write DB re-read                                   | Task 2                                                                        |
+| `SINGLE-TENANT ASSUMPTION` comments                                        | Task 2                                                                        |
+| Integration tests for scope regression                                     | Task 6                                                                        |
+| ~12 handler-direct unit tests deleted                                      | Tasks 4–5                                                                     |
+| ADR-0017                                                                   | Task 7                                                                        |
+| `coding-standards.md` update                                               | Task 7                                                                        |
+| `POST /settings/reset-data` excluded from ETag layer                       | Task 4 (not added to tenant_settings sub-router)                              |
 
 **Placeholder scan:** No TBDs or incomplete sections found.
 
