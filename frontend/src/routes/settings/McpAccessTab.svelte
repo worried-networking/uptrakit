@@ -164,7 +164,7 @@
 		try {
 			const patch = oauthDraft.draft;
 			const result = await updateOAuthSettings(
-				{ ...patch, canonical_host: patch.canonical_host === '' ? undefined : (patch.canonical_host ?? undefined) },
+				{ ...patch, canonical_host: patch.canonical_host ?? '' },
 				oauthSettingsEtag
 			);
 			oauthSettings = result.data;

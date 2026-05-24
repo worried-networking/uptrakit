@@ -37,9 +37,6 @@ pub use crate::api_tokens::{ApiTokenListResponse, ApiTokenResponse, CreateApiTok
 pub use crate::oidc_auth::{AuthMethodsResponse, OidcProviderInfo};
 pub use crate::oidc_providers::OidcProviderResponse;
 
-// ── Settings ─────────────────────────────────────────────────────────
-pub use crate::settings::RegistrationSettingsResponse;
-
 // ── System alerts ────────────────────────────────────────────────────
 pub use crate::system_alerts::AlertSeverity;
 
