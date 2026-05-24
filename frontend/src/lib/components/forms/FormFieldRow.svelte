@@ -11,6 +11,7 @@
 		error,
 		inputId,
 		required = false,
+		dirty = false,
 		children
 	}: {
 		label: string;
@@ -18,6 +19,7 @@
 		error?: string;
 		inputId?: string;
 		required?: boolean;
+		dirty?: boolean;
 		children: Snippet;
 	} = $props();
 
@@ -29,10 +31,13 @@
 	});
 </script>
 
-<div class="grid gap-3 md:items-start {labelColClass}" data-ui="form-field-row">
+<div
+	class="grid gap-3 md:items-start {labelColClass} {dirty ? 'border-l-2 border-[var(--accent)] pl-2' : ''}"
+	data-ui="form-field-row"
+>
 	<div class="space-y-1">
 		<div class="flex items-center gap-1">
-			<label class="text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
+			<label class="w-fit text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
 			{#if required}
 				<span aria-hidden="true" class="text-[var(--color-danger)]">*</span>
 			{/if}
