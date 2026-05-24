@@ -11,10 +11,7 @@ use uptrakit_web_api_types::error::ErrorResponse;
 
 use crate::app_state::AppState;
 use crate::extractors::etag_source::EtagSource;
-
-fn strip_etag(s: &str) -> &str {
-    s.strip_prefix("W/").unwrap_or(s).trim_matches('"')
-}
+use crate::extractors::if_match::strip_etag;
 
 pub(crate) async fn etag_middleware<S>(
     State(state): State<Arc<AppState>>,
