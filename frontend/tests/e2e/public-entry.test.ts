@@ -111,7 +111,7 @@ test.describe('Public entry shell', () => {
 		);
 
 		await page.goto('/device?user_code=BCDF-GHJK');
-		await expect(page.locator('[data-ui="callout"]')).toContainText('cli-laptop-2026-05-12');
+		await expect(page.locator('[data-ui="consent-prompt"]')).toContainText('cli-laptop-2026-05-12');
 	});
 
 	test('device approve succeeds', async ({ page }) => {
