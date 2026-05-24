@@ -475,6 +475,44 @@ impl UptrakitClient {
         self.handle_response(resp).await
     }
 
+    async fn get_with_etag<T: DeserializeOwned>(&self, path: &str) -> Result<(T, String)> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.get(&url).bearer_auth(self.token_or_err()?);
+        let resp = self.send_with_retry(req).await?;
+        let etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let body: T = self.handle_response(resp).await?;
+        Ok((body, etag))
+    }
+
+    async fn put_json_with_etag<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+        etag: &str,
+    ) -> Result<(T, String)> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self
+            .http
+            .put(&url)
+            .bearer_auth(self.token_or_err()?)
+            .header(reqwest::header::IF_MATCH, etag)
+            .json(body);
+        let resp = self.send_with_retry(req).await?;
+        let new_etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let body: T = self.handle_response(resp).await?;
+        Ok((body, new_etag))
+    }
+
     /// POST with JSON body, expecting a 204 No Content response.
     async fn post_json_no_content(&self, path: &str, body: &impl Serialize) -> Result<()> {
         let url = format!("{}{}", self.base_url, path);

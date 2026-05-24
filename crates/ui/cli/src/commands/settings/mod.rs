@@ -1,18 +1,16 @@
-pub mod authentication;
+pub mod access;
 pub mod certificates;
 pub mod nats;
 pub mod network;
 pub mod oidc;
 pub mod provider_github;
-pub mod registration;
 
-pub use authentication::AuthenticationCommands;
+pub use access::AccessCommands;
 pub use certificates::CertificateCommands;
 pub use nats::NatsCommands;
 pub use network::NetworkCommands;
 pub use oidc::OidcCommands;
 pub use provider_github::ProviderGithubCommands;
-pub use registration::RegistrationCommands;
 
 use crate::client::authenticated_client;
 use crate::commands::CliContext;
@@ -27,27 +25,21 @@ use uptrakit_openapi_client::types::settings_combined::CombinedSettingsResponse;
 use uptrakit_openapi_client::types::settings_reset::{ResetDataRequest, ResetDataResponse};
 use uptrakit_openapi_client::types::system_alerts::SystemAlertsResponse;
 
-use self::authentication::{authentication_show, authentication_update};
+use self::access::{AccessShowParams, AccessUpdateParams, access_show, access_update};
 use self::certificates::{certificates_show, certificates_update};
 use self::nats::{nats_clear, nats_set, nats_show};
 use self::network::{NetworkUpdateParams, network_show, network_update};
 use self::oidc::dispatch_oidc;
 use self::provider_github::{provider_github_clear, provider_github_set, provider_github_show};
-use self::registration::{RegistrationUpdateParams, registration_show, registration_update};
 
 #[derive(Debug, Subcommand)]
 pub enum SettingsCommands {
     /// Show combined settings overview
     Show,
-    /// Registration settings
-    Registration {
+    /// Registration and authentication settings
+    Access {
         #[command(subcommand)]
-        command: RegistrationCommands,
-    },
-    /// Authentication settings
-    Authentication {
-        #[command(subcommand)]
-        command: AuthenticationCommands,
+        command: AccessCommands,
     },
     /// Agent certificate settings
     Certificates {
@@ -176,56 +168,35 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        SettingsCommands::Registration { command } => match command {
-            RegistrationCommands::Show => {
-                let resp = registration_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            RegistrationCommands::Update {
-                mode,
-                token,
-                require_token_for_oidc,
-            } => {
-                let resp = registration_update(RegistrationUpdateParams {
+        SettingsCommands::Access { command } => match command {
+            AccessCommands::Show => {
+                let resp = access_show(AccessShowParams {
                     server: ctx.server.as_deref(),
                     token: ctx.token.as_deref(),
                     insecure: ctx.insecure,
-                    mode,
-                    reg_token: token,
-                    require_token_for_oidc,
                     request_timeout: ctx.request_timeout,
                 })
                 .await?;
                 crate::output::print_output(ctx.format, &resp)?;
             }
-        },
-        SettingsCommands::Authentication { command } => match command {
-            AuthenticationCommands::Show => {
-                let resp = authentication_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            AuthenticationCommands::Update {
+            AccessCommands::Update {
+                mode,
+                token,
+                require_token_for_oidc,
                 password_auth_enabled,
+                two_factor_required,
             } => {
-                let resp = authentication_update(
+                let resp = access_update(AccessUpdateParams {
+                    server: ctx.server.as_deref(),
+                    auth_token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                    mode,
+                    reg_token: token,
+                    require_token_for_oidc,
                     password_auth_enabled,
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
+                    two_factor_required,
+                })
                 .await?;
                 crate::output::print_output(ctx.format, &resp)?;
             }

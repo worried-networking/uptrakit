@@ -1,14 +1,9 @@
 use crate::Result;
 use crate::UptrakitClient;
 use crate::types_impl::server_cert::RenewServerCertResponse;
-use crate::types_impl::settings::{
-    RegistrationSettingsResponse, UpdateRegistrationSettingsRequest,
-};
+use crate::types_impl::settings_access::{AccessSettingsResponse, UpdateAccessSettingsRequest};
 use crate::types_impl::settings_agent_certs::{
     AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
-};
-use crate::types_impl::settings_auth::{
-    AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
 };
 use crate::types_impl::settings_ca::RotateCaResponse;
 use crate::types_impl::settings_combined::{
@@ -28,31 +23,20 @@ impl UptrakitClient {
         self.get(crate::paths::settings::COMBINED).await
     }
 
-    /// Get registration settings.
-    pub async fn get_registration_settings(&self) -> Result<RegistrationSettingsResponse> {
-        self.get(crate::paths::settings::REGISTRATION).await
+    /// Get access settings (registration + authentication combined).
+    /// Returns the response body and the raw `ETag` header value.
+    pub async fn get_access_settings(&self) -> Result<(AccessSettingsResponse, String)> {
+        self.get_with_etag(crate::paths::settings::ACCESS).await
     }
 
-    /// Update registration settings.
-    pub async fn update_registration_settings(
+    /// Update access settings.  `etag` must be the value returned by a prior
+    /// `get_access_settings` call — the server requires `If-Match` for optimistic locking.
+    pub async fn update_access_settings(
         &self,
-        req: &UpdateRegistrationSettingsRequest,
-    ) -> Result<RegistrationSettingsResponse> {
-        self.put_json(crate::paths::settings::REGISTRATION, req)
-            .await
-    }
-
-    /// Get authentication settings.
-    pub async fn get_authentication_settings(&self) -> Result<AuthenticationSettingsResponse> {
-        self.get(crate::paths::settings::AUTHENTICATION).await
-    }
-
-    /// Update authentication settings.
-    pub async fn update_authentication_settings(
-        &self,
-        req: &UpdateAuthenticationSettingsRequest,
-    ) -> Result<AuthenticationSettingsResponse> {
-        self.put_json(crate::paths::settings::AUTHENTICATION, req)
+        req: &UpdateAccessSettingsRequest,
+        etag: &str,
+    ) -> Result<(AccessSettingsResponse, String)> {
+        self.put_json_with_etag(crate::paths::settings::ACCESS, req, etag)
             .await
     }
 
@@ -105,31 +89,23 @@ impl UptrakitClient {
 mod tests {
     use crate::types_impl::SecretString;
     use crate::types_impl::registration::RegistrationMode;
-    use crate::types_impl::settings::UpdateRegistrationSettingsRequest;
+    use crate::types_impl::settings_access::UpdateAccessSettingsRequest;
     use crate::types_impl::settings_agent_certs::UpdateAgentCertificateSettingsRequest;
-    use crate::types_impl::settings_auth::UpdateAuthenticationSettingsRequest;
     use crate::types_impl::settings_network::UpdateNetworkSettingsRequest;
 
     #[test]
-    fn update_registration_settings_serialization() {
-        let req = UpdateRegistrationSettingsRequest {
+    fn update_access_settings_serialization() {
+        let req = UpdateAccessSettingsRequest {
             mode: RegistrationMode::Invite,
             token: Some(SecretString::new("my-invite-token")),
             require_token_for_oidc: Some(true),
+            password_auth_enabled: Some(false),
+            two_factor_required: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["mode"], "invite");
         assert_eq!(json["token"], "my-invite-token");
         assert_eq!(json["require_token_for_oidc"], true);
-    }
-
-    #[test]
-    fn update_authentication_settings_serialization() {
-        let req = UpdateAuthenticationSettingsRequest {
-            password_auth_enabled: Some(false),
-            two_factor_required: None,
-        };
-        let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["password_auth_enabled"], false);
     }
 
