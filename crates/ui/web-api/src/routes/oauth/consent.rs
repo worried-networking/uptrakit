@@ -447,7 +447,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Set};
     use time::OffsetDateTime;
     use tower::ServiceExt;
-    use uptrakit_shared_db::entity::{oauth_authorization_request, oauth_client, user};
+    use uptrakit_shared_db::entity::{oauth_authorization_request, user};
     use uptrakit_shared_types::MaskedEmail;
 
     use crate::oauth::OAuthState;
@@ -572,50 +572,6 @@ mod tests {
         id
     }
 
-    /// Insert an `oauth_client` row and return its `client_id`.
-    ///
-    /// When `trusted` is `true`, `trusted_at` is set to the current timestamp.
-    async fn insert_oauth_client(
-        db: &sea_orm::DatabaseConnection,
-        redirect_uri: &str,
-        trusted: bool,
-    ) -> String {
-        let now = OffsetDateTime::now_utc();
-        let client_id = format!("test-consent-client-{}", uuid::Uuid::now_v7());
-        let redirect_uris_json =
-            serde_json::to_string(&vec![redirect_uri]).expect("serialize redirect_uris");
-
-        oauth_client::ActiveModel {
-            id: Set(client_id.clone()),
-            client_name: Set("Consent Test Client".to_string()),
-            client_uri: Set(Some("https://example.com".to_string())),
-            logo_uri: Set(None),
-            redirect_uris: Set(redirect_uris_json),
-            default_scope: Set("mcp:read".to_string()),
-            grant_types: Set("authorization_code".to_string()),
-            response_types: Set("code".to_string()),
-            token_endpoint_auth_method: Set("none".to_string()),
-            client_secret_hash: Set(None),
-            registration_access_token_hash: Set(None),
-            created_via: Set("test".to_string()),
-            created_at: Set(now),
-            last_used_at: Set(None),
-            revoked_at: Set(None),
-            metadata_cached_at: Set(None),
-            metadata_etag: Set(None),
-            metadata_content_hash: Set(None),
-            metadata_raw: Set(None),
-            metadata_parse_error: Set(None),
-            metadata_parse_error_at: Set(None),
-            trusted_at: Set(if trusted { Some(now) } else { None }),
-        }
-        .insert(db)
-        .await
-        .expect("insert oauth_client");
-
-        client_id
-    }
-
     /// Insert an `oauth_authorization_request` row and return its `request_id`.
     async fn insert_auth_request(
         db: &sea_orm::DatabaseConnection,
@@ -653,7 +609,9 @@ mod tests {
     async fn consent_details_returns_client_info() {
         let app = setup().await;
         let user_id = insert_test_user(&app.db).await;
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
+        let client_id =
+            crate::test_harness::fixtures::insert_oauth_client(&app.db, TEST_REDIRECT_URI, false)
+                .await;
         let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
 
         let jwt_token = app
@@ -689,7 +647,9 @@ mod tests {
         let app = setup().await;
         let owner_id = insert_test_user(&app.db).await;
         let other_id = insert_test_user(&app.db).await;
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
+        let client_id =
+            crate::test_harness::fixtures::insert_oauth_client(&app.db, TEST_REDIRECT_URI, false)
+                .await;
         let request_id =
             insert_auth_request(&app.db, &client_id, owner_id, TEST_REDIRECT_URI).await;
 
@@ -717,7 +677,9 @@ mod tests {
     async fn consent_details_unauthenticated_returns_401() {
         let app = setup().await;
         let user_id = insert_test_user(&app.db).await;
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
+        let client_id =
+            crate::test_harness::fixtures::insert_oauth_client(&app.db, TEST_REDIRECT_URI, false)
+                .await;
         let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
 
         let req = Request::builder()
@@ -740,7 +702,9 @@ mod tests {
         let app = setup().await;
         let user_id = insert_test_user(&app.db).await;
         // Trusted client: no typed confirmation required.
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, true).await;
+        let client_id =
+            crate::test_harness::fixtures::insert_oauth_client(&app.db, TEST_REDIRECT_URI, true)
+                .await;
         let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
 
         let jwt_token = app
@@ -784,7 +748,9 @@ mod tests {
     async fn consent_deny_redirects_with_error() {
         let app = setup().await;
         let user_id = insert_test_user(&app.db).await;
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
+        let client_id =
+            crate::test_harness::fixtures::insert_oauth_client(&app.db, TEST_REDIRECT_URI, false)
+                .await;
         let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
 
         let jwt_token = app
