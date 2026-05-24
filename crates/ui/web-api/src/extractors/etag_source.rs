@@ -1,20 +1,15 @@
-use async_trait::async_trait;
-use axum::http::request::Parts;
 use rootcause::Report;
 
 use crate::app_state::AppState;
 
-/// Provides the current ETag value for a given resource type.
-///
-/// Implementors produce a stable string that identifies the current version of
-/// some resource.  The [`super::if_match::IfMatch`] extractor uses this to
-/// compare against the `If-Match` header sent by the client.
-///
-/// # Errors
-///
-/// Returns an error when the version cannot be determined (e.g. a DB look-up
-/// fails).  The extractor converts this into a `500 Internal Server Error`.
-#[async_trait]
 pub trait EtagSource: Sized + Send + Sync + 'static {
-    async fn current_etag(parts: &Parts, state: &AppState) -> Result<String, Report>;
+    /// Returns the current ETag from the in-memory cache. Fast; used for GET responses.
+    fn current_etag(state: &AppState) -> impl Future<Output = Result<String, Report>> + Send;
+
+    /// Re-reads the version from the DB, syncs the cache, and returns the new ETag.
+    /// Used after a successful mutation so the response carries the committed version.
+    ///
+    /// For GET-only resources this method is never called by `EtagLayer`. Implementors
+    /// covering read-only resources may return `Err(report!("refresh not supported"))`.
+    fn refresh_etag(state: &AppState) -> impl Future<Output = Result<String, Report>> + Send;
 }
