@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import type { ConsentDetails } from '../../src/lib/api/oauth';
 
 // ---------------------------------------------------------------------------
-// Session helpers (mirrors public-entry.spec.ts)
+// Session helpers
 // ---------------------------------------------------------------------------
 
 async function mockAuthenticatedSession(page: Page) {
@@ -70,18 +70,18 @@ async function mockConsentDeny(page: Page, requestId: string, redirectTo: string
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Selectors
 // ---------------------------------------------------------------------------
 
-const ALLOW_BUTTON = 'button:has-text("Allow access")';
+const APPROVE_BUTTON = 'button:has-text("Approve")';
 const DENY_BUTTON = 'button:has-text("Deny")';
-const TYPED_INPUT = '[data-ui="typed-confirmation-input"]';
+const CONSENT_PROMPT = '[data-ui="consent-prompt"]';
+const DANGER_CALLOUT = '[data-ui="callout"][data-tone="danger"]';
 const WARNING_CALLOUT = '[data-ui="callout"][data-tone="warning"]';
 
 async function navigateToConsent(page: Page, requestId: string) {
 	await page.goto(`/oauth/consent/${requestId}`);
-	// Wait until the details have loaded (the Allow button is only rendered after `details !== null`)
-	await page.waitForSelector(ALLOW_BUTTON);
+	await page.waitForSelector(APPROVE_BUTTON);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,61 +93,50 @@ test.describe('oauth consent screen', () => {
 		await mockAuthenticatedSession(page);
 	});
 
-	test('unverified client — Allow button gated by typed confirmation', async ({ page }) => {
-		const requestId = 'req-123';
-
-		await mockConsentGet(page, requestId, {
-			requires_typed_confirmation: true,
-			typed_confirmation_value: 'example.com',
-			trusted_at: null
-		});
+	test('trusted client — renders client name and Approve button', async ({ page }) => {
+		const requestId = 'req-001';
+		await mockConsentGet(page, requestId, {});
 
 		await navigateToConsent(page, requestId);
 
-		// Initially disabled — nothing typed yet
-		await expect(page.locator(ALLOW_BUTTON)).toBeDisabled();
-
-		// Type a wrong value — still disabled
-		await page.locator(TYPED_INPUT).fill('wrong.com');
-		await expect(page.locator(ALLOW_BUTTON)).toBeDisabled();
-
-		// Clear and type the correct value — now enabled
-		await page.locator(TYPED_INPUT).fill('example.com');
-		await expect(page.locator(ALLOW_BUTTON)).toBeEnabled();
+		await expect(page.locator(CONSENT_PROMPT)).toContainText('Test MCP Client');
+		await expect(page.locator(APPROVE_BUTTON)).toBeEnabled();
+		await expect(page.locator(DENY_BUTTON)).toBeVisible();
 	});
 
-	test('Allow with correct typed value calls approve and redirects', async ({ page }) => {
-		const requestId = 'req-123';
+	test('unverified client — shows danger callout, Approve still enabled', async ({ page }) => {
+		const requestId = 'req-002';
+		await mockConsentGet(page, requestId, { trusted_at: null });
+
+		await navigateToConsent(page, requestId);
+
+		await expect(page.locator(DANGER_CALLOUT)).toBeVisible();
+		await expect(page.locator(DANGER_CALLOUT)).toContainText('not been verified');
+		// Approve is immediately available — no typed gate
+		await expect(page.locator(APPROVE_BUTTON)).toBeEnabled();
+	});
+
+	test('Approve calls approve endpoint and redirects', async ({ page }) => {
+		const requestId = 'req-003';
 		const redirectTo = 'http://localhost:5173/oauth-redirect-target';
 
-		await mockConsentGet(page, requestId, {
-			requires_typed_confirmation: true,
-			typed_confirmation_value: 'example.com',
-			trusted_at: null
-		});
+		await mockConsentGet(page, requestId, {});
 		await mockConsentApprove(page, requestId, redirectTo);
 
 		await navigateToConsent(page, requestId);
 
-		await page.locator(TYPED_INPUT).fill('example.com');
-		await expect(page.locator(ALLOW_BUTTON)).toBeEnabled();
-
 		const approveResponse = page.waitForResponse(`**/oauth/consent/${requestId}/approve`);
-		await page.locator(ALLOW_BUTTON).click();
+		await page.locator(APPROVE_BUTTON).click();
 		await approveResponse;
 
-		// The SPA sets window.location.href to the redirect URL; wait for URL change.
 		await page.waitForURL('**/oauth-redirect-target', { timeout: 5_000 });
 	});
 
 	test('Deny calls deny endpoint and redirects', async ({ page }) => {
-		const requestId = 'req-456';
+		const requestId = 'req-004';
 		const redirectTo = 'http://localhost:5173/oauth-denied';
 
-		await mockConsentGet(page, requestId, {
-			requires_typed_confirmation: false,
-			trusted_at: '2026-01-01T00:00:00Z'
-		});
+		await mockConsentGet(page, requestId, {});
 		await mockConsentDeny(page, requestId, redirectTo);
 
 		await navigateToConsent(page, requestId);
@@ -160,18 +149,41 @@ test.describe('oauth consent screen', () => {
 	});
 
 	test('localhost redirect_uri_host shows warning callout', async ({ page }) => {
-		const requestId = 'req-789';
+		const requestId = 'req-005';
 
 		await mockConsentGet(page, requestId, {
 			redirect_uri_host: 'localhost',
-			redirect_uri: 'http://localhost:8080/callback',
-			trusted_at: '2026-01-01T00:00:00Z',
-			requires_typed_confirmation: false
+			redirect_uri: 'http://localhost:8080/callback'
 		});
 
 		await navigateToConsent(page, requestId);
 
 		await expect(page.locator(WARNING_CALLOUT)).toBeVisible();
 		await expect(page.locator(WARNING_CALLOUT)).toContainText('local');
+	});
+
+	test('DCR client — shows warning callout', async ({ page }) => {
+		const requestId = 'req-006';
+
+		await mockConsentGet(page, requestId, {
+			created_via: 'dcr',
+			trusted_at: '2026-01-01T00:00:00Z'
+		});
+
+		await navigateToConsent(page, requestId);
+
+		await expect(page.locator(WARNING_CALLOUT)).toBeVisible();
+		await expect(page.locator(WARNING_CALLOUT)).toContainText('recently registered');
+	});
+
+	test('scope descriptions are shown as human-readable text', async ({ page }) => {
+		const requestId = 'req-007';
+
+		await mockConsentGet(page, requestId, { scopes: ['mcp:read', 'mcp:write'] });
+
+		await navigateToConsent(page, requestId);
+
+		await expect(page.locator(CONSENT_PROMPT)).toContainText('Read your uptrakit data');
+		await expect(page.locator(CONSENT_PROMPT)).toContainText('Trigger software updates');
 	});
 });
