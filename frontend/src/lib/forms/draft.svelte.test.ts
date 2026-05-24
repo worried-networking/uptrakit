@@ -43,4 +43,20 @@ describe('createFormDraft', () => {
 		expect(form.serverValues.name).toBe('bob');
 		expect(form.isDirty).toBe(false);
 	});
+
+	it('empty-ish values treated as equal for dirty detection', () => {
+		// Server returns null; cleared number input produces ''.
+		const form = createFormDraft({ days: null as unknown as number });
+		form.update('days', '' as unknown as number);
+		expect(form.isDirty).toBe(false);
+		expect(form.isFieldDirty('days')).toBe(false);
+	});
+
+	it('clearing a number field back to empty is not dirty when original was null', () => {
+		const form = createFormDraft({ days: null as unknown as number });
+		form.update('days', 30 as number);
+		expect(form.isDirty).toBe(true);
+		form.update('days', '' as unknown as number);
+		expect(form.isDirty).toBe(false);
+	});
 });
