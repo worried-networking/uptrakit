@@ -219,15 +219,64 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .to_string();
 
     // -----------------------------------------------------------------------
-    // Step 9 — Call MCP with the OAuth access token; assert HTTP 200.
+    // Step 9a — Initialize the MCP session.
+    // -----------------------------------------------------------------------
+    let init_resp = http
+        .post(format!("https://127.0.0.1:{port}/mcp"))
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcp-e2e-test","version":"1.0"}}}"#)
+        .send()
+        .await
+        .expect("POST /mcp initialize");
+    assert_eq!(
+        init_resp.status().as_u16(),
+        200,
+        "initialize must return 200, got: {}",
+        init_resp.status()
+    );
+    let session_id = init_resp
+        .headers()
+        .get("Mcp-Session-Id")
+        .expect("Mcp-Session-Id header must be present after initialize")
+        .to_str()
+        .expect("session ID must be valid UTF-8")
+        .to_string();
+
+    // -----------------------------------------------------------------------
+    // Step 9b — Acknowledge the session.
+    // -----------------------------------------------------------------------
+    let notif_resp = http
+        .post(format!("https://127.0.0.1:{port}/mcp"))
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Mcp-Session-Id", &session_id)
+        .body(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+        .send()
+        .await
+        .expect("POST /mcp notifications/initialized");
+    assert_eq!(
+        notif_resp.status().as_u16(),
+        202,
+        "notifications/initialized must return 202, got: {}",
+        notif_resp.status()
+    );
+
+    // -----------------------------------------------------------------------
+    // Step 9c — Call the tool; assert HTTP 200 and verify result content.
     // -----------------------------------------------------------------------
     let mcp_resp = http
         .post(format!("https://127.0.0.1:{port}/mcp"))
         .header("Authorization", format!("Bearer {access_token}"))
         .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Mcp-Session-Id", &session_id)
+        .header("Mcp-Protocol-Version", "2025-03-26")
         .json(&serde_json::json!({
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": 2,
             "method": "tools/call",
             "params": {
                 "name": "get_current_user",
@@ -236,11 +285,18 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         }))
         .send()
         .await
-        .expect("POST /mcp with OAuth bearer");
+        .expect("POST /mcp tools/call with OAuth bearer");
     assert_eq!(
         mcp_resp.status().as_u16(),
         200,
         "MCP tool call with OAuth token must return 200, got: {}",
         mcp_resp.status()
+    );
+
+    // Step 9d — Verify the SSE body contains user identity.
+    let body_text = mcp_resp.text().await.expect("read tools/call body");
+    assert!(
+        body_text.contains("email"),
+        "tools/call result must contain 'email' field; body: {body_text}"
     );
 }
