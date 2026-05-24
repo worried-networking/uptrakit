@@ -10,8 +10,8 @@ Import pattern:
 import { Button, Callout, StatusBadge } from "$lib/components/ui";
 ```
 
-Non-UI-barrel components (`Button`, `Input`, `Textarea`, `Checkbox`, `Modal`, `ContextMenu`) are in
-`$lib/components` and re-exported through the barrel where noted.
+Non-UI-barrel components (`Button`, `Input`, `Textarea`, `Checkbox`, `Modal`, `ContextMenu`) are in `$lib/components` and re-exported through the
+barrel where noted.
 
 **Status:** `Implemented` (all components below)
 
@@ -126,8 +126,8 @@ Usage:
 
 ![TabStrip showing built-in and surface-contributed tabs, one active](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
 
-Keyboard behavior: `ArrowRight`/`ArrowDown` → next enabled tab, `ArrowLeft`/`ArrowUp` → previous,
-`Home` → first, `End` → last. Focus moves with selection.
+Keyboard behavior: `ArrowRight`/`ArrowDown` → next enabled tab, `ArrowLeft`/`ArrowUp` → previous, `Home` → first, `End` → last. Focus moves with
+selection.
 
 Visual rules:
 
@@ -143,8 +143,7 @@ Visual rules:
 
 ### Callout
 
-Semantic message block for inline notices. Maps to ARIA `role="alert"` for warning/danger and
-`role="status"` for info/success.
+Semantic message block for inline notices. Maps to ARIA `role="alert"` for warning/danger and `role="status"` for info/success.
 
 ```typescript
 // frontend/src/lib/components/ui/Callout.svelte
@@ -177,8 +176,7 @@ Tone → token mapping:
 | `warning` | `--color-warning` | `--color-warning-bg` | `--color-warning-border` |
 | `danger`  | `--color-danger`  | `--color-danger-bg`  | `--color-danger-border`  |
 
-Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utilities. Always use
-`<Callout>`.
+Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utilities. Always use `<Callout>`.
 
 ---
 
@@ -216,8 +214,7 @@ Renders with a dashed border and centered content. Max width of the inner block 
 
 ### StatusBadge
 
-Static label badge. Used for status indicators, tags, and any inline label that does not trigger
-an action.
+Static label badge. Used for status indicators, tags, and any inline label that does not trigger an action.
 
 ```typescript
 // frontend/src/lib/components/ui/StatusBadge.svelte
@@ -256,8 +253,7 @@ Do not use `<span class="badge preset-tonal-*">`. Always use `<StatusBadge>`.
 
 ### ActionBadge
 
-Clickable badge with idle/hover label swap inside a fixed-width container. Used for navigable
-counts (e.g. "3 updates") and batch-update triggers.
+Clickable badge with idle/hover label swap inside a fixed-width container. Used for navigable counts (e.g. "3 updates") and batch-update triggers.
 
 ```typescript
 // frontend/src/lib/components/ui/ActionBadge.svelte
@@ -285,22 +281,21 @@ Usage:
 />
 ```
 
-![ActionBadge idle state showing count](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-chromium.png) ![ActionBadge hover state showing action label](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-hover-chromium.png)
+![ActionBadge idle state showing count](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-chromium.png)
+![ActionBadge hover state showing action label](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-hover-chromium.png)
 
 Rules:
 
 - The hover label overlays the idle label using CSS grid; no layout reflow occurs.
 - `navigation` variant: `min-h-[14px]`. `bulk-update` variant: `min-h-[16px]`.
-- `violet` and `dim` static-only badges are `StatusBadge` with `neutral` tone; `ActionBadge` does
-  not support them.
+- `violet` and `dim` static-only badges are `StatusBadge` with `neutral` tone; `ActionBadge` does not support them.
 - Disabled state: `opacity-40 pointer-events-none`.
 
 ---
 
 ### PillBadge
 
-Pill-shaped categorical label. Used for agent type, OS, plugin type, and similar taxonomy labels
-where the value is not a status.
+Pill-shaped categorical label. Used for agent type, OS, plugin type, and similar taxonomy labels where the value is not a status.
 
 ```typescript
 // frontend/src/lib/components/ui/PillBadge.svelte
@@ -318,8 +313,7 @@ Usage:
 
 ![PillBadge showing a categorical label](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-pill-badge-chromium.png)
 
-Renders `rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)]`, no tone
-variants. Use `StatusBadge` for status-carrying values.
+Renders `rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)]`, no tone variants. Use `StatusBadge` for status-carrying values.
 
 ---
 
@@ -327,8 +321,8 @@ variants. Use `StatusBadge` for status-carrying values.
 
 ### FormFieldRow
 
-Labeled form field wrapper with hint and error display. Provides ARIA `aria-describedby` context
-to child `Input` and `Textarea` components automatically.
+Labeled form field wrapper with hint and error display. Provides ARIA `aria-describedby` context to child `Input` and `Textarea` components
+automatically.
 
 ```typescript
 // frontend/src/lib/components/ui/FormFieldRow.svelte
@@ -359,23 +353,20 @@ Usage:
 </FormFieldRow>
 ```
 
-Layout: the label-column width is derived from a `FormLayout` Svelte context
-(`frontend/src/lib/components/forms/form-layout-context.ts`):
+Layout: the label-column width is derived from a `FormLayout` Svelte context (`frontend/src/lib/components/forms/form-layout-context.ts`):
 
 - `FormLayout.Modal` → `md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (narrow column, room for inputs).
-- `FormLayout.Page` → `md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (wider column, prevents label
-  wrapping in page forms).
+- `FormLayout.Page` → `md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (wider column, prevents label wrapping in page forms).
 
-`Modal.svelte` sets `FormLayout.Modal` automatically; pages default to `FormLayout.Page`. Stacks to
-a single column on narrow screens. No manual width override is needed when using `FormFieldRow`.
+`Modal.svelte` sets `FormLayout.Modal` automatically; pages default to `FormLayout.Page`. Stacks to a single column on narrow screens. No manual width
+override is needed when using `FormFieldRow`.
 
 ---
 
 ### FormFieldReadOnly
 
-Static-value sibling of `FormFieldRow`. Use this for read-only URLs, fingerprints, IDs, or other
-non-interactive values displayed inside a form section so they align with surrounding
-`FormFieldRow` inputs (both primitives read the same `FormLayout` context for label-column width).
+Static-value sibling of `FormFieldRow`. Use this for read-only URLs, fingerprints, IDs, or other non-interactive values displayed inside a form
+section so they align with surrounding `FormFieldRow` inputs (both primitives read the same `FormLayout` context for label-column width).
 
 ```typescript
 // frontend/src/lib/components/forms/FormFieldReadOnly.svelte
@@ -400,9 +391,9 @@ Usage:
 </FormFieldReadOnly>
 ```
 
-Layout: identical grid + label-column-by-context behaviour as `FormFieldRow`. Use this primitive
-instead of hand-rolling a `<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not
-track the modal/page context split and will misalign with sibling `FormFieldRow` rows.
+Layout: identical grid + label-column-by-context behaviour as `FormFieldRow`. Use this primitive instead of hand-rolling a
+`<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not track the modal/page context split and will misalign with sibling
+`FormFieldRow` rows.
 
 ---
 
@@ -435,11 +426,9 @@ export type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'sear
 }
 ```
 
-When placed inside `<FormFieldRow inputId="...">`, `aria-describedby` is wired automatically via
-Svelte context — no manual prop needed.
+When placed inside `<FormFieldRow inputId="...">`, `aria-describedby` is wired automatically via Svelte context — no manual prop needed.
 
-Error state: `border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]` via `aria-invalid`.
-Height: `h-8` (`32px`). Radius: `3px`.
+Error state: `border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]` via `aria-invalid`. Height: `h-8` (`32px`). Radius: `3px`.
 
 ---
 
@@ -490,9 +479,115 @@ Single checkbox input with bindable `checked` and `indeterminate` states.
 }
 ```
 
-Color note: `@tailwindcss/forms` sets `appearance: none` on checkboxes making `accent-color` inert.
-The checked fill uses `currentColor` from the `text-[var(--accent)]` class. Do not use
-`accent-[var(--accent)]`.
+Color note: `@tailwindcss/forms` sets `appearance: none` on checkboxes making `accent-color` inert. The checked fill uses `currentColor` from the
+`text-[var(--accent)]` class. Do not use `accent-[var(--accent)]`.
+
+---
+
+### RadioCardGroup
+
+Horizontal card-tile selector for mutually exclusive string options. No radio indicators — selection is conveyed by accent border and background tint
+only.
+
+**Location:** `frontend/src/lib/components/forms/RadioCardGroup.svelte` **Import:** `import { RadioCardGroup } from '$lib/components/forms';`
+
+```typescript
+// frontend/src/lib/components/forms/RadioCardGroup.svelte
+export type RadioCardOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+{
+  name: string;                          // ARIA label for the group
+  value: string;                         // currently selected value
+  options: RadioCardOption[];            // { value, label, description? }[]
+  onchange: (value: string) => void;    // called when selection changes
+  disabled?: boolean;                    // disables all cards
+}
+```
+
+**Accessibility:** `role="radiogroup"` on container; each card has `role="radio"` and `aria-checked`.
+
+**Example:**
+
+```svelte
+<RadioCardGroup
+  name="registration-mode"
+  value={form.draft.mode}
+  options={[
+    { value: 'open', label: 'Open', description: 'Anyone can register.' },
+    { value: 'invite', label: 'Invite Only', description: 'Token required.' },
+    { value: 'closed', label: 'Closed', description: 'No new accounts.' }
+  ]}
+  onchange={(v) => form.update('mode', v)}
+/>
+```
+
+---
+
+### createFormDraft
+
+Svelte 5 reactive factory for the settings draft pattern: tracks server-committed state versus in-progress edits, computes dirty state, and provides
+load/commit/discard lifecycle methods.
+
+**Location:** `frontend/src/lib/forms/draft.svelte.ts` **Import:** `import { createFormDraft } from '$lib/forms/draft.svelte';`
+
+```typescript
+interface FormDraft<T> {
+  readonly draft: T; // current in-progress edits
+  readonly serverValues: T; // last committed server state
+  readonly isDirty: boolean; // any field differs from serverValues
+  isFieldDirty(key: keyof T): boolean;
+  update<K extends keyof T>(key: K, value: T[K]): void;
+  load(values: T): void; // on data fetch — sets both draft and serverValues
+  commit(updated: T): void; // on successful save — sets both to the server response
+  discard(): void; // reset draft to serverValues
+}
+```
+
+**When to use:** Any editable settings form that needs a Save/Discard pair with disabled-when-clean Save button and per-field dirty indicators.
+
+**Critical:** Do **not** destructure the return value — `const { draft } = form` takes a snapshot. Always access through `form.draft`, `form.isDirty`,
+etc.
+
+**Example:**
+
+```svelte
+<script lang="ts">
+  import { createFormDraft } from '$lib/forms/draft.svelte';
+
+  let form = createFormDraft({ mode: 'open', maxUsers: 100 });
+</script>
+
+<FormFieldRow label="Mode">
+  <RadioCardGroup
+    name="mode"
+    value={form.draft.mode}
+    options={[...]}
+    onchange={(v) => form.update('mode', v)}
+  />
+</FormFieldRow>
+
+<FormFieldRow label="Max Users">
+  <Input
+    id="max-users"
+    type="number"
+    value={form.draft.maxUsers}
+    oninput={(e) => form.update('maxUsers', +e.currentTarget.value)}
+  />
+</FormFieldRow>
+
+<div>
+  <Button variant="primary" disabled={!form.isDirty} onclick={() => form.commit(savedValues)}>
+    Save
+  </Button>
+  <Button variant="ghost" disabled={!form.isDirty} onclick={() => form.discard()}>
+    Discard
+  </Button>
+</div>
+```
 
 ---
 
@@ -500,8 +595,8 @@ The checked fill uses `currentColor` from the `text-[var(--accent)]` class. Do n
 
 ### DataTable
 
-Accessible table with loading, error, and empty states built in. Accepts column definitions for the
-default header/row rendering, or fully custom `header`/`row` snippets.
+Accessible table with loading, error, and empty states built in. Accepts column definitions for the default header/row rendering, or fully custom
+`header`/`row` snippets.
 
 ```typescript
 // frontend/src/lib/components/ui/DataTable.svelte
@@ -565,10 +660,12 @@ Usage (custom row):
 Visual rules:
 
 - Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-table-header font-semibold uppercase tracking-table-header`.
-- Body rows: `text-table-body`, bottom border except last row. Cell padding: `table-cell-pad`. Row highlight (applied via `<tbody>` child selectors, not per-`<tr>` classes):
+- Body rows: `text-table-body`, bottom border except last row. Cell padding: `table-cell-pad`. Row highlight (applied via `<tbody>` child selectors,
+  not per-`<tr>` classes):
   - Even rows: `[&>tr:nth-child(even)]:bg-[var(--bg-raised)]`
   - Any row on hover: `[&>tr:hover]:bg-[var(--bg-hover)]`
-  - Odd rows at rest: transparent (`--bg-surface` inherited). Even rows at rest: `--bg-raised`. Any row on hover: `--bg-hover` — distinct from both rest states in dark and light themes.
+  - Odd rows at rest: transparent (`--bg-surface` inherited). Even rows at rest: `--bg-raised`. Any row on hover: `--bg-hover` — distinct from both
+    rest states in dark and light themes.
 - Container: `rounded-panel border border-[var(--border-subtle)]`.
 
 ---
@@ -589,15 +686,14 @@ Pagination footer for `DataTable`.
 
 ![Table footer bar with total count and pagination controls](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-table-footer-chromium.png)
 
-Renders a `border-t border-[var(--border-subtle)]` bar with "N total" on the left and a
-`Pagination` control on the right. Always used inside the `footer` snippet of `DataTable`.
+Renders a `border-t border-[var(--border-subtle)]` bar with "N total" on the left and a `Pagination` control on the right. Always used inside the
+`footer` snippet of `DataTable`.
 
 ---
 
 ### ContextMenuItem
 
-Single menu item inside a `ContextMenuShell`. Carries `role="menuitem"` and handles destructive
-styling automatically.
+Single menu item inside a `ContextMenuShell`. Carries `role="menuitem"` and handles destructive styling automatically.
 
 ```typescript
 // frontend/src/lib/components/ui/ContextMenuItem.svelte
@@ -609,20 +705,16 @@ styling automatically.
 }
 ```
 
-`ContextMenuShell` (re-exported from `ContextMenu.svelte`) is anchored to the trigger element's
-bounding rect supplied by the caller. It manages keyboard navigation, viewport overflow placement,
-and click-outside dismiss.
+`ContextMenuShell` (re-exported from `ContextMenu.svelte`) is anchored to the trigger element's bounding rect supplied by the caller. It manages
+keyboard navigation, viewport overflow placement, and click-outside dismiss.
 
-The shell DOM is portaled to `document.body` via the shared `use:portal` action so its
-`position: fixed` resolves against the viewport regardless of any ancestor containing block
-(e.g. `contain: layout` on the app shell `<main>`).
+The shell DOM is portaled to `document.body` via the shared `use:portal` action so its `position: fixed` resolves against the viewport regardless of
+any ancestor containing block (e.g. `contain: layout` on the app shell `<main>`).
 
-**Constraint:** do not open `ContextMenuShell` from inside a `Modal`/`ModalShell`. Per the pinned
-z-index scale (`tokens.md`), the menu shell sits at `z-index: 100` while the modal backdrop sits at
-`900` and the modal shell at `910`; once both are body-portaled siblings, the menu would render
-behind the modal. The component emits a `console.warn` in this case to surface the violation early.
-Adding "menu inside modal" requires a new tier in the scale, updates to `app.css`,
-`css-contract.test.ts`, and this document.
+**Constraint:** do not open `ContextMenuShell` from inside a `Modal`/`ModalShell`. Per the pinned z-index scale (`tokens.md`), the menu shell sits at
+`z-index: 100` while the modal backdrop sits at `900` and the modal shell at `910`; once both are body-portaled siblings, the menu would render behind
+the modal. The component emits a `console.warn` in this case to surface the violation early. Adding "menu inside modal" requires a new tier in the
+scale, updates to `app.css`, `css-contract.test.ts`, and this document.
 
 ```typescript
 // frontend/src/lib/components/ContextMenu.svelte
@@ -635,14 +727,12 @@ Adding "menu inside modal" requires a new tier in the scale, updates to `app.css
 
 Placement rules (anchor-based):
 
-- Default: menu's top-left corner sits 2px down-right of the trigger's bottom-right corner — menu
-  sits to the right of and below the trigger, with a 2px gap on both axes.
-- Horizontal flip: when the right side would overflow the viewport, menu's top-right corner sits
-  2px down-left of the trigger's bottom-left corner — menu sits to the left of and below the
-  trigger.
-- Vertical clamp: when below would overflow, the menu's bottom edge is shifted to
-  `viewport.bottom - 8px`. Horizontal placement is unchanged; the menu does not flip above the
-  trigger. Trigger overlap is acceptable.
+- Default: menu's top-left corner sits 2px down-right of the trigger's bottom-right corner — menu sits to the right of and below the trigger, with a
+  2px gap on both axes.
+- Horizontal flip: when the right side would overflow the viewport, menu's top-right corner sits 2px down-left of the trigger's bottom-left corner —
+  menu sits to the left of and below the trigger.
+- Vertical clamp: when below would overflow, the menu's bottom edge is shifted to `viewport.bottom - 8px`. Horizontal placement is unchanged; the menu
+  does not flip above the trigger. Trigger overlap is acceptable.
 - Viewport edge clearance is 8px (`pad`); trigger gap is 2px (`gap`) on both axes.
 - The menu closes on `window` resize because the anchor rect is a snapshot from the open moment.
 
@@ -669,8 +759,7 @@ Usage:
 
 ![Context menu shell with standard and destructive items](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-context-menu-shell-chromium.png)
 
-Row height: `min-h-8` (`32px`). Horizontal padding: `px-3`. Font: `12px medium`. Hover fill:
-`bg-[var(--bg-raised)]`.
+Row height: `min-h-8` (`32px`). Horizontal padding: `px-3`. Font: `12px medium`. Hover fill: `bg-[var(--bg-raised)]`.
 
 Context menu shell dimensions:
 
@@ -679,8 +768,7 @@ Context menu shell dimensions:
 - Radius: `4px`
 - Destructive items use `--color-danger` text token.
 
-`software_item.host_context_menu` contributes launcher entries using this component — it does not
-render nested grouped sub-menus.
+`software_item.host_context_menu` contributes launcher entries using this component — it does not render nested grouped sub-menus.
 
 ---
 
@@ -688,8 +776,7 @@ render nested grouped sub-menus.
 
 ### Button
 
-Renders either an `<a role="button">` (when `href` is set) or a `<button>` element. Both share
-identical visual treatment and state management.
+Renders either an `<a role="button">` (when `href` is set) or a `<button>` element. Both share identical visual treatment and state management.
 
 ```typescript
 // frontend/src/lib/components/Button.svelte
@@ -753,8 +840,8 @@ Sizes:
 | `md` | `23px` | `px-3`  | `9px`   |
 | `sm` | `19px` | `px-2`  | `8.5px` |
 
-Loading state: replaces leading icon with a `9px` spinning border ring; sets `aria-busy`. Disabled
-state: `opacity-40 pointer-events-none` (also `aria-disabled` on link form).
+Loading state: replaces leading icon with a `9px` spinning border ring; sets `aria-busy`. Disabled state: `opacity-40 pointer-events-none` (also
+`aria-disabled` on link form).
 
 Do not use `<a class="btn btn-sm preset-tonal">` Skeleton patterns. Always use `<Button>`.
 
@@ -764,8 +851,7 @@ Do not use `<a class="btn btn-sm preset-tonal">` Skeleton patterns. Always use `
 
 ### ConfirmDialog
 
-Opinionated confirmation modal for destructive or irreversible actions. Always prefer this over
-building a custom confirmation flow inline.
+Opinionated confirmation modal for destructive or irreversible actions. Always prefer this over building a custom confirmation flow inline.
 
 ```typescript
 // frontend/src/lib/components/ConfirmDialog.svelte
@@ -805,9 +891,8 @@ import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
 
 ### ConsentPrompt
 
-Shared auth-consent card used by the OAuth consent page and the device auth approval flow.
-Owns client identity display, trust signals, Approve/Deny buttons, and a `children` slot for
-page-specific content (scope list, warnings).
+Shared auth-consent card used by the OAuth consent page and the device auth approval flow. Owns client identity display, trust signals, Approve/Deny
+buttons, and a `children` slot for page-specific content (scope list, warnings).
 
 ```typescript
 // frontend/src/lib/components/ConsentPrompt.svelte
@@ -834,11 +919,11 @@ export type ConsentPromptTrust =
 
 Trust signal behaviour:
 
-| `trust` value  | Rendered signal                                                 |
-| -------------- | --------------------------------------------------------------- |
-| `unverified`   | `<Callout tone="danger">` — "not been verified"                 |
-| `dcr`          | `<Callout tone="warning">` — "recently registered"              |
-| all others     | no callout                                                      |
+| `trust` value | Rendered signal                                    |
+| ------------- | -------------------------------------------------- |
+| `unverified`  | `<Callout tone="danger">` — "not been verified"    |
+| `dcr`         | `<Callout tone="warning">` — "recently registered" |
+| all others    | no callout                                         |
 
 Usage (OAuth consent page):
 
@@ -880,8 +965,7 @@ Rules:
 
 ### ModalShell
 
-Re-exported as `ModalShell` from the barrel. Renders a centered dialog over a backdrop with an
-optional title and footer slot.
+Re-exported as `ModalShell` from the barrel. Renders a centered dialog over a backdrop with an optional title and footer slot.
 
 ```typescript
 // frontend/src/lib/components/Modal.svelte
@@ -914,18 +998,16 @@ Rules:
 - Close on `Escape` or backdrop click via `ModalBackdrop`.
 - Footer is always right-aligned with `gap-2`.
 - `aria-modal="true"`, `role="dialog"`, `aria-labelledby` wired when `title` is provided.
-- `ModalBackdrop` is portaled to `document.body` via the shared `use:portal` action so the
-  backdrop covers the full viewport regardless of any ancestor containing block (e.g.
-  `contain: layout` on the app shell `<main>`). Stacked modals (e.g. a `ConfirmDialog` opened
-  from inside a `ModalShell`) become body-children siblings; DOM order resolves stacking when
-  the backdrop z-index ties.
+- `ModalBackdrop` is portaled to `document.body` via the shared `use:portal` action so the backdrop covers the full viewport regardless of any
+  ancestor containing block (e.g. `contain: layout` on the app shell `<main>`). Stacked modals (e.g. a `ConfirmDialog` opened from inside a
+  `ModalShell`) become body-children siblings; DOM order resolves stacking when the backdrop z-index ties.
 
 ---
 
 ## ProviderSelector
 
-Dropdown for selecting a surface provider in targeted slots. Host-owned chrome — surfaces must not
-render this themselves; the slot host renders it above the surface content.
+Dropdown for selecting a surface provider in targeted slots. Host-owned chrome — surfaces must not render this themselves; the slot host renders it
+above the surface content.
 
 ```typescript
 // frontend/src/lib/components/ui/ProviderSelector.svelte
@@ -945,15 +1027,14 @@ export type ProviderOption = {
 }
 ```
 
-Used by `SurfaceReadPanel` for targeted `surface.page` and other targeted slots. Do not use in
-surface-rendered content — only in the host container layer.
+Used by `SurfaceReadPanel` for targeted `surface.page` and other targeted slots. Do not use in surface-rendered content — only in the host container
+layer.
 
 ---
 
 ## Stat Card
 
-Navigable summary card. Shows a metric with a label and sub-label, linking to a detail page.
-Used in the dashboard summary grid.
+Navigable summary card. Shows a metric with a label and sub-label, linking to a detail page. Used in the dashboard summary grid.
 
 ```typescript
 // frontend/src/lib/components/ui/StatCard.svelte
@@ -1021,9 +1102,8 @@ Always use named static imports. Tree-shaking keeps unused icons out of the bund
 import { Package, Server, Settings } from "lucide-svelte";
 ```
 
-Do **not** use `<Icon name="string">` to render icons — the `name` prop on the `Icon`
-wrapper only sets a CSS class and does not render SVG paths. Always use the named
-component directly.
+Do **not** use `<Icon name="string">` to render icons — the `name` prop on the `Icon` wrapper only sets a CSS class and does not render SVG paths.
+Always use the named component directly.
 
 ### Standard usage
 
@@ -1056,14 +1136,13 @@ component directly.
 
 ### Icon component type
 
-When accepting a lucide icon as a prop, use `ComponentType<SvelteComponent>` from `'svelte'`
-(the Svelte 4–compatible class-constructor type, matching lucide-svelte 1.0.1's exports):
+When accepting a lucide icon as a prop, use `ComponentType<SvelteComponent>` from `'svelte'` (the Svelte 4–compatible class-constructor type, matching
+lucide-svelte 1.0.1's exports):
 
 ```typescript
 import type { ComponentType, SvelteComponent } from "svelte";
 
-let { icon: IconComponent }: { icon?: ComponentType<SvelteComponent> } =
-  $props();
+let { icon: IconComponent }: { icon?: ComponentType<SvelteComponent> } = $props();
 ```
 
 Render with a **capitalized** variable name — Svelte treats lowercase tags as HTML elements:
@@ -1078,17 +1157,15 @@ When `lucide-svelte` ships runes-native exports, migrate to `Component<IconProps
 
 ### Surface nav icon allowlist
 
-Plugins that declare a `nav_icon` on their `SurfaceDescriptor` must use a key from
-`SURFACE_NAV_ICONS` in `frontend/src/lib/nav-icons.ts`. Unknown names fall back to `Box`.
-Use `resolveNavIcon(name)` to resolve a string to a component at render time.
+Plugins that declare a `nav_icon` on their `SurfaceDescriptor` must use a key from `SURFACE_NAV_ICONS` in `frontend/src/lib/nav-icons.ts`. Unknown
+names fall back to `Box`. Use `resolveNavIcon(name)` to resolve a string to a component at render time.
 
-Permitted keys: `Box`, `Cpu`, `Database`, `FileText`, `Globe`, `HardDrive`, `History`,
-`Layers`, `Package`, `Puzzle`, `ScrollText`, `Server`, `ServerCog`, `Settings`, `Shield`,
-`Tag`, `Tags`, `Wrench`.
+Permitted keys: `Box`, `Cpu`, `Database`, `FileText`, `Globe`, `HardDrive`, `History`, `Layers`, `Package`, `Puzzle`, `ScrollText`, `Server`,
+`ServerCog`, `Settings`, `Shield`, `Tag`, `Tags`, `Wrench`.
 
 ---
 
 ## Notes
 
-**Toggle / Switch** — replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a
-track+thumb switch. The border-radius entry for "Toggle track" in `tokens.md` is a spec remnant.
+**Toggle / Switch** — replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a track+thumb switch. The border-radius entry for
+"Toggle track" in `tokens.md` is a spec remnant.

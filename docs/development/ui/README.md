@@ -19,8 +19,8 @@ Built-in product UI and surface-backed UI must read as one product. Visual origi
 ## Relationship To The Approved Spec
 
 The approved spec at
-[`docs/superpowers/specs/2026-04-16-ui-design-language-design.md`](../../superpowers/specs/2026-04-16-ui-design-language-design.md)
-is normative. If this guide conflicts with that spec, the spec wins.
+[`docs/superpowers/specs/2026-04-16-ui-design-language-design.md`](../../superpowers/specs/2026-04-16-ui-design-language-design.md) is normative. If
+this guide conflicts with that spec, the spec wins.
 
 Use this guide when:
 
@@ -85,23 +85,23 @@ Read in this order when onboarding:
 
 ## Quick Reference: What To Use
 
-| Need                                           | Use                                                |
-| ---------------------------------------------- | -------------------------------------------------- |
-| Section header + contained body                | `SectionCard`                                      |
-| Full page with eyebrow + actions               | `PageShell`                                        |
-| Tab switching                                  | `TabStrip`                                         |
-| Semantic callout (info/warning/danger/success) | `Callout`                                          |
-| No-data placeholder                            | `EmptyState`                                       |
-| Status indicator label                         | `StatusBadge`                                      |
-| Navigable or action-triggering badge           | `ActionBadge`                                      |
-| Categorical pill label                         | `PillBadge`                                        |
-| Labeled form field + validation                | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` |
-| Data listing with pagination                   | `DataTable` + `TableFooterBar`                     |
-| Navigable summary stat card                    | `StatCard`                                         |
-| Context action in a dropdown                   | `ContextMenuItem` inside `ContextMenuShell`        |
-| Destructive confirmation                       | `ConfirmDialog` (import directly, not from barrel) |
-| Arbitrary / form dialog                        | `ModalShell`                                       |
-| Primary / ghost / secondary / danger action    | `Button`                                           |
-| Targeted provider selection                    | `ProviderSelector` (surfaces only)                 |
+| Need                                           | Use                                                                   |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| Section header + contained body                | `SectionCard`                                                         |
+| Full page with eyebrow + actions               | `PageShell`                                                           |
+| Tab switching                                  | `TabStrip`                                                            |
+| Semantic callout (info/warning/danger/success) | `Callout`                                                             |
+| No-data placeholder                            | `EmptyState`                                                          |
+| Status indicator label                         | `StatusBadge`                                                         |
+| Navigable or action-triggering badge           | `ActionBadge`                                                         |
+| Categorical pill label                         | `PillBadge`                                                           |
+| Labeled form field + validation                | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` / `RadioCardGroup` |
+| Data listing with pagination                   | `DataTable` + `TableFooterBar`                                        |
+| Navigable summary stat card                    | `StatCard`                                                            |
+| Context action in a dropdown                   | `ContextMenuItem` inside `ContextMenuShell`                           |
+| Destructive confirmation                       | `ConfirmDialog` (import directly, not from barrel)                    |
+| Arbitrary / form dialog                        | `ModalShell`                                                          |
+| Primary / ghost / secondary / danger action    | `Button`                                                              |
+| Targeted provider selection                    | `ProviderSelector` (surfaces only)                                    |
 
 See `frontend/src/lib/components/ui/index.ts` for all barrel exports.
