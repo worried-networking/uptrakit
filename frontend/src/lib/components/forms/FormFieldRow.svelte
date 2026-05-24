@@ -32,7 +32,9 @@
 </script>
 
 <div
-	class="grid gap-3 md:items-start {labelColClass} {dirty ? 'border-l-2 border-[var(--accent)] pl-2' : ''}"
+	class="grid gap-3 md:items-start {labelColClass} border-l-2 pl-2 transition-colors {dirty
+		? 'border-[var(--accent)]'
+		: 'border-transparent'}"
 	data-ui="form-field-row"
 >
 	<div class="space-y-1">
