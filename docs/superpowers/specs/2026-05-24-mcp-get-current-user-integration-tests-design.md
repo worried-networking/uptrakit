@@ -55,8 +55,16 @@ McpTestApp {
 4. Build `McpState::new(...)` with:
    - `DbState::new(db.clone())`
    - `AuthState::new(JwtManager::from_secret(...), DeviceFlowStore::new(db.clone()), RateLimitStore::new(db.clone()), Arc::new(TokenDenylist::new()))`
+   - `settings`: `Settings::new(RegistrationSettings { mode: RegistrationMode::Open, token_hash: None, require_token_for_oidc: false }, 168)`,
+     then `settings.set_sans(vec!["127.0.0.1".to_string()]).await` so `build_allowed_hosts` emits a
+     non-empty list and rmcp host-header validation is exercised (not bypassed). The portless entry
+     `"127.0.0.1"` matches `Host: 127.0.0.1:<any-port>` per rmcp matching rules.
+   - `default_tenant_id: tenant_id`
+   - `controller_id: Uuid::nil()`
+   - Audit emitter: `let audit_db_backend: Arc<dyn AuditLogBackend> = Arc::new(DatabaseBackend::new(db.clone()));`
+     then `AuditEmitter::with_backends(AuditLogDispatcher::new(Arc::clone(&audit_db_backend)), Arc::clone(&audit_db_backend), Arc::new(NoopBackend))`
+   - `shutdown_token: CancellationToken::new()`
    - `NoopUpdateDispatcher` (tool not called by `get_current_user`)
-   - `AuditEmitter::with_backends(DatabaseBackend::new(db.clone()), ...)`
    - `oauth_enabled: false`, `oauth_verifier: None`, `oauth_canonical: None`
 5. `TcpListener::bind("127.0.0.1:0")` → record `addr`
 6. `build_mcp_router(state)` → `axum::serve` in `tokio::spawn` with `ct.child_token()`
@@ -71,15 +79,17 @@ No `#[tokio::test(start_paused = true)]` — no tokio time APIs in this test.
 /// Insert active user; return user_id.
 async fn insert_user(db, tenant_id, email) -> Uuid
 
-/// Link user to the seeded owner role (has AccessMcp; role seeded by migrations).
-async fn link_user_to_owner_role(db, tenant_id, user_id)
+/// Link user to a built-in role that grants AccessMcp (viewer; seeded by migrations).
+async fn link_user_to_access_mcp_role(db, tenant_id, user_id)
 
 /// Create upk_ API token; return plaintext token.
 async fn create_api_token(db, user_id) -> String
 ```
 
-`link_user_to_owner_role` finds the built-in owner role by `is_built_in = true` (same approach as
-`seed_permissions_for_owner` in web-api fixtures), then inserts `user_role`.
+`link_user_to_access_mcp_role` queries for a built-in role whose permissions include `access_mcp`
+(the `viewer`, `operator`, or `software_manager` roles seeded by migrations all qualify). The
+`owner` role was removed in migration `m20260310_000002_granular_permissions`; do not reference it.
+Inserts `user_role` linking the user to the found role.
 
 ---
 
@@ -128,7 +138,7 @@ if not found — test failure is expected to be explicit.
 ```text
 1. app = McpTestApp::new().await
 2. user_id = insert_user(&app.db, app.tenant_id, "owner@mcp.test").await
-3. link_user_to_owner_role(&app.db, app.tenant_id, user_id).await
+3. link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await
 4. token = create_api_token(&app.db, user_id).await
 5. session = McpSession::initialize(app.addr, &token).await
 6. result = session.call_tool("get_current_user", json!({})).await
@@ -143,15 +153,17 @@ if not found — test failure is expected to be explicit.
 1. app = McpTestApp::new_with_oauth(SECRET, ISSUER, AUD).await
    (same as new() but oauth_enabled=true, oauth_verifier=Some(...))
 2. user_id = insert_user(...).await
-3. link_user_to_owner_role(...).await
+3. link_user_to_access_mcp_role(...).await
 4. token = mint_test_jwt(user_id, app.tenant_id, SECRET, ISSUER, AUD, "mcp:read")
 5. session = McpSession::initialize(app.addr, &token).await
 6. result = session.call_tool("get_current_user", json!({})).await
 7. assert email matches
 ```
 
-JWT minting mirrors `oauth_rs_audience_binding.rs`: `McpAccessTokenClaims::new(...)` +
-`jsonwebtoken::encode`. `exp = 9_999_999_999`. Use `#[expect(clippy::unwrap_used, reason = "...")]`.
+JWT minting mirrors `oauth_rs_audience_binding.rs`:
+`McpAccessTokenClaims::new(iss, sub, aud, client_id, scope, jti, iat, nbf, exp, tenant_id)` + `jsonwebtoken::encode`.
+`exp = 9_999_999_999`. `client_id` and `jti` must be non-empty valid UUID strings
+(e.g. `Uuid::new_v4().to_string()`). Use `#[expect(clippy::unwrap_used, reason = "...")]`.
 
 ### `missing_access_mcp_permission_returns_403`
 
@@ -183,9 +195,9 @@ time                  = { workspace = true }
 tokio                 = { workspace = true, features = ["rt-multi-thread", "macros"] }
 ```
 
-Test file top: `#![cfg(feature = "db-sqlite")]`
+Test file top: `#![cfg(all(test, feature = "db-sqlite"))]`
 
-Quality gate command: `cargo test -p uptrakit-mcp --features db-sqlite`
+Quality gate: covered by the workspace gate `cargo test --all-features`. Run `cargo test -p uptrakit-mcp --features db-sqlite` for isolated crate verification.
 
 ---
 
@@ -208,8 +220,17 @@ and body content verification.
 
 ## Lint conventions
 
-Test file uses `#[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]`
-and `#[expect(clippy::expect_used, reason = "...")]` per project standards. No `#[allow]`.
+Lint suppression rules (no `#[allow]` permitted):
+
+- `#[tokio::test]`-annotated functions are covered by `allow-unwrap-in-tests` and `allow-panic-in-tests`
+  Clippy config settings, so no per-function annotation is needed there.
+- Private fixture helpers (`insert_user`, `link_user_to_access_mcp_role`, `create_api_token`) are NOT
+  `#[test]`-annotated, so they are NOT covered by those config settings. Each helper that calls
+  `.unwrap()` must carry `#[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]`.
+- `extract_sse_result` calls `panic!` directly, which also falls outside `allow-panic-in-tests`. It
+  must carry `#[expect(clippy::panic, reason = "test helper — explicit failure message on SSE parse error")]`.
+- `McpSession::initialize` and `McpSession::call_tool` are also not `#[test]`-annotated; add
+  `#[expect(clippy::unwrap_used, reason = "...")]` at method level if they call `.unwrap()`.
 
 ---
 
