@@ -408,3 +408,260 @@ async fn put_increments_etag_version() {
     assert_eq!(fresh_status, http::StatusCode::OK);
     assert_eq!(fresh_body["mode"], "open");
 }
+
+// ── Agent certificates (/api/v1/settings/agent-certificates) ─────────────────
+
+/// GET /settings/agent-certificates returns ETag header.
+#[tokio::test]
+async fn get_agent_certs_settings_returns_etag() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .get("/api/v1/settings/agent-certificates")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    assert!(
+        etag.contains("settings-v"),
+        "expected settings-v in ETag, got {etag:?}"
+    );
+}
+
+/// Full GET→ETag→PUT round-trip for agent-certificates.
+#[tokio::test]
+async fn agent_certs_settings_get_etag_put_round_trip() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // GET → capture ETag.
+    let get_resp = client
+        .get("/api/v1/settings/agent-certificates")
+        .bearer(&token)
+        .send()
+        .await;
+    assert_eq!(get_resp.status(), http::StatusCode::OK);
+    let etag = get_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+
+    // PUT without If-Match → 428.
+    let no_match = client
+        .put_json(
+            "/api/v1/settings/agent-certificates",
+            &serde_json::json!({}),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(no_match, http::StatusCode::PRECONDITION_REQUIRED);
+
+    // PUT with captured ETag → 200 with new ETag.
+    let put_resp = client
+        .put_json(
+            "/api/v1/settings/agent-certificates",
+            &serde_json::json!({}),
+        )
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send()
+        .await;
+    assert_eq!(put_resp.status(), http::StatusCode::OK);
+    assert!(
+        put_resp.headers().contains_key("etag"),
+        "PUT response must carry ETag"
+    );
+
+    // Old ETag now stale → 409.
+    let stale = client
+        .put_json(
+            "/api/v1/settings/agent-certificates",
+            &serde_json::json!({}),
+        )
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send_status()
+        .await;
+    assert_eq!(stale, http::StatusCode::CONFLICT);
+}
+
+// ── Network settings (/api/v1/global-settings/network) ───────────────────────
+
+/// GET /global-settings/network returns ETag header.
+#[tokio::test]
+async fn get_network_settings_returns_etag() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .get("/api/v1/global-settings/network")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    assert!(
+        etag.contains("global-settings-v"),
+        "expected global-settings-v in ETag, got {etag:?}"
+    );
+}
+
+/// PUT /global-settings/network without If-Match → 428.
+#[tokio::test]
+async fn put_network_settings_without_if_match_returns_428() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let status = client
+        .put_json("/api/v1/global-settings/network", &serde_json::json!({}))
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(status, http::StatusCode::PRECONDITION_REQUIRED);
+}
+
+/// Full GET→ETag→PUT round-trip for network settings (GlobalSettingsVersion scope).
+///
+/// This test exercises GlobalSettingsVersion::refresh_etag — the DB re-read path
+/// triggered after a successful mutation.
+#[tokio::test]
+async fn network_settings_get_etag_put_round_trip() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // GET → capture ETag.
+    let get_resp = client
+        .get("/api/v1/global-settings/network")
+        .bearer(&token)
+        .send()
+        .await;
+    assert_eq!(get_resp.status(), http::StatusCode::OK);
+    let etag = get_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    assert!(
+        etag.contains("global-settings-v"),
+        "expected global-settings-v prefix, got {etag:?}"
+    );
+
+    // PUT with captured ETag and a real field change → 200 with new ETag.
+    // An all-None body is a no-op; supply real_ip_header to trigger a DB write and
+    // version bump so the old ETag becomes stale.
+    let put_body = serde_json::json!({ "real_ip_header": "x-forwarded-for" });
+    let put_resp = client
+        .put_json("/api/v1/global-settings/network", &put_body)
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send()
+        .await;
+    assert_eq!(put_resp.status(), http::StatusCode::OK);
+    assert!(
+        put_resp.headers().contains_key("etag"),
+        "PUT response must carry ETag (from refresh_etag DB re-read)"
+    );
+
+    // Old ETag now stale → 409.
+    let stale = client
+        .put_json("/api/v1/global-settings/network", &put_body)
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send_status()
+        .await;
+    assert_eq!(stale, http::StatusCode::CONFLICT);
+}
+
+// ── Scope regression: global endpoints reject tenant-scoped ETags ─────────────
+
+/// PUT /global-settings/network with a tenant-scoped ETag → 409 Conflict.
+///
+/// Before the scope-bug fix, network/nats/zeroconf/github used SettingsVersion
+/// (tenant scope). A tenant ETag would have been accepted. This test ensures
+/// the correct GlobalSettingsVersion scope is enforced.
+#[tokio::test]
+async fn global_settings_rejects_tenant_scoped_etag() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // Seed both caches to version 5 so the test discriminates on the ETag *prefix*.
+    app.state
+        .settings_version_cache
+        .update(Scope::Tenant(app.state.default_tenant_id), 5);
+    app.state.settings_version_cache.update(Scope::Global, 5);
+
+    // Sending the tenant-scoped ETag W/"settings-v5" to a global endpoint.
+    // The middleware compares against W/"global-settings-v5" → mismatch → 409.
+    let status = client
+        .put_json("/api/v1/global-settings/network", &serde_json::json!({}))
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v5\"")
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::CONFLICT,
+        "tenant-scoped ETag must be rejected by global-settings endpoint"
+    );
+}
+
+/// PUT /global-settings/zeroconf with a tenant-scoped ETag → 409 Conflict.
+#[tokio::test]
+async fn zeroconf_settings_rejects_tenant_scoped_etag() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let status = client
+        .put_json(
+            "/api/v1/global-settings/zeroconf",
+            &serde_json::json!({ "enabled": false }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::CONFLICT,
+        "tenant-scoped ETag rejected by zeroconf (global) endpoint"
+    );
+}
