@@ -1,3 +1,4 @@
+use rmcp::handler::server::common::{AsRequestContext, FromContextPart};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -61,6 +62,24 @@ impl McpRequestContext {
     /// Returns `true` if the user holds `perm`.
     pub fn has_permission(&self, perm: &Permission) -> bool {
         self.permissions.contains(perm)
+    }
+}
+
+// Allow tool handlers to receive `McpRequestContext` as a plain parameter.
+// rmcp injects `http::request::Parts` into its own extension map; the auth
+// layer stored `McpRequestContext` in the HTTP request extensions, so we
+// retrieve it from `parts.extensions`.
+impl<C: AsRequestContext> FromContextPart<C> for McpRequestContext {
+    fn from_context_part(context: &mut C) -> Result<Self, rmcp::ErrorData> {
+        context
+            .as_request_context()
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("missing http request parts", None))?
+            .extensions
+            .get::<McpRequestContext>()
+            .cloned()
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("missing mcp request context", None))
     }
 }
 
