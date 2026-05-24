@@ -180,6 +180,60 @@ Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utiliti
 
 ---
 
+### Tooltip
+
+Inline info icon that reveals a styled tooltip bubble on hover or focus. Use for supplemental
+option descriptions that don't need to be permanently visible.
+
+**Location:** `frontend/src/lib/components/ui/Tooltip.svelte`\
+**Import:** `import { Tooltip } from '$lib/components/ui';`
+
+```typescript
+// frontend/src/lib/components/ui/Tooltip.svelte
+{
+  content: string;  // tooltip text; supports multiline via \n (rendered with white-space: pre-line)
+  id?: string;      // explicit tooltip element id; auto-generated if omitted
+}
+```
+
+Usage:
+
+```svelte
+<Tooltip content="Anyone can create an account." />
+
+<Tooltip content={"Line one.\nLine two."} />
+```
+
+Passing `content=""` renders nothing (no icon, no bubble) — treat empty string as absent.
+
+**Visual rules:**
+
+- Trigger: `<button type="button">` with `<Info size={14} />` icon from lucide-svelte.
+- Icon color: `--text-muted` at rest, `--text-secondary` on hover/focus.
+- Focus ring: `focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]`.
+- Bubble: `bg-[var(--bg-raised)]`, `border-[var(--border-default)]`, `rounded-panel` (4px),
+  `max-w-[220px]`, `text-xs text-[var(--text-primary)]`.
+- Arrow: 6×6px rotated square at the near-trigger edge of the bubble.
+- Animation: `transition-[opacity] duration-fast` (120ms); `invisible + opacity-0` when hidden.
+- Z-index: `100` (same tier as `ContextMenu`; `[data-ui="tooltip"]` rule in `app.css`).
+
+**Positioning:** centers above the trigger; flips to below if top would clip the viewport;
+horizontal clamping keeps 8px clearance from viewport edges.
+
+**Accessibility:**
+
+- Trigger has `aria-label="More information"` and `aria-describedby={tooltipId}`.
+- Bubble has `role="tooltip"` and matching `id`.
+- Bubble is **always in the DOM** (CSS-only show/hide) so `aria-describedby` always resolves.
+- `Escape` dismisses without moving focus and without `stopPropagation` (modal-close propagates
+  normally).
+- Touch: reveal via focus (tap icon → focus → show; tap elsewhere → blur → hide).
+
+**Deferred:** `SurfaceActionButton` `title=` → `Tooltip` migration is out of scope for this
+feature; tracked separately.
+
+---
+
 ### EmptyState
 
 Placeholder for list and table views with no rows, or filtered views with no matches.
@@ -498,19 +552,21 @@ only.
 export type RadioCardOption = {
   value: string;
   label: string;
-  description?: string;
+  tooltip?: string;  // shown in a Tooltip bubble; omit to render the card without an info icon
 };
 
 {
   name: string;                          // ARIA label for the group
   value: string;                         // currently selected value
-  options: RadioCardOption[];            // { value, label, description? }[]
+  options: RadioCardOption[];            // { value, label, tooltip? }[]
   onchange: (value: string) => void;    // called when selection changes
   disabled?: boolean;                    // disables all cards
 }
 ```
 
 **Accessibility:** `role="radiogroup"` on container; each card has `role="radio"` and `aria-checked`.
+Each card element is a `<div role="radio">` rather than `<button>` so the tooltip `<button>` can
+nest inside it without producing invalid HTML; no ARIA behaviour changed.
 
 **Example:**
 
@@ -519,9 +575,9 @@ export type RadioCardOption = {
   name="registration-mode"
   value={form.draft.mode}
   options={[
-    { value: 'open', label: 'Open', description: 'Anyone can register.' },
-    { value: 'invite', label: 'Invite Only', description: 'Token required.' },
-    { value: 'closed', label: 'Closed', description: 'No new accounts.' }
+    { value: 'open', label: 'Open', tooltip: 'Anyone can register.' },
+    { value: 'invite', label: 'Invite Only', tooltip: 'Token required.' },
+    { value: 'closed', label: 'Closed', tooltip: 'No new accounts.' }
   ]}
   onchange={(v) => form.update('mode', v)}
 />
