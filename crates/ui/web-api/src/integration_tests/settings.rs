@@ -5,6 +5,7 @@
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
+use http_body_util::BodyExt;
 use uptrakit_web_api_types::permissions::Permission;
 
 fn ensure_crypto_provider() {
@@ -75,6 +76,8 @@ async fn github_provider_settings_forbids_missing_permission() {
         .await;
     assert_eq!(get_status, http::StatusCode::FORBIDDEN);
 
+    // The ETag middleware runs before permission extractors; add If-Match so the
+    // middleware passes through and the permission check can produce 403.
     let (put_status, _): (_, serde_json::Value) = client
         .put_json(
             "/api/v1/global-settings/providers/github",
@@ -83,6 +86,7 @@ async fn github_provider_settings_forbids_missing_permission() {
             }),
         )
         .bearer(&token)
+        .header("if-match", "W/\"global-settings-v0\"")
         .send_json()
         .await;
     assert_eq!(put_status, http::StatusCode::FORBIDDEN);
@@ -105,7 +109,21 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
     assert!(initial_body.get("auth_token").is_none());
     assert!(initial_body.get("api_base_url").is_none());
 
-    let (status_set, set_body): (_, serde_json::Value) = client
+    // GET the current ETag before the first write.
+    let get_resp = client
+        .get("/api/v1/global-settings/providers/github")
+        .bearer(&token)
+        .send()
+        .await;
+    let etag = get_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+
+    let set_resp = client
         .put_json(
             "/api/v1/global-settings/providers/github",
             &serde_json::json!({
@@ -114,15 +132,31 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_json()
+        .header("if-match", &etag)
+        .send()
         .await;
-    assert_eq!(status_set, http::StatusCode::OK);
+    assert_eq!(set_resp.status(), http::StatusCode::OK);
+    let set_etag = set_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on first PUT")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    let set_body: serde_json::Value = serde_json::from_slice(
+        &set_resp
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+    )
+    .unwrap();
     assert_eq!(set_body["has_auth_token"], true);
     assert_eq!(set_body["auth_token"], "***");
     assert_eq!(set_body["api_base_url"], "https://ghe.example.com/api/v3");
 
-    let (status_keep, keep_body): (_, serde_json::Value) = client
+    let keep_resp = client
         .put_json(
             "/api/v1/global-settings/providers/github",
             &serde_json::json!({
@@ -130,15 +164,31 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_json()
+        .header("if-match", &set_etag)
+        .send()
         .await;
-    assert_eq!(status_keep, http::StatusCode::OK);
+    assert_eq!(keep_resp.status(), http::StatusCode::OK);
+    let keep_etag = keep_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on second PUT")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    let keep_body: serde_json::Value = serde_json::from_slice(
+        &keep_resp
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+    )
+    .unwrap();
     assert_eq!(keep_body["has_auth_token"], true);
     assert_eq!(keep_body["auth_token"], "***");
     assert_eq!(keep_body["api_base_url"], "https://ghe.example.com/api/v3");
 
-    let (status_clear, clear_body): (_, serde_json::Value) = client
+    let clear_resp = client
         .put_json(
             "/api/v1/global-settings/providers/github",
             &serde_json::json!({
@@ -147,10 +197,19 @@ async fn github_provider_settings_round_trip_masks_keeps_and_clears_token() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_json()
+        .header("if-match", &keep_etag)
+        .send()
         .await;
-    assert_eq!(status_clear, http::StatusCode::OK);
+    assert_eq!(clear_resp.status(), http::StatusCode::OK);
+    let clear_body: serde_json::Value = serde_json::from_slice(
+        &clear_resp
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+    )
+    .unwrap();
     assert_eq!(clear_body["has_auth_token"], false);
     assert!(clear_body.get("auth_token").is_none());
     assert!(clear_body.get("api_base_url").is_none());
@@ -188,7 +247,7 @@ async fn github_provider_settings_update_invalidates_runtime() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", "W/\"global-settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status, http::StatusCode::OK);
@@ -216,7 +275,7 @@ async fn github_provider_settings_invalid_update_returns_400_without_persisting_
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", "W/\"global-settings-v0\"")
         .send_json()
         .await;
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
@@ -246,7 +305,7 @@ async fn github_provider_settings_trims_whitespace_only_auth_token_to_clear() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", "W/\"global-settings-v0\"")
         .send_json()
         .await;
 

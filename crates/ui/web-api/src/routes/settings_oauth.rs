@@ -24,13 +24,10 @@ pub use uptrakit_web_api_types::settings_oauth::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{GlobalSettingsVersion, IfMatch};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::oauth::resolve_mcp_enabled;
-use crate::settings_store::{
-    get_settings_versions, load_global_setting_raw, upsert_global_setting_raw,
-};
+use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
 
 /// Load all four OAuth settings from DB. Missing keys fall back to defaults.
 async fn load_oauth_settings_from_db(state: &AppState) -> OAuthSettingsFromDb {
@@ -143,17 +140,7 @@ pub async fn get_oauth_settings(
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
     let db_state = load_oauth_settings_from_db(&state).await;
-    let version = state
-        .settings_version_cache
-        .get(uptrakit_config_reload::config::Scope::Global)
-        .unwrap_or(0);
-    let etag = format!("W/\"global-settings-v{version}\"");
-    (
-        StatusCode::OK,
-        [(axum::http::header::ETAG, etag)],
-        Json(db_state.into_response(&state)),
-    )
-        .into_response()
+    (StatusCode::OK, Json(db_state.into_response(&state))).into_response()
 }
 
 /// Update OAuth settings
@@ -183,7 +170,6 @@ pub async fn get_oauth_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_oauth_settings(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<GlobalSettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateOAuthSettingsRequest>,
@@ -191,24 +177,14 @@ pub async fn update_oauth_settings(
     let api_token_id = api_token_id.map(|v| v.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
 
-    // Nothing to update — return current state with ETag so clients can chain writes.
+    // Nothing to update — return current state.
     if req.mcp_enabled.is_none()
         && req.dcr_enabled.is_none()
         && req.cimd_enabled.is_none()
         && req.canonical_host.is_none()
     {
         let db_state = load_oauth_settings_from_db(&state).await;
-        let version = state
-            .settings_version_cache
-            .get(uptrakit_config_reload::config::Scope::Global)
-            .unwrap_or(0);
-        let etag = format!("W/\"global-settings-v{version}\"");
-        return (
-            StatusCode::OK,
-            [(axum::http::header::ETAG, etag)],
-            Json(db_state.into_response(&state)),
-        )
-            .into_response();
+        return (StatusCode::OK, Json(db_state.into_response(&state))).into_response();
     }
 
     // Read before-values for keys being updated.
@@ -420,24 +396,6 @@ pub async fn update_oauth_settings(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
     hook.flush_after_commit().await;
-
-    // Sync the in-process global-settings version cache to the authoritative DB
-    // value. Using saturating_add(1) is incorrect here because upsert_global_setting_raw
-    // calls bump_global_settings_version once per field written (up to 4 per request),
-    // so the DB counter may have advanced by more than 1.
-    if let Ok((_, global_v)) = get_settings_versions(state.db(), state.default_tenant_id).await {
-        let version = u64::try_from(global_v).unwrap_or_else(|_| {
-            tracing::warn!(
-                global_v,
-                "global_version negative or overflow; treating as 0"
-            );
-            0
-        });
-        state
-            .settings_version_cache
-            .update(uptrakit_config_reload::config::Scope::Global, version);
-    }
-    // Non-fatal: if the read fails the reconciler will sync the cache on its next poll.
 
     // Read fresh from DB for the response.
     let db_state = load_oauth_settings_from_db(&state).await;

@@ -23,7 +23,6 @@ pub use uptrakit_web_api_types::settings_zeroconf::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings::ZeroconfSnapshot;
@@ -111,7 +110,6 @@ pub async fn get_zeroconf_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_zeroconf_settings(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateZeroconfSettingsRequest>,
@@ -477,7 +475,6 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_zeroconf_settings(
             State(Arc::clone(&state)),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
