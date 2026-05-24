@@ -582,6 +582,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::device_auth::device_auth_approve))
         .routes(routes!(crate::routes::device_auth::device_auth_deny))
         .routes(routes!(crate::routes::device_auth::device_auth_lookup))
+        // rotate_ca is intentionally outside the global_settings ETag sub-router: the handler
+        // only signals a background task and returns immediately — no settings_version bump
+        // occurs during the HTTP transaction, so refresh_etag would return a stale ETag.
         .routes(routes!(crate::routes::settings_ca::rotate_ca))
         .routes(routes!(crate::routes::hosts::list_hosts))
         .routes(routes!(crate::routes::hosts::get_host))
