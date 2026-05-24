@@ -664,24 +664,14 @@ impl<'a> MockSettings<'a> {
         MockEndpoint::new(self.server, "GET", paths::settings::COMBINED)
     }
 
-    /// Mock `GET /api/v1/settings/registration`.
-    pub fn on_get_registration(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::settings::REGISTRATION)
+    /// Mock `GET /api/v1/settings/access`.
+    pub fn on_get_access(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "GET", paths::settings::ACCESS)
     }
 
-    /// Mock `PUT /api/v1/settings/registration`.
-    pub fn on_update_registration(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "PUT", paths::settings::REGISTRATION)
-    }
-
-    /// Mock `GET /api/v1/settings/authentication`.
-    pub fn on_get_authentication(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::settings::AUTHENTICATION)
-    }
-
-    /// Mock `PUT /api/v1/settings/authentication`.
-    pub fn on_update_authentication(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "PUT", paths::settings::AUTHENTICATION)
+    /// Mock `PUT /api/v1/settings/access`.
+    pub fn on_update_access(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "PUT", paths::settings::ACCESS)
     }
 
     /// Mock `GET /api/v1/settings/agent-certificates`.

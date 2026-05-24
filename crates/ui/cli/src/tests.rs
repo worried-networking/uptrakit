@@ -11,8 +11,8 @@ use uptrakit_openapi_client::Uuid;
 use commands::auth::{AuthCommands, CaCommands};
 use commands::autodiscovery::IgnoresCommands;
 use commands::settings::{
-    AuthenticationCommands, CertificateCommands, NatsCommands, NetworkCommands, OidcCommands,
-    ProviderGithubCommands, RegistrationCommands,
+    AccessCommands, CertificateCommands, NatsCommands, NetworkCommands, OidcCommands,
+    ProviderGithubCommands,
 };
 
 /// Test UUID constants for readability.
@@ -727,25 +727,25 @@ fn settings_show_parses() {
 }
 
 #[test]
-fn settings_registration_show_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "registration", "show"])
-        .expect("should parse");
+fn settings_access_show_parses() {
+    let args =
+        Cli::try_parse_from(["uptrakit", "settings", "access", "show"]).expect("should parse");
     assert!(matches!(
         args.command,
         Some(Commands::Settings {
-            command: SettingsCommands::Registration {
-                command: RegistrationCommands::Show
+            command: SettingsCommands::Access {
+                command: AccessCommands::Show
             }
         })
     ));
 }
 
 #[test]
-fn settings_registration_update_parses() {
+fn settings_access_update_parses() {
     let args = Cli::try_parse_from([
         "uptrakit",
         "settings",
-        "registration",
+        "access",
         "update",
         "--mode",
         "invite",
@@ -753,17 +753,23 @@ fn settings_registration_update_parses() {
         "my-token",
         "--require-token-for-oidc",
         "true",
+        "--password-auth-enabled",
+        "false",
+        "--two-factor-required",
+        "true",
     ])
     .expect("should parse");
     match args.command {
         Some(Commands::Settings {
             command:
-                SettingsCommands::Registration {
+                SettingsCommands::Access {
                     command:
-                        RegistrationCommands::Update {
+                        AccessCommands::Update {
                             mode,
                             token,
                             require_token_for_oidc,
+                            password_auth_enabled,
+                            two_factor_required,
                         },
                 },
         }) => {
@@ -773,49 +779,10 @@ fn settings_registration_update_parses() {
             );
             assert_eq!(token.as_deref(), Some("my-token"));
             assert_eq!(require_token_for_oidc, Some(true));
-        }
-        _ => panic!("expected Settings Registration Update"),
-    }
-}
-
-#[test]
-fn settings_authentication_show_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "authentication", "show"])
-        .expect("should parse");
-    assert!(matches!(
-        args.command,
-        Some(Commands::Settings {
-            command: SettingsCommands::Authentication {
-                command: AuthenticationCommands::Show
-            }
-        })
-    ));
-}
-
-#[test]
-fn settings_authentication_update_parses() {
-    let args = Cli::try_parse_from([
-        "uptrakit",
-        "settings",
-        "authentication",
-        "update",
-        "--password-auth-enabled",
-        "false",
-    ])
-    .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Authentication {
-                    command:
-                        AuthenticationCommands::Update {
-                            password_auth_enabled,
-                        },
-                },
-        }) => {
             assert_eq!(password_auth_enabled, Some(false));
+            assert_eq!(two_factor_required, Some(true));
         }
-        _ => panic!("expected Settings Authentication Update"),
+        _ => panic!("expected Settings Access Update"),
     }
 }
 

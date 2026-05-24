@@ -288,10 +288,8 @@ pub(crate) mod global_settings {
 pub(crate) mod settings {
     /// `GET /api/v1/settings`
     pub(crate) const COMBINED: &str = "/api/v1/settings";
-    /// `GET /api/v1/settings/registration` · `PUT …`
-    pub(crate) const REGISTRATION: &str = "/api/v1/settings/registration";
-    /// `GET /api/v1/settings/authentication` · `PUT …`
-    pub(crate) const AUTHENTICATION: &str = "/api/v1/settings/authentication";
+    /// `GET /api/v1/settings/access` · `PUT …`
+    pub(crate) const ACCESS: &str = "/api/v1/settings/access";
     /// `GET /api/v1/settings/agent-certificates` · `PUT …`
     pub(crate) const AGENT_CERTIFICATES: &str = "/api/v1/settings/agent-certificates";
     /// `GET /api/v1/global-settings/network` · `PUT …`
