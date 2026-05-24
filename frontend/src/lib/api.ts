@@ -4,7 +4,6 @@ import type {
 	AgentCertificateSettings,
 	ApiTokenListResponse,
 	AssignHostsRequest,
-	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
 	SoftwareIgnoreResponse,
@@ -28,7 +27,6 @@ import type {
 	OidcProviderResponse,
 	RefreshResponse,
 	RegisterRequest,
-	RegistrationSettings,
 	RenewServerCertResponse,
 	RotateCaResponse,
 	ScheduledTaskResponse,
@@ -42,14 +40,12 @@ import type {
 	TriggerUpdateResponse,
 	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
-	UpdateAuthenticationSettings,
 	UpdateHistoryResponse,
 	UpdateHostAssignmentRequest,
 	UpdateHostRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdatePluginConfigRequest,
-	UpdateRegistrationSettings,
 	UpdateScheduledTaskRequest,
 	UpdateServiceRequest,
 	UpdateSoftwareItemRequest,
@@ -586,22 +582,6 @@ export function batchHostTags(action: string, ids: string[]): Promise<BatchActio
 }
 
 // --- Settings APIs ---
-
-export function getRegistrationSettings(): Promise<RegistrationSettings> {
-	return request('/settings/registration');
-}
-
-export function updateRegistrationSettings(data: UpdateRegistrationSettings): Promise<RegistrationSettings> {
-	return request('/settings/registration', { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function getAuthenticationSettings(): Promise<AuthenticationSettings> {
-	return request('/settings/authentication');
-}
-
-export function updateAuthenticationSettings(data: UpdateAuthenticationSettings): Promise<AuthenticationSettings> {
-	return request('/settings/authentication', { method: 'PUT', body: JSON.stringify(data) });
-}
 
 export function getAgentCertificateSettings(): Promise<AgentCertificateSettings> {
 	return request('/settings/agent-certificates');

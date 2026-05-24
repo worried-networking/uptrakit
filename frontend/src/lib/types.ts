@@ -148,25 +148,24 @@ export interface OidcLinkRequest {
 	password?: string;
 }
 
-export interface RegistrationSettings {
+export interface AccessSettingsData {
 	mode: 'open' | 'invite' | 'closed';
 	require_token_for_oidc: boolean;
-}
-
-export interface UpdateRegistrationSettings {
-	mode: 'open' | 'invite' | 'closed';
-	token?: string;
-	require_token_for_oidc?: boolean;
-}
-
-export interface AuthenticationSettings {
 	password_auth_enabled: boolean;
 	two_factor_required: boolean;
 }
 
-export interface UpdateAuthenticationSettings {
+export interface UpdateAccessSettingsRequest {
+	mode: 'open' | 'invite' | 'closed';
+	token?: string;
+	require_token_for_oidc?: boolean;
 	password_auth_enabled?: boolean;
 	two_factor_required?: boolean;
+}
+
+export interface AccessSettingsWithEtag {
+	data: AccessSettingsData;
+	etag: string | null;
 }
 
 export type MfaMethod = 'totp' | 'email' | 'recovery_code';
@@ -270,8 +269,6 @@ export interface EnrollmentTokensSummary {
 }
 
 export interface CombinedSettingsResponse {
-	registration: RegistrationSettings;
-	authentication: AuthenticationSettings;
 	agent_certificates: AgentCertificateSettings;
 	enrollment_tokens: EnrollmentTokensSummary;
 	multi_tenancy_enabled: boolean;
