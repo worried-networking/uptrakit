@@ -3,9 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import RadioCardGroup from './RadioCardGroup.svelte';
 
 const options = [
-	{ value: 'open', label: 'Open', description: 'Anyone can create an account.' },
-	{ value: 'invite', label: 'Invite Only', description: 'Token required.' },
-	{ value: 'closed', label: 'Closed', description: 'No new accounts.' }
+	{ value: 'open', label: 'Open', tooltip: 'Anyone can create an account.' },
+	{ value: 'invite', label: 'Invite Only', tooltip: 'Token required.' },
+	{ value: 'closed', label: 'Closed', tooltip: 'No new accounts.' }
 ];
 
 describe('RadioCardGroup', () => {
@@ -35,15 +35,78 @@ describe('RadioCardGroup', () => {
 
 	it('calls onchange when a card is clicked', async () => {
 		const onchange = vi.fn();
-		render(RadioCardGroup, { name: 'mode', value: 'open', options, onchange });
+		render(RadioCardGroup, {
+			name: 'mode',
+			value: 'open',
+			options,
+			onchange
+		});
 		await fireEvent.click(screen.getByRole('radio', { name: /closed/i }));
 		expect(onchange).toHaveBeenCalledWith('closed');
 	});
 
 	it('disabled cards do not fire onchange', async () => {
 		const onchange = vi.fn();
-		render(RadioCardGroup, { name: 'mode', value: 'open', options, onchange, disabled: true });
+		render(RadioCardGroup, {
+			name: 'mode',
+			value: 'open',
+			options,
+			onchange,
+			disabled: true
+		});
 		await fireEvent.click(screen.getByRole('radio', { name: /closed/i }));
 		expect(onchange).not.toHaveBeenCalled();
+	});
+
+	it('renders info icon button when tooltip is set', () => {
+		render(RadioCardGroup, { name: 'mode', value: 'open', options });
+		const infoButtons = screen.getAllByRole('button', {
+			name: 'More information'
+		});
+		expect(infoButtons.length).toBe(3);
+	});
+
+	it('renders no info icon button when tooltip is absent', () => {
+		const optionsNoTooltip = [
+			{ value: 'open', label: 'Open' },
+			{ value: 'closed', label: 'Closed' }
+		];
+		render(RadioCardGroup, {
+			name: 'mode',
+			value: 'open',
+			options: optionsNoTooltip
+		});
+		expect(screen.queryByRole('button', { name: 'More information' })).toBeNull();
+	});
+
+	it('clicking info icon does not select the card', async () => {
+		const onchange = vi.fn();
+		render(RadioCardGroup, {
+			name: 'mode',
+			value: 'open',
+			options,
+			onchange
+		});
+		const infoButton = screen.getAllByRole('button', {
+			name: 'More information'
+		})[2]; // closed card
+		await fireEvent.click(infoButton);
+		expect(onchange).not.toHaveBeenCalled();
+	});
+
+	it('Enter key on focused card fires onchange', async () => {
+		const onchange = vi.fn();
+		render(RadioCardGroup, { name: 'mode', value: 'open', options, onchange });
+		const closedCard = screen.getByRole('radio', { name: /closed/i });
+		await fireEvent.keyDown(closedCard, { key: 'Enter' });
+		expect(onchange).toHaveBeenCalledWith('closed');
+	});
+
+	it('Space key on focused card fires onchange', async () => {
+		const onchange = vi.fn();
+		render(RadioCardGroup, { name: 'mode', value: 'open', options, onchange });
+		const closedCard = screen.getByRole('radio', { name: /closed/i });
+		await fireEvent.keyDown(closedCard, { key: ' ' });
+		expect(onchange).toHaveBeenCalledWith('closed');
 	});
 });
