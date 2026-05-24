@@ -803,6 +803,81 @@ import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
 
 ---
 
+### ConsentPrompt
+
+Shared auth-consent card used by the OAuth consent page and the device auth approval flow.
+Owns client identity display, trust signals, Approve/Deny buttons, and a `children` slot for
+page-specific content (scope list, warnings).
+
+```typescript
+// frontend/src/lib/components/ConsentPrompt.svelte
+import type { Snippet } from 'svelte';
+
+export type ConsentPromptTrust =
+  | 'verified'       // controller-internal client (device flow); no callout
+  | 'unverified'     // trusted_at IS NULL; danger callout
+  | 'dcr'            // dynamically registered; warning callout
+  | 'open-metadata'  // cimd_cache; no callout
+  | 'manual';        // admin-registered; no callout
+
+{
+  clientName: string;
+  clientUri?: string | null;     // renders as external link when present
+  trust: ConsentPromptTrust;
+  approveDisabled?: boolean;     // disables Approve without showing loading
+  approving: boolean;            // shows spinner on Approve, disables both buttons
+  onApprove: () => void;
+  onDeny: () => void;
+  children?: Snippet;            // rendered between trust signals and action buttons
+}
+```
+
+Trust signal behaviour:
+
+| `trust` value  | Rendered signal                                                 |
+| -------------- | --------------------------------------------------------------- |
+| `unverified`   | `<Callout tone="danger">` — "not been verified"                 |
+| `dcr`          | `<Callout tone="warning">` — "recently registered"              |
+| all others     | no callout                                                      |
+
+Usage (OAuth consent page):
+
+```svelte
+<ConsentPrompt
+  clientName={details.client_name}
+  clientUri={details.client_uri}
+  trust={clientTrust(details)}
+  approveDisabled={submitting}
+  approving={submitting}
+  onApprove={handleAllow}
+  onDeny={handleDeny}
+>
+  <!-- page-specific content: scope list, redirect warning, metadata notice -->
+</ConsentPrompt>
+```
+
+Usage (device auth page):
+
+```svelte
+<ConsentPrompt
+  clientName={lookup?.client_name ?? 'CLI'}
+  trust="verified"
+  approving={processing}
+  onApprove={onApprove}
+  onDeny={onDeny}
+/>
+```
+
+Rules:
+
+- Approve button: `variant="primary" loading={approving}`. Disabled when `approving` or `approveDisabled`.
+- Deny button: `variant="secondary"`. Disabled when `approving` (no loading spinner).
+- Button order: Deny left, Approve right (`flex justify-end gap-2`).
+- Always renders `data-ui="consent-prompt"` on the root element for test selectors.
+- Do not render `ConsentPrompt` inside a `SectionCard` — it is a standalone card-level unit.
+
+---
+
 ### ModalShell
 
 Re-exported as `ModalShell` from the barrel. Renders a centered dialog over a backdrop with an
