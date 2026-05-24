@@ -57,6 +57,7 @@ pub async fn get_access_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
+    // Absent entry ≡ version 0 (cache is populated only after the first PUT).
     let version = state
         .settings_version_cache
         .get(uptrakit_config_reload::config::Scope::Tenant(
@@ -343,6 +344,7 @@ pub async fn update_access_settings(
     hook.flush_after_commit().await;
 
     // ── 8. Bump settings version cache ────────────────────────────────────────
+    // Absent entry ≡ version 0; first successful PUT yields version 1.
     let scope = uptrakit_config_reload::config::Scope::Tenant(tenant_id);
     let next = state
         .settings_version_cache
