@@ -118,5 +118,15 @@ describe('Tooltip', () => {
 			const bubble = document.querySelector('[role="tooltip"]')!;
 			expect(bubble.classList.contains('invisible')).toBe(true);
 		});
+
+		it('bubble remains visible after positioning effect runs', async () => {
+			vi.useFakeTimers();
+			render(Tooltip, { content: 'Hello' });
+			const trigger = screen.getByRole('button', { name: 'More information' });
+			await fireEvent.mouseEnter(trigger);
+			const bubble = document.querySelector('[role="tooltip"]')!;
+			// getBoundingClientRect returns zeros in JSDOM — effect must not crash
+			expect(bubble.classList.contains('invisible')).toBe(false);
+		});
 	});
 });

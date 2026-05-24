@@ -41,6 +41,31 @@
 	$effect(() => {
 		return () => clearTimeout(hideTimeout);
 	});
+
+	$effect(() => {
+		if (!visible || !tooltipEl || !triggerEl) return;
+
+		const triggerRect = triggerEl.getBoundingClientRect();
+		const tooltipRect = tooltipEl.getBoundingClientRect();
+
+		let top = triggerRect.top - tooltipRect.height - 8;
+		let left = triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2;
+		let currentPlacement: 'top' | 'bottom' = 'top';
+
+		if (top < 8) {
+			top = triggerRect.bottom + 8;
+			currentPlacement = 'bottom';
+		}
+
+		left = Math.max(8, Math.min(left, window.innerWidth - tooltipRect.width - 8));
+
+		const arrowX = Math.max(8, Math.min(triggerRect.left + triggerRect.width / 2 - left, tooltipRect.width - 14));
+
+		tooltipTop = top;
+		tooltipLeft = left;
+		arrowLeft = arrowX;
+		placement = currentPlacement;
+	});
 </script>
 
 {#if content}
