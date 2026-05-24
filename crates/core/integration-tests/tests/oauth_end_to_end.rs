@@ -230,19 +230,21 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .send()
         .await
         .expect("POST /mcp initialize");
-    assert_eq!(
-        init_resp.status().as_u16(),
-        200,
-        "initialize must return 200, got: {}",
-        init_resp.status()
-    );
-    let session_id = init_resp
+    let init_status = init_resp.status();
+    let init_session_id_raw = init_resp
         .headers()
         .get("Mcp-Session-Id")
-        .expect("Mcp-Session-Id header must be present after initialize")
-        .to_str()
-        .expect("session ID must be valid UTF-8")
-        .to_string();
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let init_body = init_resp.text().await.expect("read init response body");
+    assert_eq!(
+        init_status.as_u16(),
+        200,
+        "initialize must return 200, got: {}; body: {init_body}",
+        init_status
+    );
+    let session_id =
+        init_session_id_raw.expect("Mcp-Session-Id header must be present after initialize");
 
     // -----------------------------------------------------------------------
     // Step 9b — Acknowledge the session.

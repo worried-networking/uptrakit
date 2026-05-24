@@ -90,10 +90,12 @@ impl ControllerContainer {
         let container_name = format!("controller-{}", uuid::Uuid::now_v7());
 
         let mut config_file = NamedTempFile::new().expect("create temp config file");
-        let tls_section = trust_domain
-            .filter(|d| !d.is_empty())
-            .map(|d| format!("\n[tls]\ntrust_domain = \"{d}\"\n"))
-            .unwrap_or_default();
+        let tls_section = match trust_domain.filter(|d| !d.is_empty()) {
+            Some(d) => format!("\n[tls]\ntrust_domain = \"{d}\"\nsans = [\"127.0.0.1\"]\n"),
+            // Always include 127.0.0.1 so Host: 127.0.0.1:<port> passes rmcp
+            // host validation when the test client connects via the mapped port.
+            None => "\n[tls]\nsans = [\"127.0.0.1\"]\n".to_string(),
+        };
         write!(
             config_file,
             r#"
