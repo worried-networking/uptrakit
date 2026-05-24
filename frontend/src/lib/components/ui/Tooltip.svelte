@@ -43,6 +43,17 @@
 	});
 
 	$effect(() => {
+		if (!visible) return;
+		function onGlobalKeydown(e: KeyboardEvent) {
+			if (e.key === 'Escape') {
+				visible = false;
+			}
+		}
+		window.addEventListener('keydown', onGlobalKeydown);
+		return () => window.removeEventListener('keydown', onGlobalKeydown);
+	});
+
+	$effect(() => {
 		if (!visible || !tooltipEl || !triggerEl) return;
 
 		const triggerRect = triggerEl.getBoundingClientRect();
