@@ -44,9 +44,9 @@
 	let saving = $state(false);
 
 	const modeOptions = [
-		{ value: 'open' as const, label: 'Open', description: 'Anyone can create an account.' },
-		{ value: 'invite' as const, label: 'Invite Only', description: 'Token required to register.' },
-		{ value: 'closed' as const, label: 'Closed', description: 'No new accounts allowed.' }
+		{ value: 'open' as const, label: 'Open', tooltip: 'Anyone can create an account.' },
+		{ value: 'invite' as const, label: 'Invite Only', tooltip: 'Token required to register.' },
+		{ value: 'closed' as const, label: 'Closed', tooltip: 'No new accounts allowed.' }
 	];
 
 	onMount(async () => {
