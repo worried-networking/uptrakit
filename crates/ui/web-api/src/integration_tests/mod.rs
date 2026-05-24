@@ -1,4 +1,5 @@
 mod auth_flow;
+mod device_auth_http_roundtrip;
 mod device_auth_oauth;
 mod enrollment_tokens;
 mod error_cases;
@@ -8,6 +9,7 @@ mod instance_plugins;
 mod notifications;
 mod oauth_boot_validation;
 mod oauth_master_switch_off;
+mod oauth_mcp_roundtrip;
 #[cfg(feature = "oidc")]
 mod oidc_callback;
 mod plugin_configs;
