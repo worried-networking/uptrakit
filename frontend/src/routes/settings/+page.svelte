@@ -4,8 +4,6 @@
 	import { goto } from '$app/navigation';
 	import { getCombinedSettings, getOidcProviders } from '$lib/api';
 	import type {
-		RegistrationSettings as RegistrationSettingsData,
-		AuthenticationSettings as AuthenticationSettingsData,
 		AgentCertificateSettings as AgentCertSettingsData,
 		EnrollmentTokensSummary,
 		OidcProviderResponse
@@ -27,8 +25,8 @@
 	import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 
-	import RegistrationSettings from './RegistrationSettings.svelte';
-	import AuthenticationSettings from './AuthenticationSettings.svelte';
+	import AccessSettings from './AccessSettings.svelte';
+	import McpAccessTab from './McpAccessTab.svelte';
 	import OidcProvidersSettings from './OidcProvidersSettings.svelte';
 	import AgentCertificateSettings from './AgentCertificateSettings.svelte';
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
@@ -44,6 +42,7 @@
 	// Surfaces with a matching tab_group append to these existing tabs instead of creating new ones.
 	const BUILTIN_TAB_IDS = new Set([
 		'general',
+		'mcp-access',
 		'plugin-configs',
 		'scheduler',
 		'global-settings',
@@ -82,6 +81,7 @@
 	const canViewInstanceConfig = $derived(getUser()?.permissions.includes(Permission.ViewInstanceConfigState) ?? false);
 	const hasAnyTabPermission = $derived(
 		canManageSettings ||
+			canManageOAuthClients ||
 			canViewSoftware ||
 			canViewTypeSettings ||
 			canManageSoftware ||
@@ -131,6 +131,9 @@
 		if (canManageSettings) {
 			items.push({ id: 'general', label: 'General' });
 		}
+		if (canManageOAuthClients) {
+			items.push({ id: 'mcp-access', label: 'MCP Access' });
+		}
 		if (canViewSoftware || canViewTypeSettings) {
 			items.push({ id: 'plugin-configs', label: 'Plugin Configs' });
 		}
@@ -174,6 +177,7 @@
 		const surfaceRegistryLoaded = getSurfaceRegistryLoaded();
 		const isBuiltinAccessible =
 			(activeTab === 'general' && canManageSettings) ||
+			(activeTab === 'mcp-access' && canManageOAuthClients) ||
 			(activeTab === 'plugin-configs' && (canViewSoftware || canViewTypeSettings)) ||
 			(activeTab === 'scheduler' && canManageSoftware) ||
 			(activeTab === 'global-settings' && canManageGlobalSettings) ||
@@ -199,6 +203,7 @@
 		}
 		if (!isBuiltinAccessible && !isSurfaceAccessible && !isPendingSurfaceTab) {
 			if (canManageSettings) activeTab = 'general';
+			else if (canManageOAuthClients) activeTab = 'mcp-access';
 			else if (canViewSoftware || canViewTypeSettings) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
@@ -224,15 +229,11 @@
 	// ── General tab state ─────────────────────────────────────────────────
 	let loading: boolean = $state(true);
 
-	let registrationSettings: RegistrationSettingsData | undefined = $state(undefined);
-	let authSettings: AuthenticationSettingsData | undefined = $state(undefined);
 	let oidcProviders: OidcProviderResponse[] | undefined = $state(undefined);
 	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
 	let enrollmentTokensSummary: EnrollmentTokensSummary | undefined = $state(undefined);
 	let multiTenancyEnabled: boolean = $state(false);
 
-	let registrationError: string | null = $state(null);
-	let authenticationError: string | null = $state(null);
 	let oidcProvidersError: string | null = $state(null);
 	let agentCertificateError: string | null = $state(null);
 	let enrollmentTokenError: string | null = $state(null);
@@ -252,8 +253,6 @@
 
 	async function loadAllSettings() {
 		loading = true;
-		registrationError = null;
-		authenticationError = null;
 		oidcProvidersError = null;
 		agentCertificateError = null;
 		enrollmentTokenError = null;
@@ -262,15 +261,11 @@
 
 		if (results[0].status === 'fulfilled') {
 			const combined = results[0].value;
-			registrationSettings = combined.registration;
-			authSettings = combined.authentication;
 			agentCertSettings = combined.agent_certificates;
 			enrollmentTokensSummary = combined.enrollment_tokens;
 			multiTenancyEnabled = combined.multi_tenancy_enabled;
 		} else {
 			const msg = results[0].reason instanceof Error ? results[0].reason.message : 'Failed to load combined settings.';
-			registrationError = msg;
-			authenticationError = msg;
 			agentCertificateError = msg;
 			enrollmentTokenError = msg;
 		}
@@ -305,31 +300,7 @@
 			{/if}
 
 			<div aria-busy={loading} class="space-y-4" class:opacity-50={loading}>
-				<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
-				{#if registrationError}
-					<Callout tone="danger" title="Unable to load registration settings" message={registrationError}>
-						<div class="mt-2">
-							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
-						</div>
-					</Callout>
-				{/if}
-				<AuthenticationSettings settings={authSettings} onSuccess={showSuccess} onError={showError} />
-				{#if authenticationError}
-					<Callout tone="danger" title="Unable to load authentication settings" message={authenticationError}>
-						<div class="mt-2">
-							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
-						</div>
-					</Callout>
-				{/if}
-				{#if canManageOAuthClients}
-					<SectionCard title="OAuth Clients">
-						<p class="mb-4 text-sm text-[var(--text-secondary)]">
-							Manage OAuth 2.1 clients used for MCP (Model Context Protocol) access. Trust, revoke, or manually register
-							clients, and configure the MCP authorization server settings.
-						</p>
-						<Button variant="secondary" href="/settings/authentication/oauth-clients">Manage OAuth clients</Button>
-					</SectionCard>
-				{/if}
+				<AccessSettings onSuccess={showSuccess} onError={showError} />
 				<OidcProvidersSettings
 					providers={oidcProviders}
 					{multiTenancyEnabled}
@@ -364,6 +335,10 @@
 					<DangerZone onSuccess={showSuccess} onError={showError} />
 				{/if}
 			</div>
+
+			<!-- MCP Access tab -->
+		{:else if activeTab === 'mcp-access'}
+			<McpAccessTab />
 
 			<!-- Plugin Configs tab -->
 		{:else if activeTab === 'plugin-configs'}

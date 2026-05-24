@@ -26,8 +26,6 @@ vi.mock('$lib/auth.svelte', () => ({
 
 vi.mock('$lib/api', () => ({
 	getCombinedSettings: vi.fn(async () => ({
-		registration: {},
-		authentication: {},
 		agent_certificates: {
 			lifetime_days: 365,
 			renewal_window_hours_override: null,
@@ -37,6 +35,19 @@ vi.mock('$lib/api', () => ({
 		multi_tenancy_enabled: false
 	})),
 	getOidcProviders: vi.fn(async () => [])
+}));
+
+vi.mock('$lib/api/settings', () => ({
+	getAccessSettings: vi.fn(async () => ({
+		data: {
+			mode: 'open',
+			require_token_for_oidc: false,
+			password_auth_enabled: true,
+			two_factor_required: false
+		},
+		etag: null
+	})),
+	updateAccessSettings: vi.fn()
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -106,7 +117,7 @@ describe('/settings shared-surface tabs', () => {
 
 		render(SettingsPage);
 
-		await screen.findByText('Registration');
+		await screen.findByText('Registration & Authentication');
 		expect(screen.getByRole('tab', { name: 'Global Settings' })).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="form-field-row"]')).toBeInTheDocument();
 	});
