@@ -6,7 +6,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::upsert_global_setting_raw;
@@ -199,7 +198,6 @@ pub async fn get_network_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNetworkSettingsRequest>,
@@ -670,7 +668,6 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
@@ -728,7 +725,6 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,

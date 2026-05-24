@@ -13,7 +13,6 @@ pub use uptrakit_web_api_types::settings_provider_github::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 
 const SECRET_MASK: &str = "***";
@@ -91,7 +90,6 @@ pub async fn get_github_provider_settings(
 pub async fn update_github_provider_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
-    _if_match: IfMatch<SettingsVersion>,
     Validated(req): Validated<UpdateGitHubProviderSettingsRequest>,
 ) -> Response {
     let current = match uptrakit_shared_db::provider_settings::load_github_provider_defaults(

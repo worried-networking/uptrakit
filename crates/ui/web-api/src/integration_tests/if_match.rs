@@ -365,7 +365,7 @@ async fn put_increments_etag_version() {
         .await;
     assert_eq!(put_status, http::StatusCode::OK);
 
-    // GET → ETag incremented to v1.
+    // GET → ETag incremented (must differ from etag0).
     let resp1 = client
         .get("/api/v1/settings/access")
         .bearer(&token)
@@ -378,9 +378,9 @@ async fn put_increments_etag_version() {
         .to_str()
         .expect("ASCII")
         .to_string();
-    assert!(
-        etag1.contains("settings-v1"),
-        "expected settings-v1 after PUT, got {etag1:?}"
+    assert_ne!(
+        etag0, etag1,
+        "expected ETag to change after PUT, but got {etag1:?} (same as before)"
     );
 
     // Old ETag is now stale → 409.

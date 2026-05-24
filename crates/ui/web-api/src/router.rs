@@ -11,7 +11,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::AppState;
-use crate::extractors::SettingsVersion;
+use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
 
 /// OpenAPI documentation (core — always available)
 #[derive(OpenApi)]
@@ -579,17 +579,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::server_cert::renew_server_certificate
         ))
-        .routes(routes!(
-            crate::routes::settings_global_combined::get_global_combined_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_provider_github::get_github_provider_settings,
-            crate::routes::settings_provider_github::update_github_provider_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_network::get_network_settings,
-            crate::routes::settings_network::update_network_settings
-        ))
         .routes(routes!(crate::routes::device_auth::device_auth_approve))
         .routes(routes!(crate::routes::device_auth::device_auth_deny))
         .routes(routes!(crate::routes::device_auth::device_auth_lookup))
@@ -789,28 +778,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::post(crate::routes::surfaces::invoke_surface_interaction),
         );
 
-    // Zeroconf settings
-    let auth_routes = auth_routes.routes(routes!(
-        crate::routes::settings_zeroconf::get_zeroconf_settings,
-        crate::routes::settings_zeroconf::update_zeroconf_settings
-    ));
-
-    // OAuth global settings
-    let auth_routes = auth_routes.routes(routes!(
-        crate::routes::settings_oauth::get_oauth_settings,
-        crate::routes::settings_oauth::update_oauth_settings
-    ));
-
     // Reset data
     #[cfg(feature = "reset-data")]
     let auth_routes = auth_routes.routes(routes!(crate::routes::settings_reset::reset_data));
-
-    // NATS settings
-    #[cfg(feature = "nats")]
-    let auth_routes = auth_routes.routes(routes!(
-        crate::routes::settings_nats::get_nats_settings,
-        crate::routes::settings_nats::update_nats_settings
-    ));
 
     let auth_routes = auth_routes
         // Discovery allowlist
@@ -876,6 +846,40 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::me_2fa::totp_confirm))
         .routes(routes!(crate::routes::me_2fa::totp_disable))
         .routes(routes!(crate::routes::me_2fa::regenerate_recovery_codes));
+
+    let global_settings = OpenApiRouter::new()
+        .routes(routes!(
+            crate::routes::settings_global_combined::get_global_combined_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_provider_github::get_github_provider_settings,
+            crate::routes::settings_provider_github::update_github_provider_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_network::get_network_settings,
+            crate::routes::settings_network::update_network_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_zeroconf::get_zeroconf_settings,
+            crate::routes::settings_zeroconf::update_zeroconf_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_oauth::get_oauth_settings,
+            crate::routes::settings_oauth::update_oauth_settings
+        ));
+
+    #[cfg(feature = "nats")]
+    let global_settings = global_settings.routes(routes!(
+        crate::routes::settings_nats::get_nats_settings,
+        crate::routes::settings_nats::update_nats_settings
+    ));
+
+    let global_settings = global_settings.route_layer(axum_mw::from_fn_with_state(
+        Arc::clone(&state),
+        crate::middleware::etag::etag_middleware::<GlobalSettingsVersion>,
+    ));
+
+    let auth_routes = auth_routes.merge(global_settings);
 
     let tenant_settings = OpenApiRouter::new()
         .routes(routes!(

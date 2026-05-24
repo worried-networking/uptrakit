@@ -22,7 +22,6 @@ pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNats
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
@@ -111,7 +110,6 @@ pub async fn get_nats_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_nats_settings(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNatsSettingsRequest>,
@@ -677,7 +675,6 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -744,7 +741,6 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -796,7 +792,6 @@ mod tests {
 
         let first_response = update_nats_settings(
             State(Arc::clone(&state)),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -814,7 +809,6 @@ mod tests {
 
         let second_response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -864,7 +858,6 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::ApiToken,
@@ -926,7 +919,6 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
@@ -989,7 +981,6 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            crate::extractors::IfMatch::for_test(),
             CanManageGlobalSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
