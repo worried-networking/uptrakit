@@ -55,15 +55,23 @@ async function mockDeviceLookup404(page: Page) {
 }
 
 async function mockDeviceApprove(page: Page) {
-	await page.route('**/api/v1/auth/device/approve', (route) =>
-		route.fulfill({ status: 200, json: { message: 'Device approved' } })
-	);
+	await page.route('**/api/v1/auth/device/approve', (route) => {
+		if (route.request().method() === 'POST') {
+			route.fulfill({ status: 200, json: { message: 'Device approved' } });
+		} else {
+			route.fallback();
+		}
+	});
 }
 
 async function mockDeviceDeny(page: Page) {
-	await page.route('**/api/v1/auth/device/deny', (route) =>
-		route.fulfill({ status: 200, json: { message: 'Device denied' } })
-	);
+	await page.route('**/api/v1/auth/device/deny', (route) => {
+		if (route.request().method() === 'POST') {
+			route.fulfill({ status: 200, json: { message: 'Device denied' } });
+		} else {
+			route.fallback();
+		}
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -149,8 +157,7 @@ test.describe('device approval page', () => {
 		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
 
 		await page.goto('/device?user_code=BCDF-GHJK');
-		// Wait for the page shell to render before asserting auth-dependent content.
-		await page.waitForSelector('[data-ui="public-entry-content"]');
+		await expect(page.locator('[data-ui="public-entry-content"]')).toBeVisible();
 
 		await expect(page.locator(`${ENTRY_CONTENT} a[href*="/login?redirect"]`)).toBeVisible();
 		await expect(page.locator(CONSENT_PROMPT)).not.toBeVisible();
