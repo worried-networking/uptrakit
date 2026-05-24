@@ -85,7 +85,7 @@
 		bind:this={triggerEl}
 		aria-label="More information"
 		aria-describedby={tooltipId}
-		class="inline-flex cursor-default items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
+		class="inline-flex cursor-default items-center text-inherit opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
 		onclick={(e) => e.stopPropagation()}
 		onmouseenter={show}
 		onmouseleave={scheduleHide}
