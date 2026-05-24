@@ -42,6 +42,7 @@ pub mod scheduler;
 pub mod server_cert;
 pub mod services;
 pub mod settings;
+pub mod settings_access;
 pub mod settings_agent_certs;
 pub mod settings_auth;
 pub mod settings_ca;

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::validation::{Validate, ValidationError};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkSettingsResponse {
     pub trusted_proxies: Vec<String>,
