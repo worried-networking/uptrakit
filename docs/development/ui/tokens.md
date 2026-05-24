@@ -269,15 +269,15 @@ Rules:
 
 ## Z-Index Scale
 
-| Layer              | Value | Use                                       |
-| ------------------ | ----- | ----------------------------------------- |
-| Base content       | `0`   | Normal page content                       |
-| Sticky top bar     | `10`  | Shell top bar                             |
-| Sidebar            | `20`  | Tablet overlay sidebar                    |
-| Dropdown / tooltip | `100` | Inline popovers                           |
-| Toast stack        | `920` | Toasts (floats above modals and terminal) |
-| Modal backdrop     | `900` | Dialog or terminal backdrop               |
-| Modal content      | `910` | Dialog or terminal window                 |
+| Layer              | Value | Use                                                                       |
+| ------------------ | ----- | ------------------------------------------------------------------------- |
+| Base content       | `0`   | Normal page content                                                       |
+| Sticky top bar     | `10`  | Shell top bar                                                             |
+| Sidebar            | `20`  | Tablet overlay sidebar                                                    |
+| Dropdown / tooltip | `100` | Inline popovers (`[data-ui="context-menu-shell"]`, `[data-ui="tooltip"]`) |
+| Toast stack        | `920` | Toasts (floats above modals and terminal)                                 |
+| Modal backdrop     | `900` | Dialog or terminal backdrop                                               |
+| Modal content      | `910` | Dialog or terminal window                                                 |
 
 Do not invent ad hoc z-index values when one of these applies.
 
