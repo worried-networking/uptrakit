@@ -189,7 +189,11 @@ async fn insert_user(db: &DatabaseConnection, email: &str) -> Uuid {
 /// Link user to the "viewer" built-in role, which has `access_mcp` via
 /// migration m20260424_000001_access_mcp_permission. Do NOT use "owner"
 /// (removed in m20260310_000002_granular_permissions).
-#[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test fixture — panic on setup failure"
+)]
 async fn link_user_to_access_mcp_role(db: &DatabaseConnection, tenant_id: Uuid, user_id: Uuid) {
     let viewer_role = role::Entity::find()
         .filter(role::Column::Name.eq("viewer"))
@@ -253,6 +257,7 @@ struct McpSession {
 impl McpSession {
     #[expect(
         clippy::unwrap_used,
+        clippy::expect_used,
         reason = "test helper — panic on protocol failure"
     )]
     async fn initialize(addr: SocketAddr, bearer: &str) -> Self {
