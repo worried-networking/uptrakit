@@ -353,13 +353,15 @@ Usage:
 </FormFieldRow>
 ```
 
-Layout: the label-column width is derived from a `FormLayout` Svelte context (`frontend/src/lib/components/forms/form-layout-context.ts`):
+Layout: `FormFieldRow` uses a named CSS container (`@container/field`) on its root div and anonymous container queries on the inner grid. The grid
+switches to label-beside-input layout when the field's own width crosses the context threshold derived from
+`frontend/src/lib/components/forms/form-layout-context.ts`:
 
-- `FormLayout.Modal` → `md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (narrow column, room for inputs).
-- `FormLayout.Page` → `md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (wider column, prevents label wrapping in page forms).
+- `FormLayout.Modal` → `@[24rem]:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (stacks when cell is narrower than 24 rem).
+- `FormLayout.Page` → `@[32rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (stacks when cell is narrower than 32 rem).
 
-`Modal.svelte` sets `FormLayout.Modal` automatically; pages default to `FormLayout.Page`. Stacks to a single column on narrow screens. No manual width
-override is needed when using `FormFieldRow`.
+This works correctly in multi-column grids — the label stacks when the cell is too narrow regardless of viewport width. `Modal.svelte` sets
+`FormLayout.Modal` automatically; pages default to `FormLayout.Page`. No manual width override is needed when using `FormFieldRow`.
 
 ---
 
@@ -391,9 +393,9 @@ Usage:
 </FormFieldReadOnly>
 ```
 
-Layout: identical grid + label-column-by-context behaviour as `FormFieldRow`. Use this primitive instead of hand-rolling a
-`<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not track the modal/page context split and will misalign with sibling
-`FormFieldRow` rows.
+Layout: identical `@container/field` + container-query behaviour as `FormFieldRow` (same thresholds: 24 rem for modal, 32 rem for page). Use this
+primitive instead of hand-rolling a `<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not track the modal/page context split and will
+misalign with sibling `FormFieldRow` rows.
 
 ---
 
@@ -972,7 +974,7 @@ Re-exported as `ModalShell` from the barrel. Renders a centered dialog over a ba
 {
   onclose: () => void;
   title?: string;
-  maxWidth?: string;    // Tailwind class, default: 'max-w-[380px]'
+  maxWidth?: string;    // Tailwind class, default: 'max-w-2xl'
   children: Snippet;
   footer?: Snippet;
 }

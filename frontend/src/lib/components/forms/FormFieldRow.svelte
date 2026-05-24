@@ -32,29 +32,31 @@
 </script>
 
 <div
-	class="grid gap-3 md:items-start {labelColClass} -ml-2.5 border-l-2 pl-2 transition-colors {dirty
+	class="@container/field -ml-2.5 border-l-2 pl-2 transition-colors duration-fast {dirty
 		? 'border-[var(--accent)]'
 		: 'border-transparent'}"
 	data-ui="form-field-row"
 >
-	<div class="space-y-1">
-		<div class="flex items-center gap-1">
-			<label class="w-fit text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
-			{#if required}
-				<span aria-hidden="true" class="text-[var(--color-danger)]">*</span>
+	<div class="grid gap-3 {labelColClass}" data-ui="form-field-row-grid">
+		<div class="space-y-1">
+			<div class="flex items-center gap-1">
+				<label class="w-fit text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
+				{#if required}
+					<span aria-hidden="true" class="text-[var(--color-danger)]">*</span>
+				{/if}
+			</div>
+			{#if hint}
+				<p class="text-xs text-[var(--text-muted)]">{hint}</p>
 			{/if}
 		</div>
-		{#if hint}
-			<p class="text-xs text-[var(--text-muted)]">{hint}</p>
-		{/if}
-	</div>
 
-	<div class="space-y-2">
-		<div>
-			{@render children()}
+		<div class="space-y-2">
+			<div>
+				{@render children()}
+			</div>
+			{#if error}
+				<p id={errorId} class="text-sm text-[var(--color-danger)]">{error}</p>
+			{/if}
 		</div>
-		{#if error}
-			<p id={errorId} class="text-sm text-[var(--color-danger)]">{error}</p>
-		{/if}
 	</div>
 </div>

@@ -70,8 +70,8 @@ describe('FormFieldReadOnly', () => {
 			value: 'nats://localhost:4222'
 		});
 
-		const row = container.querySelector('[data-ui="form-field-read-only"]');
-		expect(row?.className).toContain('md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]');
+		const row = container.querySelector('[data-ui="form-field-read-only-grid"]');
+		expect(row?.className).toContain('@[32rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]');
 	});
 
 	it('uses modal-context label column when FormLayout.Modal is set in context', () => {
@@ -80,7 +80,7 @@ describe('FormFieldReadOnly', () => {
 			value: 'nats://localhost:4222'
 		});
 
-		const row = container.querySelector('[data-ui="form-field-read-only"]');
-		expect(row?.className).toContain('md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
+		const row = container.querySelector('[data-ui="form-field-read-only-grid"]');
+		expect(row?.className).toContain('@[24rem]:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
 	});
 });
