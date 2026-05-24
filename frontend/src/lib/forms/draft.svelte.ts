@@ -9,11 +9,24 @@ export interface FormDraft<T extends Record<string, unknown>> {
 	discard(): void;
 }
 
+// null, undefined, '', and NaN are all "no value" — treat as equal for dirty detection.
+// Handles the common case where a cleared <input type="number"> produces '' but the
+// server-side original was null.
+function isEmpty(v: unknown): boolean {
+	return v === null || v === undefined || v === '' || (typeof v === 'number' && isNaN(v));
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+	return a === b || (isEmpty(a) && isEmpty(b));
+}
+
 export function createFormDraft<T extends Record<string, unknown>>(initial: T): FormDraft<T> {
 	let serverValues = $state<T>({ ...initial });
 	let draft = $state<T>({ ...initial });
 
-	const isDirty = $derived((Object.keys(serverValues) as (keyof T)[]).some((k) => draft[k] !== serverValues[k]));
+	const isDirty = $derived(
+		(Object.keys(serverValues) as (keyof T)[]).some((k) => !valuesEqual(draft[k], serverValues[k]))
+	);
 
 	return {
 		get draft() {
@@ -26,7 +39,7 @@ export function createFormDraft<T extends Record<string, unknown>>(initial: T): 
 			return isDirty;
 		},
 		isFieldDirty(key) {
-			return draft[key] !== serverValues[key];
+			return !valuesEqual(draft[key], serverValues[key]);
 		},
 		update(key, value) {
 			draft[key] = value;
