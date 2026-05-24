@@ -339,6 +339,7 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
         .await
         .map_err(|e| report!(OAuthBootError::Settings(e.to_string())))?;
     let issuer = canonical.issuer().as_str().to_owned();
+    let accepted_audiences = canonical.accepted_resources_strings();
 
     Ok(super::OAuthState {
         enabled: true,
@@ -349,7 +350,7 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
         verifier: Arc::new(super::jwt::McpOAuthJwtVerifier::new(
             &boot_settings.jwt_signing_secret,
             issuer,
-            vec![],
+            accepted_audiences,
         )),
         clock: Arc::new(OffsetDateTime::now_utc),
         instance_id,
