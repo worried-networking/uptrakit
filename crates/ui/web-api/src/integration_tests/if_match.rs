@@ -23,7 +23,7 @@ async fn put_settings_without_if_match_returns_428() {
 
     let status = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -51,7 +51,7 @@ async fn put_settings_with_stale_etag_returns_409() {
 
     let status = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -73,7 +73,7 @@ async fn put_settings_with_current_etag_returns_200() {
     // Cache at version 0 (default); W/"settings-v0" must be accepted.
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -102,7 +102,7 @@ async fn etag_version_discriminates_correctly() {
     // v0 is stale → 409.
     let s0 = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -114,7 +114,7 @@ async fn etag_version_discriminates_correctly() {
     // v1 is stale → 409.
     let s1 = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -126,7 +126,7 @@ async fn etag_version_discriminates_correctly() {
     // v2 is current → 200.
     let (s2, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -148,7 +148,7 @@ async fn weak_etag_prefix_stripped_before_comparison() {
     // Both `W/"settings-v0"` and `"settings-v0"` (without W/) should match.
     let (status, _): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -168,7 +168,7 @@ async fn get_returns_etag_header() {
     let token = register_and_get_token(&client).await;
 
     let resp = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send()
         .await;
@@ -341,7 +341,7 @@ async fn put_increments_etag_version() {
 
     // GET → current ETag (v0).
     let resp0 = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send()
         .await;
@@ -356,7 +356,7 @@ async fn put_increments_etag_version() {
     // PUT with current ETag → 200.
     let (put_status, _body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -367,7 +367,7 @@ async fn put_increments_etag_version() {
 
     // GET → ETag incremented to v1.
     let resp1 = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send()
         .await;
@@ -386,7 +386,7 @@ async fn put_increments_etag_version() {
     // Old ETag is now stale → 409.
     let stale_status = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -398,7 +398,7 @@ async fn put_increments_etag_version() {
     // New ETag → 200.
     let (fresh_status, fresh_body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)

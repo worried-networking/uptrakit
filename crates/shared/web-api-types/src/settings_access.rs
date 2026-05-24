@@ -59,6 +59,24 @@ pub struct AccessSettingsResponse {
     pub two_factor_required: bool,
 }
 
+impl AccessSettingsResponse {
+    /// Create a new `AccessSettingsResponse`.
+    #[must_use]
+    pub fn new(
+        mode: RegistrationMode,
+        require_token_for_oidc: bool,
+        password_auth_enabled: bool,
+        two_factor_required: bool,
+    ) -> Self {
+        Self {
+            mode,
+            require_token_for_oidc,
+            password_auth_enabled,
+            two_factor_required,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(

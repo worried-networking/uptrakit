@@ -32,7 +32,7 @@ async fn register_second_user_gets_user_role() {
     // Re-open registration (initial setup closes it after first user).
     let reopen_status = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
@@ -61,7 +61,7 @@ async fn register_duplicate_email_returns_409() {
     // Re-open registration (initial setup closes it after first user).
     client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())

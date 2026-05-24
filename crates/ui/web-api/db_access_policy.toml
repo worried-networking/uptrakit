@@ -433,17 +433,13 @@ set_update_freeze = "full-state"
 merge_service = "full-state"
 batch_services = "full-state"
 
-[routes."settings.rs"]
-get_registration_settings = "full-state"
-update_registration_settings = "full-state"
+[routes."settings_access.rs"]
+get_access_settings = "full-state"
+update_access_settings = "full-state"
 
 [routes."settings_agent_certs.rs"]
 get_agent_certificate_settings = "full-state"
 update_agent_certificate_settings = "full-state"
-
-[routes."settings_auth.rs"]
-get_authentication_settings = "full-state"
-update_authentication_settings = "full-state"
 
 [routes."settings_ca.rs"]
 rotate_ca = "full-state"

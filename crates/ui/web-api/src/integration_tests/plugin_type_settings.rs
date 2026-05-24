@@ -38,7 +38,7 @@ async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
     // Re-open registration so the second user can sign up.
     let reopen = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&admin_token)

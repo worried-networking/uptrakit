@@ -11,7 +11,7 @@ async fn unauthenticated_endpoints_return_401() {
         "/api/v1/hosts",
         "/api/v1/software-items",
         "/api/v1/enrollment-tokens",
-        "/api/v1/settings/registration",
+        "/api/v1/settings/access",
         "/api/v1/notifications/channels",
         "/api/v1/notifications/rules",
         "/api/v1/plugin-types",
