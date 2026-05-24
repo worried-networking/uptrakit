@@ -386,8 +386,16 @@ async fn api_token_get_current_user_succeeds() {
         .expect("content[0].text must be a string");
     let parsed: Value = serde_json::from_str(text).expect("text must be valid JSON");
 
-    assert_eq!(parsed["email"].as_str().unwrap(), "owner@mcp.test");
-    assert_eq!(parsed["user_id"].as_str().unwrap(), user_id.to_string());
+    assert_eq!(
+        parsed["email"].as_str().unwrap(),
+        "owner@mcp.test",
+        "email must match"
+    );
+    assert_eq!(
+        parsed["user_id"].as_str().unwrap(),
+        user_id.to_string(),
+        "user_id must match"
+    );
     assert!(
         parsed["permissions"]
             .as_array()
@@ -413,8 +421,16 @@ async fn oauth_jwt_get_current_user_succeeds() {
         .expect("content[0].text must be a string");
     let parsed: Value = serde_json::from_str(text).expect("text must be valid JSON");
 
-    assert_eq!(parsed["email"].as_str().unwrap(), "oauth@mcp.test");
-    assert_eq!(parsed["user_id"].as_str().unwrap(), user_id.to_string());
+    assert_eq!(
+        parsed["email"].as_str().unwrap(),
+        "oauth@mcp.test",
+        "email must match"
+    );
+    assert_eq!(
+        parsed["user_id"].as_str().unwrap(),
+        user_id.to_string(),
+        "user_id must match"
+    );
 }
 
 #[tokio::test]
