@@ -37,25 +37,29 @@ correct three-step session flow.
 
 - [ ] **Step 1: Add the feature and dev-deps**
 
-  Open `crates/ui/mcp/Cargo.toml`. Add the following after the existing
-  `[dependencies]` block (and before `[lints]`):
+  Open `crates/ui/mcp/Cargo.toml`. Make two edits:
+
+  **1a. Add a `[features]` block** (insert after `[dependencies]`, before `[dev-dependencies]`):
 
   ```toml
   [features]
   db-sqlite = ["uptrakit-shared-db/db-sqlite", "sea-orm/sqlx-sqlite"]
+  ```
 
-  [dev-dependencies]
+  **1b. Add to the existing `[dev-dependencies]` section** (the file already has
+  `jsonwebtoken` there — do NOT add it again; add only the new entries):
+
+  ```toml
   uptrakit-web-api-auth  = { workspace = true }
   uptrakit-shared-types  = { workspace = true }
   uptrakit-crypto        = { workspace = true, features = ["testing"] }
-  jsonwebtoken           = { workspace = true, features = ["aws_lc_rs"] }
   reqwest                = { workspace = true }
   time                   = { workspace = true }
   tokio                  = { workspace = true, features = ["rt-multi-thread", "macros"] }
   ```
 
-  **Note:** `jsonwebtoken` is already in `[dev-dependencies]` — remove the old
-  line and keep only the new one (with `features = ["aws_lc_rs"]`).
+  After the edit the `[dev-dependencies]` section should have exactly one
+  `jsonwebtoken` line (the existing one) plus the six lines above.
 
 - [ ] **Step 2: Verify the crate compiles with the new feature**
 
@@ -765,6 +769,13 @@ correct three-step session flow.
           403,
           "missing AccessMcp must return 403"
       );
+      // Confirm the 403 came from McpAuthLayer, not the MCP protocol layer.
+      // The MCP protocol layer would have set Mcp-Session-Id before returning;
+      // McpAuthLayer short-circuits before it, so no session ID is present.
+      assert!(
+          resp.headers().get("Mcp-Session-Id").is_none(),
+          "McpAuthLayer must not set Mcp-Session-Id on 403"
+      );
   }
   ```
 
@@ -879,6 +890,7 @@ correct three-step session flow.
           .post(format!("https://127.0.0.1:{port}/mcp"))
           .header("Authorization", format!("Bearer {access_token}"))
           .header("Content-Type", "application/json")
+          .header("Accept", "application/json, text/event-stream")
           .header("Mcp-Session-Id", &session_id)
           .body(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
           .send()
