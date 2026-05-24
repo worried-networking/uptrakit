@@ -8,8 +8,10 @@ export enum FormLayout {
 const KEY = 'uptrakit:form-layout';
 
 export const LABEL_COL: Record<FormLayout, string> = {
-	[FormLayout.Modal]: 'md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]',
-	[FormLayout.Page]: 'md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]'
+	// 24rem: modal half-cell ≈ 19rem < 24rem (stays stacked); full-width modal ≈ 39rem > 24rem (side-by-side)
+	[FormLayout.Modal]: '@[24rem]:grid-cols-[minmax(0,11rem)_minmax(0,1fr)] @[24rem]:items-start',
+	// 32rem: page content areas are typically 37rem+ at desktop widths
+	[FormLayout.Page]: '@[32rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] @[32rem]:items-start'
 };
 
 export function setFormLayout(layout: FormLayout): void {

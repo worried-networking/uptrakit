@@ -155,3 +155,7 @@
 [data-ui='form-field-row'] + [data-ui='form-field-row'] {
 	margin-top: 1rem;
 }
+
+.grid > [data-ui='form-field-row'] + [data-ui='form-field-row'] {
+	margin-top: 0;
+}

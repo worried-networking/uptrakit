@@ -99,12 +99,12 @@ describe('Modal', () => {
 
 	it('preserves Svelte form-layout context across portaling so FormFieldRow uses modal grid', () => {
 		render(ModalWithFormFieldFixture, { onclose: vi.fn() });
-		const fieldRow = document.body.querySelector('[data-ui="form-field-row"]');
+		const fieldRow = document.body.querySelector('[data-ui="form-field-row-grid"]');
 		expect(fieldRow).not.toBeNull();
 		// FormFieldRow reads getFormLayout() from Svelte context. Modal sets
 		// FormLayout.Modal which maps to the narrow-label grid. If portaling
 		// disrupted context propagation (it shouldn't — context is component-tree,
 		// not DOM-tree) the wide page-layout grid would appear instead.
-		expect(fieldRow?.className).toContain('md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
+		expect(fieldRow?.className).toContain('@[24rem]:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
 	});
 });

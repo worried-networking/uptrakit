@@ -275,101 +275,99 @@
 {/if}
 
 {#if showOidcModal}
-	<Modal
-		title={editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}
-		onclose={closeOidcModal}
-		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
-	>
-		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-			<FormFieldRow label="Name" inputId="oidc-name">
-				<Input id="oidc-name" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
+	<Modal title={editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'} onclose={closeOidcModal}>
+		<div class="space-y-4">
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<FormFieldRow label="Name" inputId="oidc-name">
+					<Input id="oidc-name" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
+				</FormFieldRow>
+				<FormFieldRow label="Slug" inputId="oidc-slug">
+					<Input
+						id="oidc-slug"
+						type="text"
+						bind:value={oidcForm.slug}
+						oninput={() => {
+							slugTouched = true;
+						}}
+					/>
+				</FormFieldRow>
+			</div>
+
+			<FormFieldRow label="Logo URL" inputId="oidc-logo-url">
+				<Input id="oidc-logo-url" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
+				{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
+					<small class="text-[var(--color-danger)]">Logo URL must use HTTPS</small>
+				{/if}
 			</FormFieldRow>
-			<FormFieldRow label="Slug" inputId="oidc-slug">
-				<Input
-					id="oidc-slug"
-					type="text"
-					bind:value={oidcForm.slug}
-					oninput={() => {
-						slugTouched = true;
-					}}
-				/>
+
+			<FormFieldRow label="Issuer URL" inputId="oidc-issuer-url">
+				<Input id="oidc-issuer-url" type="text" bind:value={oidcForm.issuer_url} />
 			</FormFieldRow>
-		</div>
 
-		<FormFieldRow label="Logo URL" inputId="oidc-logo-url">
-			<Input id="oidc-logo-url" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
-			{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
-				<small class="text-[var(--color-danger)]">Logo URL must use HTTPS</small>
-			{/if}
-		</FormFieldRow>
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<FormFieldRow label="Client ID" inputId="oidc-client-id">
+					<Input id="oidc-client-id" type="text" bind:value={oidcForm.client_id} />
+				</FormFieldRow>
+				<FormFieldRow label="Client Secret" inputId="oidc-client-secret">
+					<Input
+						id="oidc-client-secret"
+						type="password"
+						placeholder={editingProvider ? 'Leave blank to keep current' : ''}
+						bind:value={oidcForm.client_secret}
+					/>
+				</FormFieldRow>
+			</div>
 
-		<FormFieldRow label="Issuer URL" inputId="oidc-issuer-url">
-			<Input id="oidc-issuer-url" type="text" bind:value={oidcForm.issuer_url} />
-		</FormFieldRow>
-
-		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-			<FormFieldRow label="Client ID" inputId="oidc-client-id">
-				<Input id="oidc-client-id" type="text" bind:value={oidcForm.client_id} />
+			<FormFieldRow label="Scopes" inputId="oidc-scopes">
+				<Input id="oidc-scopes" type="text" bind:value={oidcForm.scopes} />
 			</FormFieldRow>
-			<FormFieldRow label="Client Secret" inputId="oidc-client-secret">
-				<Input
-					id="oidc-client-secret"
-					type="password"
-					placeholder={editingProvider ? 'Leave blank to keep current' : ''}
-					bind:value={oidcForm.client_secret}
-				/>
-			</FormFieldRow>
-		</div>
 
-		<FormFieldRow label="Scopes" inputId="oidc-scopes">
-			<Input id="oidc-scopes" type="text" bind:value={oidcForm.scopes} />
-		</FormFieldRow>
-
-		<label class="flex items-center gap-3">
-			<Checkbox id="oidc-auto-create-users" bind:checked={oidcForm.auto_create_users} />
-			<span>Auto-create users on first login</span>
-		</label>
-
-		{#if multiTenancyEnabled}
-			<Callout tone="info">
-				Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
-			</Callout>
-		{:else}
-			<label class="flex items-start gap-3">
-				<Checkbox
-					id="oidc-allow-private-network-issuers"
-					bind:checked={oidcForm.allow_private_network_issuers}
-					class="mt-1"
-				/>
-				<span>
-					Allow private-network issuers
-					<small class="block text-[var(--text-secondary)]">
-						Permit issuer hostnames that resolve to LAN, loopback, or other non-public addresses.
-					</small>
-				</span>
+			<label class="flex items-center gap-3">
+				<Checkbox id="oidc-auto-create-users" bind:checked={oidcForm.auto_create_users} />
+				<span>Auto-create users on first login</span>
 			</label>
-		{/if}
 
-		<FormFieldRow label="Role Claim Path" inputId="oidc-role-claim-path">
-			<Input id="oidc-role-claim-path" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
-		</FormFieldRow>
+			{#if multiTenancyEnabled}
+				<Callout tone="info">
+					Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
+				</Callout>
+			{:else}
+				<label class="flex items-start gap-3">
+					<Checkbox
+						id="oidc-allow-private-network-issuers"
+						bind:checked={oidcForm.allow_private_network_issuers}
+						class="mt-1"
+					/>
+					<span>
+						Allow private-network issuers
+						<small class="block text-[var(--text-secondary)]">
+							Permit issuer hostnames that resolve to LAN, loopback, or other non-public addresses.
+						</small>
+					</span>
+				</label>
+			{/if}
 
-		<FormFieldRow label="Role Mapping (JSON)" inputId="oidc-role-mapping-json">
-			<Textarea
-				id="oidc-role-mapping-json"
-				rows={3}
-				variant="mono"
-				placeholder={'{"oidc_value": "local_role"}'}
-				bind:value={oidcForm.role_mapping_json}
-			/>
-		</FormFieldRow>
+			<FormFieldRow label="Role Claim Path" inputId="oidc-role-claim-path">
+				<Input id="oidc-role-claim-path" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
+			</FormFieldRow>
 
-		<div class="flex justify-end gap-2 items-center">
+			<FormFieldRow label="Role Mapping (JSON)" inputId="oidc-role-mapping-json">
+				<Textarea
+					id="oidc-role-mapping-json"
+					rows={3}
+					variant="mono"
+					placeholder={'{"oidc_value": "local_role"}'}
+					bind:value={oidcForm.role_mapping_json}
+				/>
+			</FormFieldRow>
+		</div>
+
+		{#snippet footer()}
 			{#if !getIsOnline()}<span class="text-[var(--color-warning)] text-sm mr-auto">Offline</span>{/if}
 			<Button variant="secondary" onclick={closeOidcModal}>Cancel</Button>
 			<Button variant="primary" loading={saving} disabled={!getIsOnline()} onclick={() => void saveOidcProvider()}
 				>{editingProvider ? 'Update' : 'Create'}</Button
 			>
-		</div>
+		{/snippet}
 	</Modal>
 {/if}

@@ -19,21 +19,23 @@
 	} = $props();
 </script>
 
-<div class="grid gap-3 md:items-start {labelColClass}" data-ui="form-field-read-only">
-	<div class="space-y-1">
-		<p class="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-		{#if hint}
-			<p class="text-xs text-[var(--text-muted)]">{hint}</p>
-		{/if}
-	</div>
-
-	<div class="space-y-2">
-		<div>
-			{#if children}
-				{@render children()}
-			{:else}
-				<p class="text-sm text-[var(--text-primary)] {mono ? 'font-mono' : ''}">{value}</p>
+<div class="@container/field" data-ui="form-field-read-only">
+	<div class="grid gap-3 {labelColClass}" data-ui="form-field-read-only-grid">
+		<div class="space-y-1">
+			<p class="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+			{#if hint}
+				<p class="text-xs text-[var(--text-muted)]">{hint}</p>
 			{/if}
+		</div>
+
+		<div class="space-y-2">
+			<div>
+				{#if children}
+					{@render children()}
+				{:else}
+					<p class="text-sm text-[var(--text-primary)] {mono ? 'font-mono' : ''}">{value}</p>
+				{/if}
+			</div>
 		</div>
 	</div>
 </div>
