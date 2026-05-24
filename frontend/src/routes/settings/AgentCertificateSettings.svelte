@@ -79,31 +79,35 @@
 				<Input id="agent-cert-lifetime" type="number" min="1" max="730" bind:value={form.draft.lifetimeDays} />
 			</FormFieldRow>
 			<FormFieldRow
-				label="Renewal Strategy"
+				label="Automatic renewal window"
 				inputId="agent-cert-auto-renew"
 				hint="Agents request a new certificate once remaining validity falls below this window."
+				dirty={form.isFieldDirty('useAutoRenewal')}
 			>
-				<div class="space-y-2">
-					<label class="flex items-center gap-2">
-						<Checkbox id="agent-cert-auto-renew" bind:checked={form.draft.useAutoRenewal} />
-						<span>Automatic renewal window</span>
-					</label>
-					{#if form.draft.useAutoRenewal}
-						<p class="text-sm text-[var(--text-muted)]">
-							Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
-						</p>
-					{:else}
-						<FormFieldRow label="Renewal Window (hours)" inputId="agent-cert-renewal-window-hours">
-							<Input
-								id="agent-cert-renewal-window-hours"
-								type="number"
-								min="1"
-								bind:value={form.draft.renewalWindowHours}
-							/>
-						</FormFieldRow>
-					{/if}
-				</div>
+				<label class="flex items-center gap-2">
+					<Checkbox id="agent-cert-auto-renew" bind:checked={form.draft.useAutoRenewal} />
+					<span>Enabled</span>
+				</label>
+				{#if form.draft.useAutoRenewal}
+					<p class="text-sm text-[var(--text-muted)]">
+						Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
+					</p>
+				{/if}
 			</FormFieldRow>
+			{#if !form.draft.useAutoRenewal}
+				<FormFieldRow
+					label="Renewal Window (hours)"
+					inputId="agent-cert-renewal-window-hours"
+					dirty={form.isFieldDirty('renewalWindowHours')}
+				>
+					<Input
+						id="agent-cert-renewal-window-hours"
+						type="number"
+						min="1"
+						bind:value={form.draft.renewalWindowHours}
+					/>
+				</FormFieldRow>
+			{/if}
 			<div class="flex gap-2">
 				<Button variant="primary" loading={saving} disabled={!form.isDirty || saving} onclick={saveCertificates}
 					>Save</Button
