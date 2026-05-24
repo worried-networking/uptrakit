@@ -38,6 +38,8 @@ describe('Tooltip', () => {
 		render(Tooltip, { content: 'Hello', id: 'my-tip' });
 		expect(document.getElementById('my-tip')).toBeTruthy();
 		expect(document.getElementById('my-tip')?.getAttribute('role')).toBe('tooltip');
+		const trigger = screen.getByRole('button', { name: 'More information' });
+		expect(trigger.getAttribute('aria-describedby')).toBe('my-tip');
 	});
 
 	describe('show/hide behavior', () => {
