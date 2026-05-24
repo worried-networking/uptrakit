@@ -16,3 +16,6 @@ export { default as FormFieldReadOnly } from './FormFieldReadOnly.svelte';
 
 export { default as Select } from './Select.svelte';
 export type { SelectProps, SelectOption, SelectGroup, SelectItem } from './Select.svelte';
+
+export { default as RadioCardGroup } from './RadioCardGroup.svelte';
+export type { RadioCardOption } from './RadioCardGroup.svelte';
