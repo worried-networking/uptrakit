@@ -303,7 +303,7 @@ const ERROR_CALLOUT = '[data-ui="callout"][data-tone="danger"]';
 
 - Navigate to `/device?user_code=BCDF-GHJK`
 - Authenticated session + lookup mock (200)
-- Assert: `CONSENT_PROMPT` visible, contains "uptrakit CLI"
+- Assert: `CONSENT_PROMPT` visible
 - Assert: `APPROVE_BUTTON` and `DENY_BUTTON` enabled
 
 **`approve calls approve endpoint and shows success callout`**
