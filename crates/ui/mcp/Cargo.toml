@@ -32,6 +32,7 @@ db-sqlite = ["uptrakit-shared-db/db-sqlite", "sea-orm/sqlx-sqlite"]
 
 [dev-dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+uptrakit-shared-db     = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-web-api-auth  = { workspace = true }
 uptrakit-shared-types  = { workspace = true }
 uptrakit-crypto        = { workspace = true, features = ["testing"] }
