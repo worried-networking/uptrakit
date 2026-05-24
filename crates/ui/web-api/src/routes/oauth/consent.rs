@@ -27,7 +27,7 @@ use crate::oauth::services::authorization_code::{
 use crate::oauth::services::authorization_request::OAuthAuthorizationRequestService;
 use crate::oauth::services::client::OAuthClientService;
 use crate::oauth::services::consent::OAuthConsentService;
-use crate::routes::oauth::helpers::{percent_encode, redirect_302, require_auth_and_rate_limit};
+use crate::routes::oauth::helpers::{percent_encode, require_auth_and_rate_limit};
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -185,7 +185,7 @@ pub async fn consent_details(
         ("request_id" = Uuid, Path, description = "Authorization request UUID"),
     ),
     responses(
-        (status = 302, description = "Redirect with authorization code"),
+        (status = 200, description = "JSON with redirect_to URL for the client app to navigate to"),
         (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthenticated"),
         (status = 403, description = "Wrong user"),
@@ -332,14 +332,18 @@ pub async fn approve_consent(
     } else {
         '?'
     };
-    let location = format!(
+    let redirect_to = format!(
         "{}{}code={}&state={}",
         row.redirect_uri,
         sep,
         percent_encode(code.as_str()),
         percent_encode(&row.state),
     );
-    redirect_302(&location)
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({ "redirect_to": redirect_to })),
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +359,7 @@ pub async fn approve_consent(
         ("request_id" = Uuid, Path, description = "Authorization request UUID"),
     ),
     responses(
-        (status = 302, description = "Redirect with access_denied error"),
+        (status = 200, description = "JSON with redirect_to URL for the client app to navigate to"),
         (status = 401, description = "Unauthenticated"),
         (status = 403, description = "Wrong user"),
         (status = 429, description = "Rate limited"),
@@ -415,13 +419,17 @@ pub async fn deny_consent(
     } else {
         '?'
     };
-    let location = format!(
+    let redirect_to = format!(
         "{}{}error=access_denied&state={}",
         row.redirect_uri,
         sep,
         percent_encode(&row.state),
     );
-    redirect_302(&location)
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({ "redirect_to": redirect_to })),
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -781,24 +789,21 @@ mod tests {
 
         let resp = app.router.oneshot(req).await.expect("oneshot");
 
-        assert_eq!(resp.status(), http::StatusCode::FOUND);
-        let location = resp
-            .headers()
-            .get("location")
-            .expect("location header")
-            .to_str()
-            .expect("location is utf8");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
+        let redirect_to = body["redirect_to"].as_str().expect("redirect_to string");
         assert!(
-            location.starts_with(TEST_REDIRECT_URI),
-            "redirect must point to registered redirect_uri, got: {location}"
+            redirect_to.starts_with(TEST_REDIRECT_URI),
+            "redirect_to must point to registered redirect_uri, got: {redirect_to}"
         );
         assert!(
-            location.contains("code="),
-            "redirect must contain authorization code, got: {location}"
+            redirect_to.contains("code="),
+            "redirect_to must contain authorization code, got: {redirect_to}"
         );
         assert!(
-            location.contains("state="),
-            "redirect must include state param, got: {location}"
+            redirect_to.contains("state="),
+            "redirect_to must include state param, got: {redirect_to}"
         );
     }
 
@@ -861,20 +866,17 @@ mod tests {
 
         let resp = app.router.oneshot(req).await.expect("oneshot");
 
-        assert_eq!(resp.status(), http::StatusCode::FOUND);
-        let location = resp
-            .headers()
-            .get("location")
-            .expect("location header")
-            .to_str()
-            .expect("location is utf8");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
+        let redirect_to = body["redirect_to"].as_str().expect("redirect_to string");
         assert!(
-            location.contains("error=access_denied"),
-            "redirect must contain access_denied, got: {location}"
+            redirect_to.contains("error=access_denied"),
+            "redirect_to must contain access_denied, got: {redirect_to}"
         );
         assert!(
-            location.starts_with(TEST_REDIRECT_URI),
-            "redirect must point to registered redirect_uri, got: {location}"
+            redirect_to.starts_with(TEST_REDIRECT_URI),
+            "redirect_to must point to registered redirect_uri, got: {redirect_to}"
         );
     }
 
