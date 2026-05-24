@@ -17,4 +17,5 @@ mod plugin_type_settings;
 mod service_ws;
 mod services_crud;
 mod settings;
+mod settings_access;
 mod software_items_crud;
