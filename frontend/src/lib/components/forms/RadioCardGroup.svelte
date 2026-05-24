@@ -51,7 +51,8 @@
 <div
 	role="radiogroup"
 	aria-label={name}
-	style="display: grid; grid-template-columns: repeat({options.length}, 1fr); gap: 0.5rem;"
+	class="grid gap-2"
+	style="grid-template-columns: repeat({options.length}, 1fr);"
 >
 	{#each options as option, i (option.value)}
 		{@const selected = option.value === value}
@@ -64,10 +65,10 @@
 			onclick={() => select(option.value)}
 			onkeydown={(e) => handleKeydown(e, i)}
 			class="
-				rounded px-3 py-3 text-left transition-[background,border-color,color]
+				rounded-panel px-3 py-3 text-left transition-[background,border-color,color]
 				duration-fast cursor-pointer
 				{selected
-				? 'border-2 border-[rgba(var(--accent-rgb,6,182,212),0.6)] bg-[rgba(var(--accent-rgb,6,182,212),0.07)] text-[var(--accent-bright)]'
+				? 'border-2 border-[rgba(var(--accent-rgb),0.6)] bg-[rgba(var(--accent-rgb),0.07)] text-[var(--accent-bright)]'
 				: 'border border-[var(--border-subtle)] bg-transparent text-[var(--text-secondary)]'}
 				{disabled ? 'cursor-not-allowed opacity-40' : ''}
 			"
