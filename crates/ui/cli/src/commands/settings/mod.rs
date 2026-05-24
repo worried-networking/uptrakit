@@ -106,25 +106,7 @@ impl HumanOutput for DeletedOutput {
 
 impl HumanOutput for CombinedSettingsResponse {
     fn to_human_string(&self) -> String {
-        let mut out = String::from("Registration:\n");
-        out.push_str(&format!(
-            "  Mode:                    {}\n",
-            self.registration.mode.as_str()
-        ));
-        out.push_str(&format!(
-            "  Require Token for OIDC:  {}\n",
-            self.registration.require_token_for_oidc
-        ));
-        out.push_str("\nAuthentication:\n");
-        out.push_str(&format!(
-            "  Password Auth Enabled:   {}\n",
-            self.authentication.password_auth_enabled
-        ));
-        out.push_str(&format!(
-            "  Multi-Tenancy Enabled:   {}\n",
-            self.multi_tenancy_enabled
-        ));
-        out.push_str("\nAgent Certificates:\n");
+        let mut out = String::from("Agent Certificates:\n");
         out.push_str(&format!(
             "  Lifetime (hours):        {}\n",
             self.agent_certificates.lifetime_hours
@@ -141,6 +123,10 @@ impl HumanOutput for CombinedSettingsResponse {
         out.push_str(&format!(
             "  Active:                  {}\n",
             self.enrollment_tokens.active_count
+        ));
+        out.push_str(&format!(
+            "\nMulti-Tenancy Enabled:     {}\n",
+            self.multi_tenancy_enabled
         ));
         out
     }
@@ -502,10 +488,7 @@ pub async fn alerts(
 mod tests {
     use super::*;
     use uptrakit_openapi_client::types::enrollment_tokens::EnrollmentTokensSummary;
-    use uptrakit_openapi_client::types::registration::RegistrationMode;
-    use uptrakit_openapi_client::types::settings::RegistrationSettingsResponse;
     use uptrakit_openapi_client::types::settings_agent_certs::AgentCertificateSettingsResponse;
-    use uptrakit_openapi_client::types::settings_auth::AuthenticationSettingsResponse;
     use uptrakit_openapi_client::types::settings_reset::ResetDeletedCounts;
     use uptrakit_openapi_client::types::system_alerts::{AlertSeverity, SystemAlert};
 
@@ -538,30 +521,22 @@ mod tests {
 
     #[test]
     fn combined_settings_human_output() {
-        let resp = CombinedSettingsResponse {
-            registration: RegistrationSettingsResponse {
-                mode: RegistrationMode::Open,
-                require_token_for_oidc: false,
-            },
-            authentication: AuthenticationSettingsResponse {
-                password_auth_enabled: true,
-                two_factor_required: false,
-            },
-            agent_certificates: AgentCertificateSettingsResponse {
+        let resp = CombinedSettingsResponse::new(
+            AgentCertificateSettingsResponse {
                 lifetime_hours: 8760,
                 renewal_window_hours_override: None,
                 effective_renewal_window_hours: 336,
             },
-            enrollment_tokens: EnrollmentTokensSummary { active_count: 3 },
-            multi_tenancy_enabled: false,
-        };
+            EnrollmentTokensSummary { active_count: 3 },
+            false,
+        );
         let s = resp.to_human_string();
-        assert!(s.contains("Registration"), "registration section missing");
         assert!(
-            s.contains("Authentication"),
-            "authentication section missing"
+            s.contains("Agent Certificates"),
+            "agent certificates section missing"
         );
         assert!(s.contains("8760"), "lifetime_hours missing");
+        assert!(s.contains("3"), "active count missing");
     }
 
     #[test]

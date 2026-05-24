@@ -12,28 +12,10 @@ use crate::error_response::error_response;
 use crate::middleware::permission::CanViewSettings;
 use crate::queries::enrollment_tokens as et_queries;
 use uptrakit_web_api_types::enrollment_tokens::EnrollmentTokensSummary;
-use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
 use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
-use uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse;
 use uptrakit_web_api_types::settings_combined::CombinedSettingsResponse;
 
-fn build_combined_settings_response(
-    registration: RegistrationSettingsResponse,
-    authentication: AuthenticationSettingsResponse,
-    agent_certificates: AgentCertificateSettingsResponse,
-    enrollment_tokens: EnrollmentTokensSummary,
-    multi_tenancy_enabled: bool,
-) -> CombinedSettingsResponse {
-    CombinedSettingsResponse {
-        registration,
-        authentication,
-        agent_certificates,
-        enrollment_tokens,
-        multi_tenancy_enabled,
-    }
-}
-
-/// Get core settings for the settings page (service-managed settings are provided separately via extensions).
+/// Get core settings for the settings page (excludes access settings, which self-load).
 #[utoipa::path(
     get,
     path = "/api/v1/settings",
@@ -51,18 +33,6 @@ pub async fn get_combined_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    let reg = state.settings.registration();
-    let registration = RegistrationSettingsResponse {
-        mode: reg.mode,
-        require_token_for_oidc: reg.require_token_for_oidc,
-    };
-
-    let auth_settings = state.settings.authentication();
-    let authentication = AuthenticationSettingsResponse {
-        password_auth_enabled: auth_settings.password_auth_enabled,
-        two_factor_required: auth_settings.two_factor_required,
-    };
-
     let agent_certificates = AgentCertificateSettingsResponse {
         lifetime_hours: state.settings.agent_cert_lifetime_hours(),
         renewal_window_hours_override: state.settings.renewal_window_hours_override(),
@@ -77,7 +47,6 @@ pub async fn get_combined_settings(
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
-    let enrollment_tokens = EnrollmentTokensSummary { active_count };
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(state.db()).await {
             Ok(enabled) => enabled,
@@ -87,67 +56,11 @@ pub async fn get_combined_settings(
             }
         };
 
-    let response = build_combined_settings_response(
-        registration,
-        authentication,
+    let response = CombinedSettingsResponse::new(
         agent_certificates,
-        enrollment_tokens,
+        EnrollmentTokensSummary { active_count },
         multi_tenancy_enabled,
     );
 
     (StatusCode::OK, Json(response)).into_response()
-}
-
-#[cfg(test)]
-mod tests {
-    use uptrakit_web_api_types::enrollment_tokens::EnrollmentTokensSummary;
-    use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
-    use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
-
-    use crate::auth::registration::RegistrationMode;
-
-    use super::build_combined_settings_response;
-
-    #[test]
-    fn build_combined_settings_response_maps_fields() {
-        let registration = RegistrationSettingsResponse {
-            mode: RegistrationMode::Invite,
-            require_token_for_oidc: true,
-        };
-        let authentication =
-            uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse {
-                password_auth_enabled: false,
-                two_factor_required: false,
-            };
-        let agent_certificates = AgentCertificateSettingsResponse {
-            lifetime_hours: 336,
-            renewal_window_hours_override: None,
-            // 336 h / 5 = 67 h; ceiling is 336 h → effective is 67 h
-            effective_renewal_window_hours: 67,
-        };
-        let enrollment_tokens = EnrollmentTokensSummary { active_count: 3 };
-
-        let combined = build_combined_settings_response(
-            registration,
-            authentication,
-            agent_certificates,
-            enrollment_tokens,
-            false,
-        );
-
-        assert_eq!(combined.registration.mode, RegistrationMode::Invite);
-        assert!(combined.registration.require_token_for_oidc);
-        assert!(!combined.authentication.password_auth_enabled);
-        assert_eq!(combined.agent_certificates.lifetime_hours, 336);
-        assert_eq!(
-            combined.agent_certificates.renewal_window_hours_override,
-            None
-        );
-        assert_eq!(
-            combined.agent_certificates.effective_renewal_window_hours,
-            67
-        );
-        assert_eq!(combined.enrollment_tokens.active_count, 3);
-        assert!(!combined.multi_tenancy_enabled);
-    }
 }

@@ -42,11 +42,9 @@ use crate::AppState;
         crate::routes::auth::logout,
         crate::routes::auth::me,
         crate::routes::auth::refresh,
-        crate::routes::settings::get_registration_settings,
-        crate::routes::settings::update_registration_settings,
+        crate::routes::settings_access::get_access_settings,
+        crate::routes::settings_access::update_access_settings,
         crate::routes::settings_combined::get_combined_settings,
-        crate::routes::settings_auth::get_authentication_settings,
-        crate::routes::settings_auth::update_authentication_settings,
         crate::routes::services::list_services,
         crate::routes::services::get_service,
         crate::routes::services::update_service,
@@ -207,10 +205,8 @@ use crate::AppState;
             crate::routes::auth::AuthResponse,
             crate::routes::auth::RefreshResponse,
             crate::routes::auth::UserResponse,
-            crate::routes::settings::RegistrationSettingsResponse,
-            crate::routes::settings::UpdateRegistrationSettingsRequest,
-            crate::routes::settings_auth::AuthenticationSettingsResponse,
-            crate::routes::settings_auth::UpdateAuthenticationSettingsRequest,
+            uptrakit_web_api_types::settings_access::AccessSettingsResponse,
+            uptrakit_web_api_types::settings_access::UpdateAccessSettingsRequest,
             uptrakit_web_api_types::settings_combined::CombinedSettingsResponse,
             crate::auth::registration::RegistrationMode,
             crate::routes::services::ServiceStatus,
@@ -536,15 +532,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(crate::routes::api_tokens::revoke_api_token))
         .routes(routes!(
-            crate::routes::settings::get_registration_settings,
-            crate::routes::settings::update_registration_settings
+            crate::routes::settings_access::get_access_settings,
+            crate::routes::settings_access::update_access_settings
         ))
         .routes(routes!(
             crate::routes::settings_combined::get_combined_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_auth::get_authentication_settings,
-            crate::routes::settings_auth::update_authentication_settings
         ))
         .routes(routes!(
             crate::routes::settings_agent_certs::get_agent_certificate_settings,

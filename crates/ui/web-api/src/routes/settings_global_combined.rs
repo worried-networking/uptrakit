@@ -85,10 +85,7 @@ pub async fn get_global_combined_settings(
         });
     }
 
-    let response = GlobalSettingsCombinedResponse {
-        network: network_response,
-        nats,
-    };
+    let response = GlobalSettingsCombinedResponse::new(network_response, nats);
 
     (StatusCode::OK, Json(response)).into_response()
 }

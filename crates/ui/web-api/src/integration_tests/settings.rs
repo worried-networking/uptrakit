@@ -31,7 +31,7 @@ async fn get_registration_settings_returns_200() {
     let token = register_and_get_token(&client).await;
 
     let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send_json()
         .await;
@@ -50,7 +50,7 @@ async fn update_registration_settings_returns_200() {
 
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -63,7 +63,7 @@ async fn update_registration_settings_returns_200() {
 
     // Verify persistence by reading again.
     let (s2, body2): (_, serde_json::Value) = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send_json()
         .await;
