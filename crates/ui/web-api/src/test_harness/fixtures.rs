@@ -10,7 +10,9 @@
 )]
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
-use uptrakit_shared_db::entity::{host, permission, role, role_permission, service, service_host};
+use uptrakit_shared_db::entity::{
+    host, oauth_client, permission, role, role_permission, service, service_host,
+};
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::auth::{AuthResponse, LoginRequest, RefreshResponse, RegisterRequest};
 
@@ -274,4 +276,48 @@ pub(crate) async fn link_service_host(
     .insert(db)
     .await
     .expect("link service_host");
+}
+
+/// Insert an `oauth_client` row and return its `client_id`.
+///
+/// When `trusted` is `true`, `trusted_at` is set to the current timestamp.
+pub(crate) async fn insert_oauth_client(
+    db: &DatabaseConnection,
+    redirect_uri: &str,
+    trusted: bool,
+) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let client_id = format!("test-consent-client-{}", uuid::Uuid::now_v7());
+    let redirect_uris_json =
+        serde_json::to_string(&vec![redirect_uri]).expect("serialize redirect_uris");
+
+    oauth_client::ActiveModel {
+        id: Set(client_id.clone()),
+        client_name: Set("Consent Test Client".to_string()),
+        client_uri: Set(Some("https://example.com".to_string())),
+        logo_uri: Set(None),
+        redirect_uris: Set(redirect_uris_json),
+        default_scope: Set("mcp:read".to_string()),
+        grant_types: Set("authorization_code".to_string()),
+        response_types: Set("code".to_string()),
+        token_endpoint_auth_method: Set("none".to_string()),
+        client_secret_hash: Set(None),
+        registration_access_token_hash: Set(None),
+        created_via: Set("test".to_string()),
+        created_at: Set(now),
+        last_used_at: Set(None),
+        revoked_at: Set(None),
+        metadata_cached_at: Set(None),
+        metadata_etag: Set(None),
+        metadata_content_hash: Set(None),
+        metadata_raw: Set(None),
+        metadata_parse_error: Set(None),
+        metadata_parse_error_at: Set(None),
+        trusted_at: Set(if trusted { Some(now) } else { None }),
+    }
+    .insert(db)
+    .await
+    .expect("insert oauth_client");
+
+    client_id
 }
