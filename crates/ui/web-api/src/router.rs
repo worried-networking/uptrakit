@@ -11,6 +11,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::AppState;
+use crate::extractors::SettingsVersion;
 
 /// OpenAPI documentation (core — always available)
 #[derive(OpenApi)]
@@ -531,17 +532,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::api_tokens::list_api_tokens
         ))
         .routes(routes!(crate::routes::api_tokens::revoke_api_token))
-        .routes(routes!(
-            crate::routes::settings_access::get_access_settings,
-            crate::routes::settings_access::update_access_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_combined::get_combined_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_agent_certs::get_agent_certificate_settings,
-            crate::routes::settings_agent_certs::update_agent_certificate_settings
-        ))
         .routes(routes!(crate::routes::services::list_services))
         .routes(routes!(crate::routes::services::batch_services))
         .routes(routes!(
@@ -886,6 +876,25 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::me_2fa::totp_confirm))
         .routes(routes!(crate::routes::me_2fa::totp_disable))
         .routes(routes!(crate::routes::me_2fa::regenerate_recovery_codes));
+
+    let tenant_settings = OpenApiRouter::new()
+        .routes(routes!(
+            crate::routes::settings_access::get_access_settings,
+            crate::routes::settings_access::update_access_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_combined::get_combined_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_agent_certs::get_agent_certificate_settings,
+            crate::routes::settings_agent_certs::update_agent_certificate_settings
+        ))
+        .route_layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            crate::middleware::etag::etag_middleware::<SettingsVersion>,
+        ));
+
+    let auth_routes = auth_routes.merge(tenant_settings);
 
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),

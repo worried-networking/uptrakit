@@ -1,7 +1,6 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::{CanManageAgentCerts, CanViewSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{delete_setting, upsert_setting};
@@ -97,7 +96,6 @@ pub async fn get_agent_certificate_settings(
 pub async fn update_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
     CanManageAgentCerts(user): CanManageAgentCerts,
-    _if_match: IfMatch<SettingsVersion>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
@@ -557,7 +555,6 @@ mod tests {
                 vec![Permission::ManageAgentCerts],
                 None,
             )),
-            crate::extractors::IfMatch::for_test(),
             None,
             Json(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(0),
@@ -612,7 +609,6 @@ mod tests {
                 vec![Permission::ManageAgentCerts],
                 None,
             )),
-            crate::extractors::IfMatch::for_test(),
             None,
             Json(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(24),
