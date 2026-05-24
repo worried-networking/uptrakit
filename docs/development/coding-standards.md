@@ -1198,6 +1198,32 @@ canonical example.
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 
+## ETag Route-Layer Pattern
+
+Settings endpoints use route-level ETag middleware rather than per-handler extractors
+(see [ADR-0017](../adr/0017-etag-route-layer-middleware.md)). New settings routes **must** be
+covered by `etag_middleware`.
+
+### How to add a new settings route
+
+1. Decide scope: `SettingsVersion` for `/api/v1/settings/*`, `GlobalSettingsVersion` for
+   `/api/v1/global-settings/*`.
+2. In `router.rs`, add the route to the appropriate sub-router (`tenant_settings` or
+   `global_settings`). Do not add it to the outer `auth_routes` chain.
+3. Handler bodies contain no ETag code — no `If-Match` parameter, no `settings_version_cache`
+   lookup, no ETag header construction.
+
+### POST endpoints
+
+POST routes included in an ETag sub-router receive an ETag on success if they mutate state.
+POST endpoints that are destructive teardowns (e.g. `POST /settings/reset-data`) must **not** be
+included in any ETag sub-router.
+
+### `IfMatch<S>` extractor
+
+Retained for `plugin_configs.rs` handlers that use it directly. Do not add it to new handlers —
+use the layer pattern instead.
+
 ## Typed Path Extractors
 
 Route handlers that accept UUID path parameters must use `Path<Uuid>` (or `Path<(Uuid, Uuid)>` for
