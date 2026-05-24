@@ -136,6 +136,10 @@
 	z-index: 100;
 }
 
+[data-ui='tooltip'] {
+	z-index: 100;
+}
+
 [data-ui='batch-action-bar'] {
 	z-index: 500;
 }
