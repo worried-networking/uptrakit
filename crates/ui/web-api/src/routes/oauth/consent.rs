@@ -160,7 +160,7 @@ pub async fn consent_details(
         "client_name": client.client_name,
         "client_uri": client.client_uri,
         "scopes": scopes,
-        "redirect_uri_hostname": redirect_hostname,
+        "redirect_uri_host": redirect_hostname,
         "requires_typed_confirmation": requires_typed_confirmation,
         "typed_confirmation_value": typed_confirmation_value,
         "revalidation_required": revalidation_required,
