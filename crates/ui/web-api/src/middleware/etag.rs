@@ -7,8 +7,6 @@ use axum::http::header::{ETAG, HeaderValue, IF_MATCH};
 use axum::http::{Method, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::Route;
-use tower::Layer;
 use uptrakit_web_api_types::error::ErrorResponse;
 
 use crate::app_state::AppState;
@@ -16,16 +14,6 @@ use crate::extractors::etag_source::EtagSource;
 
 fn strip_etag(s: &str) -> &str {
     s.strip_prefix("W/").unwrap_or(s).trim_matches('"')
-}
-
-pub fn etag_layer<S>(state: Arc<AppState>) -> impl Layer<Route> + Clone
-where
-    S: EtagSource,
-{
-    axum::middleware::from_fn_with_state::<_, Arc<AppState>, (State<Arc<AppState>>,)>(
-        state,
-        etag_middleware::<S>,
-    )
 }
 
 pub(crate) async fn etag_middleware<S>(
