@@ -1,6 +1,5 @@
 use rmcp::{
     ErrorData, Json, ServerHandler,
-    handler::server::tool::Extension,
     handler::server::wrapper::Parameters,
     model::{Implementation, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
@@ -49,7 +48,7 @@ impl McpHandler {
     )]
     pub async fn get_current_user(
         &self,
-        Extension(ctx): Extension<McpRequestContext>,
+        ctx: McpRequestContext,
     ) -> Result<Json<GetCurrentUserResult>, ErrorData> {
         self.get_current_user_impl(ctx).await
     }
@@ -67,7 +66,7 @@ impl McpHandler {
     )]
     pub async fn list_update_history(
         &self,
-        Extension(ctx): Extension<McpRequestContext>,
+        ctx: McpRequestContext,
         Parameters(input): Parameters<ListUpdateHistoryInput>,
     ) -> Result<Json<ListUpdateHistoryResult>, ErrorData> {
         self.list_update_history_impl(ctx, input).await
@@ -85,7 +84,7 @@ impl McpHandler {
     )]
     pub async fn get_update_history_detail(
         &self,
-        Extension(ctx): Extension<McpRequestContext>,
+        ctx: McpRequestContext,
         Parameters(input): Parameters<GetUpdateHistoryDetailInput>,
     ) -> Result<Json<UpdateHistoryDetailResult>, ErrorData> {
         self.get_update_history_detail_impl(ctx, input).await
@@ -103,7 +102,7 @@ impl McpHandler {
     )]
     pub async fn trigger_update(
         &self,
-        Extension(ctx): Extension<McpRequestContext>,
+        ctx: McpRequestContext,
         Parameters(input): Parameters<TriggerUpdateInput>,
     ) -> Result<Json<TriggerUpdateResult>, ErrorData> {
         self.trigger_update_impl(ctx, input).await
