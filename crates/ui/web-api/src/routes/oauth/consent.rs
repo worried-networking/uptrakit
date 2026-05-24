@@ -2,7 +2,7 @@
 //! `POST /oauth/consent/{request_id}/approve`, and
 //! `POST /oauth/consent/{request_id}/deny`.
 //!
-//! Per spec §12 + §12.4 typed-confirmation logic.
+//! Per spec §12.
 
 use std::sync::Arc;
 
@@ -199,7 +199,7 @@ pub async fn approve_consent(
     client_ip: Option<Extension<ClientIp>>,
     auth_user: Option<Extension<AuthenticatedUser>>,
     Path(request_id): Path<Uuid>,
-    axum::Json(body): axum::Json<ConsentDecision>,
+    axum::Json(_body): axum::Json<ConsentDecision>,
 ) -> Response {
     if !state.oauth.enabled {
         return StatusCode::NOT_FOUND.into_response();
@@ -252,37 +252,6 @@ pub async fn approve_consent(
     // Defensive ownership check: row.user_id must match since preflight verified it.
     if row.user_id != auth_user.user_id {
         return StatusCode::FORBIDDEN.into_response();
-    }
-
-    let client_svc = OAuthClientService::new(
-        state.db().clone(),
-        Arc::clone(&state.oauth.clock),
-        Arc::new(state.audit_emitter.clone()),
-    );
-    let client = match client_svc.lookup(&row.client_id).await {
-        Ok(Some(c)) if c.revoked_at.is_none() => c,
-        Ok(_) => {
-            return oauth_400("invalid_client", "client not found or revoked");
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "oauth client lookup failed");
-            return oauth_500();
-        }
-    };
-
-    if client.trusted_at.is_none() {
-        let expected_confirmation = loopback_or_host(&row.redirect_uri);
-        let provided = body
-            .typed_confirmation
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase();
-        if provided != expected_confirmation {
-            return oauth_400(
-                "unverified_typed_confirmation_mismatch",
-                "typed confirmation does not match redirect URI hostname",
-            );
-        }
     }
 
     let consent_svc = OAuthConsentService::new(state.db().clone(), Arc::clone(&state.oauth.clock));
@@ -808,41 +777,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 5 — POST approve with wrong typed confirmation returns 400
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn consent_approve_unverified_wrong_typed_confirmation() {
-        let app = setup().await;
-        let user_id = insert_test_user(&app.db).await;
-        // Unverified client (trusted_at = NULL).
-        let client_id = insert_oauth_client(&app.db, TEST_REDIRECT_URI, false).await;
-        let request_id = insert_auth_request(&app.db, &client_id, user_id, TEST_REDIRECT_URI).await;
-
-        let jwt_token = app
-            .jwt
-            .create_access_token(user_id, &[], "password", None, None)
-            .expect("create_access_token");
-
-        let body = serde_json::json!({ "typed_confirmation": "wrong-host.com" });
-        let req = Request::builder()
-            .method("POST")
-            .uri(format!("/oauth/consent/{request_id}/approve"))
-            .header("authorization", format!("Bearer {jwt_token}"))
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .expect("build request");
-
-        let resp = app.router.oneshot(req).await.expect("oneshot");
-
-        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
-        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
-        let resp_body: serde_json::Value = serde_json::from_slice(&body_bytes).expect("json body");
-        assert_eq!(resp_body["error"], "unverified_typed_confirmation_mismatch");
-    }
-
-    // -----------------------------------------------------------------------
-    // Test 6 — POST deny redirects with access_denied
+    // Test 5 — POST deny redirects with access_denied
     // -----------------------------------------------------------------------
 
     #[tokio::test]

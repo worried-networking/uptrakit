@@ -126,20 +126,10 @@ impl Validate for TokenRequest {
 }
 
 /// User-driven consent decision posted from the consent UI.
-///
-/// `typed_confirmation` carries the hostname the user typed in the
-/// "unverified client" confirmation flow; it is required only when the
-/// targeted client's `trusted_at` is null (spec §12.1). Higher-layer policy —
-/// not this struct — enforces the requirement, so this `Validate` impl is a
-/// no-op placeholder that keeps the type aligned with the project rule.
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ConsentDecision {
-    /// Hostname the user typed for unverified-client confirmation. Required
-    /// when the client's `trusted_at` is `NULL`; checked outside this struct.
-    pub typed_confirmation: Option<String>,
-}
+pub struct ConsentDecision {}
 
 impl Validate for ConsentDecision {
     fn validate(&self) -> Result<(), ValidationError> {
@@ -253,13 +243,5 @@ mod tests {
             resource: None,
         };
         assert!(r.validate().is_err());
-    }
-
-    #[test]
-    fn consent_decision_validates() {
-        let c = ConsentDecision {
-            typed_confirmation: Some("x".into()),
-        };
-        assert!(c.validate().is_ok());
     }
 }
