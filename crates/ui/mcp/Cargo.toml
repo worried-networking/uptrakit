@@ -27,8 +27,17 @@ serde                  = { workspace = true }
 serde_json             = { workspace = true }
 thiserror              = { workspace = true }
 
+[features]
+db-sqlite = ["uptrakit-shared-db/db-sqlite", "sea-orm/sqlx-sqlite"]
+
 [dev-dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+uptrakit-web-api-auth  = { workspace = true }
+uptrakit-shared-types  = { workspace = true }
+uptrakit-crypto        = { workspace = true, features = ["testing"] }
+reqwest                = { workspace = true }
+time                   = { workspace = true }
+tokio                  = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
