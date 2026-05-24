@@ -63,13 +63,10 @@ export async function getConsentDetails(requestId: string): Promise<ConsentDetai
 	return oauthRequest(`/oauth/consent/${encodeURIComponent(requestId)}`);
 }
 
-export async function approveConsent(
-	requestId: string,
-	typedConfirmation: string | null
-): Promise<{ redirect_to: string }> {
+export async function approveConsent(requestId: string): Promise<{ redirect_to: string }> {
 	return oauthRequest(`/oauth/consent/${encodeURIComponent(requestId)}/approve`, {
 		method: 'POST',
-		body: JSON.stringify({ typed_confirmation: typedConfirmation })
+		body: JSON.stringify({})
 	});
 }
 
