@@ -121,6 +121,17 @@ describe('Tooltip', () => {
 			expect(bubble.classList.contains('invisible')).toBe(true);
 		});
 
+		it('Escape hides tooltip via window listener (hover without focus — WCAG 1.4.13)', async () => {
+			vi.useFakeTimers();
+			render(Tooltip, { content: 'Hello' });
+			const trigger = screen.getByRole('button', { name: 'More information' });
+			await fireEvent.mouseEnter(trigger);
+			// Fire Escape on window, not trigger — simulates keyboard press without trigger focus
+			await fireEvent.keyDown(window, { key: 'Escape' });
+			const bubble = document.querySelector('[role="tooltip"]')!;
+			expect(bubble.classList.contains('invisible')).toBe(true);
+		});
+
 		it('bubble remains visible after positioning effect runs', async () => {
 			vi.useFakeTimers();
 			render(Tooltip, { content: 'Hello' });
