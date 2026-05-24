@@ -6,11 +6,13 @@ use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::header::IF_MATCH;
 use axum::http::request::Parts;
+use rootcause::Report;
 use uptrakit_config_reload::config::Scope;
 use uptrakit_web_api_types::error::ErrorResponse;
 
 use crate::app_state::AppState;
 use crate::extractors::etag_source::EtagSource;
+use crate::settings_store::get_settings_versions;
 
 /// Axum extractor that enforces optimistic locking via the HTTP `If-Match` header.
 ///
@@ -45,7 +47,7 @@ pub struct IfMatch<T: EtagSource> {
 impl<T: EtagSource> IfMatch<T> {
     /// Strip `W/` prefix and surrounding `"` quotes from an ETag string.
     fn strip_etag(s: &str) -> &str {
-        s.trim_start_matches("W/").trim_matches('"')
+        s.strip_prefix("W/").unwrap_or(s).trim_matches('"')
     }
 
     /// Construct a pre-approved [`IfMatch`] value for use in unit tests that
@@ -90,7 +92,7 @@ impl<T: EtagSource> FromRequestParts<Arc<AppState>> for IfMatch<T> {
                 )
             })?
             .to_string();
-        let current = T::current_etag(parts, state).await.map_err(|e| {
+        let current = T::current_etag(state).await.map_err(|e| {
             tracing::error!(error = %e, "settings version etag lookup failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -122,13 +124,29 @@ impl<T: EtagSource> FromRequestParts<Arc<AppState>> for IfMatch<T> {
 /// current per-tenant settings version counter (0 when not yet populated).
 pub struct SettingsVersion;
 
-#[async_trait::async_trait]
 impl EtagSource for SettingsVersion {
-    async fn current_etag(_parts: &Parts, state: &AppState) -> Result<String, rootcause::Report> {
+    async fn current_etag(state: &AppState) -> Result<String, Report> {
+        // SINGLE-TENANT ASSUMPTION
         let version = state
             .settings_version_cache
             .get(Scope::Tenant(state.default_tenant_id))
             .unwrap_or(0);
+        Ok(format!("W/\"settings-v{version}\""))
+    }
+
+    async fn refresh_etag(state: &AppState) -> Result<String, Report> {
+        // SINGLE-TENANT ASSUMPTION
+        let (tenant_v, _) = get_settings_versions(state.db(), state.default_tenant_id).await?;
+        let version = u64::try_from(tenant_v).unwrap_or_else(|_| {
+            tracing::warn!(
+                tenant_v,
+                "settings_version negative or overflow; treating as 0"
+            );
+            0
+        });
+        state
+            .settings_version_cache
+            .update(Scope::Tenant(state.default_tenant_id), version);
         Ok(format!("W/\"settings-v{version}\""))
     }
 }
@@ -141,10 +159,23 @@ impl EtagSource for SettingsVersion {
 /// `settings`), where the reconciler tracks changes under [`Scope::Global`].
 pub struct GlobalSettingsVersion;
 
-#[async_trait::async_trait]
 impl EtagSource for GlobalSettingsVersion {
-    async fn current_etag(_parts: &Parts, state: &AppState) -> Result<String, rootcause::Report> {
+    async fn current_etag(state: &AppState) -> Result<String, Report> {
         let version = state.settings_version_cache.get(Scope::Global).unwrap_or(0);
+        Ok(format!("W/\"global-settings-v{version}\""))
+    }
+
+    async fn refresh_etag(state: &AppState) -> Result<String, Report> {
+        // SINGLE-TENANT ASSUMPTION
+        let (_, global_v) = get_settings_versions(state.db(), state.default_tenant_id).await?;
+        let version = u64::try_from(global_v).unwrap_or_else(|_| {
+            tracing::warn!(
+                global_v,
+                "global_version negative or overflow; treating as 0"
+            );
+            0
+        });
+        state.settings_version_cache.update(Scope::Global, version);
         Ok(format!("W/\"global-settings-v{version}\""))
     }
 }
