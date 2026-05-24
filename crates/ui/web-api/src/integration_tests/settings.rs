@@ -24,67 +24,31 @@ async fn seed_invalid_github_provider_record(
 }
 
 #[tokio::test]
-async fn get_registration_settings_returns_200() {
+async fn get_combined_settings_returns_ok_shape() {
     ensure_crypto_provider();
     let app = TestApp::new().await;
     let client = app.client();
     let token = register_and_get_token(&client).await;
 
     let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/settings/access")
-        .bearer(&token)
-        .send_json()
-        .await;
-
-    assert_eq!(status, http::StatusCode::OK);
-    // Default mode is "Closed" after first user completes initial setup.
-    assert!(body["mode"].as_str().is_some());
-}
-
-#[tokio::test]
-async fn update_registration_settings_returns_200() {
-    ensure_crypto_provider();
-    let app = TestApp::new().await;
-    let client = app.client();
-    let token = register_and_get_token(&client).await;
-
-    let (status, body): (_, serde_json::Value) = client
-        .put_json(
-            "/api/v1/settings/access",
-            &serde_json::json!({ "mode": "open" }),
-        )
-        .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_json()
-        .await;
-
-    assert_eq!(status, http::StatusCode::OK);
-    assert_eq!(body["mode"], "open");
-
-    // Verify persistence by reading again.
-    let (s2, body2): (_, serde_json::Value) = client
-        .get("/api/v1/settings/access")
-        .bearer(&token)
-        .send_json()
-        .await;
-    assert_eq!(s2, http::StatusCode::OK);
-    assert_eq!(body2["mode"], "open");
-}
-
-#[tokio::test]
-async fn get_combined_settings_returns_200() {
-    ensure_crypto_provider();
-    let app = TestApp::new().await;
-    let client = app.client();
-    let token = register_and_get_token(&client).await;
-
-    let (status, _body): (_, serde_json::Value) = client
         .get("/api/v1/settings")
         .bearer(&token)
         .send_json()
         .await;
 
     assert_eq!(status, http::StatusCode::OK);
+    assert!(
+        body.get("agent_certificates").is_some(),
+        "agent_certificates missing from combined settings"
+    );
+    assert!(
+        body.get("enrollment_tokens").is_some(),
+        "enrollment_tokens missing from combined settings"
+    );
+    assert!(
+        body.get("multi_tenancy_enabled").is_some(),
+        "multi_tenancy_enabled missing from combined settings"
+    );
 }
 
 #[tokio::test]
