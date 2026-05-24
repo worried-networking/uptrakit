@@ -4,6 +4,7 @@
 	import { approveDeviceAuth, denyDeviceAuth, lookupDeviceAuth, type DeviceLookup } from '$lib/api';
 	import { getLoading, getUser } from '$lib/auth.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ConsentPrompt from '$lib/components/ConsentPrompt.svelte';
 	import { Callout } from '$lib/components/ui';
 	import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
 
@@ -232,37 +233,15 @@
 			{#if actionError}
 				<Callout tone="danger" title="Unable to process device request" message={actionError} />
 			{/if}
-			{#if lookup?.client_name}
-				<Callout
-					tone="info"
-					title="Approve sign-in"
-					message="Approve sign-in from {lookup.client_name}? Confirm the code above matches your terminal."
-				/>
-			{:else}
-				<Callout tone="info" message="Your CLI is requesting access. Confirm the code above matches your terminal." />
-			{/if}
-			<div class="flex gap-3">
-				<Button
-					variant="primary"
-					type="button"
-					class="flex-1 justify-center"
-					disabled={processing}
-					loading={processing}
-					onclick={onApprove}
-				>
-					Approve
-				</Button>
-				<Button
-					variant="secondary"
-					type="button"
-					class="flex-1 justify-center"
-					disabled={processing}
-					loading={processing}
-					onclick={onDeny}
-				>
-					Deny
-				</Button>
-			</div>
+			<!-- trust="verified": device clients are always controller-internal (uptrakit CLI).
+			     No third-party DCR path exists for device-flow clients. -->
+			<ConsentPrompt
+				clientName={lookup?.client_name ?? 'CLI'}
+				trust="verified"
+				approving={processing}
+				{onApprove}
+				{onDeny}
+			/>
 		{/if}
 	{/if}
 </PublicEntryShell>
