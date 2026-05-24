@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
-	import { approveDeviceAuth, denyDeviceAuth, lookupDeviceAuth, type DeviceLookup } from '$lib/api';
+	import { approveDeviceAuth, denyDeviceAuth, lookupDeviceAuth } from '$lib/api';
 	import { getLoading, getUser } from '$lib/auth.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import ConsentPrompt from '$lib/components/ConsentPrompt.svelte';
@@ -11,7 +11,6 @@
 	let success = $state(false);
 	let denied = $state(false);
 	let processing = $state(false);
-	let lookup = $state<DeviceLookup | null>(null);
 	let lookupPhase: 'idle' | 'loading' | 'done' | 'error' = $state('idle');
 	let lookupError = $state('');
 	let actionError = $state('');
@@ -34,7 +33,6 @@
 	function resetLookup() {
 		if (lookupPhase !== 'idle') {
 			lookupPhase = 'idle';
-			lookup = null;
 			lookupError = '';
 			// actionError is NOT cleared here — cleared at the start of onApprove/onDeny.
 			// Clearing it here would silently hide a failed-approve error when the user edits a box.
@@ -60,8 +58,7 @@
 		if (codeValid && isLoggedIn && lookupPhase === 'idle') {
 			lookupPhase = 'loading';
 			lookupDeviceAuth(enteredCode)
-				.then((r) => {
-					lookup = r;
+				.then(() => {
 					lookupPhase = 'done';
 				})
 				.catch((err) => {
@@ -235,13 +232,7 @@
 			{/if}
 			<!-- trust="verified": device clients are always controller-internal (uptrakit CLI).
 			     No third-party DCR path exists for device-flow clients. -->
-			<ConsentPrompt
-				clientName={lookup?.client_name ?? 'CLI'}
-				trust="verified"
-				approving={processing}
-				{onApprove}
-				{onDeny}
-			/>
+			<ConsentPrompt trust="verified" approving={processing} {onApprove} {onDeny} />
 		{/if}
 	{/if}
 </PublicEntryShell>

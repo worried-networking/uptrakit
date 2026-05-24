@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { AlertTriangle, CheckCircle } from 'lucide-svelte';
+	import { CheckCircle } from 'lucide-svelte';
 	import { Callout } from '$lib/components/ui';
 	import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
 	import ConsentPrompt from '$lib/components/ConsentPrompt.svelte';
@@ -71,8 +71,6 @@
 		<Callout tone="danger" message={loadError} />
 	{:else if details !== null}
 		<ConsentPrompt
-			clientName={details.client_name}
-			clientUri={details.client_uri}
 			trust={clientTrust(details)}
 			approveDisabled={submitting}
 			approving={submitting}
@@ -87,14 +85,10 @@
 			{/if}
 
 			{#if isLocalRedirect}
-				<Callout tone="warning">
-					<div class="flex items-center gap-2">
-						<AlertTriangle size={16} aria-hidden="true" />
-						<span
-							>This client will receive credentials at a local address. Make sure it is running on this machine.</span
-						>
-					</div>
-				</Callout>
+				<Callout
+					tone="warning"
+					message="This client will receive credentials at a local address. Make sure it is running on this machine."
+				/>
 			{/if}
 
 			<ul class="space-y-1">
