@@ -46,6 +46,11 @@ registry. Would inject ETags on non-settings routes unintentionally. Rejected.
 - `IfMatch<S>` extractor is retained because `plugin_configs.rs` handlers still use it directly.
   It is a candidate for removal in a future spec that migrates those handlers to the layer
   pattern.
+- `POST /api/v1/global-settings/ca/rotate` is intentionally outside the `GlobalSettingsVersion`
+  sub-router. The handler only signals a background CA-rotation task via `notify_one()` and
+  returns immediately; no `settings_version` bump occurs during the HTTP transaction, so
+  `refresh_etag` would return the pre-rotation version. Routes whose side-effects are
+  asynchronous and do not bump the version counter must be kept outside the ETag sub-router.
 - New resources outside settings may adopt the same pattern by implementing `EtagSource` and
   adding the middleware via
   `axum_mw::from_fn_with_state(state, crate::middleware::etag::etag_middleware::<NewResourceVersion>)`

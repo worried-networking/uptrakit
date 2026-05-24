@@ -44,12 +44,12 @@ pub struct IfMatch<T: EtagSource> {
     _marker: PhantomData<T>,
 }
 
-impl<T: EtagSource> IfMatch<T> {
-    /// Strip `W/` prefix and surrounding `"` quotes from an ETag string.
-    fn strip_etag(s: &str) -> &str {
-        s.strip_prefix("W/").unwrap_or(s).trim_matches('"')
-    }
+/// Strip `W/` prefix and surrounding `"` quotes from an ETag string.
+pub(crate) fn strip_etag(s: &str) -> &str {
+    s.strip_prefix("W/").unwrap_or(s).trim_matches('"')
+}
 
+impl<T: EtagSource> IfMatch<T> {
     /// Construct a pre-approved [`IfMatch`] value for use in unit tests that
     /// call handler functions directly (bypassing axum's extractor pipeline).
     ///
@@ -102,7 +102,7 @@ impl<T: EtagSource> FromRequestParts<Arc<AppState>> for IfMatch<T> {
                 }),
             )
         })?;
-        if Self::strip_etag(&client) != Self::strip_etag(&current) {
+        if strip_etag(&client) != strip_etag(&current) {
             return Err((
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
