@@ -28,7 +28,7 @@ where
     )
 }
 
-async fn etag_middleware<S>(
+pub(crate) async fn etag_middleware<S>(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: Next,

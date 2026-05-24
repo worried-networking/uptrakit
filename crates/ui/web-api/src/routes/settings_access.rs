@@ -18,7 +18,6 @@ use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 #[cfg(feature = "oidc")]
@@ -57,20 +56,7 @@ pub async fn get_access_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    // Absent entry ≡ version 0 (cache is populated only after the first PUT).
-    let version = state
-        .settings_version_cache
-        .get(uptrakit_config_reload::config::Scope::Tenant(
-            state.default_tenant_id,
-        ))
-        .unwrap_or(0);
-    let etag = format!("W/\"settings-v{version}\"");
-    (
-        StatusCode::OK,
-        [(axum::http::header::ETAG, etag)],
-        Json(current_response(&state)),
-    )
-        .into_response()
+    (StatusCode::OK, Json(current_response(&state))).into_response()
 }
 
 /// Update access settings (registration + authentication in one transaction)
@@ -91,7 +77,6 @@ pub async fn get_access_settings(
 pub async fn update_access_settings(
     State(state): State<Arc<AppState>>,
     CanManageAuthSettings(user): CanManageAuthSettings,
-    _if_match: IfMatch<SettingsVersion>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAccessSettingsRequest>,
@@ -343,27 +328,10 @@ pub async fn update_access_settings(
     }
     hook.flush_after_commit().await;
 
-    // ── 8. Bump settings version cache ────────────────────────────────────────
-    // Absent entry ≡ version 0; first successful PUT yields version 1.
-    let scope = uptrakit_config_reload::config::Scope::Tenant(tenant_id);
-    let next = state
-        .settings_version_cache
-        .get(scope)
-        .unwrap_or(0)
-        .saturating_add(1);
-    state.settings_version_cache.update(scope, next);
-
     state.settings.set_registration(reg).await;
     state.settings.set_authentication(auth).await;
 
-    // Return updated ETag so clients can chain subsequent PUTs without a GET.
-    let new_etag = format!("W/\"settings-v{next}\"");
-    (
-        StatusCode::OK,
-        [(axum::http::header::ETAG, new_etag)],
-        Json(current_response(&state)),
-    )
-        .into_response()
+    (StatusCode::OK, Json(current_response(&state))).into_response()
 }
 
 // ── Audit helpers ─────────────────────────────────────────────────────────────
