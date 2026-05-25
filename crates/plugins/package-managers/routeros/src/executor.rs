@@ -7,6 +7,7 @@ use rootcause::prelude::*;
 
 use uptrakit_plugin_infrastructure_core::RouterOsExecutor;
 
+use crate::channel::RouterOsChannel;
 use crate::error::{Result, RouterOsError};
 
 /// Drives a RouterOS update: triggers the background update check, waits for
@@ -24,11 +25,19 @@ pub(crate) struct RouterOsUpdateExecutor {
 impl RouterOsUpdateExecutor {
     /// Run the update sequence.
     ///
-    /// 1. Trigger the background update check (`check-for-updates`).
-    /// 2. Wait 10 seconds for the router to complete the check.
-    /// 3. Either issue `package install` (if `reboot && allow_reboot`)
+    /// 1. If `channel` is `Some`, set it on the router before checking.
+    /// 2. Trigger the background update check (`check-for-updates`).
+    /// 3. Wait 10 seconds for the router to complete the check.
+    /// 4. Either issue `package install` (if `reboot && allow_reboot`)
     ///    or `package download`.
-    pub(crate) async fn run_update(&self) -> Result<()> {
+    pub(crate) async fn run_update(&self, channel: Option<&RouterOsChannel>) -> Result<()> {
+        if let Some(ch) = channel {
+            self.exec
+                .set_update_channel(ch.as_str())
+                .await
+                .map_err(|e| report!(RouterOsError::SshExec(e.to_string())))?;
+        }
+
         self.exec
             .check_for_updates()
             .await
@@ -104,6 +113,10 @@ mod tests {
             Ok(String::new())
         }
 
+        async fn set_update_channel(&self, _channel: &str) -> std::result::Result<(), PluginError> {
+            Ok(())
+        }
+
         async fn check_for_updates(&self) -> std::result::Result<(), PluginError> {
             *self.last_call.lock() = LastCall::CheckForUpdates;
             Ok(())
@@ -134,7 +147,10 @@ mod tests {
             reboot: false,
             allow_reboot: true,
         };
-        executor.run_update().await.expect("update should succeed");
+        executor
+            .run_update(None)
+            .await
+            .expect("update should succeed");
         assert_eq!(mock.last(), LastCall::PackageDownload);
     }
 
@@ -146,7 +162,10 @@ mod tests {
             reboot: true,
             allow_reboot: false,
         };
-        executor.run_update().await.expect("update should succeed");
+        executor
+            .run_update(None)
+            .await
+            .expect("update should succeed");
         // allow_reboot=false: must download even though reboot=true
         assert_eq!(mock.last(), LastCall::PackageDownload);
     }
@@ -159,7 +178,10 @@ mod tests {
             reboot: true,
             allow_reboot: true,
         };
-        executor.run_update().await.expect("update should succeed");
+        executor
+            .run_update(None)
+            .await
+            .expect("update should succeed");
         assert_eq!(mock.last(), LastCall::PackageInstall);
     }
 
@@ -171,7 +193,10 @@ mod tests {
             reboot: false,
             allow_reboot: false,
         };
-        executor.run_update().await.expect("update should succeed");
+        executor
+            .run_update(None)
+            .await
+            .expect("update should succeed");
         assert_eq!(mock.last(), LastCall::PackageDownload);
     }
 }

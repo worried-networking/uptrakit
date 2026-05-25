@@ -45,15 +45,38 @@ impl RouterOsExecutor for RouterOsSshExecutor {
             .map_err(|e| PluginError::PluginInternal(e.to_string()))
     }
 
+    async fn set_update_channel(&self, channel: &str) -> std::result::Result<(), PluginError> {
+        let cmd = format!("/system package update set channel={channel}");
+        let output = self
+            .inner
+            .exec_raw(&cmd, Some(ROS_CMD_TIMEOUT))
+            .await
+            .map_err(|e| PluginError::PluginInternal(e.to_string()))?;
+        check_ros_write_output_for_error(&cmd, &output)
+    }
+
     async fn check_for_updates(&self) -> std::result::Result<(), PluginError> {
-        self.inner
+        let output = self
+            .inner
             .exec_raw(
                 "/system package update check-for-updates",
                 Some(ROS_CMD_TIMEOUT),
             )
             .await
-            .map(|_| ())
-            .map_err(|e| PluginError::PluginInternal(e.to_string()))
+            .map_err(|e| PluginError::PluginInternal(e.to_string()))?;
+        // Only surface permission errors — connectivity failures like
+        // "failure: dns name does not exist" are transient and should not
+        // abort the update attempt.
+        if let Some(line) = output
+            .lines()
+            .find(|l| l.contains("not enough permissions"))
+        {
+            return Err(PluginError::PluginInternal(format!(
+                "check-for-updates failed: {}",
+                line.trim()
+            )));
+        }
+        Ok(())
     }
 
     async fn package_update_print(&self) -> std::result::Result<String, PluginError> {
@@ -90,6 +113,12 @@ impl RouterOsExecutor for RouterOsSshExecutor {
 /// docs, the official forum, or output reproduced against a real router; do
 /// not add markers without a confirmed source — false positives abort
 /// bootstrap mid-way. See [`classify_ros_bootstrap_result`].
+///
+/// **Safe use**: these markers are used for bootstrap helpers and write commands
+/// whose success output is empty by RouterOS convention (`/system … set …`).
+/// Do NOT use for read commands (`/log print`, etc.) or for `check-for-updates`,
+/// which emits `"failure: dns name does not exist"` on connectivity errors —
+/// a transient condition that should not abort an update attempt.
 const ROS_ERROR_MARKERS: &[&str] = &[
     // `failure: <reason>` — runtime errors. MikroTik Scripting docs example:
     // `failure: dns name does not exist`. Existing in-tree precedent in
@@ -108,6 +137,27 @@ const ROS_ERROR_MARKERS: &[&str] = &[
     // `Script Error: bad command name ...`.
     "Script Error:",
 ];
+
+/// Check RouterOS write-command stdout for error markers.
+///
+/// Use only for commands whose success output is empty by RouterOS convention
+/// (`/system … set …`). Do not use for `check-for-updates` or read commands —
+/// see the [`ROS_ERROR_MARKERS`] doc for the rationale.
+fn check_ros_write_output_for_error(
+    cmd: &str,
+    output: &str,
+) -> std::result::Result<(), PluginError> {
+    if let Some(line) = output
+        .lines()
+        .find(|line| ROS_ERROR_MARKERS.iter().any(|m| line.contains(m)))
+    {
+        return Err(PluginError::PluginInternal(format!(
+            "{cmd} failed: {}",
+            line.trim()
+        )));
+    }
+    Ok(())
+}
 
 /// Classify a RouterOS bootstrap command result as success or failure.
 ///
