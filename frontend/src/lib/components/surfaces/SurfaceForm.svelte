@@ -43,7 +43,7 @@
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
 
-	async function submitInteraction(params: Record<string, unknown>) {
+	async function submitInteraction(params: Record<string, unknown>): Promise<unknown> {
 		submitting = true;
 		try {
 			const request = await buildSurfaceInteractionRequest(interaction, params, {
@@ -53,8 +53,10 @@
 			const result = await invokeSurfaceInteraction(surfaceId, interaction.interaction_id, request);
 			showSuccess(`${actionLabel} completed`);
 			await oncomplete?.(result);
+			return result;
 		} catch (error) {
 			showError(error instanceof Error ? error.message : 'Interaction failed');
+			throw error;
 		} finally {
 			submitting = false;
 		}
