@@ -363,9 +363,7 @@
 				</FormFieldRow>
 
 				<div class="flex flex-wrap gap-2 justify-end">
-					<Button variant="primary" loading={githubProviderSaving} onclick={saveGitHubProviderSettings}>
-						Save GitHub Provider
-					</Button>
+					<Button variant="primary" loading={githubProviderSaving} onclick={saveGitHubProviderSettings}>Save</Button>
 				</div>
 			</div>
 		</SectionCard>

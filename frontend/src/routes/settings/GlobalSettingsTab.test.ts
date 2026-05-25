@@ -56,7 +56,7 @@ describe('GlobalSettingsTab button variants', () => {
 
 	it('GitHub Provider Save button has no raw preset-filled-primary-500 class', async () => {
 		const { container } = render(GlobalSettingsTab);
-		await screen.findByText('Save GitHub Provider');
+		await screen.findAllByRole('button', { name: 'Save' });
 		const raw = container.querySelector('button.preset-filled-primary-500');
 		expect(raw).toBeNull();
 	});

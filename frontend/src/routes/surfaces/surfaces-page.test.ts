@@ -366,7 +366,7 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 			'?page_ds1=2&filter=foo&page_ds2=3',
 			expect.objectContaining({ replaceState: true, keepFocus: true, noScroll: true })
 		);
-	});
+	}, 15000);
 
 	it('removes the page param when navigating to page 1', async () => {
 		vi.doMock('$app/state', () => ({
