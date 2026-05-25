@@ -218,4 +218,42 @@ describe('SurfaceRenderer', () => {
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Open details' })).not.toBeInTheDocument();
 	});
+
+	it('renders section with header_action_ids as SectionCard with header button', async () => {
+		const node: SurfaceNode = {
+			kind: 'section',
+			title: 'My Section',
+			header_action_ids: ['create-item'],
+			children: []
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'create-item',
+				kind: 'mutation_action',
+				label: 'Create Item',
+				transport: { mode: 'controller_local' }
+			}
+		];
+		const { container } = render(SurfaceRenderer, {
+			surfaceId: 'test.surface',
+			node,
+			interactions
+		});
+		expect(container.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Create Item' })).toBeInTheDocument();
+	});
+
+	it('renders section without header_action_ids as plain div (no SectionCard)', () => {
+		const node: SurfaceNode = {
+			kind: 'section',
+			title: 'Plain Section',
+			children: []
+		};
+		const { container } = render(SurfaceRenderer, {
+			surfaceId: 'test.surface',
+			node
+		});
+		expect(container.querySelector('[data-ui="section-card"]')).not.toBeInTheDocument();
+		expect(screen.getByText('Plain Section')).toBeInTheDocument();
+	});
 });
