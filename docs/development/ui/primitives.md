@@ -79,6 +79,44 @@ Usage:
 - Header section has a bottom border separating it from the body.
 - Omit `title`, `description`, and `actions` to render the card without a header.
 
+### SectionCard button placement rules
+
+Two distinct button categories exist in `SectionCard` — they go in different locations:
+
+| Button category                                                | Location                                                        | Example                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------ |
+| Modal/workflow trigger (opens a new dialog or starts a wizard) | `{#snippet actions()}` slot in the card header                  | "Add Provider", "Create Token"       |
+| Form action (saves or discards the card's own form)            | Card body, `<div class="flex gap-2 justify-end">` at the bottom | Save, Discard, Reset Data, Rotate CA |
+
+**Modal/workflow triggers in the header:**
+
+```svelte
+<SectionCard title="OIDC Providers">
+  {#snippet actions()}
+    <Button variant="primary" onclick={openCreate}>Add Provider</Button>
+  {/snippet}
+  <!-- table or body content -->
+</SectionCard>
+```
+
+**Form actions right-aligned in the body:**
+
+```svelte
+<SectionCard title="Network Settings">
+  <!-- form fields -->
+  <div class="flex gap-2 justify-end">
+    {#if form.isDirty}
+      <Button variant="ghost" onclick={() => form.discard()}>Discard</Button>
+    {/if}
+    <Button variant="primary" disabled={!form.isDirty} onclick={save}>Save</Button>
+  </div>
+</SectionCard>
+```
+
+Confirmation-dialog triggers (buttons that open a `ConfirmDialog`, not a `ModalShell`) are **not** modal-triggers. They stay in the card body and must be right-aligned: `<div class="flex justify-end">`.
+
+Titles in `SectionCard` must follow **Title Case** (e.g. "OAuth Settings", not "OAuth settings").
+
 ---
 
 ## Navigation Primitives
@@ -646,6 +684,21 @@ etc.
   </Button>
 </div>
 ```
+
+**Form action button rules (applies to all hand-written forms using `createFormDraft`):**
+
+```svelte
+<div class="flex gap-2 justify-end">
+  {#if form.isDirty}
+    <Button variant="ghost" onclick={() => form.discard()}>Discard</Button>
+  {/if}
+  <!-- Save is always visible; disabled when not dirty or invalid -->
+  <Button variant="primary" disabled={!form.isDirty || !isValid} onclick={save}>Save</Button>
+</div>
+```
+
+- The submit label is always **"Save"** for form-save actions.
+- Pass `dirty={form.isFieldDirty(key)}` to each `FormFieldRow` to show the left-accent dirty indicator.
 
 ---
 
