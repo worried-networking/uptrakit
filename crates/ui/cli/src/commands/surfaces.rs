@@ -901,19 +901,17 @@ mod tests {
                     vec![],
                 ))
                 .build(),
-            interactions: vec![InteractionDescriptor {
-                interaction_id: "surface.sample.submit".parse().unwrap(),
-                kind: InteractionKind::FormSubmit,
-                label: "Submit".to_string(),
-                required_permission: None,
-                input_schema: Some(uptrakit_wire::surfaces::SchemaContract::Object),
-                result_schema: Some(uptrakit_wire::surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(30),
-                confirmation: None,
-                transport: InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(uptrakit_wire::surfaces::FormUiDescriptor {
+            interactions: vec![{
+                let mut i = InteractionDescriptor::new(
+                    "surface.sample.submit".parse().unwrap(),
+                    InteractionKind::FormSubmit,
+                    "Submit",
+                    InteractionTransport::ControllerLocal,
+                );
+                i.input_schema = Some(uptrakit_wire::surfaces::SchemaContract::Object);
+                i.result_schema = Some(uptrakit_wire::surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(30);
+                i.form_ui = Some(uptrakit_wire::surfaces::FormUiDescriptor {
                     fields: vec![FormFieldDescriptor {
                         key: "mystery".to_string(),
                         label: "Mystery".to_string(),
@@ -929,8 +927,8 @@ mod tests {
                         visible_when: None,
                     }],
                     pre_load_interaction_id: None,
-                }),
-                icon: None,
+                });
+                i
             }],
             data_sources: vec![],
         };

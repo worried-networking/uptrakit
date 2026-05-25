@@ -325,20 +325,18 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
             })
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("switch-tag")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Switch Tag".to_string(),
-                required_permission: Some(Permission::UpdateSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("switch-tag")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::FormSubmit,
+                    "Switch Tag",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "software_item_id".to_string(),
@@ -391,24 +389,20 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                         surfaces::InteractionId::new("get-current-tag")
                             .expect("literal interaction id is valid"),
                     ),
-                }),
-                icon: None,
+                });
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("get-current-tag")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Load current tag".to_string(),
-                required_permission: Some(Permission::UpdateSoftware.to_string()),
-                input_schema: None,
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("get-current-tag")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Load current tag",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i
             },
         ],
         data_sources: vec![],

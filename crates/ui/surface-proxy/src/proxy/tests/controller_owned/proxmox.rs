@@ -50,20 +50,18 @@ fn proxmox_hosts_registration(provider_id: &str) -> surfaces::SurfaceRegistratio
                     text: "ok".to_string(),
                 })
                 .build(),
-            interactions: vec![surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("add-config").unwrap(),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Action".to_string(),
-                required_permission: Some("manage_commands".to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(30),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("add-config").unwrap(),
+                    surfaces::InteractionKind::FormSubmit,
+                    "Action",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some("manage_commands".to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(30);
+                i
             }],
             data_sources: vec![],
         }],

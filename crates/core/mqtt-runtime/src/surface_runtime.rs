@@ -674,86 +674,81 @@ mod tests {
 )]
 fn build_interactions() -> Vec<InteractionDescriptor> {
     vec![
-        InteractionDescriptor {
-            interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id is valid"),
-            kind: InteractionKind::DataLoad,
-            label: "List MQTT Clients".to_string(),
-            required_permission: Some("update_system_services".to_string()),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Object),
-            sensitive_fields: Vec::new(),
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: None,
-            icon: None,
+        {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new(ACTION_LIST).expect("interaction id is valid"),
+                InteractionKind::DataLoad,
+                "List MQTT Clients",
+                InteractionTransport::ProviderProxied,
+            );
+            i.required_permission = Some("update_system_services".to_string());
+            i.input_schema = Some(surfaces::SchemaContract::Object);
+            i.result_schema = Some(surfaces::SchemaContract::Object);
+            i.timeout_seconds = Some(30);
+            i
         },
-        InteractionDescriptor {
-            interaction_id: InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
-            kind: InteractionKind::FormSubmit,
-            label: "Add MQTT Client".to_string(),
-            required_permission: Some("update_system_services".to_string()),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Object),
-            sensitive_fields: vec!["password".to_string(), "ca_pem".to_string()],
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: Some(build_client_form_ui(false)),
-            icon: None,
+        {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
+                InteractionKind::FormSubmit,
+                "Add MQTT Client",
+                InteractionTransport::ProviderProxied,
+            );
+            i.required_permission = Some("update_system_services".to_string());
+            i.input_schema = Some(surfaces::SchemaContract::Object);
+            i.result_schema = Some(surfaces::SchemaContract::Object);
+            i.sensitive_fields = vec!["password".to_string(), "ca_pem".to_string()];
+            i.timeout_seconds = Some(30);
+            i.form_ui = Some(build_client_form_ui(false));
+            i
         },
-        InteractionDescriptor {
-            interaction_id: InteractionId::new(ACTION_EDIT).expect("interaction id is valid"),
-            kind: InteractionKind::FormSubmit,
-            label: "Edit MQTT Client".to_string(),
-            required_permission: Some("update_system_services".to_string()),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Null),
-            sensitive_fields: vec!["password".to_string(), "ca_pem".to_string()],
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: Some(build_client_form_ui(true)),
-            icon: None,
+        {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new(ACTION_EDIT).expect("interaction id is valid"),
+                InteractionKind::FormSubmit,
+                "Edit MQTT Client",
+                InteractionTransport::ProviderProxied,
+            );
+            i.required_permission = Some("update_system_services".to_string());
+            i.input_schema = Some(surfaces::SchemaContract::Object);
+            i.result_schema = Some(surfaces::SchemaContract::Null);
+            i.sensitive_fields = vec!["password".to_string(), "ca_pem".to_string()];
+            i.timeout_seconds = Some(30);
+            i.form_ui = Some(build_client_form_ui(true));
+            i
         },
-        InteractionDescriptor {
-            interaction_id: InteractionId::new(ACTION_GET).expect("interaction id is valid"),
-            kind: InteractionKind::DataLoad,
-            label: "Get MQTT Client".to_string(),
-            required_permission: Some("update_system_services".to_string()),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Object),
-            sensitive_fields: Vec::new(),
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: None,
-            icon: None,
+        {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new(ACTION_GET).expect("interaction id is valid"),
+                InteractionKind::DataLoad,
+                "Get MQTT Client",
+                InteractionTransport::ProviderProxied,
+            );
+            i.required_permission = Some("update_system_services".to_string());
+            i.input_schema = Some(surfaces::SchemaContract::Object);
+            i.result_schema = Some(surfaces::SchemaContract::Object);
+            i.timeout_seconds = Some(30);
+            i
         },
-        InteractionDescriptor {
-            interaction_id: InteractionId::new(ACTION_DELETE).expect("interaction id is valid"),
-            kind: InteractionKind::ConfirmableAction,
-            label: "Delete MQTT Client".to_string(),
-            required_permission: Some("update_system_services".to_string()),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Null),
-            sensitive_fields: Vec::new(),
-            timeout_seconds: Some(30),
-            confirmation: Some(InteractionConfirmation {
+        {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new(ACTION_DELETE).expect("interaction id is valid"),
+                InteractionKind::ConfirmableAction,
+                "Delete MQTT Client",
+                InteractionTransport::ProviderProxied,
+            );
+            i.required_permission = Some("update_system_services".to_string());
+            i.input_schema = Some(surfaces::SchemaContract::Object);
+            i.result_schema = Some(surfaces::SchemaContract::Null);
+            i.timeout_seconds = Some(30);
+            i.confirmation = Some(InteractionConfirmation {
                 title: "Delete MQTT Client".to_string(),
                 message: "Delete this MQTT client configuration?".to_string(),
                 confirm_label: Some("Delete".to_string()),
                 cancel_label: Some("Cancel".to_string()),
                 severity: surfaces::ConfirmationSeverity::Danger,
-            }),
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: None,
-            icon: None,
+            });
+            i
         },
     ]
 }

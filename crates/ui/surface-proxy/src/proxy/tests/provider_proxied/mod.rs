@@ -48,20 +48,19 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
                     text: "ok".to_string(),
                 })
                 .build(),
-            interactions: vec![surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Action".to_string(),
-                required_permission: Some("update_software".to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec!["token".to_string()],
-                timeout_seconds: Some(2),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ProviderProxied,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("refresh").unwrap(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Action",
+                    surfaces::InteractionTransport::ProviderProxied,
+                );
+                i.required_permission = Some("update_software".to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i.sensitive_fields = vec!["token".to_string()];
+                i.timeout_seconds = Some(2);
+                i
             }],
             data_sources: vec![],
         }],

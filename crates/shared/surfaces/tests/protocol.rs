@@ -42,21 +42,18 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
             .required_capabilities(CapabilitySet::from_capabilities([Capability::SectionNode]))
             .root_node(SurfaceNode::section(Some("Sample"), Vec::new()))
             .build(),
-        interactions: vec![InteractionDescriptor {
-            interaction_id: InteractionId::new("surface.refresh").expect("valid interaction id"),
-            kind: InteractionKind::DataLoad,
-            label: "Refresh".to_string(),
-            required_permission: None,
-            input_schema: Some(SchemaContract::Any),
-            result_schema: Some(SchemaContract::Any),
-            sensitive_fields: Vec::new(),
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: Vec::new(),
-            form_ui: None,
-            icon: None,
-        }],
+        interactions: {
+            let mut i = InteractionDescriptor::new(
+                InteractionId::new("surface.refresh").expect("valid interaction id"),
+                InteractionKind::DataLoad,
+                "Refresh",
+                InteractionTransport::ProviderProxied,
+            );
+            i.input_schema = Some(SchemaContract::Any);
+            i.result_schema = Some(SchemaContract::Any);
+            i.timeout_seconds = Some(30);
+            vec![i]
+        },
         data_sources: vec![DataSourceDescriptor {
             data_source_id: DataSourceId::new("surface.data").expect("valid data source id"),
             kind: DataSourceKind::ProviderQuery {
@@ -142,20 +139,17 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
         .capabilities
         .0
         .insert(Capability::MutationAction);
-    let duplicate_interaction = InteractionDescriptor {
-        interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
-        kind: InteractionKind::MutationAction,
-        label: "Refresh".to_string(),
-        required_permission: None,
-        input_schema: Some(SchemaContract::Object),
-        result_schema: Some(SchemaContract::Any),
-        sensitive_fields: Vec::new(),
-        timeout_seconds: Some(30),
-        confirmation: None,
-        transport: InteractionTransport::ProviderProxied,
-        workflow_steps: Vec::new(),
-        form_ui: None,
-        icon: None,
+    let duplicate_interaction = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.refresh").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Refresh",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
     };
     registration.surfaces[0]
         .interactions
@@ -197,18 +191,17 @@ fn protocol_registration_rejects_blank_interaction_label() {
 fn protocol_registration_rejects_missing_workflow_step_label_during_deserialization() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
     registration.capabilities.0.insert(Capability::Workflow);
-    registration.surfaces[0].interactions[0] = InteractionDescriptor {
-        interaction_id: InteractionId::new("surface.bootstrap").expect("valid interaction id"),
-        kind: InteractionKind::Workflow,
-        label: "Bootstrap".to_string(),
-        required_permission: None,
-        input_schema: Some(SchemaContract::Object),
-        result_schema: Some(SchemaContract::Any),
-        sensitive_fields: Vec::new(),
-        timeout_seconds: Some(30),
-        confirmation: None,
-        transport: InteractionTransport::ProviderProxied,
-        workflow_steps: vec![WorkflowStepDescriptor {
+    registration.surfaces[0].interactions[0] = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.bootstrap").expect("valid interaction id"),
+            InteractionKind::Workflow,
+            "Bootstrap",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i.workflow_steps = vec![WorkflowStepDescriptor {
             step_id: "connect".to_string(),
             label: "Connect".to_string(),
             form_ui: None,
@@ -216,9 +209,8 @@ fn protocol_registration_rejects_missing_workflow_step_label_during_deserializat
             render_previous_response: false,
             input_schema: SchemaContract::Object,
             result_schema: SchemaContract::Any,
-        }],
-        form_ui: None,
-        icon: None,
+        }];
+        i
     };
 
     let mut encoded = serde_json::to_value(&registration).expect("serialize registration");
@@ -236,18 +228,17 @@ fn protocol_registration_rejects_missing_workflow_step_label_during_deserializat
 fn protocol_registration_rejects_blank_workflow_step_label() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
     registration.capabilities.0.insert(Capability::Workflow);
-    registration.surfaces[0].interactions[0] = InteractionDescriptor {
-        interaction_id: InteractionId::new("surface.bootstrap").expect("valid interaction id"),
-        kind: InteractionKind::Workflow,
-        label: "Bootstrap".to_string(),
-        required_permission: None,
-        input_schema: Some(SchemaContract::Object),
-        result_schema: Some(SchemaContract::Any),
-        sensitive_fields: Vec::new(),
-        timeout_seconds: Some(30),
-        confirmation: None,
-        transport: InteractionTransport::ProviderProxied,
-        workflow_steps: vec![WorkflowStepDescriptor {
+    registration.surfaces[0].interactions[0] = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.bootstrap").expect("valid interaction id"),
+            InteractionKind::Workflow,
+            "Bootstrap",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i.workflow_steps = vec![WorkflowStepDescriptor {
             step_id: "connect".to_string(),
             label: "   ".to_string(),
             form_ui: None,
@@ -255,9 +246,8 @@ fn protocol_registration_rejects_blank_workflow_step_label() {
             render_previous_response: false,
             input_schema: SchemaContract::Object,
             result_schema: SchemaContract::Any,
-        }],
-        form_ui: None,
-        icon: None,
+        }];
+        i
     };
 
     let err = registration
@@ -396,26 +386,24 @@ fn protocol_data_source_static_supports_embedded_data_and_read_contract_fields()
 
 #[test]
 fn protocol_confirmable_action_carries_confirmation_metadata() {
-    let interaction = InteractionDescriptor {
-        interaction_id: InteractionId::new("surface.delete").expect("valid id"),
-        kind: InteractionKind::ConfirmableAction,
-        label: "Delete".to_string(),
-        required_permission: None,
-        input_schema: Some(SchemaContract::Object),
-        result_schema: Some(SchemaContract::Any),
-        sensitive_fields: Vec::new(),
-        timeout_seconds: Some(30),
-        confirmation: Some(InteractionConfirmation {
+    let interaction = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.delete").expect("valid id"),
+            InteractionKind::ConfirmableAction,
+            "Delete",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i.confirmation = Some(InteractionConfirmation {
             title: "Delete item?".to_string(),
             message: "This cannot be undone.".to_string(),
             confirm_label: Some("Delete".to_string()),
             cancel_label: Some("Cancel".to_string()),
             severity: uptrakit_surfaces::ConfirmationSeverity::Danger,
-        }),
-        transport: InteractionTransport::ProviderProxied,
-        workflow_steps: Vec::new(),
-        form_ui: None,
-        icon: None,
+        });
+        i
     };
 
     let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
@@ -584,18 +572,17 @@ fn protocol_registration_rejects_duplicate_tab_ids_within_tabs_node() {
 
 #[test]
 fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
-    let interaction = InteractionDescriptor {
-        interaction_id: InteractionId::new("surface.bootstrap").expect("valid id"),
-        kind: InteractionKind::Workflow,
-        label: "Bootstrap Host".to_string(),
-        required_permission: None,
-        input_schema: Some(SchemaContract::Object),
-        result_schema: Some(SchemaContract::Any),
-        sensitive_fields: Vec::new(),
-        timeout_seconds: Some(120),
-        confirmation: None,
-        transport: InteractionTransport::ProviderProxied,
-        workflow_steps: vec![WorkflowStepDescriptor {
+    let interaction = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.bootstrap").expect("valid id"),
+            InteractionKind::Workflow,
+            "Bootstrap Host",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(120);
+        i.workflow_steps = vec![WorkflowStepDescriptor {
             step_id: "connect".to_string(),
             label: "Connection & Authentication".to_string(),
             form_ui: Some(FormUiDescriptor {
@@ -623,9 +610,8 @@ fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
             render_previous_response: false,
             input_schema: SchemaContract::Object,
             result_schema: SchemaContract::Any,
-        }],
-        form_ui: None,
-        icon: None,
+        }];
+        i
     };
 
     let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
@@ -660,33 +646,29 @@ fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
 fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
     registration.capabilities.0.insert(Capability::Workflow);
-    registration.surfaces[0]
-        .interactions
-        .push(InteractionDescriptor {
-            interaction_id: InteractionId::new("surface.workflow").expect("valid id"),
-            kind: InteractionKind::Workflow,
-            label: "Workflow".to_string(),
-            required_permission: None,
-            input_schema: Some(SchemaContract::Object),
-            result_schema: Some(SchemaContract::Any),
-            sensitive_fields: Vec::new(),
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps: vec![WorkflowStepDescriptor {
-                step_id: "step-1".to_string(),
-                label: "Step 1".to_string(),
-                form_ui: None,
-                submit_interaction_id: Some(
-                    InteractionId::new("surface.workflow.missing").expect("valid id"),
-                ),
-                render_previous_response: false,
-                input_schema: SchemaContract::Object,
-                result_schema: SchemaContract::Any,
-            }],
+    registration.surfaces[0].interactions.push({
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.workflow").expect("valid id"),
+            InteractionKind::Workflow,
+            "Workflow",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i.workflow_steps = vec![WorkflowStepDescriptor {
+            step_id: "step-1".to_string(),
+            label: "Step 1".to_string(),
             form_ui: None,
-            icon: None,
-        });
+            submit_interaction_id: Some(
+                InteractionId::new("surface.workflow.missing").expect("valid id"),
+            ),
+            render_previous_response: false,
+            input_schema: SchemaContract::Object,
+            result_schema: SchemaContract::Any,
+        }];
+        i
+    });
 
     let err = registration
         .validate_against(&registration_policy(CapabilitySet::default()))

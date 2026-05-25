@@ -654,36 +654,29 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 ))
                 .build(),
             interactions: vec![
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("list")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::DataLoad,
-                    label: "List".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("list")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "List",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("create")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::FormSubmit,
-                    label: "Add Email Channel".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("create")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Add Email Channel",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "name".to_string(),
@@ -731,23 +724,21 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: None,
-                    }),
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("edit")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::FormSubmit,
-                    label: "Edit".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("edit")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Edit",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "id".to_string(),
@@ -809,61 +800,55 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: None,
-                    }),
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("test")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Test".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("test")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Test",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("delete")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::ConfirmableAction,
-                    label: "Delete".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: Some(surfaces::InteractionConfirmation {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("delete")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::ConfirmableAction,
+                        "Delete",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.confirmation = Some(surfaces::InteractionConfirmation {
                         title: "Confirm Delete".to_string(),
                         message: "This action may modify existing data.".to_string(),
                         confirm_label: None,
                         cancel_label: None,
                         severity: surfaces::ConfirmationSeverity::Danger,
-                    }),
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("configure_smtp")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::FormSubmit,
-                    label: "Override SMTP".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec!["password".to_string()],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("configure_smtp")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Override SMTP",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.sensitive_fields = vec!["password".to_string()];
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "host".to_string(),
@@ -981,24 +966,19 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             surfaces::InteractionId::new("get_smtp")
                                 .expect("literal interaction id is valid"),
                         ),
-                    }),
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("get_smtp")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::DataLoad,
-                    label: "Get SMTP Settings".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("get_smtp")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Get SMTP Settings",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
                 },
             ],
             data_sources: vec![surfaces::DataSourceDescriptor {
@@ -1060,51 +1040,40 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 ))
                 .build(),
             interactions: vec![
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("get_global_smtp")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::DataLoad,
-                    label: "Get Global SMTP Defaults".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                                icon: None,
-},
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("test_global_smtp_email")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Send Test Email".to_string(),
-                    required_permission: Some("manage_global_settings".to_string()),
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                                icon: None,
-},
-                surfaces::InteractionDescriptor {
-                    interaction_id: save_global_smtp_interaction,
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Save Global SMTP Defaults".to_string(),
-                    required_permission: Some("manage_global_settings".to_string()),
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec!["password".to_string()],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("get_global_smtp")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Get Global SMTP Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
+                },
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("test_global_smtp_email")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Send Test Email",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_global_settings".to_string());
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
+                },
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        save_global_smtp_interaction,
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Global SMTP Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_global_settings".to_string());
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.sensitive_fields = vec!["password".to_string()];
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "host".to_string(),
@@ -1238,9 +1207,9 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             surfaces::InteractionId::new("get_global_smtp")
                                 .expect("literal interaction id is valid"),
                         ),
-                    }),
-                                icon: None,
-},
+                    });
+                    i
+                },
             ],
             data_sources: vec![],
         }

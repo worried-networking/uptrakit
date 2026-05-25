@@ -70,20 +70,17 @@ fn docker_switch_tag_registration(provider_id: &str) -> surfaces::SurfaceRegistr
                     text: "ok".to_string(),
                 })
                 .build(),
-            interactions: vec![surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("switch-tag").unwrap(),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Action".to_string(),
-                required_permission: None,
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(30),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("switch-tag").unwrap(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Action",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(30);
+                i
             }],
             data_sources: vec![],
         }],

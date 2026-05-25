@@ -226,79 +226,69 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("list").expect("literal"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "List Hosts".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: None,
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("list").expect("literal"),
+                    surfaces::InteractionKind::DataLoad,
+                    "List Hosts",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("discover").expect("literal"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Discover".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(120),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: Some("radar".to_string()),
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("discover").expect("literal"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Discover",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(120);
+                i.icon = Some("radar".to_string());
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("test-connection").expect("literal"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Test Connection".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(30),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: Some("plug-zap".to_string()),
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("test-connection").expect("literal"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Test Connection",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(30);
+                i.icon = Some("plug-zap".to_string());
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("approve-match").expect("literal"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Approve Match".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: Some("check".to_string()),
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("approve-match").expect("literal"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Approve Match",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.icon = Some("check".to_string());
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("match").expect("literal"),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Manual Match".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("match").expect("literal"),
+                    surfaces::InteractionKind::FormSubmit,
+                    "Manual Match",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "mapping_id".to_string(),
@@ -334,29 +324,29 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                         },
                     ],
                     pre_load_interaction_id: None,
-                }),
-                icon: Some("link".to_string()),
+                });
+                i.icon = Some("link".to_string());
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("unmatch").expect("literal"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Remove Match".to_string(),
-                required_permission: Some(Permission::UpdateHosts.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: Some(surfaces::InteractionConfirmation {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("unmatch").expect("literal"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Remove Match",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.confirmation = Some(surfaces::InteractionConfirmation {
                     title: "Remove Match".to_string(),
                     message: "Remove the host mapping for".to_string(),
                     confirm_label: Some("Remove".to_string()),
                     cancel_label: None,
                     severity: surfaces::ConfirmationSeverity::Danger,
-                }),
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: Some("unlink".to_string()),
+                });
+                i.icon = Some("unlink".to_string());
+                i
             },
         ],
         data_sources: vec![surfaces::DataSourceDescriptor {
@@ -407,21 +397,17 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
                 data_source_id: data_source_id.clone(),
             })
             .build(),
-        interactions: vec![surfaces::InteractionDescriptor {
-            interaction_id: surfaces::InteractionId::new("get-info")
-                .expect("literal interaction id is valid"),
-            kind: surfaces::InteractionKind::DataLoad,
-            label: "Get Info".to_string(),
-            required_permission: Some(Permission::UpdateHosts.to_string()),
-            input_schema: None,
-            result_schema: Some(surfaces::SchemaContract::Object),
-            sensitive_fields: vec![],
-            timeout_seconds: Some(10),
-            confirmation: None,
-            transport: surfaces::InteractionTransport::ControllerLocal,
-            workflow_steps: vec![],
-            form_ui: None,
-            icon: None,
+        interactions: vec![{
+            let mut i = surfaces::InteractionDescriptor::new(
+                surfaces::InteractionId::new("get-info").expect("literal interaction id is valid"),
+                surfaces::InteractionKind::DataLoad,
+                "Get Info",
+                surfaces::InteractionTransport::ControllerLocal,
+            );
+            i.required_permission = Some(Permission::UpdateHosts.to_string());
+            i.result_schema = Some(surfaces::SchemaContract::Object);
+            i.timeout_seconds = Some(10);
+            i
         }],
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
@@ -480,52 +466,44 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("preload-global-defaults")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Preload Global Defaults".to_string(),
-                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("preload-global-defaults")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Preload Global Defaults",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("load-backup-target-options")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Load Backup Target Options".to_string(),
-                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("load-backup-target-options")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Load Backup Target Options",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("save-global-defaults")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Save Global Defaults".to_string(),
-                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("save-global-defaults")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Save Global Defaults",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
@@ -641,8 +619,8 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                         surfaces::InteractionId::new("preload-global-defaults")
                             .expect("literal interaction id is valid"),
                     ),
-                }),
-                icon: None,
+                });
+                i
             },
         ],
         data_sources: vec![],
@@ -680,36 +658,31 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("preload-scaling-global-defaults")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Preload Scaling Global Defaults".to_string(),
-                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("preload-scaling-global-defaults")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Preload Scaling Global Defaults",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Save Scaling Global Defaults".to_string(),
-                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("save-scaling-global-defaults")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Save Scaling Global Defaults",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
@@ -841,8 +814,8 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
                         surfaces::InteractionId::new("preload-scaling-global-defaults")
                             .expect("literal interaction id is valid"),
                     ),
-                }),
-                icon: None,
+                });
+                i
             },
         ],
         data_sources: vec![],
@@ -891,52 +864,44 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
             ))
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("preload-item-overrides")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Preload Per-item Overrides".to_string(),
-                required_permission: Some(Permission::ViewSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                        icon: None,
-},
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("load-backup-target-options")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Load Backup Target Options".to_string(),
-                required_permission: Some(Permission::ViewSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                        icon: None,
-},
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("save-item-overrides")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Save Per-item Overrides".to_string(),
-                required_permission: Some(Permission::UpdateSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("preload-item-overrides")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Preload Per-item Overrides",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ViewSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
+            },
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("load-backup-target-options")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Load Backup Target Options",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ViewSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
+            },
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("save-item-overrides")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Save Per-item Overrides",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
@@ -1060,8 +1025,8 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                         surfaces::InteractionId::new("preload-item-overrides")
                             .expect("literal interaction id is valid"),
                     ),
-                }),
-                icon: None,
+                });
+                i
             },
         ],
         data_sources: vec![],
@@ -1099,36 +1064,31 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
             ))
             .build(),
         interactions: vec![
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("preload-scaling-item-overrides")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::DataLoad,
-                label: "Preload Per-item Scaling Overrides".to_string(),
-                required_permission: Some(Permission::ViewSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Object),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("preload-scaling-item-overrides")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Preload Per-item Scaling Overrides",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::ViewSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i
             },
-            surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Save Per-item Scaling Overrides".to_string(),
-                required_permission: Some(Permission::UpdateSoftware.to_string()),
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("save-scaling-item-overrides")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::MutationAction,
+                    "Save Per-item Scaling Overrides",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "software_item_id".to_string(),
@@ -1278,8 +1238,8 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
                         surfaces::InteractionId::new("preload-scaling-item-overrides")
                             .expect("literal interaction id is valid"),
                     ),
-                }),
-                icon: None,
+                });
+                i
             },
         ],
         data_sources: vec![],

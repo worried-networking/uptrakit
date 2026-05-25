@@ -166,19 +166,17 @@ fn sample_surface_read() -> SurfaceReadResponse {
                 vec![],
             ))
             .build(),
-        interactions: vec![wire_surfaces::InteractionDescriptor {
-            interaction_id: sample_interaction_id().parse().unwrap(),
-            kind: wire_surfaces::InteractionKind::FormSubmit,
-            label: "Submit".to_string(),
-            required_permission: None,
-            input_schema: Some(wire_surfaces::SchemaContract::Object),
-            result_schema: Some(wire_surfaces::SchemaContract::Any),
-            sensitive_fields: vec![],
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: wire_surfaces::InteractionTransport::ControllerLocal,
-            workflow_steps: vec![],
-            form_ui: Some(wire_surfaces::FormUiDescriptor {
+        interactions: vec![{
+            let mut i = wire_surfaces::InteractionDescriptor::new(
+                sample_interaction_id().parse().unwrap(),
+                wire_surfaces::InteractionKind::FormSubmit,
+                "Submit",
+                wire_surfaces::InteractionTransport::ControllerLocal,
+            );
+            i.input_schema = Some(wire_surfaces::SchemaContract::Object);
+            i.result_schema = Some(wire_surfaces::SchemaContract::Any);
+            i.timeout_seconds = Some(30);
+            i.form_ui = Some(wire_surfaces::FormUiDescriptor {
                 fields: vec![wire_surfaces::FormFieldDescriptor {
                     key: "name".to_string(),
                     label: "Name".to_string(),
@@ -194,8 +192,8 @@ fn sample_surface_read() -> SurfaceReadResponse {
                     visible_when: None,
                 }],
                 pre_load_interaction_id: None,
-            }),
-            icon: None,
+            });
+            i
         }],
         data_sources: vec![],
     }
@@ -246,19 +244,18 @@ fn sample_proxied_surface_read() -> SurfaceReadResponse {
                 vec![],
             ))
             .build(),
-        interactions: vec![wire_surfaces::InteractionDescriptor {
-            interaction_id: sample_interaction_id().parse().unwrap(),
-            kind: wire_surfaces::InteractionKind::FormSubmit,
-            label: "Submit".to_string(),
-            required_permission: None,
-            input_schema: Some(wire_surfaces::SchemaContract::Object),
-            result_schema: Some(wire_surfaces::SchemaContract::Any),
-            sensitive_fields: vec!["password".to_string()],
-            timeout_seconds: Some(30),
-            confirmation: None,
-            transport: wire_surfaces::InteractionTransport::ProviderProxied,
-            workflow_steps: vec![],
-            form_ui: Some(wire_surfaces::FormUiDescriptor {
+        interactions: vec![{
+            let mut i = wire_surfaces::InteractionDescriptor::new(
+                sample_interaction_id().parse().unwrap(),
+                wire_surfaces::InteractionKind::FormSubmit,
+                "Submit",
+                wire_surfaces::InteractionTransport::ProviderProxied,
+            );
+            i.input_schema = Some(wire_surfaces::SchemaContract::Object);
+            i.result_schema = Some(wire_surfaces::SchemaContract::Any);
+            i.sensitive_fields = vec!["password".to_string()];
+            i.timeout_seconds = Some(30);
+            i.form_ui = Some(wire_surfaces::FormUiDescriptor {
                 fields: vec![
                     wire_surfaces::FormFieldDescriptor {
                         key: "username".to_string(),
@@ -290,8 +287,8 @@ fn sample_proxied_surface_read() -> SurfaceReadResponse {
                     },
                 ],
                 pre_load_interaction_id: None,
-            }),
-            icon: None,
+            });
+            i
         }],
         data_sources: vec![],
     }
