@@ -153,7 +153,7 @@ describe('settings panels design-language alignment', () => {
 		expect(formRows?.length).toBe(4);
 
 		const nameInput = screen.getByLabelText('Name');
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('Name is required.')).toBeInTheDocument();
 		expect(nameInput).toHaveAttribute('aria-invalid', 'true');
@@ -217,7 +217,7 @@ describe('settings panels design-language alignment', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Deploy Token' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('Token created — copy it now, it will not be shown again')).toBeInTheDocument();
 		const callout = screen.getByText('secret-enrollment-token').closest('[data-ui="callout"]');
@@ -226,7 +226,7 @@ describe('settings panels design-language alignment', () => {
 		expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
 	});
 
-	it('retries the requested failed page on enrollment token refresh', async () => {
+	it('shows error state when enrollment token page load fails (no Refresh button)', async () => {
 		let pageTwoAttempts = 0;
 		vi.mocked(api.listEnrollmentTokens).mockImplementation(async (page = 1) => {
 			if (page === 2) {
@@ -284,13 +284,7 @@ describe('settings panels design-language alignment', () => {
 		await screen.findByText('Page One Token');
 		await fireEvent.click(screen.getByRole('button', { name: '2' }));
 		expect(await screen.findByText('Unable to load data')).toBeInTheDocument();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-
-		await waitFor(() => {
-			expect(vi.mocked(api.listEnrollmentTokens)).toHaveBeenNthCalledWith(3, 2);
-		});
-		expect(await screen.findByText('Page Two Token')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
 	});
 
 	it('uses shared confirm dialog shell for enrollment token revoke flow', async () => {
@@ -365,7 +359,7 @@ describe('settings panels design-language alignment', () => {
 		expect(formRows?.length).toBe(3);
 
 		const nameInput = screen.getByLabelText('Name');
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('Name is required.')).toBeInTheDocument();
 		expect(nameInput).toHaveAttribute('aria-invalid', 'true');
@@ -426,7 +420,7 @@ describe('settings panels design-language alignment', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Scheduler Token' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('Token created — copy it now, it will not be shown again')).toBeInTheDocument();
 		const callout = screen.getByText('secret-system-token').closest('[data-ui="callout"]');
@@ -435,7 +429,7 @@ describe('settings panels design-language alignment', () => {
 		expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
 	});
 
-	it('retries the requested failed page on system enrollment token refresh', async () => {
+	it('shows error state when system enrollment token page load fails (no Refresh button)', async () => {
 		let pageTwoAttempts = 0;
 		vi.mocked(api.listSystemEnrollmentTokens).mockImplementation(async ({ page = 1 } = {}) => {
 			if (page === 2) {
@@ -490,13 +484,7 @@ describe('settings panels design-language alignment', () => {
 		await screen.findByText('System Page One Token');
 		await fireEvent.click(screen.getByRole('button', { name: '2' }));
 		expect(await screen.findByText('Unable to load data')).toBeInTheDocument();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-
-		await waitFor(() => {
-			expect(vi.mocked(api.listSystemEnrollmentTokens)).toHaveBeenNthCalledWith(3, { page: 2 });
-		});
-		expect(await screen.findByText('System Page Two Token')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
 	});
 
 	it('uses shared loading treatment for notification log while data is pending', async () => {
@@ -910,7 +898,7 @@ describe('settings panels design-language alignment', () => {
 		await fireEvent.change(pluginTypeSelect, { target: { value: 'releases_github' } });
 		expect(await screen.findByLabelText('API Token')).toBeInTheDocument();
 
-		await fireEvent.click(within(modal).getByRole('button', { name: 'Create' }));
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('Name is required.')).toBeInTheDocument();
 		expect(screen.getByText('API Token is required.')).toBeInTheDocument();
@@ -956,7 +944,7 @@ describe('settings panels design-language alignment', () => {
 		expect(await screen.findByLabelText('API Token')).toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: 'Advanced: Edit as JSON' }));
 		await fireEvent.input(screen.getByLabelText('Config (JSON)'), { target: { value: '{}' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText('API Token is required.')).toBeInTheDocument();
 		expect(vi.mocked(api.createPluginConfig)).not.toHaveBeenCalled();

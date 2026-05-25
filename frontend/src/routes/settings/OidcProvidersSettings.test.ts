@@ -128,7 +128,7 @@ describe('OidcProvidersSettings — button variants', () => {
 		await waitFor(() => expect(deactivateBtns[0]).not.toHaveAttribute('aria-busy'));
 	});
 
-	it('modal submit shows Create text and carries aria-busy during save', async () => {
+	it('modal submit shows Save text and carries aria-busy during save', async () => {
 		let resolve!: () => void;
 		vi.mocked(api.createOidcProvider).mockReturnValue(
 			new Promise((r) => {
@@ -139,7 +139,7 @@ describe('OidcProvidersSettings — button variants', () => {
 		render(OidcProvidersSettings, defaultProps);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Provider' }));
 
-		const submitBtn = await screen.findByRole('button', { name: 'Create' });
+		const submitBtn = await screen.findByRole('button', { name: 'Save' });
 		expect(submitBtn).toBeDefined();
 
 		await fireEvent.click(submitBtn);
@@ -150,13 +150,13 @@ describe('OidcProvidersSettings — button variants', () => {
 		resolve();
 	});
 
-	it('modal submit shows Update text when editing', async () => {
+	it('modal submit shows Save text when editing', async () => {
 		render(OidcProvidersSettings, {
 			...defaultProps,
 			providers: [makeProvider('p1', 'Provider One', false)]
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-		await screen.findByRole('button', { name: 'Update' });
+		await screen.findByRole('button', { name: 'Save' });
 	});
 
 	it('modal Cancel button has secondary variant', async () => {
