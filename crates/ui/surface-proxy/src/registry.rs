@@ -838,6 +838,13 @@ impl SurfaceRegistry {
                     });
                 }
             }
+
+            validate_section_header_actions(
+                &surface.descriptor.root_node,
+                &surface.interactions,
+                Some(surface.descriptor.surface_id.to_string()),
+                &mut reasons,
+            );
         }
 
         if let Err(err) = registration.validate_against(&surfaces::SurfaceRegistrationPolicy {
@@ -1150,6 +1157,100 @@ fn validate_contract_collisions(
     }
 
     Ok(())
+}
+
+fn validate_section_header_actions(
+    node: &surfaces::SurfaceNode,
+    interactions: &[surfaces::InteractionDescriptor],
+    surface_id: Option<String>,
+    reasons: &mut Vec<SurfaceProviderRejectionReason>,
+) {
+    match node {
+        surfaces::SurfaceNode::Section {
+            header_action_ids,
+            children,
+            ..
+        } => {
+            // Count check here covers built-in/plugin providers that register programmatically
+            // and bypass the wire-layer validation path. The wire-layer check (Task 3) is an
+            // additional early rejection for service providers; this is the authoritative gate.
+            if header_action_ids.len() > 3 {
+                reasons.push(SurfaceProviderRejectionReason {
+                    code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                    message: format!(
+                        "section header_action_ids has {} entries, max 3",
+                        header_action_ids.len()
+                    ),
+                    surface_id: surface_id.clone(),
+                });
+            }
+            for action_id in header_action_ids {
+                match interactions.iter().find(|i| &i.interaction_id == action_id) {
+                    None => {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                            message: format!(
+                                "section header_action_ids references unknown interaction `{action_id}`"
+                            ),
+                            surface_id: surface_id.clone(),
+                        });
+                    }
+                    Some(interaction) => {
+                        let valid_kind = matches!(
+                            interaction.kind,
+                            surfaces::InteractionKind::Workflow
+                                | surfaces::InteractionKind::MutationAction
+                        );
+                        if !valid_kind {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                                message: format!(
+                                    "interaction `{action_id}` in header_action_ids must be \
+                                     kind Workflow or MutationAction (got {:?})",
+                                    interaction.kind
+                                ),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                        if interaction.form_ui.is_some() {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                                message: format!(
+                                    "interaction `{action_id}` in header_action_ids must not \
+                                     have form_ui set"
+                                ),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            for child in children {
+                validate_section_header_actions(child, interactions, surface_id.clone(), reasons);
+            }
+        }
+        surfaces::SurfaceNode::Tabs { tabs } => {
+            for tab in tabs {
+                validate_section_header_actions(
+                    &tab.root,
+                    interactions,
+                    surface_id.clone(),
+                    reasons,
+                );
+            }
+        }
+        surfaces::SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+            for node in modal_nodes {
+                validate_section_header_actions(node, interactions, surface_id.clone(), reasons);
+            }
+        }
+        surfaces::SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
+            for node in step_nodes {
+                validate_section_header_actions(node, interactions, surface_id.clone(), reasons);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn surface_node_depth(node: &surfaces::SurfaceNode) -> usize {
@@ -2193,6 +2294,183 @@ mod tests {
             .expect("explicit service target should resolve");
         assert_eq!(action.provider_id, "provider-a");
         assert_eq!(action.provider_kind, surfaces::ProviderKind::Service);
+    }
+
+    /// Builds a minimal plugin [`SurfaceRegistration`] with the given root node and
+    /// interaction list. Used to test per-surface validation in `validate_registration_basics`.
+    fn make_minimal_plugin_registration_with_root(
+        root_node: surfaces::SurfaceNode,
+        interactions: Vec<surfaces::InteractionDescriptor>,
+    ) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.test_provider".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("test.surface").unwrap())
+                    .label("Test Surface")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::SectionNode,
+                        surfaces::Capability::UniversalTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]))
+                    .root_node(root_node)
+                    .build(),
+                interactions,
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    #[test]
+    fn header_action_ids_unknown_interaction_id_is_rejected() {
+        let registration = make_minimal_plugin_registration_with_root(
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![surfaces::InteractionId::new("nonexistent").unwrap()],
+                vec![],
+            ),
+            vec![/* no interactions */],
+        );
+        let result = registry().bootstrap_plugin(registration);
+        assert!(result.is_err(), "unknown header_action_id must be rejected");
+        let rejection = rejection(result.unwrap_err());
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("unknown interaction")
+                && reason.message.contains("nonexistent")
+        }));
+    }
+
+    #[test]
+    fn header_action_ids_form_submit_kind_is_rejected() {
+        let interaction_id = surfaces::InteractionId::new("submit-action").unwrap();
+        let registration = make_minimal_plugin_registration_with_root(
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![interaction_id.clone()],
+                vec![],
+            ),
+            vec![surfaces::InteractionDescriptor {
+                interaction_id: interaction_id.clone(),
+                kind: surfaces::InteractionKind::FormSubmit,
+                label: "Submit".to_string(),
+                required_permission: None,
+                input_schema: None,
+                result_schema: None,
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+                icon: None,
+            }],
+        );
+        let result = registry().bootstrap_plugin(registration);
+        assert!(
+            result.is_err(),
+            "FormSubmit kind must be rejected in header_action_ids"
+        );
+        let rejection = rejection(result.unwrap_err());
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("header_action_ids")
+                && reason.message.contains("Workflow or MutationAction")
+        }));
+    }
+
+    #[test]
+    fn header_action_ids_mutation_action_with_form_ui_is_rejected() {
+        let interaction_id = surfaces::InteractionId::new("form-action").unwrap();
+        let registration = make_minimal_plugin_registration_with_root(
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![interaction_id.clone()],
+                vec![],
+            ),
+            vec![surfaces::InteractionDescriptor {
+                interaction_id: interaction_id.clone(),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Save".to_string(),
+                required_permission: None,
+                input_schema: None,
+                result_schema: None,
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![],
+                    pre_load_interaction_id: None,
+                }),
+                icon: None,
+            }],
+        );
+        let result = registry().bootstrap_plugin(registration);
+        assert!(
+            result.is_err(),
+            "MutationAction with form_ui must be rejected in header_action_ids"
+        );
+        let rejection = rejection(result.unwrap_err());
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("header_action_ids")
+                && reason.message.contains("must not have form_ui set")
+        }));
+    }
+
+    #[test]
+    fn header_action_ids_mutation_action_without_form_ui_is_accepted() {
+        let interaction_id = surfaces::InteractionId::new("btn-action").unwrap();
+        let registration = make_minimal_plugin_registration_with_root(
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![interaction_id.clone()],
+                vec![],
+            ),
+            vec![surfaces::InteractionDescriptor {
+                interaction_id: interaction_id.clone(),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Refresh".to_string(),
+                required_permission: None,
+                input_schema: None,
+                result_schema: None,
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+                icon: None,
+            }],
+        );
+        let result = registry().bootstrap_plugin(registration);
+        assert!(
+            result.is_ok(),
+            "MutationAction without form_ui must be accepted: {:?}",
+            result.err()
+        );
     }
 
     #[test]
