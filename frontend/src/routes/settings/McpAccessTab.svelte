@@ -185,7 +185,7 @@
 		<Callout tone="danger" message={actionError} />
 	{/if}
 
-	<SectionCard title="Registered clients">
+	<SectionCard title="Registered Clients">
 		{#snippet actions()}
 			<Button
 				variant="primary"
@@ -279,7 +279,7 @@
 	</SectionCard>
 
 	{#if canManageGlobalSettings}
-		<SectionCard title="OAuth settings">
+		<SectionCard title="OAuth Settings">
 			{#if settingsLoading}
 				<p class="py-4 text-center text-sm text-[var(--text-secondary)]">Loading…</p>
 			{:else if settingsLoaded && oauthSettings !== null}
@@ -364,7 +364,7 @@
 {#if detailClient !== null}
 	{@const dc = detailClient}
 	<ModalShell
-		title="Client details"
+		title="Client Details"
 		onclose={() => {
 			detailClient = null;
 		}}
