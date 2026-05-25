@@ -155,9 +155,9 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::ContextSelector,
                 surfaces::Capability::EntityLinkColumn,
             ]))
-            .root_node(surfaces::SurfaceNode::Section {
-                title: None,
-                children: vec![
+            .root_node(surfaces::SurfaceNode::section(
+                None::<String>,
+                vec![
                     surfaces::SurfaceNode::ActionBar {
                         action_ids: vec![
                             surfaces::InteractionId::new("discover").expect("literal"),
@@ -211,7 +211,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                         ],
                     },
                 ],
-            })
+            ))
             .context_selector(surfaces::SurfaceContextSelectorDescriptor::new(
                 "plugin_config_id",
                 "Configuration",
@@ -465,9 +465,9 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::UniversalTargeting,
             ]))
             .tab_group("proxmox.settings", "Proxmox Update Hooks")
-            .root_node(surfaces::SurfaceNode::Section {
-                title: None,
-                children: vec![
+            .root_node(surfaces::SurfaceNode::section(
+                None::<String>,
+                vec![
                     surfaces::SurfaceNode::Callout {
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
@@ -477,7 +477,7 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     },
                 ],
-            })
+            ))
             .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
@@ -671,13 +671,13 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::UniversalTargeting,
             ]))
             .tab_group("proxmox.settings", "Proxmox Update Hooks")
-            .root_node(surfaces::SurfaceNode::Section {
-                title: None,
-                children: vec![surfaces::SurfaceNode::Form {
+            .root_node(surfaces::SurfaceNode::section(
+                None::<String>,
+                vec![surfaces::SurfaceNode::Form {
                     interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
                         .expect("literal interaction id is valid"),
                 }],
-            })
+            ))
             .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
@@ -876,9 +876,9 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 surfaces::Capability::UniversalTargeting,
             ]))
             .tab_group("proxmox.software-item", "Proxmox Update Hooks")
-            .root_node(surfaces::SurfaceNode::Section {
-                title: None,
-                children: vec![
+            .root_node(surfaces::SurfaceNode::section(
+                None::<String>,
+                vec![
                     surfaces::SurfaceNode::Callout {
                         level: surfaces::CalloutLevel::Info,
                         text: callout,
@@ -888,7 +888,7 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             .expect("literal interaction id is valid"),
                     },
                 ],
-            })
+            ))
             .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
@@ -1090,13 +1090,13 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
                 surfaces::Capability::UniversalTargeting,
             ]))
             .tab_group("proxmox.software-item", "Proxmox Update Hooks")
-            .root_node(surfaces::SurfaceNode::Section {
-                title: None,
-                children: vec![surfaces::SurfaceNode::Form {
+            .root_node(surfaces::SurfaceNode::section(
+                None::<String>,
+                vec![surfaces::SurfaceNode::Form {
                     interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
                         .expect("literal interaction id is valid"),
                 }],
-            })
+            ))
             .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {

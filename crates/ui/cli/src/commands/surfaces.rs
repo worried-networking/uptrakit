@@ -896,10 +896,10 @@ mod tests {
                 .targeting(Targeting::Universal)
                 .provider_kind(uptrakit_wire::surfaces::ProviderKind::Plugin)
                 .required_capabilities(uptrakit_wire::surfaces::CapabilitySet::default())
-                .root_node(uptrakit_wire::surfaces::SurfaceNode::Section {
-                    title: Some("Sample surface".to_string()),
-                    children: vec![],
-                })
+                .root_node(uptrakit_wire::surfaces::SurfaceNode::section(
+                    Some("Sample surface".to_string()),
+                    vec![],
+                ))
                 .build(),
             interactions: vec![InteractionDescriptor {
                 interaction_id: "surface.sample.submit".parse().unwrap(),

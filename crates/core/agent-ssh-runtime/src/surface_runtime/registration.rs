@@ -223,9 +223,12 @@ fn build_surface_parts(
         }
     }
 
-    let root = SurfaceNode::Section {
-        title: None,
-        children: vec![
+    let root = SurfaceNode::section(
+        None::<String>,
+        vec![
+            SurfaceNode::ActionBar {
+                action_ids: primary_ids,
+            },
             SurfaceNode::Table {
                 data_source_id: data_source_id.clone(),
                 columns: SSH_HOSTS_COLUMNS
@@ -234,11 +237,8 @@ fn build_surface_parts(
                     .collect(),
                 row_actions: row_ids,
             },
-            SurfaceNode::ActionBar {
-                action_ids: primary_ids,
-            },
         ],
-    };
+    );
 
     let data_sources = vec![DataSourceDescriptor {
         data_source_id,

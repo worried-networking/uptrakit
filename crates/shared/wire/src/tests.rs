@@ -2907,12 +2907,12 @@ fn test_surface_registration() -> surfaces::SurfaceRegistration {
                     surfaces::Capability::SectionNode,
                     surfaces::Capability::UniversalTargeting,
                 ]))
-                .root_node(surfaces::SurfaceNode::Section {
-                    title: Some("Guests".to_string()),
-                    children: vec![surfaces::SurfaceNode::TextBlock {
+                .root_node(surfaces::SurfaceNode::section(
+                    Some("Guests".to_string()),
+                    vec![surfaces::SurfaceNode::TextBlock {
                         text: "Guest overview".to_string(),
                     }],
-                })
+                ))
                 .build(),
             interactions: vec![],
             data_sources: vec![],

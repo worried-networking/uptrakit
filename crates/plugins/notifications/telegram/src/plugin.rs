@@ -320,9 +320,9 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     surfaces::Capability::UniversalTargeting,
                     surfaces::Capability::SensitiveFields,
                 ]))
-                .root_node(surfaces::SurfaceNode::Section {
-                    title: None,
-                    children: vec![
+                .root_node(surfaces::SurfaceNode::section(
+                    None::<String>,
+                    vec![
                         surfaces::SurfaceNode::ActionBar {
                             action_ids: vec![
                                 surfaces::InteractionId::new("create")
@@ -356,7 +356,7 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             ],
                         },
                     ],
-                })
+                ))
                 .build(),
             interactions: vec![
                 surfaces::InteractionDescriptor {

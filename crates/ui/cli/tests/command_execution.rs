@@ -161,10 +161,10 @@ fn sample_surface_read() -> SurfaceReadResponse {
             .targeting(wire_surfaces::Targeting::Universal)
             .provider_kind(wire_surfaces::ProviderKind::Plugin)
             .required_capabilities(wire_surfaces::CapabilitySet::default())
-            .root_node(wire_surfaces::SurfaceNode::Section {
-                title: Some("Sample surface".to_string()),
-                children: vec![],
-            })
+            .root_node(wire_surfaces::SurfaceNode::section(
+                Some("Sample surface".to_string()),
+                vec![],
+            ))
             .build(),
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),
@@ -241,10 +241,10 @@ fn sample_proxied_surface_read() -> SurfaceReadResponse {
             .targeting(wire_surfaces::Targeting::Targeted)
             .provider_kind(wire_surfaces::ProviderKind::Plugin)
             .required_capabilities(wire_surfaces::CapabilitySet::default())
-            .root_node(wire_surfaces::SurfaceNode::Section {
-                title: Some("Sample surface".to_string()),
-                children: vec![],
-            })
+            .root_node(wire_surfaces::SurfaceNode::section(
+                Some("Sample surface".to_string()),
+                vec![],
+            ))
             .build(),
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),

@@ -334,9 +334,12 @@ fn build_surface_parts(
         }
     }
 
-    let root = SurfaceNode::Section {
-        title: None,
-        children: vec![
+    let root = SurfaceNode::section(
+        None::<String>,
+        vec![
+            SurfaceNode::ActionBar {
+                action_ids: primary_ids,
+            },
             SurfaceNode::Table {
                 data_source_id: data_source_id.clone(),
                 columns: SSH_HOSTS_COLUMNS
@@ -345,11 +348,8 @@ fn build_surface_parts(
                     .collect(),
                 row_actions: row_ids,
             },
-            SurfaceNode::ActionBar {
-                action_ids: primary_ids,
-            },
         ],
-    };
+    );
 
     let data_sources = vec![DataSourceDescriptor {
         data_source_id,
@@ -2477,9 +2477,9 @@ mod tests {
             columns,
             row_actions,
             ..
-        }) = children.first()
+        }) = children.get(1)
         else {
-            panic!("first section child should be a table");
+            panic!("second section child should be a table");
         };
         let actual_columns: Vec<(&str, &str)> = columns
             .iter()
@@ -2513,8 +2513,8 @@ mod tests {
         let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
             panic!("root node should be a section");
         };
-        let Some(SurfaceNode::ActionBar { action_ids }) = children.get(1) else {
-            panic!("second section child should be an action bar");
+        let Some(SurfaceNode::ActionBar { action_ids }) = children.first() else {
+            panic!("first section child should be an action bar");
         };
         let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
         assert!(action_ids.contains(SSH_HOSTS_PRIMARY_ACTION_ID));

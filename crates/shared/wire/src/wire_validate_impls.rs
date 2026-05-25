@@ -387,7 +387,11 @@ fn validate_surface_node(
     }
 
     match node {
-        surfaces::SurfaceNode::Section { title, children } => {
+        surfaces::SurfaceNode::Section {
+            title,
+            children,
+            header_action_ids: _,
+        } => {
             check_opt_string_len(
                 title,
                 MAX_SHORT_STRING_LEN,
@@ -1786,12 +1790,12 @@ mod tests {
                     .targeting(surfaces::Targeting::Universal)
                     .provider_kind(surfaces::ProviderKind::Service)
                     .required_capabilities(surfaces::CapabilitySet::default())
-                    .root_node(surfaces::SurfaceNode::Section {
-                        title: Some("Guests".to_string()),
-                        children: vec![surfaces::SurfaceNode::TextBlock {
+                    .root_node(surfaces::SurfaceNode::section(
+                        Some("Guests".to_string()),
+                        vec![surfaces::SurfaceNode::TextBlock {
                             text: "Guests view".to_string(),
                         }],
-                    })
+                    ))
                     .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
@@ -1836,9 +1840,9 @@ mod tests {
     #[test]
     fn surface_registration_rejects_oversized_nested_root_node_text() {
         let mut payload = test_surface_registration();
-        payload.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::Section {
-            title: None,
-            children: vec![surfaces::SurfaceNode::Tabs {
+        payload.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::section(
+            None::<String>,
+            vec![surfaces::SurfaceNode::Tabs {
                 tabs: vec![surfaces::SurfaceTab {
                     id: surfaces::SurfaceTabId::new("guests").unwrap(),
                     label: "Guests".to_string(),
@@ -1847,7 +1851,7 @@ mod tests {
                     },
                 }],
             }],
-        };
+        );
 
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].descriptor.root_node.text");
