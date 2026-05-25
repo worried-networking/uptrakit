@@ -340,7 +340,7 @@
 						<Callout tone="danger" message={settingsError} />
 					{/if}
 
-					<div class="flex gap-2">
+					<div class="flex gap-2 justify-end">
 						<Button
 							variant="primary"
 							disabled={!oauthDraft.isDirty || savingSettings}

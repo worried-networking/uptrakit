@@ -362,7 +362,7 @@
 					/>
 				</FormFieldRow>
 
-				<div class="flex flex-wrap gap-2">
+				<div class="flex flex-wrap gap-2 justify-end">
 					<Button variant="primary" loading={githubProviderSaving} onclick={saveGitHubProviderSettings}>
 						Save GitHub Provider
 					</Button>
@@ -398,7 +398,7 @@
 					/>
 				</FormFieldRow>
 
-				<div class="flex gap-2">
+				<div class="flex gap-2 justify-end">
 					<Button variant="primary" loading={natsSaving} disabled={!natsUrlInput.trim()} onclick={saveNatsUrl}>
 						Save
 					</Button>
@@ -457,7 +457,9 @@
 					/>
 				</FormFieldRow>
 
-				<Button variant="primary" loading={zeroconfSaving} onclick={saveZeroconfSettings}>Save</Button>
+				<div class="flex justify-end">
+					<Button variant="primary" loading={zeroconfSaving} onclick={saveZeroconfSettings}>Save</Button>
+				</div>
 			</div>
 		</SectionCard>
 	{/if}
@@ -520,7 +522,9 @@
 			</div>
 		</FormFieldRow>
 
-		<Button variant="primary" onclick={saveNetworkSettings}>Save</Button>
+		<div class="flex justify-end">
+			<Button variant="primary" onclick={saveNetworkSettings}>Save</Button>
+		</div>
 	</SectionCard>
 
 	<!-- Section 5: Controller TLS Certificate -->
@@ -536,7 +540,9 @@
 			{/each}
 		{/if}
 
-		<Button variant="primary" loading={renewingCert} onclick={handleRenewServerCert}>Renew Server Certificate</Button>
+		<div class="flex justify-end">
+			<Button variant="primary" loading={renewingCert} onclick={handleRenewServerCert}>Renew Server Certificate</Button>
+		</div>
 	</SectionCard>
 
 	<!-- Section 6: System Services -->
@@ -550,7 +556,9 @@
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
 			issued certificates and require all agents to re-enroll.
 		</p>
-		<Button variant="danger" loading={rotatingCa} onclick={() => (showRotateCaConfirm = true)}>Rotate CA</Button>
+		<div class="flex justify-end">
+			<Button variant="danger" loading={rotatingCa} onclick={() => (showRotateCaConfirm = true)}>Rotate CA</Button>
+		</div>
 	</SectionCard>
 
 	{#if showRotateCaConfirm}
