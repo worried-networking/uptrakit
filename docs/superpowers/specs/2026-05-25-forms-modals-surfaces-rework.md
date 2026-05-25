@@ -205,22 +205,31 @@ constructor functions, not raw struct literals. The correct migration path is:
 4. **Update rustdoc examples**: `SurfaceDescriptorBuilder` documentation likely contains
    a `.root_node(SurfaceNode::Section { title: None, children: vec![] })` example. This
    is compiled by `cargo test --doc` and will break. Update to use the constructor.
-5. Do not add `header_action_ids: vec![]` to raw struct literals — that continues the
+5. **Update destructuring match in `crates/shared/wire/src/wire_validate_impls.rs`:**
+   there is a match arm `SurfaceNode::Section { title, children } => { … }` that
+   destructures the variant without binding `header_action_ids`. After adding the field,
+   add `header_action_ids` to the binding (or `..`) and validate that
+   `header_action_ids.len() <= 3`. Without this update, the `validate_surface_node`
+   function silently skips validating the new field.
+6. Do not add `header_action_ids: vec![]` to raw struct literals — that continues the
    anti-pattern and must be updated on every future extension.
 
 ### Rust validation (surface registration)
 
-At registration time, for every `header_action_id` in a `Section` node:
+At registration time, for every `Section` node with a non-empty `header_action_ids`:
 
-1. Resolve the referenced interaction from the surface's `interactions` list.
-2. Assert its `kind ∈ {InteractionKind::Workflow, InteractionKind::MutationAction}`.
-3. **Additionally assert** that the interaction's `form_ui` is `None`. `MutationAction`
+1. **Assert `header_action_ids.len() <= 3`**. More than three header-action buttons overflow
+   the card header on small viewports. Reject with `SchemaOrLimitFailure` if exceeded.
+2. Resolve the referenced interaction from the surface's `interactions` list.
+3. Assert its `kind ∈ {InteractionKind::Workflow, InteractionKind::MutationAction}`.
+4. **Additionally assert** that the interaction's `form_ui` is `None`. `MutationAction`
    interactions that carry `form_ui: Some(_)` render an inline form expansion, which breaks
    the card header layout. Reject regardless of whether `form_ui.fields` is empty — if
    `form_ui` is set, reject it. Only `Workflow` interactions and `MutationAction` interactions
    with `form_ui: None` (zero-field confirm-style mutations) are valid in a section header.
    Plugin authors should use `ConfirmableAction` for confirmable zero-field mutations instead.
-4. If not found, wrong kind, or has `form_ui: Some(_)`: emit `SurfaceProviderRejectionCode::SchemaOrLimitFailure`.
+5. If count exceeds 3, not found, wrong kind, or has `form_ui: Some(_)`: emit
+   `SurfaceProviderRejectionCode::SchemaOrLimitFailure`.
 
 ### Frontend rendering — `SurfaceRenderer.svelte`
 
@@ -275,15 +284,15 @@ are silently skipped in the frontend — Rust validation is the enforcement gate
 Add row:
 
 ```text
-| `Section` (with `header_action_ids`) | Renders action buttons in `SectionCard` header row via `{#snippet actions()}`. Only `modal_trigger` and `workflow_trigger` interactions are valid here. Validation enforced at registration. |
+| `Section` (with `header_action_ids`) | Renders action buttons in `SectionCard` header row via `{#snippet actions()}`. Only `Workflow` and `MutationAction` (with `form_ui: None`) interactions are valid here. Validation enforced at registration. |
 ```
 
 Also add a note to the `Section` primitive row:
 
 > `header_action_ids` accepts an array of interaction IDs. Each referenced interaction must be
-> kind `modal_trigger` or `workflow_trigger`. The host renders them as buttons in the card
-> header — right-aligned, same position as built-in modal-trigger buttons. Action bars and
-> form submits must not appear here.
+> kind `Workflow` or `MutationAction` (with `form_ui: None`). The host renders them as buttons
+> in the card header — right-aligned, same position as built-in modal-trigger buttons.
+> `ActionBar` and `FormSubmit` interactions must not appear here.
 
 ---
 
@@ -296,13 +305,15 @@ Only `SchemaForm.svelte` (structured forms with `form_ui` fields). Raw JSON-payl
 
 ### Behavior specification
 
-| State                  | Save button                 | Discard button   |
-| ---------------------- | --------------------------- | ---------------- |
-| Loading initial values | Visible, disabled           | Hidden           |
-| Loaded, not dirty      | Visible, disabled           | Hidden           |
-| Dirty, valid           | Visible, **enabled**        | Visible, enabled |
-| Dirty, invalid         | Visible, disabled           | Visible, enabled |
-| Submitting             | Visible, disabled (loading) | Hidden           |
+| State                                          | Save button                 | Discard button   |
+| ---------------------------------------------- | --------------------------- | ---------------- |
+| Loading initial values                         | Visible, disabled           | Hidden           |
+| Loaded, not dirty                              | Visible, disabled           | Hidden           |
+| Dirty, valid                                   | Visible, **enabled**        | Visible, enabled |
+| Dirty, invalid                                 | Visible, disabled           | Visible, enabled |
+| Submitting                                     | Visible, disabled (loading) | Hidden           |
+| No `preLoadInteraction` (create mode), valid   | Visible, **enabled**        | Hidden           |
+| No `preLoadInteraction` (create mode), invalid | Visible, disabled           | Hidden           |
 
 **Dirty detection:** compare each field's current value against the value returned by
 `pre_load_interaction`. Use the same `valuesEqual` semantics as `createFormDraft` —
@@ -337,7 +348,7 @@ $effect(() => {
 
 `createFormDraft` provides:
 
-- `form.draft` — reactive draft object bound to each form field
+- `form.draft` — reactive draft object; mutate via `form.update(key, value)`, not direct assignment (direct writes are not reactive outside the closure)
 - `form.isDirty` — `true` when any field differs from loaded server values
 - `form.isFieldDirty(name)` — per-field dirty indicator passed to `FormFieldRow`
 - `form.commit(values)` — reset dirty state after successful save
@@ -393,18 +404,25 @@ Call `form.load(normalizeForDraft(serverResponse))` after loading initial values
 `valuesEqual(draft[k], serverValues[k])` compares like types and the form is not dirty
 immediately after load for numeric or boolean fields.
 
-**Multi-select fields:** normalize `SvelteSet` contents to a sorted `string[]` before
-storing in the draft. After `form.load()`, reconstruct `multiSets` from `form.draft`.
-`isFieldDirty` for multi-select fields compares the current `SvelteSet` as a sorted array
-against the sorted array in `serverValues`.
+**When no `preLoadInteraction` is provided (create mode):** dirty-gating is disabled.
+Save is enabled whenever `isValid` — there is no server baseline to compare against so
+`isDirty` is meaningless. Discard is never shown. This applies to all create forms (new
+OIDC provider, new enrollment token, etc.).
 
-**When no `preLoadInteraction` is provided:** `form.isDirty` is always false, Save
-is always disabled. Correct behavior for create-only forms.
+**On successful submit:** guard the result type before committing to avoid resetting the
+draft to all-empty on non-object returns:
 
-**On successful submit:** if the interaction result is a non-null object, call
-`form.commit(normalizeForDraft(result))` so the form returns to a not-dirty state without
-a full reload. If the result is not an object (null or primitive), call
-`loadInitialValues()` again to re-sync and then `form.load(normalizeForDraft(reloaded))`.
+```typescript
+if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+  form.commit(normalizeForDraft(result as Record<string, unknown>));
+} else {
+  const reloaded = await loadInitialValues();
+  form.load(normalizeForDraft(reloaded));
+}
+```
+
+If `result` is a primitive or `null` (e.g., the plugin returns a string ID on create),
+fall back to a full reload so the draft baseline reflects the persisted record.
 
 ### Design language update
 
@@ -462,7 +480,7 @@ Add to each builder (the `tab_group` builder method takes both id and label in o
 
 **Telegram exception:** the Telegram plugin registers TWO surfaces — `notifications.telegram`
 (the channels list, gets `tab_group`) and `notifications.telegram.global_settings` (the
-instance-scoped SMTP-equivalent surface that renders on `SLOT_SETTINGS_BELOW_GLOBAL`).
+instance-scoped global bot token configuration surface that renders on `SLOT_SETTINGS_BELOW_GLOBAL`).
 The global settings surface must **not** receive `tab_group` — it belongs in the global
 settings area, not the notification channels tab. Only `notifications.telegram` gets the
 `tab_group` call.
@@ -506,21 +524,30 @@ pub struct InteractionDescriptor {
 }
 ```
 
+**Validation:** at registration time, if `submit_label` is `Some`, reject empty strings and
+strings longer than 50 characters with `SurfaceProviderRejectionCode::SchemaOrLimitFailure`.
+This prevents malformed labels from breaking modal footer layout.
+
 ### Rendering
 
 **`SurfaceForm.svelte`** receives the full `interaction: InteractionDescriptor` prop.
-It must resolve `submit_label` and pass it as the `submitLabel` prop to `SchemaForm.svelte`.
-`SchemaForm.svelte` receives `submitLabel: string` only — it has no access to
-`interaction` directly:
+Two changes required in this file:
+
+1. Change the `submitLabel` prop default from `'Submit'` to `'Save'` (line ~21).
+2. Change the `effectiveSubmitLabel` fallback from `'Submit'` to `'Save'` (line ~42):
 
 ```typescript
-// In SurfaceForm.svelte:
+// In SurfaceForm.svelte — both changes:
+let { submitLabel = 'Save', … } = $props();
 const effectiveSubmitLabel = $derived(
-  interaction.submit_label?.trim() || "Save",
+  interaction.submit_label?.trim() || submitLabel?.trim() || 'Save',
 );
 // Pass to SchemaForm:
 // <SchemaForm submitLabel={effectiveSubmitLabel} … />
 ```
+
+Without fixing `SurfaceForm`'s own fallback, the `'Save'` default on `SchemaForm` is
+never reached — `SurfaceForm` resolves to `'Submit'` first and passes that through.
 
 **`SchemaForm.svelte`:** change the `submitLabel` prop default from `'Submit'` to `'Save'`:
 
@@ -591,11 +618,14 @@ All changes below are part of this spec's implementation — not deferred.
 **Requirement 5 (Rust side) must land first.** Adding `header_action_ids` to `SurfaceNode::Section`
 and migrating all construction sites to `SurfaceNode::section(…)` is a workspace-wide compile
 break. Any crate that references `SurfaceNode::Section { … }` fails to compile until the
-migration is complete. Requirements 1 and 4 (Rust surface titles) also touch `SurfaceNode`
-and must merge after R5. All frontend requirements (R2, R3, R6, R7, R9) and Rust plugin
-requirements (R8) can proceed in parallel once R5's Rust side compiles cleanly.
+migration is complete. Requirement 1 (Rust surface child reorder) also touches
+`SurfaceNode` construction sites and is easiest to apply during the R5 migration pass.
+Requirement 4 (Rust title casing) changes only string values inside existing construction
+sites — it is not a compile dependency of R5, but should be applied in the same pass to
+avoid touching the same files twice. All frontend requirements (R2, R3, R6, R7, R9) and
+Rust plugin requirements (R8) can proceed in parallel once R5's Rust side compiles cleanly.
 
-Suggested commit order: **R5-Rust** → **R1, R4-Rust, R8** → **R2, R3, R6, R7, R9, R5-Frontend**.
+Suggested commit order: **R5-Rust** (includes R1, R4-Rust migration sites) → **R8** → **R2, R3, R6, R7, R9, R5-Frontend**.
 
 ---
 
@@ -604,15 +634,21 @@ Suggested commit order: **R5-Rust** → **R1, R4-Rust, R8** → **R2, R3, R6, R7
 All existing quality gates apply. Additional checks for this spec:
 
 - `cargo check --all-features` — surface contract Rust changes compile
+- `cargo test -p uptrakit-wire` — `validate_surface_node` covers `header_action_ids` validation
 - `cargo test -p uptrakit-surface-proxy` — registration validation tests pass
 - `frontend/npm run check` — TypeScript types compile for new contract fields
 - `frontend/npm run test` — `SurfaceRenderer`, `SchemaForm`, `SurfaceActionBar` unit tests pass
 - `frontend/npm run test:e2e -- ui-parity` — run after R8; if tab consolidation changes
   snapshots, run `npm run test:e2e -- ui-parity --update-snapshots`, review the diff
   (must show only the notification channels tab consolidation), then commit the updated snapshots
-- **R9 label audit gate:** `grep -rn '"Create"\|"Update"\|"Submit"' frontend/src/routes/settings/`
+- **R9 label audit gate (string literals):**
+  `grep -rn '"Create"\|"Update"\|"Submit"' frontend/src/routes/settings/`
   — review every match; any remaining modal footer "Create"/"Update"/"Submit" label on a
   save-record action is a gap and must be fixed
+- **R9 label audit gate (variable bindings):**
+  `grep -rn 'submitLabel={[^"'"'"']\|confirmLabel={[^"'"'"']' frontend/src/routes/settings/`
+  — catches variable bindings (e.g., `submitLabel={actionLabel}`) that string-literal grep
+  misses; trace each binding to its definition and verify it resolves to "Save"
 - Manual visual check: SSH Hosts page shows bootstrap buttons above table
 - Manual visual check: OIDC Providers "Add Provider" in card header
 - Manual visual check: Notification Channels combined tab in Settings
