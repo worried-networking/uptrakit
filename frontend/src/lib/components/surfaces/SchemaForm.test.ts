@@ -186,7 +186,7 @@ describe('SchemaForm', () => {
 			onsubmit
 		});
 
-		const submitButton = screen.getByRole('button', { name: 'Submit' });
+		const submitButton = screen.getByRole('button', { name: 'Save' });
 		await fireEvent.submit(submitButton.closest('form')!);
 
 		expect(onsubmit).not.toHaveBeenCalled();
@@ -441,5 +441,13 @@ describe('SchemaForm', () => {
 		buttons.forEach((b) => {
 			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
 		});
+	});
+
+	it('renders Save as default submit label', () => {
+		render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }],
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
 	});
 });

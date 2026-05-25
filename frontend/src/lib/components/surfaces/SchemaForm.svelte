@@ -9,7 +9,7 @@
 	let {
 		fields,
 		onsubmit,
-		submitLabel = 'Submit',
+		submitLabel = 'Save',
 		loading = false,
 		formId = undefined,
 		hideSubmit = false,

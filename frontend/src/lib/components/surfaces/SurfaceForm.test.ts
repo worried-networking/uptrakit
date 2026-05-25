@@ -303,7 +303,7 @@ describe('SurfaceForm', () => {
 			interaction
 		});
 
-		const submitButton = screen.getByRole('button', { name: 'Submit' });
+		const submitButton = screen.getByRole('button', { name: 'Save' });
 		await fireEvent.submit(submitButton.closest('form')!);
 
 		expect(vi.mocked(invokeSurfaceInteraction)).not.toHaveBeenCalled();
@@ -348,7 +348,7 @@ describe('SurfaceForm', () => {
 			interaction
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(screen.getAllByRole('button', { name: 'Delete Provider Form' }).length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText('provider.form.delete')).not.toBeInTheDocument();
@@ -386,10 +386,56 @@ describe('SurfaceForm', () => {
 			interaction
 		});
 
-		const btn = screen.getByRole('button', { name: 'Submit' });
+		const btn = screen.getByRole('button', { name: 'Save' });
 		// Button primitive h-[23px] for size=md
 		expect(btn.className).toContain('h-[23px]');
 		expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
+	});
+
+	it('renders Save as default submit label when interaction has no submit_label', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'save-form',
+			kind: 'form_submit',
+			label: 'Save Settings',
+			transport: { mode: 'controller_local' },
+			form_ui: {
+				fields: [{ key: 'value', label: 'Value', field_type: 'text', required: false }]
+			}
+		};
+		render(SurfaceForm, {
+			surfaceId: 'test',
+			interaction,
+			interactions: [interaction]
+		});
+		expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+	});
+
+	it('uses interaction.submit_label when present', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'rotate',
+			kind: 'form_submit',
+			label: 'Rotate CA',
+			submit_label: 'Rotate CA',
+			transport: { mode: 'controller_local' },
+			form_ui: {
+				fields: [
+					{
+						key: 'confirm',
+						label: 'Confirm',
+						field_type: 'text',
+						required: false
+					}
+				]
+			}
+		};
+		render(SurfaceForm, {
+			surfaceId: 'test',
+			interaction,
+			interactions: [interaction]
+		});
+		expect(screen.getByRole('button', { name: 'Rotate CA' })).toBeInTheDocument();
 	});
 
 	it('fallback submit preserves effectiveSubmitLabel during loading (no text-swap)', async () => {
