@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SurfaceActionBar from './SurfaceActionBar.svelte';
 	import SurfaceForm from './SurfaceForm.svelte';
+	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
 	import SurfaceKeyValue from './SurfaceKeyValue.svelte';
 	import SurfaceModal from './SurfaceModal.svelte';
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
@@ -9,6 +10,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import SectionCard from '$lib/components/ui/SectionCard.svelte';
 	import TabStrip from '$lib/components/ui/TabStrip.svelte';
 	import { clampSurfaceTabIndex, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
@@ -89,30 +91,79 @@
 	function interactionLabel(interaction: InteractionDescriptor): string {
 		return typeof interaction.label === 'string' ? interaction.label.trim() : '';
 	}
+
+	function notifySurfaceReload(): void {
+		if (typeof window === 'undefined') return;
+		window.dispatchEvent(
+			new CustomEvent('surface:reload', {
+				detail: { surfaceId, targetProviderId: targetProviderId ?? null }
+			})
+		);
+	}
 </script>
 
 {#if node.kind === 'section'}
-	<div class="space-y-4">
-		{#if node.title}
-			<h3 class="text-subsection-title font-bold text-[var(--text-primary)]">{node.title}</h3>
-		{/if}
-		{#each node.children ?? [] as child, idx (idx)}
-			<SurfaceRenderer
-				{surfaceId}
-				node={child}
-				{interactions}
-				{dataSources}
-				{targetProviderId}
-				{encryptionContext}
-				{dataBySource}
-				{baseParams}
-				{requiredContextParam}
-				{requiredForInteractionIds}
-				{pageBySource}
-				{onPageChange}
-			/>
-		{/each}
-	</div>
+	{#if (node.header_action_ids ?? []).length > 0}
+		<SectionCard title={node.title}>
+			{#snippet actions()}
+				{#each node.header_action_ids ?? [] as actionId (actionId)}
+					{@const headerInteraction = findInteraction(actionId)}
+					{#if headerInteraction}
+						<SurfaceInteractionButton
+							{surfaceId}
+							interaction={headerInteraction}
+							{interactions}
+							{targetProviderId}
+							{encryptionContext}
+							{baseParams}
+							size="sm"
+							oncomplete={async () => {
+								notifySurfaceReload();
+							}}
+						/>
+					{/if}
+				{/each}
+			{/snippet}
+			{#each node.children ?? [] as child, idx (idx)}
+				<SurfaceRenderer
+					{surfaceId}
+					node={child}
+					{interactions}
+					{dataSources}
+					{targetProviderId}
+					{encryptionContext}
+					{dataBySource}
+					{baseParams}
+					{requiredContextParam}
+					{requiredForInteractionIds}
+					{pageBySource}
+					{onPageChange}
+				/>
+			{/each}
+		</SectionCard>
+	{:else}
+		<div class="space-y-4">
+			{#if node.title}
+				<h3 class="text-subsection-title font-bold text-[var(--text-primary)]">{node.title}</h3>
+			{/if}
+			{#each node.children ?? [] as child, idx (idx)}
+				<SurfaceRenderer
+					{surfaceId}
+					node={child}
+					{interactions}
+					{dataSources}
+					{targetProviderId}
+					{encryptionContext}
+					{dataBySource}
+					{baseParams}
+					{requiredContextParam}
+					{requiredForInteractionIds}
+					{pageBySource}
+					{onPageChange}
+				/>
+			{/each}
+		</div>
+	{/if}
 {:else if node.kind === 'text_block'}
 	<p class="whitespace-pre-wrap text-sm">{node.text}</p>
 {:else if node.kind === 'key_value'}
