@@ -302,7 +302,7 @@ impl UpdateExecutor for RouterOsPlugin {
         };
 
         executor
-            .run_update()
+            .run_update(self.config.channel.as_ref())
             .await
             .map_err(|e| e.context_to::<PluginError>())?;
 
@@ -371,6 +371,10 @@ mod tests {
 
         async fn license_print(&self) -> std::result::Result<String, PluginError> {
             Ok(String::new())
+        }
+
+        async fn set_update_channel(&self, _channel: &str) -> std::result::Result<(), PluginError> {
+            Ok(())
         }
 
         async fn check_for_updates(&self) -> std::result::Result<(), PluginError> {

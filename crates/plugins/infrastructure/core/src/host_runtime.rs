@@ -138,8 +138,11 @@ pub fn construct_host_runtime(
 /// can depend on it without depending on `agent-ssh`. `RouterOsSshExecutor`
 /// in `agent-ssh` implements this trait.
 ///
-/// All methods return raw stdout from the RouterOS CLI. Parsing is the
-/// caller's responsibility.
+/// Read-only methods (`resource_print`, `routerboard_print`, `license_print`,
+/// `package_update_print`) return raw stdout from the RouterOS CLI; parsing is
+/// the caller's responsibility. Mutating methods (`set_update_channel`,
+/// `check_for_updates`, `package_install`, `package_download`) return `()` and
+/// trigger state changes on the router.
 #[async_trait::async_trait]
 pub trait RouterOsExecutor: Send + Sync + 'static {
     /// `/system resource print`
@@ -150,6 +153,19 @@ pub trait RouterOsExecutor: Send + Sync + 'static {
 
     /// `/system license print`
     async fn license_print(&self) -> std::result::Result<String, crate::PluginError>;
+
+    /// `/system package update set channel=<channel>` — persists the update channel
+    /// on the router before `check_for_updates` so that the update check and
+    /// subsequent install use the channel from plugin config.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PluginError::PluginInternal` if the SSH command fails or the
+    /// RouterOS output contains an error marker (e.g., "not enough permissions").
+    async fn set_update_channel(
+        &self,
+        channel: &str,
+    ) -> std::result::Result<(), crate::PluginError>;
 
     /// `/system package update check-for-updates` — triggers an async background
     /// check on the router. RouterOS caches the result; subsequent `package_update_print`
@@ -312,6 +328,12 @@ mod tests {
             async fn license_print(&self) -> std::result::Result<String, crate::PluginError> {
                 Ok(String::new())
             }
+            async fn set_update_channel(
+                &self,
+                _channel: &str,
+            ) -> std::result::Result<(), crate::PluginError> {
+                Ok(())
+            }
             async fn check_for_updates(&self) -> std::result::Result<(), crate::PluginError> {
                 Ok(())
             }
@@ -349,6 +371,12 @@ mod tests {
             }
             async fn license_print(&self) -> std::result::Result<String, crate::PluginError> {
                 Ok(String::new())
+            }
+            async fn set_update_channel(
+                &self,
+                _channel: &str,
+            ) -> std::result::Result<(), crate::PluginError> {
+                Ok(())
             }
             async fn check_for_updates(&self) -> std::result::Result<(), crate::PluginError> {
                 Ok(())

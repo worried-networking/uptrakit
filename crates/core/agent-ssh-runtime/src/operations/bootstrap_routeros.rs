@@ -74,6 +74,7 @@ pub(crate) enum RouterOsPlannedAction {
 /// - `ssh` — required for the `uptrakit` user to SSH in at all.
 /// - `read` — query system state.
 /// - `write` — apply changes including `/system package update install`.
+/// - `policy` — required for `/system package update check-for-updates`.
 /// - `test` — `ping`/`traceroute`/`bandwidth-test` used by health checks.
 /// - `reboot` (conditional) — required to complete `package update install`,
 ///   which reboots to apply. Operator-controlled via `allow_reboot`.
@@ -84,6 +85,7 @@ pub(crate) fn plan_bootstrap_routeros(
         "ssh".to_string(),
         "read".to_string(),
         "write".to_string(),
+        "policy".to_string(),
         "test".to_string(),
     ];
     if params.allow_reboot {
@@ -360,7 +362,7 @@ mod tests {
         let plan = plan_bootstrap_routeros(&params);
         assert_eq!(
             extracted_policies(&plan),
-            vec!["ssh", "read", "write", "test", "reboot"]
+            vec!["ssh", "read", "write", "policy", "test", "reboot"]
         );
     }
 
@@ -407,9 +409,9 @@ mod tests {
         let plan = plan_bootstrap_routeros(&stub_params());
         assert_eq!(
             extracted_policies(&plan),
-            vec!["ssh", "read", "write", "test"],
+            vec!["ssh", "read", "write", "policy", "test"],
             "default policy list (allow_reboot=false) must be exactly the \
-             RouterOS 7 enum values needed for SSH login + read/write + test"
+             RouterOS 7 enum values needed for SSH login + read/write + check-for-updates + test"
         );
     }
 
