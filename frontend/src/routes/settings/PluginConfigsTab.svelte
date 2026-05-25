@@ -1591,9 +1591,7 @@
 					onclick={testCurrentConfig}>Test</Button
 				>
 			{/if}
-			<Button variant="primary" onclick={saveConfig}>
-				{editingConfig ? 'Update' : 'Create'}
-			</Button>
+			<Button variant="primary" onclick={saveConfig}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}

@@ -283,9 +283,7 @@
 				<span class="text-sm">Enabled</span>
 			</label>
 
-			<Button type="submit" variant="primary" loading={saving}>
-				{editingRule ? 'Update' : 'Create'}
-			</Button>
+			<Button type="submit" variant="primary" loading={saving}>Save</Button>
 		</form>
 	</Modal>
 {/if}

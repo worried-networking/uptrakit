@@ -176,11 +176,11 @@ describe('NotificationRulesSettings — button variants', () => {
 		await waitFor(() => expect(api.listNotificationRules).toHaveBeenCalled());
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
-		const submitBtn = await screen.findByRole('button', { name: 'Create' });
+		const submitBtn = await screen.findByRole('button', { name: 'Save' });
 		await fireEvent.click(submitBtn);
 
 		await waitFor(() => expect(submitBtn).toHaveAttribute('aria-busy', 'true'));
-		expect(submitBtn).toHaveTextContent('Create');
+		expect(submitBtn).toHaveTextContent('Save');
 
 		// Resolve the in-flight save; saveRule calls loadData() after success so stub it again
 		vi.mocked(api.listNotificationRules).mockResolvedValue({
@@ -195,7 +195,7 @@ describe('NotificationRulesSettings — button variants', () => {
 		// We only need to confirm aria-busy was set to true (already asserted above).
 	});
 
-	it('modal submit text is Update when editing a rule', async () => {
+	it('modal submit text is Save when editing a rule', async () => {
 		vi.mocked(api.listNotificationRules).mockResolvedValue({
 			items: [
 				{
@@ -224,6 +224,6 @@ describe('NotificationRulesSettings — button variants', () => {
 		render(NotificationRulesSettings, defaultProps);
 		const editBtn = await screen.findByRole('button', { name: 'Edit' });
 		await fireEvent.click(editBtn);
-		await screen.findByRole('button', { name: 'Update' });
+		await screen.findByRole('button', { name: 'Save' });
 	});
 });

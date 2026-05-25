@@ -69,14 +69,14 @@ describe('EnrollmentTokenSettings button variants', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
 		const nameInput = await screen.findByLabelText(/Name/i);
 		await fireEvent.input(nameInput, { target: { value: 'My Token' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		const copyBtn = await screen.findByRole('button', { name: 'Copy' });
 		expect(copyBtn.className).toContain('bg-transparent');
 		// size="sm" — no loading prop
 		expect(copyBtn).not.toHaveAttribute('aria-busy');
 	});
 
-	it('modal Create button carries aria-busy=true while creating', async () => {
+	it('modal Save button carries aria-busy=true while creating', async () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.createEnrollmentToken).mockReturnValue(
 			new Promise((r) => {
@@ -88,7 +88,7 @@ describe('EnrollmentTokenSettings button variants', () => {
 		await fireEvent.click(createLauncher);
 		const nameInput = await screen.findByLabelText(/Name/i);
 		await fireEvent.input(nameInput, { target: { value: 'My Token' } });
-		const createBtn = screen.getByRole('button', { name: 'Create' });
+		const createBtn = screen.getByRole('button', { name: 'Save' });
 		await fireEvent.click(createBtn);
 		await waitFor(() => expect(createBtn).toHaveAttribute('aria-busy', 'true'));
 		resolve({
