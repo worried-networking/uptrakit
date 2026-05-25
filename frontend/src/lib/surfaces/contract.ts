@@ -76,6 +76,7 @@ export type SurfaceNode =
 	| {
 			kind: 'section';
 			title?: string;
+			header_action_ids?: InteractionId[];
 			children?: SurfaceNode[];
 	  }
 	| {
