@@ -50,7 +50,7 @@ describe('SystemServicesSettings button variants', () => {
 			total_pages: 1
 		});
 		render(SystemServicesSettings, props);
-		await fireEvent.click(screen.getByRole('button', { name: 'Load Tokens' }));
+		// Tokens auto-load on mount — wait for Revoke to appear
 		const revokeBtn = await screen.findByRole('button', { name: 'Revoke' });
 		expect(revokeBtn.className).toContain('bg-[var(--color-danger-bg)]');
 	});

@@ -195,23 +195,14 @@
 </script>
 
 <SectionCard title="Enrollment Tokens">
-	<div class="mb-4 flex items-center justify-between">
-		<div class="flex gap-2">
-			{#if tokens === null}
-				<Button variant="primary" {loading} disabled={loading} onclick={() => void loadTokens(1)}>Load Tokens</Button>
-			{:else}
-				<Button variant="secondary" {loading} disabled={loading} onclick={() => void loadTokens(currentPage)}>
-					Refresh
-				</Button>
-			{/if}
-			<Button
-				variant="primary"
-				onclick={() => {
-					showCreateDialog = true;
-				}}>Create Token</Button
-			>
-		</div>
-	</div>
+	{#snippet actions()}
+		<Button
+			variant="primary"
+			onclick={() => {
+				showCreateDialog = true;
+			}}>Create Token</Button
+		>
+	{/snippet}
 
 	{#if summary !== undefined}
 		<p class="mb-4 text-sm text-[var(--text-secondary)]">

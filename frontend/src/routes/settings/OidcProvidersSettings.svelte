@@ -212,9 +212,9 @@
 </script>
 
 <SectionCard title="OIDC Providers">
-	<div class="mb-4 flex items-center justify-between">
+	{#snippet actions()}
 		<Button variant="primary" onclick={openCreateOidc}>Add Provider</Button>
-	</div>
+	{/snippet}
 
 	<DataTable
 		columns={oidcColumns}
