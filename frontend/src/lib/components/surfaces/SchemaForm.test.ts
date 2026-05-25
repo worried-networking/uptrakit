@@ -451,3 +451,69 @@ describe('SchemaForm', () => {
 		expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
 	});
 });
+
+describe('SchemaForm draft mode', () => {
+	afterEach(() => {
+		cleanup();
+		vi.clearAllMocks();
+	});
+
+	it('in create mode (no loadInitialValues), Save is enabled when valid', async () => {
+		render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }],
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		// required field empty → invalid → disabled
+		expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+		await fireEvent.input(screen.getByLabelText(/Name/i), {
+			target: { value: 'Hello' }
+		});
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+		// no Discard in create mode
+		expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
+	});
+
+	it('in edit mode, Save is disabled when values match server baseline', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({ name: 'Original' });
+		render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }],
+			onsubmit: vi.fn().mockResolvedValue(undefined),
+			loadInitialValues
+		});
+		await waitFor(() => expect(screen.getByDisplayValue('Original')).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+		expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
+	});
+
+	it('in edit mode, Save enabled and Discard visible after change', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({ name: 'Original' });
+		render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }],
+			onsubmit: vi.fn().mockResolvedValue(undefined),
+			loadInitialValues
+		});
+		await waitFor(() => screen.getByDisplayValue('Original'));
+		await fireEvent.input(screen.getByDisplayValue('Original'), {
+			target: { value: 'Changed' }
+		});
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+		expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument();
+	});
+
+	it('Discard restores server values and hides itself', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({ name: 'Original' });
+		render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }],
+			onsubmit: vi.fn().mockResolvedValue(undefined),
+			loadInitialValues
+		});
+		await waitFor(() => screen.getByDisplayValue('Original'));
+		await fireEvent.input(screen.getByDisplayValue('Original'), {
+			target: { value: 'Changed' }
+		});
+		const discardBtn = await screen.findByRole('button', { name: 'Discard' });
+		await fireEvent.click(discardBtn);
+		await waitFor(() => expect(screen.getByDisplayValue('Original')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
+	});
+});

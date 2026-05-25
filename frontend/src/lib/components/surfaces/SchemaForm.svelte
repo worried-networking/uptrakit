@@ -5,6 +5,9 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { CheckboxList, FormFieldRow, Input, Checkbox, Textarea, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
+	import { createFormDraft } from '$lib/forms/draft.svelte';
+
+	type FieldRecord = Record<string, unknown>;
 
 	let {
 		fields,
@@ -18,7 +21,7 @@
 		loadSelectOptions
 	}: {
 		fields: FormField[];
-		onsubmit: (values: Record<string, unknown>) => Promise<void>;
+		onsubmit: (values: Record<string, unknown>) => Promise<unknown>;
 		submitLabel?: string;
 		loading?: boolean;
 		formId?: string;
@@ -28,7 +31,7 @@
 		loadSelectOptions?: (actionId: string) => Promise<SelectOption[]>;
 	} = $props();
 
-	let values: Record<string, string> = $state({});
+	const form = createFormDraft<FieldRecord>({});
 	// Separate state for multi_select fields — stores selected values as SvelteSet<string>.
 	let multiSets: Record<string, SvelteSet<string>> = $state({});
 	let fieldErrors: Record<string, string> = $state({});
@@ -44,8 +47,41 @@
 	const warnedFieldTypes: Record<string, true> = {};
 
 	function fieldValue(key: string): string {
-		return values[key] ?? '';
+		return (form.draft[key] as string) ?? '';
 	}
+
+	function setToDraftString(set: SvelteSet<string>): string {
+		return [...set].sort().join('\0');
+	}
+
+	function draftStringToSet(s: string): SvelteSet<string> {
+		return new SvelteSet(s ? s.split('\0') : []);
+	}
+
+	function normalizeForDraft(raw: Record<string, unknown>): FieldRecord {
+		const result: FieldRecord = {};
+		for (const f of fields) {
+			const v = raw[f.key];
+			result[f.key] = Array.isArray(v)
+				? [...(v as string[])].sort().join('\0')
+				: v === null || v === undefined
+					? ''
+					: String(v);
+		}
+		return result;
+	}
+
+	function handleDiscard() {
+		form.discard();
+		for (const f of fields) {
+			if (f.field_type === 'multi_select') {
+				multiSets[f.key] = draftStringToSet((form.draft[f.key] as string) ?? '');
+			}
+		}
+	}
+
+	const draftMode = $derived(loadInitialValues !== undefined);
+	const isValid = $derived(fields.every((f) => validateField(f) === null));
 
 	function warnUnknownFieldType(fieldType: string): 'text' | 'password' | 'number' {
 		if (fieldType === 'password') return 'password';
@@ -108,9 +144,9 @@
 			return (multiSets[field.key]?.size ?? 0) > 0 ? null : requiredFieldMessage(field);
 		}
 		if (field.field_type === 'toggle') {
-			return values[field.key] === 'true' ? null : requiredFieldMessage(field);
+			return fieldValue(field.key) === 'true' ? null : requiredFieldMessage(field);
 		}
-		const raw = values[field.key];
+		const raw = fieldValue(field.key);
 		if (raw == null) {
 			return requiredFieldMessage(field);
 		}
@@ -118,21 +154,23 @@
 	}
 
 	$effect(() => {
-		const initial: Record<string, string> = {};
+		const initial: FieldRecord = {};
 		const initialMulti: Record<string, SvelteSet<string>> = {};
 		const rowData = extraParams._row as Record<string, unknown> | undefined;
 		for (const f of fields) {
 			if (f.field_type === 'multi_select') {
 				const rowValue = rowData?.[f.key];
 				const fallbackValue = rowValue == null ? f.default_value : rowValue;
-				initialMulti[f.key] = new SvelteSet<string>(parseMultiSelectValues(fallbackValue));
+				const multiValues = parseMultiSelectValues(fallbackValue);
+				initialMulti[f.key] = new SvelteSet<string>(multiValues);
+				initial[f.key] = [...multiValues].sort().join('\0');
 			} else if (rowData && rowData[f.key] != null) {
 				initial[f.key] = String(rowData[f.key]);
 			} else {
 				initial[f.key] = f.default_value ?? '';
 			}
 		}
-		values = initial;
+		form.load(initial);
 		multiSets = initialMulti;
 		fieldErrors = {};
 
@@ -142,19 +180,20 @@
 			preLoading = true;
 			loadFormValues()
 				.then((obj) => {
-					const loadedValues = { ...values };
-					const loadedMultiSets = { ...multiSets };
+					const normalized = normalizeForDraft(obj);
+					// Preserve fields not returned by server from current draft baseline
+					const merged: FieldRecord = { ...form.draft };
+					for (const key of Object.keys(normalized)) {
+						merged[key] = normalized[key];
+					}
+					form.load(merged);
+					const nextMulti: Record<string, SvelteSet<string>> = {};
 					for (const f of fields) {
-						if (obj[f.key] != null) {
-							if (f.field_type === 'multi_select') {
-								loadedMultiSets[f.key] = new SvelteSet<string>(parseMultiSelectValues(obj[f.key]));
-							} else {
-								loadedValues[f.key] = String(obj[f.key]);
-							}
+						if (f.field_type === 'multi_select') {
+							nextMulti[f.key] = draftStringToSet((form.draft[f.key] as string) ?? '');
 						}
 					}
-					values = loadedValues;
-					multiSets = loadedMultiSets;
+					multiSets = nextMulti;
 				})
 				.catch((e) => {
 					showError(e instanceof Error ? e.message : 'Failed to load form data');
@@ -301,7 +340,7 @@
 
 	function isFieldVisible(field: FormField): boolean {
 		if (!field.visible_when) return true;
-		const controlValue = values[field.visible_when.field] ?? '';
+		const controlValue = fieldValue(field.visible_when.field);
 		return field.visible_when.values.includes(controlValue);
 	}
 
@@ -320,7 +359,7 @@
 		}
 		// Coerce values to the correct types expected by the backend:
 		// - multi_select → JSON-encoded string array
-		// - toggles → boolean (values map stores "true" / "" as strings)
+		// - toggles → boolean (draft map stores "true" / "" as strings)
 		// - numbers → JSON numbers
 		// - empty text/textarea/password fields → omit entirely (absent = unset)
 		// - all other fields → pass through as strings
@@ -329,7 +368,7 @@
 			if (f.field_type === 'multi_select') {
 				coerced[f.key] = JSON.stringify([...(multiSets[f.key] ?? [])]);
 			} else {
-				const raw = values[f.key];
+				const raw = fieldValue(f.key);
 				if (f.field_type === 'toggle') {
 					coerced[f.key] = raw === 'true';
 				} else if (f.field_type === 'number' && raw !== '') {
@@ -342,7 +381,23 @@
 			}
 		}
 		const submitParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
-		await onsubmit({ ...submitParams, ...coerced });
+		const payload = { ...submitParams, ...coerced };
+		const result = await onsubmit(payload);
+		if (draftMode) {
+			if (result !== null && typeof result === 'object' && !Array.isArray(result)) {
+				form.commit(normalizeForDraft(result as Record<string, unknown>));
+			} else {
+				const reloaded = await loadInitialValues!();
+				form.load(normalizeForDraft(reloaded));
+			}
+			const nextMulti: Record<string, SvelteSet<string>> = {};
+			for (const f of fields) {
+				if (f.field_type === 'multi_select') {
+					nextMulti[f.key] = draftStringToSet((form.draft[f.key] as string) ?? '');
+				}
+			}
+			multiSets = nextMulti;
+		}
 	}
 </script>
 
@@ -356,6 +411,7 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					<Textarea
 						id={field.key}
@@ -365,7 +421,7 @@
 						rows={3}
 						error={fieldErrors[field.key]}
 						oninput={(e) => {
-							values[field.key] = (e.target as HTMLTextAreaElement).value;
+							form.update(field.key, (e.target as HTMLTextAreaElement).value);
 							clearFieldError(field.key);
 						}}
 					/>
@@ -377,6 +433,7 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					<Textarea
 						id={field.key}
@@ -387,7 +444,7 @@
 						variant="mono"
 						error={fieldErrors[field.key]}
 						oninput={(e) => {
-							values[field.key] = (e.target as HTMLTextAreaElement).value;
+							form.update(field.key, (e.target as HTMLTextAreaElement).value);
 							clearFieldError(field.key);
 						}}
 					/>
@@ -399,18 +456,22 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-[var(--text-muted)]">Loading options...</p>
 					{:else}
 						<Select
 							id={field.key}
-							bind:value={values[field.key]}
+							value={fieldValue(field.key)}
 							options={resolvedOptions(field)}
 							placeholder="Select..."
 							required={field.required}
 							error={fieldErrors[field.key]}
-							onchange={() => clearFieldError(field.key)}
+							onchange={(e) => {
+								form.update(field.key, (e.target as HTMLSelectElement).value);
+								clearFieldError(field.key);
+							}}
 						/>
 					{/if}
 				</FormFieldRow>
@@ -420,6 +481,7 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-[var(--text-muted)]">Loading options...</p>
@@ -428,7 +490,12 @@
 						{#if opts.length === 0}
 							<p class="text-sm text-[var(--text-muted)]">No options available.</p>
 						{:else}
-							<div onchange={() => clearFieldError(field.key)}>
+							<div
+								onchange={() => {
+									form.update(field.key, setToDraftString(multiSets[field.key] ?? new SvelteSet<string>()));
+									clearFieldError(field.key);
+								}}
+							>
 								<CheckboxList
 									items={opts.map((o) => ({ value: o.value, label: o.label }))}
 									selected={multiSets[field.key] ?? new SvelteSet<string>()}
@@ -444,13 +511,14 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					<Checkbox
 						id={field.key}
-						checked={values[field.key] === 'true'}
+						checked={fieldValue(field.key) === 'true'}
 						disabled={loading}
 						onchange={(e) => {
-							values[field.key] = (e.target as HTMLInputElement).checked ? 'true' : 'false';
+							form.update(field.key, (e.target as HTMLInputElement).checked ? 'true' : 'false');
 							clearFieldError(field.key);
 						}}
 					/>
@@ -462,6 +530,7 @@
 					required={field.required}
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
+					dirty={form.isFieldDirty(field.key)}
 				>
 					<Input
 						id={field.key}
@@ -471,20 +540,30 @@
 						required={field.required}
 						error={fieldErrors[field.key]}
 						oninput={(e) => {
-							values[field.key] = (e.target as HTMLInputElement).value;
+							form.update(field.key, (e.target as HTMLInputElement).value);
 							clearFieldError(field.key);
 						}}
 					/>
 				</FormFieldRow>
 			{/if}
 		{:else}
-			<input type="hidden" name={field.key} bind:value={values[field.key]} />
+			<input type="hidden" name={field.key} value={fieldValue(field.key)} />
 		{/if}
 	{/each}
 
 	{#if !hideSubmit}
-		<Button type="submit" variant="primary" loading={loading || preLoading}>
-			{submitLabel}
-		</Button>
+		<div class="flex gap-2 justify-end">
+			{#if draftMode && form.isDirty}
+				<Button type="button" variant="ghost" disabled={loading || preLoading} onclick={handleDiscard}>Discard</Button>
+			{/if}
+			<Button
+				type="submit"
+				variant="primary"
+				loading={loading || preLoading}
+				disabled={!isValid || loading || preLoading || (draftMode && !form.isDirty)}
+			>
+				{submitLabel}
+			</Button>
+		</div>
 	{/if}
 </form>
