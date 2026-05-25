@@ -366,7 +366,7 @@
 			{#if !getIsOnline()}<span class="text-[var(--color-warning)] text-sm mr-auto">Offline</span>{/if}
 			<Button variant="secondary" onclick={closeOidcModal}>Cancel</Button>
 			<Button variant="primary" loading={saving} disabled={!getIsOnline()} onclick={() => void saveOidcProvider()}
-				>{editingProvider ? 'Update' : 'Create'}</Button
+				>Save</Button
 			>
 		{/snippet}
 	</Modal>
