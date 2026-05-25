@@ -67,19 +67,104 @@ Targeted-provider rules:
 Surface-rendered content uses the same shared primitive set as built-in UI. No surface-only visual
 widgets are allowed.
 
-| Surface Primitive | Design treatment                                                             |
-| ----------------- | ---------------------------------------------------------------------------- |
-| `Section`         | Vertical stack with `16px` gap                                               |
-| `TextBlock`       | Standard body copy at `text-sm text-[var(--text-primary)]`                   |
-| `KeyValue`        | Same label/value rhythm as settings and detail views                         |
-| `Table`           | Canonical `DataTable` treatment                                              |
-| `Form`            | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms |
-| `ActionBar`       | Right-aligned action row with `flex gap-2 justify-end`                       |
-| `Tabs`            | Canonical `TabStrip`                                                         |
-| `Callout`         | Semantic info/warning/danger via shared `Callout` component                  |
-| `EmptyState`      | Canonical `EmptyState` component                                             |
-| `ModalTrigger`    | Standard `ModalShell`                                                        |
-| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`)         |
+| Surface Primitive | Design treatment                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Section`         | Vertical stack with `16px` gap. `header_action_ids` accepts an array of interaction IDs (max 3). Each referenced interaction must be kind `Workflow` or `MutationAction` (with `form_ui: None`). The host renders them as buttons in the card header. `ActionBar` and `FormSubmit` interactions must not appear here. Validation enforced at surface registration (both wire layer and surface-proxy registry). |
+| `TextBlock`       | Standard body copy at `text-sm text-[var(--text-primary)]`                                                                                                                                                                                                                                                                                                                                                      |
+| `KeyValue`        | Same label/value rhythm as settings and detail views                                                                                                                                                                                                                                                                                                                                                            |
+| `Table`           | Canonical `DataTable` treatment                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Form`            | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms. `submit_label: Option<String>` overrides the default "Save" button label. Validated at registration: empty string and strings longer than 50 chars are rejected. TypeScript: `submit_label?: string` on `InteractionDescriptor`. If absent, frontend defaults to "Save".                                                          |
+| `ActionBar`       | Right-aligned action row with `flex gap-2 justify-end`. Must appear before any `Table` sibling in the `Section` children list — buttons display above the data table.                                                                                                                                                                                                                                           |
+| `Tabs`            | Canonical `TabStrip`                                                                                                                                                                                                                                                                                                                                                                                            |
+| `Callout`         | Semantic info/warning/danger via shared `Callout` component                                                                                                                                                                                                                                                                                                                                                     |
+| `EmptyState`      | Canonical `EmptyState` component                                                                                                                                                                                                                                                                                                                                                                                |
+| `ModalTrigger`    | Standard `ModalShell`                                                                                                                                                                                                                                                                                                                                                                                           |
+| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`)                                                                                                                                                                                                                                                                                                                                            |
+
+---
+
+## Section Layout Rules
+
+`SurfaceNode` is `#[non_exhaustive]`. Always use the provided constructors — never raw struct literals.
+Raw literals break at compile time on any future field addition.
+
+| Constructor                                                      | Use when                        |
+| ---------------------------------------------------------------- | ------------------------------- |
+| `SurfaceNode::section(title, children)`                          | No header action buttons needed |
+| `SurfaceNode::section_with_header_actions(title, ids, children)` | Header action buttons required  |
+
+### ActionBar ordering
+
+`ActionBar` must appear **before** any `Table` sibling in the `Section` children list. Buttons
+display above the data table. Placing `ActionBar` after `Table` causes buttons to render below
+the table, which is incorrect.
+
+```rust
+// Correct:
+SurfaceNode::section(None::<String>, vec![
+    SurfaceNode::ActionBar { action_ids: vec![...] },
+    SurfaceNode::Table { ... },
+])
+
+// Wrong — buttons render below the table:
+SurfaceNode::section(None::<String>, vec![
+    SurfaceNode::Table { ... },
+    SurfaceNode::ActionBar { action_ids: vec![...] },
+])
+```
+
+---
+
+## Section Header Actions
+
+`header_action_ids` declares interaction IDs whose buttons the host renders in the card header of
+a `Section` node. Use `SurfaceNode::section_with_header_actions(title, ids, children)` to set them.
+
+### Valid interaction kinds
+
+| Condition                                  | Allowed |
+| ------------------------------------------ | ------- |
+| Kind `Workflow`                            | Yes     |
+| Kind `MutationAction` with `form_ui: None` | Yes     |
+| Kind `MutationAction` with `form_ui` set   | No      |
+| Kind `ActionBar`                           | No      |
+| Kind `FormSubmit`                          | No      |
+
+### Constraints
+
+- Maximum 3 IDs per `Section`. Registrations with more are rejected.
+- All referenced IDs must be declared in the surface's `interactions` list.
+
+### Rust constructor
+
+```rust
+SurfaceNode::section_with_header_actions(
+    Some("My Section".to_string()),
+    vec![refresh_id, export_id],
+    vec![
+        SurfaceNode::Table { ... },
+    ],
+)
+```
+
+### TypeScript shape
+
+```typescript
+// section node variant in SurfaceNode
+| {
+    kind: 'section';
+    title?: string;
+    header_action_ids?: InteractionId[];
+    children?: SurfaceNode[];
+  }
+```
+
+### Registration validation layers
+
+| Layer         | Check                                      | Rejection path                       |
+| ------------- | ------------------------------------------ | ------------------------------------ |
+| Wire layer    | Count exceeds 3                            | Early rejection at wire validation   |
+| Surface-proxy | Unknown ID, disallowed kind, `form_ui` set | Authoritative gate at registry entry |
 
 ---
 
