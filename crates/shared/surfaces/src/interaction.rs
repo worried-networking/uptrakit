@@ -41,6 +41,7 @@ pub struct WorkflowStepDescriptor {
     pub result_schema: SchemaContract,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractionDescriptor {
     pub interaction_id: InteractionId,
@@ -65,6 +66,8 @@ pub struct InteractionDescriptor {
     pub form_ui: Option<FormUiDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submit_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,9 +119,39 @@ pub enum InteractionValidationError {
         interaction_id: InteractionId,
         reason: crate::IconNameError,
     },
+    #[error("interaction `{interaction_id}` has invalid submit_label: {reason}")]
+    SubmitLabelInvalid {
+        interaction_id: InteractionId,
+        reason: String,
+    },
 }
 
 impl InteractionDescriptor {
+    /// Creates a new `InteractionDescriptor` with all optional fields set to their defaults.
+    pub fn new(
+        interaction_id: InteractionId,
+        kind: InteractionKind,
+        label: impl Into<String>,
+        transport: InteractionTransport,
+    ) -> Self {
+        Self {
+            interaction_id,
+            kind,
+            label: label.into(),
+            transport,
+            required_permission: None,
+            input_schema: None,
+            result_schema: None,
+            sensitive_fields: vec![],
+            timeout_seconds: None,
+            confirmation: None,
+            workflow_steps: vec![],
+            form_ui: None,
+            icon: None,
+            submit_label: None,
+        }
+    }
+
     /// Validates provider-specific interaction contract rules.
     ///
     /// # Errors
@@ -203,6 +236,21 @@ impl InteractionDescriptor {
             })?;
         }
 
+        if let Some(submit_label) = &self.submit_label {
+            if submit_label.trim().is_empty() {
+                return Err(InteractionValidationError::SubmitLabelInvalid {
+                    interaction_id: self.interaction_id.clone(),
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if submit_label.len() > 50 {
+                return Err(InteractionValidationError::SubmitLabelInvalid {
+                    interaction_id: self.interaction_id.clone(),
+                    reason: format!("exceeds max 50 characters ({} given)", submit_label.len()),
+                });
+            }
+        }
+
         Ok(())
     }
 }
@@ -214,19 +262,13 @@ mod tests {
     #[test]
     fn validate_for_provider_accepts_kebab_icon() {
         let descriptor = InteractionDescriptor {
-            interaction_id: InteractionId::new("act").unwrap(),
-            kind: InteractionKind::MutationAction,
-            label: "Action".to_string(),
-            required_permission: None,
-            input_schema: None,
-            result_schema: None,
-            sensitive_fields: vec![],
-            timeout_seconds: None,
-            confirmation: None,
-            transport: InteractionTransport::ControllerLocal,
-            workflow_steps: vec![],
-            form_ui: None,
             icon: Some("trash-2".to_string()),
+            ..InteractionDescriptor::new(
+                InteractionId::new("act").unwrap(),
+                InteractionKind::MutationAction,
+                "Action",
+                InteractionTransport::ControllerLocal,
+            )
         };
         descriptor
             .validate_for_provider(ProviderKind::Plugin)
@@ -236,19 +278,13 @@ mod tests {
     #[test]
     fn validate_for_provider_rejects_pascal_icon() {
         let mut descriptor = InteractionDescriptor {
-            interaction_id: InteractionId::new("act").unwrap(),
-            kind: InteractionKind::MutationAction,
-            label: "Action".to_string(),
-            required_permission: None,
-            input_schema: None,
-            result_schema: None,
-            sensitive_fields: vec![],
-            timeout_seconds: None,
-            confirmation: None,
-            transport: InteractionTransport::ControllerLocal,
-            workflow_steps: vec![],
-            form_ui: None,
             icon: Some("Trash2".to_string()),
+            ..InteractionDescriptor::new(
+                InteractionId::new("act").unwrap(),
+                InteractionKind::MutationAction,
+                "Action",
+                InteractionTransport::ControllerLocal,
+            )
         };
         let err = descriptor
             .validate_for_provider(ProviderKind::Plugin)
@@ -270,20 +306,67 @@ mod tests {
 
     #[test]
     fn validate_for_provider_accepts_missing_icon() {
+        let descriptor = InteractionDescriptor::new(
+            InteractionId::new("act").unwrap(),
+            InteractionKind::MutationAction,
+            "Action",
+            InteractionTransport::ControllerLocal,
+        );
+        descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap();
+    }
+
+    #[test]
+    fn validate_for_provider_rejects_empty_submit_label() {
         let descriptor = InteractionDescriptor {
-            interaction_id: InteractionId::new("act").unwrap(),
-            kind: InteractionKind::MutationAction,
-            label: "Action".to_string(),
-            required_permission: None,
-            input_schema: None,
-            result_schema: None,
-            sensitive_fields: vec![],
-            timeout_seconds: None,
-            confirmation: None,
-            transport: InteractionTransport::ControllerLocal,
-            workflow_steps: vec![],
-            form_ui: None,
-            icon: None,
+            submit_label: Some("   ".to_string()),
+            ..InteractionDescriptor::new(
+                InteractionId::new("act").unwrap(),
+                InteractionKind::FormSubmit,
+                "Save Settings",
+                InteractionTransport::ProviderProxied,
+            )
+        };
+        let err = descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            InteractionValidationError::SubmitLabelInvalid { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_for_provider_rejects_submit_label_exceeding_50_chars() {
+        let descriptor = InteractionDescriptor {
+            submit_label: Some("a".repeat(51)),
+            ..InteractionDescriptor::new(
+                InteractionId::new("act").unwrap(),
+                InteractionKind::FormSubmit,
+                "Save",
+                InteractionTransport::ProviderProxied,
+            )
+        };
+        let err = descriptor
+            .validate_for_provider(ProviderKind::Plugin)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            InteractionValidationError::SubmitLabelInvalid { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_for_provider_accepts_valid_submit_label() {
+        let descriptor = InteractionDescriptor {
+            submit_label: Some("Connect".to_string()),
+            ..InteractionDescriptor::new(
+                InteractionId::new("act").unwrap(),
+                InteractionKind::FormSubmit,
+                "Save",
+                InteractionTransport::ProviderProxied,
+            )
         };
         descriptor
             .validate_for_provider(ProviderKind::Plugin)
