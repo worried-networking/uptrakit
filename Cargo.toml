@@ -60,7 +60,8 @@ uuid = { version = "1" }
 rand = "0.9"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 hostname = "0.4"
-# sha2/hmac stay at 0.10/0.12 — bumping pulls digest 0.11 → pkcs8 0.11-rc which has broken API against pkcs5 0.8 stable
+# sha2/hmac stay at 0.10/0.12 — blocked by openidconnect 4.x hardcoding sha2 = "0.10.6";
+# bumping would produce two incompatible sha2 versions in the graph
 sha2 = "0.10"
 hex = "0.4"
 subtle = "2"
@@ -169,7 +170,7 @@ uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discov
 # External deps used by a single crate — declared here so all versions are pinned in one place
 dirs = "6"
 rpassword = "7"
-russh = { version = "0.60" }
+russh = { version = "0.61" }
 russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
 ssh2-config = "0.7"
@@ -182,7 +183,7 @@ sd-notify = "0.5"
 rust-embed = { version = "8", default-features = false }
 mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.6", default-features = false }
-# hmac stays at 0.12 — see sha2 comment above; same pkcs8 0.11-rc / pkcs5 0.8 conflict
+# hmac stays at 0.12 — see sha2 comment above; same openidconnect sha2 constraint
 hmac = "0.12"
 argon2 = { version = "0.5", default-features = false }
 jsonwebtoken = { version = "10", default-features = false }
@@ -204,7 +205,7 @@ tame-index = "0.26"
 serde_urlencoded = "0.7"
 husky-rs = { version = "0.3", default-features = false }
 socket2 = "0.6"
-mdns-sd = { version = "0.19", default-features = false }
+mdns-sd = { version = "0.20", default-features = false }
 walkdir = "2"
 
 [workspace.lints.rust]
