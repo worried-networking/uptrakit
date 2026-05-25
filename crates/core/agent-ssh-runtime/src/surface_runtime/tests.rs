@@ -126,9 +126,9 @@ fn ssh_hosts_surface_descriptor_and_data_source_parity_is_preserved() {
         columns,
         row_actions,
         ..
-    }) = children.first()
+    }) = children.get(1)
     else {
-        panic!("first section child should be a table");
+        panic!("second section child should be a table");
     };
     let actual_columns: Vec<(&str, &str)> = columns
         .iter()
@@ -162,8 +162,8 @@ fn dynamic_primary_action_is_included_in_action_bar_when_available() {
     let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
         panic!("root node should be a section");
     };
-    let Some(SurfaceNode::ActionBar { action_ids }) = children.get(1) else {
-        panic!("second section child should be an action bar");
+    let Some(SurfaceNode::ActionBar { action_ids }) = children.first() else {
+        panic!("first section child should be an action bar");
     };
     let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
     assert!(action_ids.contains(SSH_HOSTS_PRIMARY_ACTION_ID));

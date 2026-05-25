@@ -266,10 +266,7 @@ mod tests {
 
     #[test]
     fn collect_from_section_with_nested_table() {
-        let node = SurfaceNode::Section {
-            title: None,
-            children: vec![entity_link_table_node("host_col")],
-        };
+        let node = SurfaceNode::section(None::<String>, vec![entity_link_table_node("host_col")]);
         let cols = collect_entity_link_columns(&node);
         assert_eq!(cols.len(), 1);
     }

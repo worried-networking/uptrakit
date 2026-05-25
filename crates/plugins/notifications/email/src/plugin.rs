@@ -613,9 +613,9 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     surfaces::Capability::UniversalTargeting,
                     surfaces::Capability::SensitiveFields,
                 ]))
-                .root_node(surfaces::SurfaceNode::Section {
-                    title: None,
-                    children: vec![
+                .root_node(surfaces::SurfaceNode::section(
+                    None::<String>,
+                    vec![
                         surfaces::SurfaceNode::ActionBar {
                             action_ids: vec![
                                 surfaces::InteractionId::new("create")
@@ -651,7 +651,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             ],
                         },
                     ],
-                })
+                ))
                 .build(),
             interactions: vec![
                 surfaces::InteractionDescriptor {
@@ -1044,9 +1044,9 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     surfaces::Capability::UniversalTargeting,
                     surfaces::Capability::SensitiveFields,
                 ]))
-                .root_node(surfaces::SurfaceNode::Section {
-                    title: None,
-                    children: vec![
+                .root_node(surfaces::SurfaceNode::section(
+                    None::<String>,
+                    vec![
                         surfaces::SurfaceNode::Form {
                             interaction_id: save_global_smtp_interaction.clone(),
                         },
@@ -1057,7 +1057,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             ],
                         },
                     ],
-                })
+                ))
                 .build(),
             interactions: vec![
                 surfaces::InteractionDescriptor {

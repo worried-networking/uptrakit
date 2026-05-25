@@ -176,9 +176,9 @@ mod tests {
     fn section_table_action_bar_tree_adds_node_capabilities() {
         let data_source_id = DataSourceId::new("data.primary").expect("valid data source id");
         let action_id = InteractionId::new("action.primary").expect("valid interaction id");
-        let root = SurfaceNode::Section {
-            title: None,
-            children: vec![
+        let root = SurfaceNode::section(
+            None::<String>,
+            vec![
                 SurfaceNode::Table {
                     data_source_id,
                     columns: vec![],
@@ -188,7 +188,7 @@ mod tests {
                     action_ids: vec![action_id],
                 },
             ],
-        };
+        );
 
         let caps = compute_required_capabilities(&root, &Targeting::Universal, &[], &[]);
 
@@ -199,10 +199,7 @@ mod tests {
 
     #[test]
     fn interactions_and_provider_proxied_transport_add_capabilities() {
-        let root = SurfaceNode::Section {
-            title: None,
-            children: vec![],
-        };
+        let root = SurfaceNode::section(None::<String>, vec![]);
         let interactions = vec![
             make_interaction(
                 "interaction.mutation",
@@ -259,10 +256,7 @@ mod tests {
 
     #[test]
     fn data_source_kinds_add_expected_data_source_capabilities() {
-        let root = SurfaceNode::Section {
-            title: None,
-            children: vec![],
-        };
+        let root = SurfaceNode::section(None::<String>, vec![]);
         let data_sources = vec![
             make_data_source(DataSourceKind::Static { data: json!({}) }),
             make_data_source(DataSourceKind::ControllerQuery {
@@ -289,10 +283,7 @@ mod tests {
 
     #[test]
     fn targeting_adds_matching_targeting_capability() {
-        let root = SurfaceNode::Section {
-            title: None,
-            children: vec![],
-        };
+        let root = SurfaceNode::section(None::<String>, vec![]);
 
         let universal_caps = compute_required_capabilities(&root, &Targeting::Universal, &[], &[]);
         assert!(

@@ -84,9 +84,9 @@ pub(crate) fn build_surface_registration_with_ids(
             .required_permission("update_system_services")
             .provider_kind(surfaces::ProviderKind::Service)
             .required_capabilities(required_capabilities.clone())
-            .root_node(SurfaceNode::Section {
-                title: None,
-                children: vec![
+            .root_node(SurfaceNode::section(
+                None::<String>,
+                vec![
                     SurfaceNode::ActionBar {
                         action_ids: vec![
                             InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
@@ -118,7 +118,7 @@ pub(crate) fn build_surface_registration_with_ids(
                         ],
                     },
                 ],
-            })
+            ))
             .build(),
         interactions: build_interactions(),
         data_sources: vec![DataSourceDescriptor {
