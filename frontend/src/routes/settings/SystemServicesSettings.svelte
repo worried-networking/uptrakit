@@ -31,7 +31,6 @@
 	} = $props();
 
 	let tokens: PaginatedResponse<SystemEnrollmentTokenResponse> | null = $state(null);
-	let currentPage: number = $state(1);
 	let loading: boolean = $state(false);
 	let loadError: string | null = $state(null);
 	let showCreateDialog: boolean = $state(false);
@@ -56,12 +55,10 @@
 	});
 
 	async function loadTokens(page = 1) {
-		currentPage = page;
 		loading = true;
 		loadError = null;
 		try {
 			tokens = await listSystemEnrollmentTokens({ page });
-			currentPage = tokens.page;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load system enrollment tokens';
 			onError(loadError);
