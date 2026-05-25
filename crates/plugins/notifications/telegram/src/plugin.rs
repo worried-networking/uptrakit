@@ -308,6 +308,7 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 .targeting(surfaces::Targeting::Universal)
                 .required_permission("view_notifications")
                 .provider_kind(surfaces::ProviderKind::Plugin)
+                .tab_group("notification-channels", "Notification Channels")
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::SectionNode,
                     surfaces::Capability::ActionBarNode,
