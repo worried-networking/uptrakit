@@ -40,10 +40,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
             .targeting(Targeting::Universal)
             .provider_kind(provider_kind)
             .required_capabilities(CapabilitySet::from_capabilities([Capability::SectionNode]))
-            .root_node(SurfaceNode::Section {
-                title: Some("Sample".to_string()),
-                children: Vec::new(),
-            })
+            .root_node(SurfaceNode::section(Some("Sample"), Vec::new()))
             .build(),
         interactions: vec![InteractionDescriptor {
             interaction_id: InteractionId::new("surface.refresh").expect("valid interaction id"),
