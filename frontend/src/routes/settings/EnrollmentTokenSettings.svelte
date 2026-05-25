@@ -274,7 +274,7 @@
 						resetForm();
 					}}>Cancel</Button
 				>
-				<Button variant="primary" loading={creating} onclick={handleCreate}>Create</Button>
+				<Button variant="primary" loading={creating} onclick={handleCreate}>Save</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
