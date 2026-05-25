@@ -168,6 +168,33 @@ SurfaceNode::section_with_header_actions(
 
 ---
 
+## Form Draft Mode
+
+**Status:** `Implemented`
+
+Surface forms backed by `pre_load_interaction` automatically enter draft mode. The form fetches the current server values on mount, then tracks dirty state field-by-field.
+
+### Behavior
+
+| Condition                                            | Save button        | Discard button |
+| ---------------------------------------------------- | ------------------ | -------------- |
+| `pre_load_interaction` absent (create mode), valid   | Enabled            | Hidden         |
+| `pre_load_interaction` absent (create mode), invalid | Disabled           | Hidden         |
+| Edit mode, values match server baseline              | Disabled           | Hidden         |
+| Edit mode, at least one field changed                | Enabled            | Visible        |
+| Submitting or loading initial values                 | Disabled (spinner) | Hidden         |
+
+- **Dirty fields** receive a left-side accent border (the `dirty` prop on `FormFieldRow`).
+- **Discard** restores all fields to the last server-fetched values without a network round-trip.
+- **Save** commits the current values as the new baseline on success — no reload needed to re-enable Save for subsequent edits.
+
+### Caveats
+
+- The JSON-payload fallback (no `form_ui` / `fields`) is **not** in draft mode. It remains stateless.
+- Multi-select dirty detection uses sorted NUL-joined string comparison. Field order from the server does not affect dirty state.
+
+---
+
 ## Context Selector
 
 **Status:** `Implemented`
