@@ -612,21 +612,24 @@ fn build_interactions(
             _ => vec![],
         };
 
-        interactions.push(InteractionDescriptor {
-            interaction_id,
-            kind,
-            label: action.label.clone(),
-            required_permission: permission_or_none(&action.permission),
-            input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Any),
-            sensitive_fields: sensitive_fields.into_iter().collect(),
-            timeout_seconds,
-            confirmation,
-            transport: InteractionTransport::ProviderProxied,
-            workflow_steps,
-            form_ui,
-            icon: action.icon.clone(),
-        });
+        {
+            let mut descriptor = InteractionDescriptor::new(
+                interaction_id,
+                kind,
+                action.label.clone(),
+                InteractionTransport::ProviderProxied,
+            );
+            descriptor.required_permission = permission_or_none(&action.permission);
+            descriptor.input_schema = Some(surfaces::SchemaContract::Object);
+            descriptor.result_schema = Some(surfaces::SchemaContract::Any);
+            descriptor.sensitive_fields = sensitive_fields.into_iter().collect();
+            descriptor.timeout_seconds = timeout_seconds;
+            descriptor.confirmation = confirmation;
+            descriptor.workflow_steps = workflow_steps;
+            descriptor.form_ui = form_ui;
+            descriptor.icon = action.icon.clone();
+            interactions.push(descriptor);
+        }
     }
     interactions
 }

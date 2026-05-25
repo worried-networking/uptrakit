@@ -1382,20 +1382,19 @@ mod tests {
                         text: "ok".to_string(),
                     })
                     .build(),
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Refresh".to_string(),
-                    required_permission: Some("update_software".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec!["token".to_string()],
-                    timeout_seconds: Some(30),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ProviderProxied,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                interactions: vec![{
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("refresh").unwrap(),
+                        surfaces::InteractionKind::MutationAction,
+                        "Refresh",
+                        surfaces::InteractionTransport::ProviderProxied,
+                    );
+                    i.required_permission = Some("update_software".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i.sensitive_fields = vec!["token".to_string()];
+                    i.timeout_seconds = Some(30);
+                    i
                 }],
                 data_sources: vec![],
             }],
@@ -1447,20 +1446,18 @@ mod tests {
                         text: "plugin-fallback".to_string(),
                     })
                     .build(),
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Save Global SMTP".to_string(),
-                    required_permission: Some("update_software".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec![],
-                    timeout_seconds: Some(30),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                interactions: vec![{
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("refresh").unwrap(),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Global SMTP",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("update_software".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i.timeout_seconds = Some(30);
+                    i
                 }],
                 data_sources: vec![],
             }],
@@ -1646,20 +1643,18 @@ mod tests {
                         text: "Telegram settings".to_string(),
                     })
                     .build(),
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("save_global_telegram").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Refresh".to_string(),
-                    required_permission: None,
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec!["bot_token".to_string()],
-                    timeout_seconds: Some(30),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                interactions: vec![{
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save_global_telegram").unwrap(),
+                        surfaces::InteractionKind::MutationAction,
+                        "Refresh",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i.sensitive_fields = vec!["bot_token".to_string()];
+                    i.timeout_seconds = Some(30);
+                    i
                 }],
                 data_sources: vec![],
             }],
@@ -1709,20 +1704,18 @@ mod tests {
                         text: "Built-in sensitive action".to_string(),
                     })
                     .build(),
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("save_builtin_secret").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Save Built-in Secret".to_string(),
-                    required_permission: None,
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec!["secret".to_string()],
-                    timeout_seconds: Some(30),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                interactions: vec![{
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save_builtin_secret").unwrap(),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Built-in Secret",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i.sensitive_fields = vec!["secret".to_string()];
+                    i.timeout_seconds = Some(30);
+                    i
                 }],
                 data_sources: vec![],
             }],
@@ -2370,21 +2363,12 @@ mod tests {
                 vec![interaction_id.clone()],
                 vec![],
             ),
-            vec![surfaces::InteractionDescriptor {
-                interaction_id: interaction_id.clone(),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Submit".to_string(),
-                required_permission: None,
-                input_schema: None,
-                result_schema: None,
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
-            }],
+            vec![surfaces::InteractionDescriptor::new(
+                interaction_id.clone(),
+                surfaces::InteractionKind::FormSubmit,
+                "Submit",
+                surfaces::InteractionTransport::ControllerLocal,
+            )],
         );
         let result = registry().bootstrap_plugin(registration);
         assert!(
@@ -2408,23 +2392,18 @@ mod tests {
                 vec![interaction_id.clone()],
                 vec![],
             ),
-            vec![surfaces::InteractionDescriptor {
-                interaction_id: interaction_id.clone(),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Save".to_string(),
-                required_permission: None,
-                input_schema: None,
-                result_schema: None,
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: Some(surfaces::FormUiDescriptor {
+            vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    interaction_id.clone(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Save",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![],
                     pre_load_interaction_id: None,
-                }),
-                icon: None,
+                });
+                i
             }],
         );
         let result = registry().bootstrap_plugin(registration);
@@ -2449,21 +2428,12 @@ mod tests {
                 vec![interaction_id.clone()],
                 vec![],
             ),
-            vec![surfaces::InteractionDescriptor {
-                interaction_id: interaction_id.clone(),
-                kind: surfaces::InteractionKind::MutationAction,
-                label: "Refresh".to_string(),
-                required_permission: None,
-                input_schema: None,
-                result_schema: None,
-                sensitive_fields: vec![],
-                timeout_seconds: None,
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
-            }],
+            vec![surfaces::InteractionDescriptor::new(
+                interaction_id.clone(),
+                surfaces::InteractionKind::MutationAction,
+                "Refresh",
+                surfaces::InteractionTransport::ControllerLocal,
+            )],
         );
         let result = registry().bootstrap_plugin(registration);
         assert!(

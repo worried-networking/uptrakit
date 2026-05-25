@@ -53,20 +53,17 @@ fn proxmox_update_protection_registration(
                     text: "ok".to_string(),
                 })
                 .build(),
-            interactions: vec![surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Action".to_string(),
-                required_permission: None,
-                input_schema: Some(surfaces::SchemaContract::Object),
-                result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec![],
-                timeout_seconds: Some(30),
-                confirmation: None,
-                transport: surfaces::InteractionTransport::ControllerLocal,
-                workflow_steps: vec![],
-                form_ui: None,
-                icon: None,
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new(interaction_id).unwrap(),
+                    surfaces::InteractionKind::FormSubmit,
+                    "Action",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.timeout_seconds = Some(30);
+                i
             }],
             data_sources: vec![],
         }],

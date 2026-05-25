@@ -359,36 +359,30 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 ))
                 .build(),
             interactions: vec![
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("list")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::DataLoad,
-                    label: "List".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("list")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "List",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("create")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::FormSubmit,
-                    label: "Add Telegram Channel".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec!["bot_token".to_string()],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("create")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Add Telegram Channel",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.sensitive_fields = vec!["bot_token".to_string()];
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "name".to_string(),
@@ -448,23 +442,22 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: None,
-                    }),
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("edit")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::FormSubmit,
-                    label: "Edit".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec!["bot_token".to_string()],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("edit")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Edit",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.sensitive_fields = vec!["bot_token".to_string()];
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "id".to_string(),
@@ -540,46 +533,41 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: None,
-                    }),
-                    icon: None,
+                    });
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("test")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Test".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("test")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Test",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
                 },
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("delete")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::ConfirmableAction,
-                    label: "Delete".to_string(),
-                    required_permission: Some("manage_notifications".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: Some(surfaces::InteractionConfirmation {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("delete")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::ConfirmableAction,
+                        "Delete",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_notifications".to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.confirmation = Some(surfaces::InteractionConfirmation {
                         title: "Confirm Delete".to_string(),
                         message: "This action may modify existing data.".to_string(),
                         confirm_label: None,
                         cancel_label: None,
                         severity: surfaces::ConfirmationSeverity::Danger,
-                    }),
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
+                    });
+                    i
                 },
             ],
             data_sources: vec![surfaces::DataSourceDescriptor {
@@ -628,35 +616,28 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 })
                 .build(),
             interactions: vec![
-                surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("get_global_telegram")
-                        .expect("literal interaction id is valid"),
-                    kind: surfaces::InteractionKind::DataLoad,
-                    label: "Get Global Telegram Settings".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                                icon: None,
-},
-                surfaces::InteractionDescriptor {
-                    interaction_id: save_global_interaction,
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Save Global Telegram Settings".to_string(),
-                    required_permission: Some("manage_global_settings".to_string()),
-                    input_schema: None,
-                    result_schema: Some(surfaces::SchemaContract::Any),
-                    sensitive_fields: vec!["bot_token".to_string()],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: Some(surfaces::FormUiDescriptor {
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("get_global_telegram")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Get Global Telegram Settings",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
+                },
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        save_global_interaction,
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Global Telegram Settings",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some("manage_global_settings".to_string());
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.sensitive_fields = vec!["bot_token".to_string()];
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![surfaces::FormFieldDescriptor {
                             key: "bot_token".to_string(),
                             label: "Global Bot Token".to_string(),
@@ -677,9 +658,9 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             surfaces::InteractionId::new("get_global_telegram")
                                 .expect("literal interaction id is valid"),
                         ),
-                    }),
-                                icon: None,
-},
+                    });
+                    i
+                },
             ],
             data_sources: vec![],
         }

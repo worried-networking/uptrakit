@@ -1806,21 +1806,12 @@ mod tests {
                         }],
                     ))
                     .build(),
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Refresh".to_string(),
-                    required_permission: None,
-                    input_schema: None,
-                    result_schema: None,
-                    sensitive_fields: vec![],
-                    timeout_seconds: None,
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ProviderProxied,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                    icon: None,
-                }],
+                interactions: vec![surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("refresh").unwrap(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Refresh",
+                    surfaces::InteractionTransport::ProviderProxied,
+                )],
                 data_sources: vec![surfaces::DataSourceDescriptor {
                     data_source_id: surfaces::DataSourceId::new("guest.rows").unwrap(),
                     kind: surfaces::DataSourceKind::Static {
@@ -1869,27 +1860,22 @@ mod tests {
     #[test]
     fn surface_registration_rejects_invalid_interaction_confirmation_text() {
         let mut payload = test_surface_registration();
-        payload.surfaces[0].interactions[0] = surfaces::InteractionDescriptor {
-            interaction_id: surfaces::InteractionId::new("danger.refresh").unwrap(),
-            kind: surfaces::InteractionKind::ConfirmableAction,
-            label: "Danger Refresh".to_string(),
-            required_permission: None,
-            input_schema: None,
-            result_schema: None,
-            sensitive_fields: vec![],
-            timeout_seconds: None,
-            confirmation: Some(surfaces::InteractionConfirmation {
+        {
+            let mut i = surfaces::InteractionDescriptor::new(
+                surfaces::InteractionId::new("danger.refresh").unwrap(),
+                surfaces::InteractionKind::ConfirmableAction,
+                "Danger Refresh",
+                surfaces::InteractionTransport::ProviderProxied,
+            );
+            i.confirmation = Some(surfaces::InteractionConfirmation {
                 title: "Confirm".to_string(),
                 message: "x".repeat(MAX_MEDIUM_STRING_LEN + 1),
                 confirm_label: None,
                 cancel_label: None,
                 severity: surfaces::ConfirmationSeverity::Warning,
-            }),
-            transport: surfaces::InteractionTransport::ProviderProxied,
-            workflow_steps: vec![],
-            form_ui: None,
-            icon: None,
-        };
+            });
+            payload.surfaces[0].interactions[0] = i;
+        }
 
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].interactions[].confirmation.message");
