@@ -108,7 +108,7 @@
 					/>
 				</FormFieldRow>
 			{/if}
-			<div class="flex gap-2">
+			<div class="flex gap-2 justify-end">
 				<Button variant="primary" loading={saving} disabled={!form.isDirty || saving} onclick={saveCertificates}
 					>Save</Button
 				>

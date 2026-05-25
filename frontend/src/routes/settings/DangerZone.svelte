@@ -65,10 +65,12 @@
 		<p class="mb-4 text-[var(--text-secondary)]">
 			This action cannot be undone. Services, users, enrollment tokens, and settings are preserved.
 		</p>
-		<Button variant="danger" disabled={!getIsOnline()} onclick={openDialog}>Reset Data</Button>
-		{#if !getIsOnline()}
-			<span class="text-[var(--color-warning)] text-sm ml-2">Offline</span>
-		{/if}
+		<div class="flex items-center gap-2 justify-end">
+			{#if !getIsOnline()}
+				<span class="text-[var(--color-warning)] text-sm">Offline</span>
+			{/if}
+			<Button variant="danger" disabled={!getIsOnline()} onclick={openDialog}>Reset Data</Button>
+		</div>
 	</SectionCard>
 </div>
 
