@@ -239,6 +239,7 @@ export interface InteractionDescriptor {
 	transport: InteractionTransport;
 	workflow_steps?: WorkflowStepDescriptor[];
 	form_ui?: FormUiDescriptor;
+	submit_label?: string;
 }
 
 export interface RegisteredSurface {
