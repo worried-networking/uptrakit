@@ -18,7 +18,7 @@
 		targetProviderId,
 		encryptionContext,
 		baseParams = {},
-		submitLabel = 'Submit',
+		submitLabel = 'Save',
 		oncomplete
 	}: {
 		surfaceId: string;
@@ -39,7 +39,7 @@
 	const schemaFields = $derived(interaction.form_ui?.fields ?? []);
 	const actionLabel = $derived(typeof interaction.label === 'string' ? interaction.label.trim() : '');
 	const hasActionLabel = $derived(actionLabel.length > 0);
-	const effectiveSubmitLabel = $derived(submitLabel?.trim() || 'Submit');
+	const effectiveSubmitLabel = $derived(interaction.submit_label?.trim() || submitLabel?.trim() || 'Save');
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
 
