@@ -390,13 +390,22 @@ fn validate_surface_node(
         surfaces::SurfaceNode::Section {
             title,
             children,
-            header_action_ids: _,
+            header_action_ids,
         } => {
             check_opt_string_len(
                 title,
                 MAX_SHORT_STRING_LEN,
                 "surfaces[].descriptor.root_node.title",
             )?;
+            if header_action_ids.len() > 3 {
+                return Err(WireValidationError {
+                    field: "surfaces[].descriptor.root_node.header_action_ids",
+                    message: format!(
+                        "section header_action_ids has {} entries, max 3",
+                        header_action_ids.len()
+                    ),
+                });
+            }
             check_vec_len(
                 children,
                 MAX_SURFACE_FIELDS,
@@ -2238,5 +2247,43 @@ mod tests {
 
         let err = msg.wire_validate().unwrap_err();
         assert_eq!(err.field, "report_page_limits.report_hosts");
+    }
+
+    #[test]
+    fn section_header_action_ids_count_exceeds_limit_is_rejected() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.root_node =
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![
+                    surfaces::InteractionId::new("a1").unwrap(),
+                    surfaces::InteractionId::new("a2").unwrap(),
+                    surfaces::InteractionId::new("a3").unwrap(),
+                    surfaces::InteractionId::new("a4").unwrap(),
+                ],
+                vec![],
+            );
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(
+            err.field,
+            "surfaces[].descriptor.root_node.header_action_ids"
+        );
+        assert!(err.message.contains("max 3"));
+    }
+
+    #[test]
+    fn section_header_action_ids_at_limit_is_accepted() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.root_node =
+            surfaces::SurfaceNode::section_with_header_actions(
+                None::<String>,
+                vec![
+                    surfaces::InteractionId::new("a1").unwrap(),
+                    surfaces::InteractionId::new("a2").unwrap(),
+                    surfaces::InteractionId::new("a3").unwrap(),
+                ],
+                vec![],
+            );
+        assert!(payload.wire_validate().is_ok());
     }
 }
