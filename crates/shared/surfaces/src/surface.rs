@@ -35,6 +35,8 @@ pub enum SurfaceNode {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        header_action_ids: Vec<crate::InteractionId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         children: Vec<SurfaceNode>,
     },
     TextBlock {
@@ -80,6 +82,43 @@ pub enum SurfaceNode {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         step_nodes: Vec<SurfaceNode>,
     },
+}
+
+impl SurfaceNode {
+    /// Constructs a [`SurfaceNode::Section`] with an optional title and children,
+    /// and no header action buttons.
+    ///
+    /// Use this constructor instead of the struct literal because [`SurfaceNode`] is
+    /// `#[non_exhaustive]` — external crates cannot construct variants directly.
+    #[must_use]
+    pub fn section(title: Option<impl Into<String>>, children: Vec<Self>) -> Self {
+        Self::Section {
+            title: title.map(Into::into),
+            header_action_ids: vec![],
+            children,
+        }
+    }
+
+    /// Constructs a [`SurfaceNode::Section`] with an optional title, header action
+    /// button IDs, and children.
+    ///
+    /// `header_action_ids` refers to [`crate::InteractionId`]s that the Dashboard
+    /// renders as icon buttons in the section header row.
+    ///
+    /// Use this constructor instead of the struct literal because [`SurfaceNode`] is
+    /// `#[non_exhaustive]` — external crates cannot construct variants directly.
+    #[must_use]
+    pub fn section_with_header_actions(
+        title: Option<impl Into<String>>,
+        header_action_ids: Vec<crate::InteractionId>,
+        children: Vec<Self>,
+    ) -> Self {
+        Self::Section {
+            title: title.map(Into::into),
+            header_action_ids,
+            children,
+        }
+    }
 }
 
 #[non_exhaustive]
@@ -281,7 +320,7 @@ impl SurfaceDescriptor {
     ///     .targeting(Targeting::Universal)
     ///     .provider_kind(ProviderKind::Plugin)
     ///     .required_capabilities(CapabilitySet::default())
-    ///     .root_node(SurfaceNode::Section { title: None, children: vec![] })
+    ///     .root_node(SurfaceNode::section(None::<String>, vec![]))
     ///     .build();
     /// ```
     #[must_use]
@@ -607,10 +646,7 @@ mod tests {
             required_permission: None,
             provider_kind: ProviderKind::Plugin,
             required_capabilities: CapabilitySet::from_capabilities([Capability::ContextSelector]),
-            root_node: SurfaceNode::Section {
-                title: None,
-                children: vec![],
-            },
+            root_node: SurfaceNode::section(None::<String>, vec![]),
             context_selector: Some(SurfaceContextSelectorDescriptor {
                 param_key: "plugin_config_id".to_string(),
                 label: "Configuration".to_string(),
@@ -649,10 +685,7 @@ mod tests {
             required_permission: None,
             provider_kind: ProviderKind::Plugin,
             required_capabilities: CapabilitySet::default(),
-            root_node: SurfaceNode::Section {
-                title: None,
-                children: vec![],
-            },
+            root_node: SurfaceNode::section(None::<String>, vec![]),
             context_selector: None,
             nav_icon: None,
             tab_group: None,
