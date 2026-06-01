@@ -31,8 +31,10 @@ repeating it. Full primitive docs are in `primitives.md` under "Filter Primitive
 ![Software group row showing item name, version, and update badge](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-group-row-chromium.png)
 
 - Software items are top-level groups; hosts are sub-rows.
-- Built-in and surface-backed `software.tabs` share one tab strip and one body container.
-- Active tab persists in `?tab=<tab-id>`.
+- Featured/unfeatured/all selection is a `<Select>` in the filter bar — driven by `?featured=` (default `featured`). Surface-backed `software.tabs`
+  render as a `TabStrip` only when at least one surface is registered, and the first surface is auto-selected client-side (no URL persistence).
+- Ignore Rules render as a collapsible `<details>` card below the main software card. The body is lazy-mounted via `{#if open}` so its API calls are
+  deferred until the user expands it.
 - Column grid: `16px 1fr 120px 88px`.
 - Header-row version column is always empty; version column on host rows is a two-line installed/latest stack.
 - Host-row background is transparent until hover.
