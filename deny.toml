@@ -256,9 +256,6 @@ skip = [
     # untrusted: 0.7.1 via aws-lc-rs, 0.9.0 via ring/rustls-webpki. Will resolve with dependency updates.
     { crate = "untrusted@0.7.1", reason = "pulled by aws-lc-rs; waiting for upstream convergence" },
 
-    # windows-sys 0.48.0 via etcetera (sqlx-postgres dep); newer versions used by tokio/clap/socket-pktinfo
-    { crate = "windows-sys@0.48.0", reason = "pulled by etcetera via sqlx-postgres; waiting for upstream convergence" },
-
     # windows-sys 0.52.0 via windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio/clap
     { crate = "windows-sys@0.52.0", reason = "pulled by windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio, clap" },
 
@@ -266,34 +263,29 @@ skip = [
     { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd); newer 0.61.x used by tokio, clap" },
     { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd)" },
 
-    # windows-targets 0.48.5 via windows-sys@0.48.0; 0.52.6 via older deps
-    { crate = "windows-targets@0.48.5", reason = "pulled by windows-sys@0.48.0 (etcetera → sqlx-postgres); newer 0.52.6+ used by other crates" },
+    # windows-targets 0.52.6 via older toolchain deps
     { crate = "windows-targets@0.52.6", reason = "pulled by windows-sys@0.52.0 (older toolchain deps); newer 0.53.5+ used by clap, tokio" },
 
-    # windows arch crates 0.48.5 via windows-targets@0.48.5; 0.52.6 via windows-targets@0.52.6
-    { crate = "windows_aarch64_gnullvm@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    # windows arch crates 0.52.6 via windows-targets@0.52.6
     { crate = "windows_aarch64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_aarch64_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_aarch64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_i686_gnu@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_i686_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
     { crate = "windows_i686_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_i686_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_i686_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_i686_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_x86_64_gnu@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_x86_64_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_x86_64_gnullvm@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_x86_64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
-    { crate = "windows_x86_64_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
     { crate = "windows_x86_64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
     { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+
+    # flume: 0.11.x via mdns-sd 0.20 / rumqttc 0.25.1; 0.12.x via sqlx-sqlite 0.9
+    { crate = "flume@0.11.1", reason = "pulled by mdns-sd 0.20, rumqttc 0.25.1; sqlx-sqlite 0.9 uses flume 0.12" },
 
     # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
@@ -303,9 +295,8 @@ skip = [
     { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
     { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
 
-    # hashbrown: 0.14.x via dashmap (russh-sftp), 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause, 0.17.x via newer crates
-    { crate = "hashbrown@0.14.5", reason = "pulled by dashmap 6.x (russh-sftp); newer 0.15.x used by sqlx-core" },
-    { crate = "hashbrown@0.15.5", reason = "pulled by sqlx-core; newer 0.16.x used by indexmap, rootcause" },
+    # hashbrown: 0.14.x via dashmap (russh-sftp), 0.16.x via indexmap/rootcause, 0.17.x via newer crates
+    { crate = "hashbrown@0.14.5", reason = "pulled by dashmap 6.x (russh-sftp); newer 0.16.x used by indexmap, rootcause" },
     { crate = "hashbrown@0.16.1", reason = "pulled by indexmap 2.x; newer 0.17.x used by newer crates" },
 
     # heck: 0.4.x via sea-orm macros, 0.5.x via clap/sea-orm-macros
@@ -320,7 +311,7 @@ skip = [
 
     # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit, 0.10.x via russh 0.60
     { crate = "rand@0.8.6", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
-    { crate = "rand@0.9.4", reason = "uptrakit workspace uses rand 0.9 (blocked by testcontainers 0.27 / bollard 0.20 constraint)" },
+    { crate = "rand@0.9.4", reason = "workspace pins rand 0.9; bollard 0.21 would use rand 0.10 but testcontainers 0.27 pins bollard ^0.20 (bollard-stubs exact-version conflict blocks bollard 0.21 upgrade)" },
     { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
     { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
 
@@ -328,8 +319,6 @@ skip = [
     { crate = "thiserror@1.0.69", reason = "pulled by openidconnect, oauth2; newer 2.x used by most ecosystem" },
     { crate = "thiserror-impl@1.0.69", reason = "pulled by thiserror 1.x; newer 2.x used by thiserror 2.x" },
 
-    # webpki-roots: 0.26.x via sqlx-core, 1.x via reqwest/hyper-rustls
-    { crate = "webpki-roots@0.26.11", reason = "pulled by sqlx-core; newer 1.x used by reqwest, hyper-rustls" },
 
 # crypto stack duplicates: older 0.10.x/0.1.x series pulled by argon2/openidconnect crypto crates;
     # newer 0.11.x/0.2.x series pulled by russh 0.60 crypto stack. Will resolve when upstream converges.
@@ -371,7 +360,6 @@ skip = [
     { crate = "ed25519-dalek@2.2.0", reason = "pulled by openidconnect JWT signing; newer 3.0-pre used by russh 0.60" },
     { crate = "elliptic-curve@0.13.8", reason = "pulled by p256/p384/ecdsa (openidconnect); newer 0.14-rc used by russh 0.60" },
     { crate = "fiat-crypto@0.2.9", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.3 used by russh 0.60 crypto" },
-    { crate = "foldhash@0.1.5", reason = "pulled by hashbrown 0.15.x (sqlx-core); newer 0.2 used by hashbrown 0.16+" },
     { crate = "hkdf@0.12.4", reason = "pulled by openidconnect crypto chain; newer 0.13 used by russh 0.61" },
     { crate = "hmac@0.12.1", reason = "pulled by argon2/openidconnect; newer 0.13 used by russh 0.61 crypto" },
     { crate = "inout@0.1.4", reason = "pulled by cipher 0.4 (openidconnect crypto chain); newer 0.2 used by russh 0.60" },
