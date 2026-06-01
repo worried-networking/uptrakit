@@ -6,8 +6,7 @@
 
 ## App Shell Measurements
 
-**Status:** `Implemented` for shell measurements  
-**Status:** `Target` for responsive shell behavior
+**Status:** `Implemented`
 
 | Region          | Value       |
 | --------------- | ----------- |
@@ -28,9 +27,8 @@
 | Nav item radius     | `3px`                  |
 | Nav item font       | `10px`                 |
 
-Active nav item state: accent tint background, accent text, colored nav icon.
-Nav items include a lucide icon to the left of the label (sidebar) or above the label (mobile bottom
-nav). See the Icons section in `primitives.md` for sizing and component type conventions.
+Active nav item state: accent tint background, accent text, colored nav icon. Nav items include a lucide icon to the left of the label (sidebar) or
+above the label (mobile bottom nav). See the Icons section in `primitives.md` for sizing and component type conventions.
 
 ![Sidebar navigation showing built-in items alongside a surface.page entry](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
 
@@ -49,8 +47,7 @@ nav). See the Icons section in `primitives.md` for sizing and component type con
 
 ## Public Entry Shell
 
-Routes `/login`, `/register`, `/device`, and `frontend/src/routes/+error.svelte` share
-`PublicEntryShell.svelte`.
+Routes `/login`, `/register`, `/device`, and `frontend/src/routes/+error.svelte` share `PublicEntryShell.svelte`.
 
 Props:
 
@@ -73,12 +70,9 @@ import { PUBLIC_ENTRY_FORM_CLASS } from "$lib/components/ui/PublicEntryShell.sve
 
 Rules:
 
-- Public-entry routes do not render authenticated shell chrome (sidebar, mobile bottom nav,
-  current-user controls).
-- The auth guard redirects protected routes to `/login`; 4xx/5xx routes stay on the public-entry
-  error shell instead of redirecting.
-- Route-specific semantics remain allowed: device-code block, account-linking flow, first-user
-  setup, and public error recovery actions.
+- Public-entry routes do not render authenticated shell chrome (sidebar, mobile bottom nav, current-user controls).
+- The auth guard redirects protected routes to `/login`; 4xx/5xx routes stay on the public-entry error shell instead of redirecting.
+- Route-specific semantics remain allowed: device-code block, account-linking flow, first-user setup, and public error recovery actions.
 - Content scrolls independently.
 
 ---
@@ -103,8 +97,11 @@ Implemented:
 
 Implemented:
 
-- Mobile software rows expand inline. `SoftwareGroupList` renders a card-per-item layout at `< 640px`. Compact single-host items show name + hostname + plugin badge + version + action. Multi-host items show name + expand pill + host count; expanding reveals host sub-cards indented with a left border.
-- `DataTable` `mobileMode='cards'` provides column-defined card layout (auto `<dl>/<dt>/<dd>`) or a custom `mobileRow` snippet. `mobileMode='scroll'` enables horizontal scroll with `w-max` on the table.
+- Mobile software rows expand inline. `SoftwareGroupList` renders a card-per-item layout at `< 640px`. Compact single-host items show name +
+  hostname + plugin badge + version + action. Multi-host items show name + expand pill + host count; expanding reveals host sub-cards indented with a
+  left border.
+- `DataTable` `mobileMode='cards'` provides column-defined card layout (auto `<dl>/<dt>/<dd>`) or a custom `mobileRow` snippet. `mobileMode='scroll'`
+  enables horizontal scroll with `w-max` on the table.
 - Mobile snapshot coverage via `chromium-mobile` and `chromium-mobile-dark` Playwright projects at 393×852.
 
 Responsive layout captures:
@@ -113,31 +110,25 @@ Responsive layout captures:
 
 ![Mobile bottom navigation bar with overflow](../../../frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/ui-parity-responsive-mobile-bottom-nav-overflow-chromium.png)
 
-**Adding a new built-in nav item:** edit the `builtInNavItems` array in
-`frontend/src/routes/+layout.svelte`. Each entry needs `href`, `label`, `priority`, and an
-optional `permission` guard. Choose a `priority` that places the item in the correct mobile
-position — items beyond index 3 go into the bottom-sheet overflow.
+**Adding a new built-in nav item:** edit the `builtInNavItems` array in `frontend/src/routes/+layout.svelte`. Each entry needs `href`, `label`,
+`priority`, and an optional `permission` guard. Choose a `priority` that places the item in the correct mobile position — items beyond index 3 go into
+the bottom-sheet overflow.
 
-**Nav item badges:** `ShellNavItem` has an optional `badge?: string` field. Badges are
-injected in the `navItems` `$derived` expression (not in `builtInNavItems`) via a `formatBadge`
-helper. The Software item currently shows a count badge from the
+**Nav item badges:** `ShellNavItem` has an optional `badge?: string` field. Badges are injected in the `navItems` `$derived` expression (not in
+`builtInNavItems`) via a `formatBadge` helper. The Software item currently shows a count badge from the
 `frontend/src/lib/stores/software-updates.svelte.ts` store:
 
 ```typescript
-badge: item.href === "/software"
-  ? formatBadge(getUpdatableSoftwareCount())
-  : undefined;
+badge: item.href === "/software" ? formatBadge(getUpdatableSoftwareCount()) : undefined;
 ```
 
-`formatBadge` returns `undefined` for null/0, `String(count)` for 1–99, and `"99+"` for ≥100.
-Badges render as `<StatusBadge tone="info" label={item.badge} />` in all four nav templates.
-Desktop, tablet, and overflow templates use `ml-auto pl-1.5`; mobile primary uses
-`shrink-0 pl-1.5` (no `ml-auto`) to avoid conflicting with `justify-center`.
+`formatBadge` returns `undefined` for null/0, `String(count)` for 1–99, and `"99+"` for ≥100. Badges render as
+`<StatusBadge tone="info" label={item.badge} />` in all four nav templates. Desktop, tablet, and overflow templates use `ml-auto pl-1.5`; mobile
+primary uses `shrink-0 pl-1.5` (no `ml-auto`) to avoid conflicting with `justify-center`.
 
-The software-updates store fetches the count once on auth (idempotent — safe to call from a
-re-running `$effect`) and is wired in `+layout.svelte` behind `Permission.ViewSoftware`. Future
-SSE live-update of the count can be added inside the store by subscribing to
-`software_item_updated` and `version_check_completed` events without any layout changes.
+The software-updates store fetches the count once on auth (idempotent — safe to call from a re-running `$effect`) and is wired in `+layout.svelte`
+behind `Permission.ViewSoftware`. Future SSE live-update of the count can be added inside the store by subscribing to `software_item_updated` and
+`version_check_completed` events without any layout changes.
 
 Built-in nav priorities (lower number = higher priority = shown first on mobile):
 
@@ -153,9 +144,8 @@ Built-in nav priorities (lower number = higher priority = shown first on mobile)
 | Audit Logs      | `900`    |
 | Settings        | `1000`   |
 
-Visual regression fixtures:
-`frontend/tests/e2e/ui-parity-responsive.test.ts` captures tablet sidebar overlay and mobile
-bottom-nav overflow states on Chromium.
+Visual regression fixtures: `frontend/tests/e2e/ui-parity-responsive.test.ts` captures tablet sidebar overlay and mobile bottom-nav overflow states on
+Chromium.
 
 ---
 
@@ -163,8 +153,8 @@ bottom-nav overflow states on Chromium.
 
 **Status:** `Implemented`
 
-Multi-step workflows use the standard `ModalShell` with a step indicator row rendered above the
-step body. The `SurfaceWorkflow` component implements this pattern for surface-backed workflows.
+Multi-step workflows use the standard `ModalShell` with a step indicator row rendered above the step body. The `SurfaceWorkflow` component implements
+this pattern for surface-backed workflows.
 
 Step indicator chip states:
 
@@ -227,65 +217,4 @@ Rules:
 
 ---
 
-## Page-Level Patterns
-
-### Software Page
-
-**Status:** `Implemented`
-
-![Software group row showing item name, version, and update badge](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-group-row-chromium.png)
-
-- Software items are top-level groups; hosts are sub-rows.
-- Built-in and surface-backed `software.tabs` share one tab strip and one body container.
-- Active tab persists in `?tab=<tab-id>`.
-- Column grid: `16px 1fr 120px 88px`.
-- Header-row version column is always empty; version column on host rows is a two-line
-  installed/latest stack.
-- Host-row background is transparent until hover.
-- Truncation row uses `▸ N more`.
-
-### Hosts Page
-
-**Status:** `Implemented`
-
-- Standard table layout.
-- Software-status badge uses the navigable badge pattern (see `ActionBadge` in `primitives.md`).
-- `N updates` navigates to Software; `X error` navigates to History.
-- `Up to date` and `Unknown` are static `StatusBadge` instances.
-
-### History Page
-
-**Status:** `Implemented`
-
-![History feed row with status icon, software name, version change, and metadata](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-history-feed-row-chromium.png)
-
-- Chronological feed grouped by date.
-- Icon square + body + right meta per row.
-- Row-level "view log" actions open the shared terminal modal.
-- Waiting/no-output, truncation, recovery, and actor details render as terminal callouts inside the
-  modal.
-- Interactive sessions expose live controls (e.g. `Ctrl+C`) inside terminal status actions.
-
-### Settings Page
-
-**Status:** `Implemented`
-
-![Settings tab strip with built-in tabs and a surface-contributed tab active](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
-
-- Built-in settings sections and `settings.tabs` share one tab strip.
-- Active tab persists in `?tab=<tab-id>`.
-- Form-heavy views historically referenced a `110px` label width; current `FormFieldRow` and
-  `FormFieldReadOnly` derive their label-column width from `FormLayout` context — `11rem` inside
-  modals, `20rem` on pages. No manual width override is needed when using either primitive.
-- Destructive actions live in a danger zone at the bottom of the page.
-- `settings.below.global` renders below built-in global settings content.
-
-### Slot-Backed Detail Panels
-
-**Status:** `Implemented`
-
-- `host_detail.tabs` is an inline card stack (not a tab strip).
-- `settings.below.global` is an inline panel stack.
-- Targeted surfaces keep their provider selector inside host-owned panel chrome, above rendered nodes.
-- No-provider state uses the shared `EmptyState` component.
-- Parity capture regions use stable host markers such as `data-parity-region`.
+Feature-specific page conventions (Software, Hosts, History, Settings, Slot-Backed Detail Panels) live in `pages.md`.
