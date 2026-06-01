@@ -53,7 +53,7 @@ crates/core/functional-tests/
     │   ├── mod.rs
     │   ├── db.rs          # SQLite + migrations
     │   ├── fixtures.rs    # row insertion + PendingProtectionWork builder
-    │   └── stubs.rs       # StubPluginOps, StubNotificationState, NoopOutputStream
+    │   └── stubs.rs       # build_plugin_ops, TestNotificationSetup, NoopOutputStream
     └── proxmox_update_lifecycle.rs   # all 6 test cases
 ```
 
@@ -72,9 +72,9 @@ repository.workspace = true
 [dev-dependencies]
 uptrakit-controller-core                = { workspace = true, features = ["testing", "plugin-ops"] }
 uptrakit-web-api-queries                = { workspace = true, features = ["plugin-ops"] }
-uptrakit-plugin-infrastructure-proxmox  = { workspace = true, features = ["migration", "plugin-ops", "db-sqlite"] }
+uptrakit-plugin-infrastructure-proxmox  = { workspace = true, features = ["migrations", "plugin-ops", "db-sqlite"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["plugin-ops"] }
-uptrakit-plugin-infrastructure-core     = { workspace = true, features = ["plugin-ops", "migration"] }
+uptrakit-plugin-infrastructure-core     = { workspace = true, features = ["plugin-ops", "migrations", "catalog"] }
 uptrakit-shared-db                      = { workspace = true, features = ["migration"] }
 uptrakit-shared-types                   = { workspace = true }
 uptrakit-wire                           = { workspace = true }
@@ -194,34 +194,75 @@ The `ValidatedUpdateTarget` fields:
 - `pre_update_hook_plugins`: `[]`
 - `post_update_hook_plugins`: `[]`
 
-### `support/stubs.rs` — Stub Implementations
+### `support/stubs.rs` — Real Plugin Catalog + Notification Wiring
 
-**`StubPluginOps`**
+**`build_plugin_ops`**
 
-Implements all `PluginOps` sub-traits. No-op methods must return appropriate
-typed defaults — never `todo!()` or `unimplemented!()` (workspace deny-level
-lints). Trait methods returning `Result<T>` return `Ok(Default::default())` or
-`Ok(None)`; methods returning `()` have empty bodies.
+Do **not** write a hand-rolled `StubPluginOps`. The production
+`uptrakit_plugin_infrastructure_core::PluginCatalog` already implements every
+`PluginOps` sub-trait (`PluginMetadataOps`, `PluginConfigOps`, `PluginSurfaceActionOps`,
+`PluginSurfaceOps`, `NotificationOps`, `SoftwareItemLifecycleOps`,
+`ControllerUpdateProtectionOps`, `ControllerUpdateHookOps`). Tests construct a real
+catalog from the Proxmox descriptor:
 
-Overrides:
+```rust
+pub fn build_plugin_ops(with_proxmox: bool) -> Arc<dyn PluginOps> {
+    use uptrakit_plugin_infrastructure_core::{
+        CatalogConfig, InstancePluginStates, PluginCatalog,
+    };
+    use uptrakit_plugin_infrastructure_proxmox::DESCRIPTOR as PROXMOX_DESCRIPTOR;
 
-- `controller_update_protection()` → `Some(ControllerUpdateProtectionPlugin::create(&catalog_config)?)` where `CatalogConfig` holds the proxmox `plugin_config_id`
-- `controller_update_hook()` → `Some(ControllerUpdateHookPlugin::create(&catalog_config)?)` same config
+    let descriptors = if with_proxmox {
+        vec![&PROXMOX_DESCRIPTOR]
+    } else {
+        vec![]
+    };
+    let catalog = PluginCatalog::new(
+        descriptors,
+        &CatalogConfig {
+            allow_private_urls: false,
+            global_provider_lookup: None,
+            // feature-gated fields default to None when the `catalog` feature is on:
+            #[cfg(feature = "catalog")]
+            http_client: None,
+            #[cfg(feature = "catalog")]
+            cancellation_token: None,
+        },
+        // Proxmox is a Tenant-scoped plugin; InstancePluginStates only gates
+        // Instance-scoped plugins, so `all_disabled()` is correct here.
+        InstancePluginStates::all_disabled(),
+    )
+    .expect("PluginCatalog::new with proxmox descriptor must succeed");
+    Arc::new(catalog)
+}
+```
 
-`ControllerUpdateHookPlugin` and its `create()` are currently `pub(crate)` in the
-proxmox crate. Before `StubPluginOps` can call them from an external crate, their
-visibility must be widened to `pub` (gated on `plugin-ops` feature, matching the
-existing pattern used by `ControllerUpdateProtectionPlugin`).
+Both `ControllerUpdateProtectionPlugin::create(&CatalogConfig)` and
+`ControllerUpdateHookPlugin::create(&CatalogConfig)` are invoked internally by
+`PluginCatalog::new` when the proxmox descriptor declares the respective roles. The
+plugins discover their `plugin_config_id` at runtime via
+`update_protection_context.tenant_db` (querying `plugin_config` for
+`plugin_type = "infrastructure_proxmox"`); fixtures must therefore insert exactly one
+proxmox `plugin_config` row per tenant — already covered by `TestFixtures::insert()`.
 
-For tests that don't need Proxmox (e.g., "no mapping" test), both methods return
-`None`.
+Test 3 (no Proxmox mapping) calls `build_plugin_ops(true)` — the plugin is loaded, but
+`prepare_pre_update_protection` returns `Proceed` because the per-host
+`proxmox_host_mapping` row is absent and the protection plugin reports
+`ControllerProtectionDecision::no_op(...)` (or analogous; verify against the actual
+protection plugin's behavior on missing mapping). If the actual behavior is that the
+protection plugin still runs and writes a status row even without a mapping, set
+`with_proxmox = false` for Test 3 instead so both `controller_update_protection()` and
+`controller_update_hook()` accessors on the empty catalog return `None`.
+
+**No `pub(crate)` → `pub` widening** of `ControllerUpdateHookPlugin` is required — the
+catalog calls `create()` from inside the proxmox crate (which already has access).
 
 **`TestNotificationSetup`**
 
-`NotificationService` is a concrete struct — it cannot be replaced with a stub.
-To capture the dispatched `ExecuteUpdate` payload and ensure `is_connected` returns
-`true` for the agent, register a real tokio channel in `ServiceConnectionRegistry`
-before calling `run_protection_and_dispatch`:
+`NotificationService` is a concrete struct — it cannot be replaced via the
+`PluginCatalog` route. To capture the dispatched `ExecuteUpdate` payload and ensure
+`is_connected` returns `true` for the agent, register a real tokio channel in
+`ServiceConnectionRegistry` before calling `run_protection_and_dispatch`:
 
 ```rust
 pub struct TestNotificationSetup {
@@ -271,6 +312,24 @@ Implements `UpdateOutputStream`, all methods have empty bodies.
 
 All tests: `#[tokio::test]` (no `start_paused` — SQLite connection pool uses
 internal Tokio timers).
+
+### Lint suppression
+
+Workspace lints `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic` are deny.
+Match the existing `crates/core/integration-tests` pattern: place at the top of every test
+file (and `support/*.rs`) a module-level allowlist:
+
+```rust
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "functional test infrastructure: panics acceptable in test helpers and assertions"
+)]
+```
+
+This is `#[expect]` (not `#[allow]`) with `reason = "..."` per workspace
+`allow_attributes_without_reason = deny`.
 
 ### Synchronization note
 
@@ -378,6 +437,10 @@ GET  path_contains("/tasks/")  AND  path_contains("/status")
 
 - Full fixtures, **no** `proxmox_host_mapping` row
 - No protection, no scaling default
+- `build_plugin_ops(false)` — empty catalog; both `controller_update_protection()` and
+  `controller_update_hook()` return `None`. (Using `true` here would test the proxmox
+  protection plugin's missing-mapping branch, which is already covered by Proxmox
+  in-crate tests and is out of scope for this spec.)
 
 **httpmock:** no expectations registered
 
@@ -386,8 +449,15 @@ GET  path_contains("/tasks/")  AND  path_contains("/status")
 - CAS sentinel (see above)
 - httpmock server received 0 total requests
 - `ExecuteUpdate` dispatched (captured 1 message)
-- DB: `update_history.pre_update_protection_status == None` (`StubPluginOps` returns `None`
-  for `controller_update_protection()` — no plugin runs, nothing writes the status column)
+- DB: no `proxmox_protection_audit` row exists for `fixtures.update_history_id`
+  (this is the durable contract — "no protection plugin ran" — and is independent of
+  the `pre_update_protection_status` column value)
+- Do **not** assert a specific value of `pre_update_protection_status` here.
+  `set_inprogress_for_orchestrator` unconditionally writes `"in_progress"` to the column
+  while `prepare_pre_update_protection`'s contract comment claims `"protection == None ->
+  leaves protection fields NULL"`. Asserting `Some("in_progress")` would codify a
+  current implementation detail at odds with the documented contract; future cleanup
+  aligning the two would flip the value to `NULL` and silently break this test.
 
 ---
 
@@ -433,6 +503,15 @@ No snapshot or vzdump endpoints registered (any unexpected call → httpmock ret
 
 **Assertions on captured `ExecuteUpdate` payload (CAS sentinel applies here too):**
 
+`PluginAssignment` (see `crates/shared/wire/src/payloads.rs:364`) has fields
+`plugin_type: PluginTypeId`, `package_identifier: String`, `config: serde_json::Value`.
+There is **no `config_id` field on the wire** — the merged config is embedded as JSON.
+`PluginTypeId` implements `PartialEq<&str>` (see `crates/shared/types/src/plugin_type_id.rs:64`),
+so direct `assert_eq!(.plugin_type, "generic_shell")` compiles.
+
+To verify the assignment originated from the fixture-inserted shell `plugin_config` row,
+assert on a distinctive value from `config_payload`:
+
 ```rust
 let payload = /* extract from captured ControllerMessage::ExecuteUpdate */;
 
@@ -441,11 +520,19 @@ assert_eq!(payload.software_item_id, fixtures.software_item_id);
 
 let exec = &payload.execute_update_plugin;
 assert_eq!(exec.plugin_type, "generic_shell");
-assert_eq!(exec.config_id, fixtures.shell_config_id);
+assert_eq!(
+    exec.config.get("update_command").and_then(|v| v.as_str()),
+    Some("echo ok"),
+    "execute_update assignment must carry shell config payload from fixtures"
+);
 
 let detect = payload.detect_version_plugin.as_ref().expect("detect_version present");
 assert_eq!(detect.plugin_type, "generic_shell");
-assert_eq!(detect.config_id, fixtures.shell_config_id);
+assert_eq!(
+    detect.config.get("version_command").and_then(|v| v.as_str()),
+    Some("echo 1.0.0"),
+    "detect_version assignment must carry shell config payload from fixtures"
+);
 ```
 
 ---
@@ -478,7 +565,7 @@ PUT /api2/json/nodes/pve1/qemu/100/config
 uptrakit_web_api_queries::queries::update_dispatch::finalize_post_update_hook(
     &db,
     Some(hook_plugin),
-    &stub_plugin_ops as &dyn NotificationOps,  // StubPluginOps implements NotificationOps
+    plugin_ops.as_ref(),  // PluginCatalog implements NotificationOps
     &update_history_record,
 )
 .await
@@ -506,5 +593,15 @@ Tests are **not** `#[ignore]` — they run in normal `cargo test` without Docker
 
 ## Documentation Impact
 
-None. These are internal test infrastructure additions with no user-facing
-behavior change. No `CONTEXT.md`, ADR, or API doc updates required.
+This spec widens one API surface (feature-gated, test-only). Required doc update:
+
+- `crates/ui/controller-core/src/lib.rs` — the new `pub mod testing { ... }` block must
+  carry a module-level `//!` docstring stating: (a) it is feature-gated on `testing`, (b)
+  the contained items are exposed only for in-tree test crates (`uptrakit-functional-tests`)
+  and are not part of the stable public API, (c) signatures may change without semver impact.
+
+No `CONTEXT.md` / ADR / README / public docstring changes elsewhere: the orchestration
+behavior, wire types, schema, and runtime contract are unchanged. No user-facing behavior
+change. No glossary additions. No proxmox-crate visibility changes (the test uses
+`PluginCatalog::new` from `uptrakit-plugin-infrastructure-core`, which already calls the
+proxmox plugin constructors from within the proxmox crate).
