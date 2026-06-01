@@ -596,31 +596,119 @@ Shared filter-shell pattern for table pages. Filter shells live above tables —
 navigation (badge clicks, browser back, deep links) immediately re-runs the filter.
 
 The three artifacts below were introduced by the 2026-05-26 unified-filter-bars work; see
-[`docs/superpowers/specs/2026-05-26-unified-filter-bars.md`](../../superpowers/specs/2026-05-26-unified-filter-bars.md) for design rationale. The doc
-bodies are filled in by the filter-bars implementation; this section reserves the anchors.
+[`docs/superpowers/specs/2026-05-26-unified-filter-bars.md`](../../superpowers/specs/2026-05-26-unified-filter-bars.md) for design rationale.
 
 ### FilterBar
 
-Layout shell for the filter row inside a `SectionCard` header (via the `filterBar?: Snippet` prop) or a custom card wrapper. Two slots: `filters`
-(left, filter controls) and `actions` (right, primary action buttons).
+**File:** `frontend/src/lib/components/ui/FilterBar.svelte`
+**Export:** `$lib/components/ui`
 
-Full props and visual contract: see `frontend/src/lib/components/ui/FilterBar.svelte` and the filter-bars spec linked above. (Doc body filled in by
-the filter-bars implementation.)
+Layout shell for table card header rows. Purely presentational — no filter logic. Provides a standard two-zone flex layout: filters on the left,
+primary actions on the right.
+
+**Props:**
+
+- `filters?: Snippet` — filter controls (Selects, Checkboxes, ExpandableSearch). Rendered in a flex-wrap row on the left.
+- `actions?: Snippet` — primary action buttons (e.g. "Add Software", "Create Tag"). Rendered on the right with `shrink-0`. Omit entirely if no
+  actions.
+
+**Renders:** `<header data-ui="filter-bar">` with `border-b border-[var(--border-subtle)]`, `bg-[var(--bg-raised)]`, `card-padding`. On small screens,
+stacks vertically.
+
+**Usage:**
+
+```svelte
+<FilterBar>
+  {#snippet filters()}
+    <Select id="..." ... />
+    <ExpandableSearch ... />
+  {/snippet}
+  {#snippet actions()}
+    <Button variant="primary">Create</Button>
+  {/snippet}
+</FilterBar>
+```
+
+**With SectionCard:** Pass a `FilterBar` inside the `filterBar` snippet prop on `SectionCard`. The `SectionCard` suppresses its own title row
+`border-b` when `filterBar` is provided; the `FilterBar` carries the single divider between title+filter and content.
+
+```svelte
+<SectionCard title="Tags">
+  {#snippet filterBar()}
+    <FilterBar>...</FilterBar>
+  {/snippet}
+  ...
+</SectionCard>
+```
+
+**Do NOT use** `bind:value` on any Select or Input inside `FilterBar` when the value is backed by a URL param (circular reactivity). Use one-way
+`value={param.value}` + `onchange`.
 
 ### ExpandableSearch
 
-Expandable inline search widget. Collapsed state is a ghost icon button; expanded state is a controlled `<Input type="search">` with a clear (X)
-button. Debounced via `debounceMs` (default 300). Used as the canonical inline text-search control on table pages.
+**File:** `frontend/src/lib/components/ui/ExpandableSearch.svelte`
+**Export:** `$lib/components/ui`
 
-Full props and behaviour: see `frontend/src/lib/components/ui/ExpandableSearch.svelte` and the filter-bars spec linked above.
+Expandable inline search widget for use inside `FilterBar`. Collapsed state is a ghost icon button; expanded state is a controlled
+`<Input type="search">` with a clear (X) button. Controlled component — parent owns the committed (URL-synced) value.
+
+**Props:**
+
+- `id: string` — passed to the underlying `<Input>` for accessibility.
+- `value: string` — the committed value (from `queryParam.value`). Non-empty → always shown expanded.
+- `onchange: (v: string) => void` — called after debounce completes. Should call `queryParam.set(v)`.
+- `placeholder?: string` — default `'Search...'`. Used as `aria-label` on the icon button.
+- `debounceMs?: number` — default `300`. Delay before `onchange` fires.
+
+**Behaviour:** Escape key and clear button both call `onchange('')` and collapse. Auto-focuses the input on expand via `tick()`. External `value`
+prop changes sync local state via `$effect` (handles browser back/external nav).
+
+**Usage with `createUrlParam`:**
+
+```svelte
+<script lang="ts">
+  import { createUrlParam } from '$lib/url-params.svelte';
+  const queryParam = createUrlParam('query');
+</script>
+
+<ExpandableSearch
+  id="my-name-filter"
+  value={queryParam.value}
+  onchange={(v) => queryParam.set(v)}
+  placeholder="Filter by name"
+/>
+```
 
 ### createUrlParam
+
+**File:** `frontend/src/lib/url-params.svelte.ts`
+**Import:** `import { createUrlParam } from '$lib/url-params.svelte';`
 
 Svelte 5 reactive factory binding a single URL search-param to a `{ value, set() }` API. Sibling of `createFormDraft` (see
 [`forms.md`](forms.md#createformdraft)) — both wrap a reactive source with a stable read/write API. `createUrlParam` is the canonical way to make
 table filters URL-reactive.
 
-**Location:** `frontend/src/lib/url-params.svelte.ts`. Full API, constraints, and parse/serialize options: see the filter-bars spec linked above.
+**Signature:** `createUrlParam<T>(key: string, options?: UrlParamOptions<T>): UrlParam<T>`
+
+**Returns:** `{ readonly value: T; set(v: T): void }` — `value` is reactive (updates on every URL change); `set()` navigates via
+`goto(replaceState: true)` and **always removes `page=` from the URL** (pagination reset on every filter change).
+
+**Options:**
+
+- `parse?: (raw: string | null) => T` — converts the raw URL string to your type. Default: identity (empty string when absent).
+- `serialize?: (v: T) => string | null` — converts value back to string. Return `null` to omit the param. Default: omits when empty string or null.
+
+**CONSTRAINT:** Must be called at component initialisation scope only — top-level `<script>` block in `.svelte` files, or top-level of `.svelte.ts`
+modules. Calling inside a callback, event handler, or `$effect` throws a rune-outside-reactive-context error.
+
+**Pagination note:** `currentPage` on all in-scope pages is `$derived(parseUrlPage(page.url))`. A single data-loading `$effect` tracks both filter
+params and `currentPage`. When `set()` removes `page=`, `currentPage` auto-derives to 1 — no separate `currentPage = 1` assignment needed in
+`onchange` handlers.
+
+**Effect pattern:** The data-loading `$effect` must wrap its async loader call in `untrack(() => loadX(pg))`. The loader synchronously reads
+`$state` values it later writes (e.g. `items.map(...)` then `items = result.items`); without `untrack`, those reads tag the effect and the writes
+re-arm it indefinitely. Capture `currentPage` to a local `const pg = currentPage;` before `untrack` so only the explicit filter/page reads above
+drive re-runs.
 
 ---
 
