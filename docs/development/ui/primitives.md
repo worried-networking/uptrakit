@@ -99,23 +99,17 @@ Two distinct button categories exist in `SectionCard` — they go in different l
 </SectionCard>
 ```
 
-**Form actions right-aligned in the body:**
-
-```svelte
-<SectionCard title="Network Settings">
-  <!-- form fields -->
-  <div class="flex gap-2 justify-end">
-    {#if form.isDirty}
-      <Button variant="ghost" onclick={() => form.discard()}>Discard</Button>
-    {/if}
-    <Button variant="primary" disabled={!form.isDirty} onclick={save}>Save</Button>
-  </div>
-</SectionCard>
-```
-
-Confirmation-dialog triggers (buttons that open a `ConfirmDialog`, not a `ModalShell`) are **not** modal-triggers. They stay in the card body and must be right-aligned: `<div class="flex justify-end">`.
+**Form actions in the body** — Save/Discard pair, right-aligned at the bottom. The canonical placement rule (including the confirmation-dialog caveat
+and the Save-always-labelled "Save" rule) lives in [`forms.md` Form Action Buttons](forms.md#form-action-buttons). Match that exactly.
 
 Titles in `SectionCard` must follow **Title Case** (e.g. "OAuth Settings", not "OAuth settings").
+
+### SectionCard props
+
+In addition to `title`, `description`, `actions`, and `children`, `SectionCard` accepts:
+
+- `filterBar?: Snippet` — rendered between the title row and the body. When present, the title row drops its `border-b` (the `FilterBar` inside the
+  snippet carries the divider, avoiding double-border artefacts). See Filter Primitives below for the canonical filter-shell pattern.
 
 ---
 
@@ -173,7 +167,8 @@ Visual rules:
 - Inactive tab hover: `hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]`
 - Disabled: `opacity-40 pointer-events-none`
 
-`host_detail.tabs` is currently an inline card stack, not a `TabStrip`.
+For slots that contribute multi-entry content but do **not** render as a `TabStrip`, see the Slot Registry in `surfaces.md` (`host_detail.tabs`, for
+example, is an inline card stack despite the name).
 
 ---
 
@@ -220,8 +215,8 @@ Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utiliti
 
 ### Tooltip
 
-Inline info icon that reveals a styled tooltip bubble on hover or focus. Use for supplemental
-option descriptions that don't need to be permanently visible.
+Inline info icon that reveals a styled tooltip bubble on hover or focus. Use for supplemental option descriptions that don't need to be permanently
+visible.
 
 **Location:** `frontend/src/lib/components/ui/Tooltip.svelte`\
 **Import:** `import { Tooltip } from '$lib/components/ui';`
@@ -249,26 +244,23 @@ Passing `content=""` renders nothing (no icon, no bubble) — treat empty string
 - Trigger: `<button type="button">` with `<Info size={14} />` icon from lucide-svelte.
 - Icon color: `--text-muted` at rest, `--text-secondary` on hover/focus.
 - Focus ring: `focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]`.
-- Bubble: `bg-[var(--bg-raised)]`, `border-[var(--border-default)]`, `rounded-panel` (4px),
-  `max-w-[220px]`, `text-xs text-[var(--text-primary)]`.
+- Bubble: `bg-[var(--bg-raised)]`, `border-[var(--border-default)]`, `rounded-panel` (4px), `max-w-[220px]`, `text-xs text-[var(--text-primary)]`.
 - Arrow: 6×6px rotated square at the near-trigger edge of the bubble.
 - Animation: `transition-[opacity] duration-fast` (120ms); `invisible + opacity-0` when hidden.
 - Z-index: `100` (same tier as `ContextMenu`; `[data-ui="tooltip"]` rule in `app.css`).
 
-**Positioning:** centers above the trigger; flips to below if top would clip the viewport;
-horizontal clamping keeps 8px clearance from viewport edges.
+**Positioning:** centers above the trigger; flips to below if top would clip the viewport; horizontal clamping keeps 8px clearance from viewport
+edges.
 
 **Accessibility:**
 
 - Trigger has `aria-label="More information"` and `aria-describedby={tooltipId}`.
 - Bubble has `role="tooltip"` and matching `id`.
 - Bubble is **always in the DOM** (CSS-only show/hide) so `aria-describedby` always resolves.
-- `Escape` dismisses without moving focus and without `stopPropagation` (modal-close propagates
-  normally).
+- `Escape` dismisses without moving focus and without `stopPropagation` (modal-close propagates normally).
 - Touch: reveal via focus (tap icon → focus → show; tap elsewhere → blur → hide).
 
-**Deferred:** `SurfaceActionButton` `title=` → `Tooltip` migration is out of scope for this
-feature; tracked separately.
+**Deferred:** `SurfaceActionButton` `title=` → `Tooltip` migration is out of scope for this feature; tracked separately.
 
 ---
 
@@ -411,294 +403,9 @@ Renders `rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)
 
 ## Form Primitives
 
-### FormFieldRow
-
-Labeled form field wrapper with hint and error display. Provides ARIA `aria-describedby` context to child `Input` and `Textarea` components
-automatically.
-
-```typescript
-// frontend/src/lib/components/ui/FormFieldRow.svelte
-{
-  label: string;
-  hint?: string;          // secondary helper text below the label
-  error?: string;         // error message; triggers red text below the field
-  inputId?: string;       // connects label[for] and generates error id
-  required?: boolean;     // shows red asterisk next to label
-  children: Snippet;      // the input control(s)
-}
-```
-
-Usage:
-
-```svelte
-<FormFieldRow label="Email address" inputId="user-email" required>
-  <Input id="user-email" type="email" bind:value={email} />
-</FormFieldRow>
-
-<FormFieldRow
-  label="Webhook URL"
-  inputId="webhook-url"
-  hint="Must be HTTPS."
-  error={urlError}
->
-  <Input id="webhook-url" type="url" bind:value={webhookUrl} error={urlError} />
-</FormFieldRow>
-```
-
-Layout: `FormFieldRow` uses a named CSS container (`@container/field`) on its root div and anonymous container queries on the inner grid. The grid
-switches to label-beside-input layout when the field's own width crosses the context threshold derived from
-`frontend/src/lib/components/forms/form-layout-context.ts`:
-
-- `FormLayout.Modal` → `@[24rem]:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (stacks when cell is narrower than 24 rem).
-- `FormLayout.Page` → `@[32rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]` (stacks when cell is narrower than 32 rem).
-
-This works correctly in multi-column grids — the label stacks when the cell is too narrow regardless of viewport width. `Modal.svelte` sets
-`FormLayout.Modal` automatically; pages default to `FormLayout.Page`. No manual width override is needed when using `FormFieldRow`.
-
----
-
-### FormFieldReadOnly
-
-Static-value sibling of `FormFieldRow`. Use this for read-only URLs, fingerprints, IDs, or other non-interactive values displayed inside a form
-section so they align with surrounding `FormFieldRow` inputs (both primitives read the same `FormLayout` context for label-column width).
-
-```typescript
-// frontend/src/lib/components/forms/FormFieldReadOnly.svelte
-{
-  label: string;
-  hint?: string;          // secondary helper text below the label
-  value?: string;         // text rendered in the value column
-  mono?: boolean;         // default false; when true, applies font-mono to the value text
-  children?: Snippet;     // overrides `value` rendering (badges, links, custom content)
-}
-```
-
-Usage:
-
-```svelte
-<FormFieldReadOnly label="Current URL" mono value={currentUrl} />
-
-<FormFieldReadOnly label="CA Fingerprint" mono value={fingerprint} hint="SHA-256." />
-
-<FormFieldReadOnly label="Status">
-  <StatusBadge tone="success" label="Active" />
-</FormFieldReadOnly>
-```
-
-Layout: identical `@container/field` + container-query behaviour as `FormFieldRow` (same thresholds: 24 rem for modal, 32 rem for page). Use this
-primitive instead of hand-rolling a `<div class="grid grid-cols-[…rem_1fr]">` — hand-rolled grids will not track the modal/page context split and will
-misalign with sibling `FormFieldRow` rows.
-
----
-
-### Input
-
-Single-line text input. Supports error state, disabled state, and bindable value.
-
-```typescript
-// frontend/src/lib/components/Input.svelte
-export type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'search';
-
-{
-  id: string;
-  type: InputType;
-  value: string | number;         // bindable
-  name?: string;
-  placeholder?: string;
-  autocomplete?: string;
-  disabled?: boolean;
-  required?: boolean;
-  error?: string;                 // sets aria-invalid and error styling
-  min?: number | string;
-  max?: number | string;
-  oninput?: (e: Event) => void;
-  onblur?: (e: FocusEvent) => void;
-  onkeydown?: (e: KeyboardEvent) => void;
-  'aria-describedby'?: string;
-  'aria-label'?: string;
-  class?: string;
-}
-```
-
-When placed inside `<FormFieldRow inputId="...">`, `aria-describedby` is wired automatically via Svelte context — no manual prop needed.
-
-Error state: `border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]` via `aria-invalid`. Height: `h-8` (`32px`). Radius: `3px`.
-
----
-
-### Textarea
-
-Multi-line text input. Identical token contract to `Input`.
-
-```typescript
-// frontend/src/lib/components/Textarea.svelte
-export type TextareaVariant = 'default' | 'mono';
-
-{
-  id: string;
-  value: string;            // bindable
-  name?: string;
-  placeholder?: string;
-  rows?: number;
-  disabled?: boolean;
-  required?: boolean;
-  error?: string;
-  variant?: TextareaVariant;   // 'mono' applies font-mono text-[13px]
-  oninput?: (e: Event) => void;
-  onblur?: (e: FocusEvent) => void;
-  'aria-describedby'?: string;
-  class?: string;
-}
-```
-
-Minimum height `4rem` (`min-h-[4rem]`), resizable vertically.
-
----
-
-### Checkbox
-
-Single checkbox input with bindable `checked` and `indeterminate` states.
-
-```typescript
-// frontend/src/lib/components/Checkbox.svelte
-{
-  id: string;
-  checked?: boolean;          // bindable, default false
-  indeterminate?: boolean;    // bindable, default false
-  name?: string;
-  disabled?: boolean;
-  onchange?: (e: Event) => void;
-  class?: string;
-  'aria-label'?: string;
-}
-```
-
-Color note: `@tailwindcss/forms` sets `appearance: none` on checkboxes making `accent-color` inert. The checked fill uses `currentColor` from the
-`text-[var(--accent)]` class. Do not use `accent-[var(--accent)]`.
-
----
-
-### RadioCardGroup
-
-Horizontal card-tile selector for mutually exclusive string options. No radio indicators — selection is conveyed by accent border and background tint
-only.
-
-**Location:** `frontend/src/lib/components/forms/RadioCardGroup.svelte` **Import:** `import { RadioCardGroup } from '$lib/components/forms';`
-
-```typescript
-// frontend/src/lib/components/forms/RadioCardGroup.svelte
-export type RadioCardOption = {
-  value: string;
-  label: string;
-  tooltip?: string;  // shown in a Tooltip bubble; omit to render the card without an info icon
-};
-
-{
-  name: string;                          // ARIA label for the group
-  value: string;                         // currently selected value
-  options: RadioCardOption[];            // { value, label, tooltip? }[]
-  onchange: (value: string) => void;    // called when selection changes
-  disabled?: boolean;                    // disables all cards
-}
-```
-
-**Accessibility:** `role="radiogroup"` on container; each card has `role="radio"` and `aria-checked`.
-Each card element is a `<div role="radio">` rather than `<button>` so the tooltip `<button>` can
-nest inside it without producing invalid HTML; no ARIA behaviour changed.
-
-**Example:**
-
-```svelte
-<RadioCardGroup
-  name="registration-mode"
-  value={form.draft.mode}
-  options={[
-    { value: 'open', label: 'Open', tooltip: 'Anyone can register.' },
-    { value: 'invite', label: 'Invite Only', tooltip: 'Token required.' },
-    { value: 'closed', label: 'Closed', tooltip: 'No new accounts.' }
-  ]}
-  onchange={(v) => form.update('mode', v)}
-/>
-```
-
----
-
-### createFormDraft
-
-Svelte 5 reactive factory for the settings draft pattern: tracks server-committed state versus in-progress edits, computes dirty state, and provides
-load/commit/discard lifecycle methods.
-
-**Location:** `frontend/src/lib/forms/draft.svelte.ts` **Import:** `import { createFormDraft } from '$lib/forms/draft.svelte';`
-
-```typescript
-interface FormDraft<T> {
-  readonly draft: T; // current in-progress edits
-  readonly serverValues: T; // last committed server state
-  readonly isDirty: boolean; // any field differs from serverValues
-  isFieldDirty(key: keyof T): boolean;
-  update<K extends keyof T>(key: K, value: T[K]): void;
-  load(values: T): void; // on data fetch — sets both draft and serverValues
-  commit(updated: T): void; // on successful save — sets both to the server response
-  discard(): void; // reset draft to serverValues
-}
-```
-
-**When to use:** Any editable settings form that needs a Save/Discard pair with disabled-when-clean Save button and per-field dirty indicators.
-
-**Critical:** Do **not** destructure the return value — `const { draft } = form` takes a snapshot. Always access through `form.draft`, `form.isDirty`,
-etc.
-
-**Example:**
-
-```svelte
-<script lang="ts">
-  import { createFormDraft } from '$lib/forms/draft.svelte';
-
-  let form = createFormDraft({ mode: 'open', maxUsers: 100 });
-</script>
-
-<FormFieldRow label="Mode">
-  <RadioCardGroup
-    name="mode"
-    value={form.draft.mode}
-    options={[...]}
-    onchange={(v) => form.update('mode', v)}
-  />
-</FormFieldRow>
-
-<FormFieldRow label="Max Users">
-  <Input
-    id="max-users"
-    type="number"
-    value={form.draft.maxUsers}
-    oninput={(e) => form.update('maxUsers', +e.currentTarget.value)}
-  />
-</FormFieldRow>
-
-<div>
-  <Button variant="primary" disabled={!form.isDirty} onclick={() => form.commit(savedValues)}>
-    Save
-  </Button>
-  <Button variant="ghost" disabled={!form.isDirty} onclick={() => form.discard()}>
-    Discard
-  </Button>
-</div>
-```
-
-**Form action button rules (applies to all hand-written forms using `createFormDraft`):**
-
-```svelte
-<div class="flex gap-2 justify-end">
-  {#if form.isDirty}
-    <Button variant="ghost" onclick={() => form.discard()}>Discard</Button>
-  {/if}
-  <!-- Save is always visible; disabled when not dirty or invalid -->
-  <Button variant="primary" disabled={!form.isDirty || !isValid} onclick={save}>Save</Button>
-</div>
-```
-
-- The submit label is always **"Save"** for form-save actions.
-- Pass `dirty={form.isFieldDirty(key)}` to each `FormFieldRow` to show the left-accent dirty indicator.
+Moved to [`forms.md`](forms.md). That file is the canonical home for `FormFieldRow`, `FormFieldReadOnly`, `Input`, `Textarea`, `Checkbox`,
+`RadioCardGroup`, the `FormLayout` context, the `createFormDraft` factory, the Form Action Buttons rule (Save/Discard placement), the surface Form
+Draft Mode behaviour, and the `submit_label` override.
 
 ---
 
@@ -880,6 +587,40 @@ Context menu shell dimensions:
 - Destructive items use `--color-danger` text token.
 
 `software_item.host_context_menu` contributes launcher entries using this component — it does not render nested grouped sub-menus.
+
+---
+
+## Filter Primitives
+
+Shared filter-shell pattern for table pages. Filter shells live above tables — inside the table card header — and use URL-reactive state so external
+navigation (badge clicks, browser back, deep links) immediately re-runs the filter.
+
+The three artifacts below were introduced by the 2026-05-26 unified-filter-bars work; see
+[`docs/superpowers/specs/2026-05-26-unified-filter-bars.md`](../../superpowers/specs/2026-05-26-unified-filter-bars.md) for design rationale. The doc
+bodies are filled in by the filter-bars implementation; this section reserves the anchors.
+
+### FilterBar
+
+Layout shell for the filter row inside a `SectionCard` header (via the `filterBar?: Snippet` prop) or a custom card wrapper. Two slots: `filters`
+(left, filter controls) and `actions` (right, primary action buttons).
+
+Full props and visual contract: see `frontend/src/lib/components/ui/FilterBar.svelte` and the filter-bars spec linked above. (Doc body filled in by
+the filter-bars implementation.)
+
+### ExpandableSearch
+
+Expandable inline search widget. Collapsed state is a ghost icon button; expanded state is a controlled `<Input type="search">` with a clear (X)
+button. Debounced via `debounceMs` (default 300). Used as the canonical inline text-search control on table pages.
+
+Full props and behaviour: see `frontend/src/lib/components/ui/ExpandableSearch.svelte` and the filter-bars spec linked above.
+
+### createUrlParam
+
+Svelte 5 reactive factory binding a single URL search-param to a `{ value, set() }` API. Sibling of `createFormDraft` (see
+[`forms.md`](forms.md#createformdraft)) — both wrap a reactive source with a stable read/write API. `createUrlParam` is the canonical way to make
+table filters URL-reactive.
+
+**Location:** `frontend/src/lib/url-params.svelte.ts`. Full API, constraints, and parse/serialize options: see the filter-bars spec linked above.
 
 ---
 
@@ -1275,8 +1016,3 @@ Permitted keys: `Box`, `Cpu`, `Database`, `FileText`, `Globe`, `HardDrive`, `His
 `ServerCog`, `Settings`, `Shield`, `Tag`, `Tags`, `Wrench`.
 
 ---
-
-## Notes
-
-**Toggle / Switch** — replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a track+thumb switch. The border-radius entry for
-"Toggle track" in `tokens.md` is a spec remnant.

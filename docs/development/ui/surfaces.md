@@ -2,16 +2,15 @@
 
 # Surfaces
 
-**Status:** `Implemented` for parity contract, slot registry, runtime states, and surface primitives  
-**Status:** `Transitional` for shared-surface parity closure, slot governance, and parity CI rollout
+**Status:** `Implemented` for parity contract, slot registry, runtime states, surface primitives, and context-selector prop forwarding (closed in
+`563e6473e`) **Status:** `Transitional` for parity CI rollout (1 active waiver: `oauth-consent-screen`, expires 2026-11-13)
 
 ---
 
 ## Core Rule
 
-Surfaces are not a separate visual system. Built-in and surface-backed UI use the same tokens,
-primitives, spacing, type scale, and states. Users must not be able to infer visual origin. Origin
-leakage is a bug.
+Surfaces are not a separate visual system. Built-in and surface-backed UI use the same tokens, primitives, spacing, type scale, and states. Users must
+not be able to infer visual origin. Origin leakage is a bug.
 
 Hard rules:
 
@@ -24,14 +23,14 @@ Hard rules:
 
 ## Slot Registry
 
-| Slot ID                           | Host container                  | Visual rule                                                          |
-| --------------------------------- | ------------------------------- | -------------------------------------------------------------------- |
-| `surface.page`                    | Top-level nav page              | Same shell and nav treatment as built-in top-level pages             |
-| `settings.tabs`                   | Settings tab strip              | Same `TabStrip` and body container as built-in settings tabs         |
-| `settings.below.global`           | Global settings body            | Same inline card stack as built-in global settings content           |
-| `software.tabs`                   | Software tab strip              | Same `TabStrip` and body container as built-in software tabs         |
-| `host_detail.tabs`                | Host detail body                | Same inline card stack as built-in host detail content               |
-| `software_item.host_context_menu` | Software-item host context menu | Same launcher-row shell and standard modal shell as built-in actions |
+| Slot ID                           | Host container                  | Visual rule                                                                                                                                        |
+| --------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `surface.page`                    | Top-level nav page              | Same shell and nav treatment as built-in top-level pages                                                                                           |
+| `settings.tabs`                   | Settings tab strip              | Same `TabStrip` and body container as built-in settings tabs                                                                                       |
+| `settings.below.global`           | Global settings body            | Same inline card stack as built-in global settings content                                                                                         |
+| `software.tabs`                   | Software tab strip              | Same `TabStrip` and body container as built-in software tabs                                                                                       |
+| `host_detail.tabs`                | Host detail body                | Same inline card stack as built-in host detail content. Despite the `.tabs` name, this slot renders as an inline card stack, **not** a `TabStrip`. |
+| `software_item.host_context_menu` | Software-item host context menu | Same launcher-row shell and standard modal shell as built-in actions                                                                               |
 
 ![Sidebar navigation showing built-in and surface.page entries at equal visual weight](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
 ![Sidebar navigation showing built-in and surface.page entries at equal visual weight (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium-dark.png)
@@ -41,17 +40,14 @@ Registration and aggregation rules:
 - `surface.page` and `software_item.host_context_menu` are single-entry per provider registration.
 - `settings.tabs`, `software.tabs`, `host_detail.tabs`, and `settings.below.global` are multi-entry.
 - Aggregation order: `priority`, then `label`, then `surface_id`.
-- Mixed built-in and `surface.page` nav order: `priority`, then `label`, then origin
-  (`built-in` before `surface.page`), then stable ID.
+- Mixed built-in and `surface.page` nav order: `priority`, then `label`, then origin (`built-in` before `surface.page`), then stable ID.
 
-**Structural vs non-structural slots:** `settings.tabs` and `software.tabs` are structural — their
-container always renders even when no surface provides content. All other slots are non-structural
-and omit themselves when `no_surface_content` applies. Defined in `SurfaceSlot.svelte` via
+**Structural vs non-structural slots:** `settings.tabs` and `software.tabs` are structural — their container always renders even when no surface
+provides content. All other slots are non-structural and omit themselves when `no_surface_content` applies. Defined in `SurfaceSlot.svelte` via
 `STRUCTURAL_SLOTS`.
 
-**Targeted vs non-targeted slots:** a targeted slot routes content to a specific provider selected
-by the user via `ProviderSelector`. `targeting: 'targeted'` is set in the slot descriptor.
-Non-targeted slots aggregate all registered providers without a provider selector.
+**Targeted vs non-targeted slots:** a targeted slot routes content to a specific provider selected by the user via `ProviderSelector`.
+`targeting: 'targeted'` is set in the slot descriptor. Non-targeted slots aggregate all registered providers without a provider selector.
 
 Targeted-provider rules:
 
@@ -64,29 +60,31 @@ Targeted-provider rules:
 
 ## Surface Primitives
 
-Surface-rendered content uses the same shared primitive set as built-in UI. No surface-only visual
-widgets are allowed.
+Surface-rendered content uses the same shared primitive set as built-in UI. No surface-only visual widgets are allowed.
 
-| Surface Primitive | Design treatment                                                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Section`         | Vertical stack with `16px` gap. `header_action_ids` accepts an array of interaction IDs (max 3). Each referenced interaction must be kind `Workflow` or `MutationAction` (with `form_ui: None`). The host renders them as buttons in the card header. `ActionBar` and `FormSubmit` interactions must not appear here. Validation enforced at surface registration (both wire layer and surface-proxy registry). |
-| `TextBlock`       | Standard body copy at `text-sm text-[var(--text-primary)]`                                                                                                                                                                                                                                                                                                                                                      |
-| `KeyValue`        | Same label/value rhythm as settings and detail views                                                                                                                                                                                                                                                                                                                                                            |
-| `Table`           | Canonical `DataTable` treatment                                                                                                                                                                                                                                                                                                                                                                                 |
-| `Form`            | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms. `submit_label: Option<String>` overrides the default "Save" button label. Validated at registration: empty string and strings longer than 50 chars are rejected. TypeScript: `submit_label?: string` on `InteractionDescriptor`. If absent, frontend defaults to "Save".                                                          |
-| `ActionBar`       | Right-aligned action row with `flex gap-2 justify-end`. Must appear before any `Table` sibling in the `Section` children list — buttons display above the data table.                                                                                                                                                                                                                                           |
-| `Tabs`            | Canonical `TabStrip`                                                                                                                                                                                                                                                                                                                                                                                            |
-| `Callout`         | Semantic info/warning/danger via shared `Callout` component                                                                                                                                                                                                                                                                                                                                                     |
-| `EmptyState`      | Canonical `EmptyState` component                                                                                                                                                                                                                                                                                                                                                                                |
-| `ModalTrigger`    | Standard `ModalShell`                                                                                                                                                                                                                                                                                                                                                                                           |
-| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`)                                                                                                                                                                                                                                                                                                                                            |
+| Surface Primitive | Design treatment                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Section`         | Vertical stack with `16px` gap. `header_action_ids` accepts an array of interaction IDs (max 3). Each referenced interaction must be kind `Workflow` or `MutationAction` (with `form_ui: None`). The host renders them as buttons in the card header. `ActionBar` and `FormSubmit` interactions must not appear here. Validation enforced at surface registration (both wire layer and surface-proxy registry).          |
+| `TextBlock`       | Standard body copy at `text-sm text-[var(--text-primary)]`                                                                                                                                                                                                                                                                                                                                                               |
+| `KeyValue`        | Same label/value rhythm as settings and detail views                                                                                                                                                                                                                                                                                                                                                                     |
+| `Table`           | Canonical `DataTable` treatment                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Form`            | Same `FormFieldRow` + `Input`/`Textarea`/`Checkbox` layout as built-in forms. `submit_label: Option<String>` overrides the default "Save" button label; full validation rules and TypeScript shape live in [`forms.md` submit_label](forms.md#submit_label). Surface forms backed by `pre_load_interaction` enter draft mode automatically — see [`forms.md` Surface Form Draft Mode](forms.md#surface-form-draft-mode). |
+| `ActionBar`       | Right-aligned action row with `flex gap-2 justify-end`. Must appear before any `Table` sibling in the `Section` children list — buttons display above the data table.                                                                                                                                                                                                                                                    |
+| `Tabs`            | Canonical `TabStrip`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `Callout`         | Semantic info/warning/danger via shared `Callout` component                                                                                                                                                                                                                                                                                                                                                              |
+| `EmptyState`      | Canonical `EmptyState` component                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ModalTrigger`    | Standard `ModalShell`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `WorkflowTrigger` | Standard workflow shell (see Workflow / Wizard Shell in `layout.md`)                                                                                                                                                                                                                                                                                                                                                     |
 
 ---
 
 ## Section Layout Rules
 
-`SurfaceNode` is `#[non_exhaustive]`. Always use the provided constructors — never raw struct literals.
-Raw literals break at compile time on any future field addition.
+**Always use `SurfaceNode::section()` or `SurfaceNode::section_with_header_actions()`; never raw struct literals — `SurfaceNode` is
+`#[non_exhaustive]`.**
+
+`SurfaceNode` is `#[non_exhaustive]`. Always use the provided constructors — never raw struct literals. Raw literals break at compile time on any
+future field addition.
 
 | Constructor                                                      | Use when                        |
 | ---------------------------------------------------------------- | ------------------------------- |
@@ -95,9 +93,8 @@ Raw literals break at compile time on any future field addition.
 
 ### ActionBar ordering
 
-`ActionBar` must appear **before** any `Table` sibling in the `Section` children list. Buttons
-display above the data table. Placing `ActionBar` after `Table` causes buttons to render below
-the table, which is incorrect.
+`ActionBar` must appear **before** any `Table` sibling in the `Section` children list. Buttons display above the data table. Placing `ActionBar` after
+`Table` causes buttons to render below the table, which is incorrect.
 
 ```rust
 // Correct:
@@ -117,8 +114,8 @@ SurfaceNode::section(None::<String>, vec![
 
 ## Section Header Actions
 
-`header_action_ids` declares interaction IDs whose buttons the host renders in the card header of
-a `Section` node. Use `SurfaceNode::section_with_header_actions(title, ids, children)` to set them.
+`header_action_ids` declares interaction IDs whose buttons the host renders in the card header of a `Section` node. Use
+`SurfaceNode::section_with_header_actions(title, ids, children)` to set them.
 
 ### Valid interaction kinds
 
@@ -172,26 +169,9 @@ SurfaceNode::section_with_header_actions(
 
 **Status:** `Implemented`
 
-Surface forms backed by `pre_load_interaction` automatically enter draft mode. The form fetches the current server values on mount, then tracks dirty state field-by-field.
-
-### Behavior
-
-| Condition                                            | Save button        | Discard button |
-| ---------------------------------------------------- | ------------------ | -------------- |
-| `pre_load_interaction` absent (create mode), valid   | Enabled            | Hidden         |
-| `pre_load_interaction` absent (create mode), invalid | Disabled           | Hidden         |
-| Edit mode, values match server baseline              | Disabled           | Hidden         |
-| Edit mode, at least one field changed                | Enabled            | Visible        |
-| Submitting or loading initial values                 | Disabled (spinner) | Hidden         |
-
-- **Dirty fields** receive a left-side accent border (the `dirty` prop on `FormFieldRow`).
-- **Discard** restores all fields to the last server-fetched values without a network round-trip.
-- **Save** commits the current values as the new baseline on success — no reload needed to re-enable Save for subsequent edits.
-
-### Caveats
-
-- The JSON-payload fallback (no `form_ui` / `fields`) is **not** in draft mode. It remains stateless.
-- Multi-select dirty detection uses sorted NUL-joined string comparison. Field order from the server does not affect dirty state.
+Surface forms backed by `pre_load_interaction` automatically enter draft mode — same Save/Discard semantics and per-field dirty tracking as built-in
+forms backed by `createFormDraft`. Full behavioural table, caveats, and the `submit_label` override are documented in
+[`forms.md` Surface Form Draft Mode](forms.md#surface-form-draft-mode).
 
 ---
 
@@ -199,10 +179,9 @@ Surface forms backed by `pre_load_interaction` automatically enter draft mode. T
 
 **Status:** `Implemented`
 
-A context selector lets a universal-targeting surface expose a host-owned dropdown that scopes all subsequent
-interaction calls to a user-selected value (for example, choosing a Proxmox node before running host-targeted
-actions). It is declared in the surface descriptor and rendered entirely by the host layer — surfaces must not
-render their own equivalent selector.
+A context selector lets a universal-targeting surface expose a host-owned dropdown that scopes all subsequent interaction calls to a user-selected
+value (for example, choosing a Proxmox node before running host-targeted actions). It is declared in the surface descriptor and rendered entirely by
+the host layer — surfaces must not render their own equivalent selector.
 
 ### Contract interface
 
@@ -219,41 +198,33 @@ export interface SurfaceContextSelector {
 }
 ```
 
-The `'context_selector'` entry in the `SurfaceCapability` union signals that a surface descriptor may carry a
-`context_selector` field. Surface capability declarations that include a context selector must list
-`'context_selector'` in `required_capabilities`.
+The `'context_selector'` entry in the `SurfaceCapability` union signals that a surface descriptor may carry a `context_selector` field. Surface
+capability declarations that include a context selector must list `'context_selector'` in `required_capabilities`.
 
 ### Rendering rules
 
-- The context selector is rendered by `SurfaceReadPanel` inside the non-targeted branch, before the
-  `SurfaceRenderer` call.
-- It uses the shared `ProviderSelector` component — the same component used for targeted-slot provider selection.
-  Do not substitute a raw `<select>` element.
-- The selector is shown only after `selectorFetchDone` is true (REST fetch has settled). No partial or
-  skeleton state is shown during the fetch.
-- The first option is always the `all_option_label` with an empty-string value, allowing users to deselect
-  and return to an unfiltered view.
-- The selector is constrained to `max-w-[280px]` with `mb-4` bottom margin, matching the targeted-slot
-  provider selector layout.
+- The context selector is rendered by `SurfaceReadPanel` inside the non-targeted branch, before the `SurfaceRenderer` call.
+- It uses the shared `ProviderSelector` component — the same component used for targeted-slot provider selection. Do not substitute a raw `<select>`
+  element.
+- The selector is shown only after `selectorFetchDone` is true (REST fetch has settled). No partial or skeleton state is shown during the fetch.
+- The first option is always the `all_option_label` with an empty-string value, allowing users to deselect and return to an unfiltered view.
+- The selector is constrained to `max-w-[280px]` with `mb-4` bottom margin, matching the targeted-slot provider selector layout.
 
 ### effectiveBaseParams
 
-When a context selector is present and `selectedContextValue` is non-empty, `SurfaceReadPanel` builds an
-`effectiveBaseParams` object that merges the selected value into `baseParams` under `param_key`. This
-`effectiveBaseParams` is passed as `baseParams` to the root `SurfaceRenderer`. When no value is selected
-(empty string), `effectiveBaseParams` is identical to the original `baseParams`.
+When a context selector is present and `selectedContextValue` is non-empty, `SurfaceReadPanel` builds an `effectiveBaseParams` object that merges the
+selected value into `baseParams` under `param_key`. This `effectiveBaseParams` is passed as `baseParams` to the root `SurfaceRenderer`. When no value
+is selected (empty string), `effectiveBaseParams` is identical to the original `baseParams`.
 
 ```typescript
 // Derived in SurfaceReadPanel
 const effectiveBaseParams = $derived(
-  contextSelector && selectedContextValue
-    ? { ...baseParams, [contextSelector.param_key]: selectedContextValue }
-    : { ...baseParams },
+  contextSelector && selectedContextValue ? { ...baseParams, [contextSelector.param_key]: selectedContextValue } : { ...baseParams },
 );
 ```
 
-Hydration re-triggers automatically when `effectiveBaseParams` changes because the hydration fingerprint
-includes `base_params`. No manual reload is required.
+Hydration re-triggers automatically when `effectiveBaseParams` changes because the hydration fingerprint includes `base_params`. No manual reload is
+required.
 
 ### requiredContextParam / requiredForInteractionIds prop chain
 
@@ -264,18 +235,17 @@ includes `base_params`. No manual reload is required.
 | `requiredContextParam`      | `contextSelector.param_key`                 | The key that must be non-empty for gated interactions |
 | `requiredForInteractionIds` | `contextSelector.required_for_interactions` | Which interaction IDs are gated                       |
 
-`SurfaceRenderer` accepts both props and forwards them to `SurfaceActionBar` when rendering an `action_bar`
-node. `SurfaceActionBar` forwards `requiredContextParam` selectively — only to buttons whose
-`interaction_id` appears in `requiredForInteractionIds`. This keeps ungated buttons always enabled.
+`SurfaceRenderer` accepts both props and forwards them to `SurfaceActionBar` when rendering an `action_bar` node. `SurfaceActionBar` forwards
+`requiredContextParam` selectively — only to buttons whose `interaction_id` appears in `requiredForInteractionIds`. This keeps ungated buttons always
+enabled.
 
-**Forwarding rule:** any `SurfaceRenderer` recursive call that may contain an `action_bar` descendant must
-forward both `requiredContextParam` and `requiredForInteractionIds`. Currently the `section` and `tabs`
-recursive calls omit these props (see adherence findings); fix by passing both props at those call sites.
+**Forwarding rule:** any `SurfaceRenderer` recursive call that may contain an `action_bar` descendant must forward both `requiredContextParam` and
+`requiredForInteractionIds`. Currently the `section` and `tabs` recursive calls omit these props (see adherence findings); fix by passing both props
+at those call sites.
 
 ### Disabled-button tooltip pattern
 
-When `isContextGated` is true in `SurfaceInteractionButton`, the button is wrapped in a `<span>` with a
-`title` attribute:
+When `isContextGated` is true in `SurfaceInteractionButton`, the button is wrapped in a `<span>` with a `title` attribute:
 
 ```svelte
 <span title="Select a configuration first">
@@ -287,14 +257,13 @@ When `isContextGated` is true in `SurfaceInteractionButton`, the button is wrapp
 
 Rules for this pattern:
 
-- The `<span>` wrapper is required because `disabled` buttons do not fire mouse events; `title` on the
-  `<button>` itself is invisible on hover in most browsers.
+- The `<span>` wrapper is required because `disabled` buttons do not fire mouse events; `title` on the `<button>` itself is invisible on hover in most
+  browsers.
 - The `title` text must be a short, user-facing prompt — not an internal ID or technical description.
-- Use this wrapper only when the control is disabled due to a prerequisite that the user can satisfy
-  within the same view. For permanent permission-based disabling, use `opacity-40 pointer-events-none`
-  without a wrapper.
-- This is the canonical pattern for prerequisite-gated surface actions. Do not implement alternatives
-  (tooltips, inline callouts, hidden buttons) for this case.
+- Use this wrapper only when the control is disabled due to a prerequisite that the user can satisfy within the same view. For permanent
+  permission-based disabling, use `opacity-40 pointer-events-none` without a wrapper.
+- This is the canonical pattern for prerequisite-gated surface actions. Do not implement alternatives (tooltips, inline callouts, hidden buttons) for
+  this case.
 
 ---
 
@@ -304,10 +273,9 @@ Rules for this pattern:
 
 - Shared-surface actions must provide a non-empty human-authored `interaction.label`.
 - Workflow steps must provide a non-empty human-authored `workflow_step.label`.
-- The shared runtime must not synthesize generic fallback copy: `Run action`, `Run workflow`,
-  `Step`, `Open details`, or `Details` are forbidden fallbacks.
-- Malformed or unlabeled interactions must degrade to the shared `Action unavailable` callout
-  instead of rendering actionable UI.
+- The shared runtime must not synthesize generic fallback copy: `Run action`, `Run workflow`, `Step`, `Open details`, or `Details` are forbidden
+  fallbacks.
+- Malformed or unlabeled interactions must degrade to the shared `Action unavailable` callout instead of rendering actionable UI.
 
 ---
 
@@ -407,6 +375,8 @@ markdownlint --config .markdownlint.json \
   docs/development/ui/tokens.md \
   docs/development/ui/layout.md \
   docs/development/ui/primitives.md \
+  docs/development/ui/forms.md \
+  docs/development/ui/pages.md \
   docs/development/ui/surfaces.md \
   docs/development/README.md \
   docs/README.md
@@ -417,8 +387,7 @@ Design-language verification also requires:
 - Deterministic parity fixtures for every new shared visual path.
 - Dark and light theme coverage for all required pairs.
 - Parity closure stays open while any required pair is missing paired dark/light captures.
-- Removed built-in-only captures (e.g. prior audit/profile parity captures) do not count toward
-  required built-in-vs-surface parity coverage.
+- Removed built-in-only captures (e.g. prior audit/profile parity captures) do not count toward required built-in-vs-surface parity coverage.
 - Token completeness via `frontend/src/lib/theme/css-contract.test.ts`.
 
 ![Governance mask union area budget example](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium.png)
@@ -483,15 +452,13 @@ Waiver rules:
 
 The pair/state matrix above is the required target contract.
 
-Known open gaps (as of 2026-04-24):
+Known open gaps (as of 2026-06-01):
 
-- **Waivers file is empty.** `frontend/tests/e2e/ui-parity-waivers.json` contains `[]` — no
-  active waivers. Any known mismatches must be filed here before the parity harness is enforced
-  in CI.
-- **Context selector prop forwarding gap.** `SurfaceRenderer` recursive calls for `section` and
-  `tabs` nodes do not forward `requiredContextParam` and `requiredForInteractionIds`. An `action_bar`
-  nested inside a `section` or `tabs` will not receive the context guard. Fix by forwarding both
-  props at those call sites in `SurfaceRenderer.svelte`.
+- _No open prop-forwarding gaps._ The previous `section`/`tabs` recursion gap was closed by commit `563e6473e` ("fix(surfaces-ui): forward context
+  props through section/tabs, effectiveBaseParams in targeted branch, show selector during fetch"). `SurfaceRenderer.svelte` now forwards both
+  `requiredContextParam` and `requiredForInteractionIds` at every recursive call site.
+- **Waivers in active use.** `frontend/tests/e2e/ui-parity-waivers.json` carries one active waiver (`oauth-consent-screen`, expires 2026-11-13). New
+  mismatches must be filed there with the schema in the Waivers section above before the parity harness becomes a hard gate.
 
-Removed built-in-only captures (such as prior audit/profile parity captures) are intentionally
-excluded and do not count as required built-in-vs-surface parity coverage.
+Removed built-in-only captures (such as prior audit/profile parity captures) are intentionally excluded and do not count as required
+built-in-vs-surface parity coverage.

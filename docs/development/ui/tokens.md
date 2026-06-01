@@ -4,19 +4,17 @@
 
 **Status:** `Implemented` (all sections unless noted)
 
-All styling uses semantic CSS custom properties and named Tailwind utilities. The following are
-bugs, not style choices:
+All styling uses semantic CSS custom properties and named Tailwind utilities. The following are bugs, not style choices:
 
 - Hardcoded hex or rgb color values anywhere in component or route files
 - Tailwind palette utilities (`text-zinc-500`, `bg-slate-900`, etc.) where a semantic token exists
-- Arbitrary pixel values (`text-[11px]`, `rounded-[4px]`, `tracking-[0.12em]`, `duration-[120ms]`,
-  etc.) for any role that has a named utility in `app.css`
+- Arbitrary pixel values (`text-[11px]`, `rounded-[4px]`, `tracking-[0.12em]`, `duration-[120ms]`, etc.) for any role that has a named utility in
+  `app.css`
 - Inventing a new hardcoded pixel value before checking whether a token already covers the role
 
-**Before writing any hardcoded value:** check `app.css` `@theme` and `@utility` blocks and this
-document. If a token exists, use it. If none exists and the value appears in more than one place,
-add a token first. Isolated one-off values (e.g. a single modal's max-height) are acceptable
-as-is and do not need a token.
+**Before writing any hardcoded value:** check `app.css` `@theme` and `@utility` blocks and this document. If a token exists, use it. If none exists
+and the value appears in more than one place, add a token first. Isolated one-off values (e.g. a single modal's max-height) are acceptable as-is and
+do not need a token.
 
 ---
 
@@ -108,15 +106,12 @@ Heading scale (page content):
 | `h2` (section heading)    | `18px` | `600`  | `--text-primary` | `SectionCard` title, `EmptyState` title |
 | `h3` (subsection heading) | `13px` | `700`  | `--text-primary` | Inline card headings                    |
 
-Public entry shell (`/login`, `/register`) uses `24px`/`600` for its `h1`. Do not replicate this
-size in authenticated routes.
+Public entry shell (`/login`, `/register`) uses `24px`/`600` for its `h1`. Do not replicate this size in authenticated routes.
 
-Do not use Skeleton/framework heading utility classes (`h3`, `h4`, etc.). Do not use Tailwind
-scale classes (`text-lg`, `text-xs`, etc.) for any size where deviating from the spec is a visual
-bug. Use the named typography utilities defined in `app.css` via `@theme` (see table below).
+Do not use Skeleton/framework heading utility classes (`h3`, `h4`, etc.). Do not use Tailwind scale classes (`text-lg`, `text-xs`, etc.) for any size
+where deviating from the spec is a visual bug. Use the named typography utilities defined in `app.css` via `@theme` (see table below).
 
-`text-sm` (14px) is acceptable for body copy, form labels, and descriptive prose — anywhere the
-exact pixel value is not load-bearing.
+`text-sm` (14px) is acceptable for body copy, form labels, and descriptive prose — anywhere the exact pixel value is not load-bearing.
 
 Heading scale utilities:
 
@@ -140,24 +135,23 @@ UI chrome uses a compressed scale:
 | Top bar title       | `text-topbar`                          | `font-bold`               |
 | Form labels         | `text-sm`                              | `font-medium`             |
 
-All utilities are defined in `frontend/src/app.css` via `@theme`. Do not use raw `text-[Npx]`
-arbitrary values for any of these roles.
+All utilities are defined in `frontend/src/app.css` via `@theme`. Do not use raw `text-[Npx]` arbitrary values for any of these roles.
 
 ---
 
 ## Border Radius
 
-| Element                                | Utility            | Value                                                                   |
-| -------------------------------------- | ------------------ | ----------------------------------------------------------------------- |
-| Page panels, modals, sidebar           | `rounded-panel`    | `4px`                                                                   |
-| Terminal modal window                  | `rounded-terminal` | `6px`                                                                   |
-| Cards, table wrappers, buttons, inputs | `rounded-card`     | `3px`                                                                   |
-| Badges, pills, small chips             | `rounded-badge`    | `2px`                                                                   |
-| Traffic light dots                     | `rounded-full`     | `50%`                                                                   |
-| Toggle track                           | `rounded-toggle`   | `10px` (no dedicated toggle component; boolean settings use `Checkbox`) |
+| Element                                | Utility            | Value                                                                                                                                        |
+| -------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page panels, modals, sidebar           | `rounded-panel`    | `4px`                                                                                                                                        |
+| Terminal modal window                  | `rounded-terminal` | `6px`                                                                                                                                        |
+| Cards, table wrappers, buttons, inputs | `rounded-card`     | `3px`                                                                                                                                        |
+| Badges, pills, small chips             | `rounded-badge`    | `2px`                                                                                                                                        |
+| Traffic light dots                     | `rounded-full`     | `50%`                                                                                                                                        |
+| Toggle track                           | `rounded-toggle`   | `10px` — spec remnant; no dedicated toggle component exists. Boolean settings use `Checkbox` (see [`forms.md` Checkbox](forms.md#checkbox)). |
 
-Do not use shorthand scale classes (`rounded-lg`, `rounded-md`, `rounded-2xl`, etc.) or raw
-`rounded-[Npx]` arbitrary values. Use the named utilities above.
+Do not use shorthand scale classes (`rounded-lg`, `rounded-md`, `rounded-2xl`, etc.) or raw `rounded-[Npx]` arbitrary values. Use the named utilities
+above.
 
 ---
 
@@ -177,8 +171,7 @@ Do not use raw `tracking-[Nem]` arbitrary values for these roles.
 
 ## Spacing Utilities
 
-Compound padding patterns defined via `@utility` in `app.css`. Use these instead of combining
-raw padding classes for these specific contexts.
+Compound padding patterns defined via `@utility` in `app.css`. Use these instead of combining raw padding classes for these specific contexts.
 
 | Utility             | Value                      | Use                                   |
 | ------------------- | -------------------------- | ------------------------------------- |
@@ -189,8 +182,7 @@ raw padding classes for these specific contexts.
 | `card-padding`      | `padding: 16px 20px`       | SectionCard header and body sections  |
 | `min-h-badge`       | `min-height: 14px`         | StatusBadge, PillBadge, ActionBadge   |
 
-Standard Tailwind grid values (`py-3`, `px-4`, `gap-2`, etc.) remain as-is — no token needed
-for on-grid values.
+Standard Tailwind grid values (`py-3`, `px-4`, `gap-2`, etc.) remain as-is — no token needed for on-grid values.
 
 ---
 
@@ -202,8 +194,8 @@ Named utilities for off-grid component dimensions:
 | ----------- | ------- | ------------------- |
 | `w-sidebar` | `180px` | Shell sidebar width |
 
-Button heights (`h-[23px]` md, `h-[19px]` sm) and spinner size (`h-[9px] w-[9px]`) are
-confined to `Button.svelte` — acceptable raw values within that single component file.
+Button heights (`h-[23px]` md, `h-[19px]` sm) and spinner size (`h-[9px] w-[9px]`) are confined to `Button.svelte` — acceptable raw values within that
+single component file.
 
 ---
 
@@ -228,8 +220,7 @@ transition:
 
 Tailwind: `transition-[background,border-color,color] duration-fast`
 
-Use `duration-fast` (`120ms`) for all interactive control transitions. Do not write
-`duration-[120ms]` or `duration-[0.12s]` directly.
+Use `duration-fast` (`120ms`) for all interactive control transitions. Do not write `duration-[120ms]` or `duration-[0.12s]` directly.
 
 Allowed animated properties:
 
@@ -308,10 +299,9 @@ Family-level mapping from Skeleton/framework utilities to semantic tokens:
 | `preset-filled-error-*` / `error-*`     | `--color-danger-*`                                   |
 | `info-*` / info preset utilities        | `--color-info-*`                                     |
 
-**Adding a new token:** update `TokenName` union in `tokens.ts`, add dark/light values to the token
-map in the same file, then add the token to both `design-token-values.test.ts` and `tokens.test.ts`.
-All files must be updated together — `css-contract.test.ts` covers z-index and transitions only and
-does not need to be changed for a new color or surface token.
+**Adding a new token:** update `TokenName` union in `tokens.ts`, add dark/light values to the token map in the same file, then add the token to both
+`design-token-values.test.ts` and `tokens.test.ts`. All files must be updated together — `css-contract.test.ts` covers z-index and transitions only
+and does not need to be changed for a new color or surface token.
 
 Conformance rules:
 
@@ -319,21 +309,18 @@ Conformance rules:
 - CI must fail if any required token is missing.
 - Built-in and surface-backed UI must consume the same adapter.
 - No one-off raw color classes where an equivalent semantic token exists.
-- `preset-filled-*`, `preset-tonal-*`, `text-surface-*`, `bg-surface-*`, `border-surface-*` Skeleton
-  utilities are forbidden in component and route files — replace with semantic token classes.
+- `preset-filled-*`, `preset-tonal-*`, `text-surface-*`, `bg-surface-*`, `border-surface-*` Skeleton utilities are forbidden in component and route
+  files — replace with semantic token classes.
 
 ---
 
 ## Accent Tint Patterns
 
-When you need accent-tinted backgrounds (e.g. active tab, highlight), use the `--accent-rgb`
-space-separated value with the `rgba()` function:
+When you need accent-tinted backgrounds (e.g. active tab, highlight), use the `--accent-rgb` space-separated value with the `rgba()` function:
 
 ```html
 <!-- Active state background -->
-<div
-  class="bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]"
-></div>
+<div class="bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]"></div>
 
 <!-- Subtle info card border -->
 <div class="border border-[rgba(var(--accent-rgb),0.15)]"></div>
