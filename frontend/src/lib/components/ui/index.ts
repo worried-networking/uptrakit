@@ -4,6 +4,7 @@ export { default as SectionCard } from './SectionCard.svelte';
 export { default as TabStrip } from './TabStrip.svelte';
 export { default as Callout } from './Callout.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
+export { default as FilterBar } from './FilterBar.svelte';
 export { default as StatusBadge } from './StatusBadge.svelte';
 export { default as ActionBadge } from './ActionBadge.svelte';
 export { default as PillBadge } from './PillBadge.svelte';
