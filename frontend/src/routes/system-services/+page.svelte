@@ -2,7 +2,6 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSystemServices,
@@ -15,7 +14,7 @@
 	} from '$lib/api';
 	import type { SystemServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
+	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
@@ -28,13 +27,15 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FilterBar,
 		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar
 	} from '$lib/components/ui';
-	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
+	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
+	import { createUrlParam } from '$lib/url-params.svelte';
 
 	const STATUS_FILTER_VALUES = ['all', 'pending', 'approved', 'rejected', 'deactivated'] as const;
 	type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];
@@ -52,10 +53,13 @@
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let isRetrying: boolean = $state(false);
-	let currentPage: number = $state(parseUrlPage(page.url));
+	const currentPage = $derived(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
-	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
+	const statusParam = createUrlParam<StatusFilter>('status', {
+		parse: (r): StatusFilter => (STATUS_FILTER_VALUES.includes(r as StatusFilter) ? (r as StatusFilter) : 'all'),
+		serialize: (v) => (v === 'all' ? null : v)
+	});
 
 	let selectedIds = new SvelteSet<string>();
 	const selectedItemsMap = new SvelteMap<string, SystemServiceResponse>();
@@ -114,23 +118,12 @@
 	let unsubscribers: (() => void)[] = [];
 
 	$effect(() => {
-		const parts: string[] = [];
-		if (statusFilter !== 'all') parts.push(`status=${statusFilter}`);
-		if (currentPage > 1) parts.push(`page=${currentPage}`);
-		const search = parts.join('&');
-		goto(search ? `${location.pathname}?${search}` : location.pathname, {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true
-		});
-	});
-
-	$effect(() => {
-		const _filter = statusFilter; // explicit dependency tracking
-		loadServices(untrack(() => currentPage));
+		void statusParam.value;
+		const pg = currentPage;
+		if (canView) untrack(() => loadServices(pg));
 
 		refreshInterval = setInterval(() => {
-			if (document.visibilityState === 'visible') loadServices(currentPage, true);
+			if (document.visibilityState === 'visible') loadServices(pg, true);
 		}, 300_000);
 
 		return () => {
@@ -153,14 +146,13 @@
 		try {
 			if (!background && !retry) error = null;
 			const result = await getSystemServices({
-				status: statusFilter === 'all' ? undefined : statusFilter,
+				status: statusParam.value === 'all' ? undefined : statusParam.value,
 				page: p
 			});
 			services = result.items;
 			for (const service of result.items) {
 				if (selectedIds.has(service.id)) selectedItemsMap.set(service.id, service);
 			}
-			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
 			error = null;
@@ -182,14 +174,6 @@
 
 	function closeMenu() {
 		openMenuId = null;
-	}
-
-	function setFilter(filter: StatusFilter) {
-		selectedIds.clear();
-		selectedItemsMap.clear();
-		currentPage = 1;
-		statusFilter = filter;
-		closeMenu();
 	}
 
 	function requestConfirm(
@@ -324,7 +308,7 @@
 			let p = 1;
 			while (true) {
 				const result = await getSystemServices({
-					status: statusFilter === 'all' ? undefined : statusFilter,
+					status: statusParam.value === 'all' ? undefined : statusParam.value,
 					page: p,
 					perPage: 100
 				});
@@ -384,43 +368,29 @@
 
 {#if canView}
 	<PageShell title="System Services" description="Manage scheduler and system-level service enrollment.">
-		<SectionCard title="Status Filters">
-			<div class="flex flex-wrap gap-2">
-				<Button variant={statusFilter === 'all' ? 'accent' : 'ghost'} size="sm" onclick={() => setFilter('all')}>
-					All
-				</Button>
-				<Button
-					variant={statusFilter === 'pending' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('pending')}
-				>
-					Pending
-				</Button>
-				<Button
-					variant={statusFilter === 'approved' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('approved')}
-				>
-					Approved
-				</Button>
-				<Button
-					variant={statusFilter === 'rejected' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('rejected')}
-				>
-					Rejected
-				</Button>
-				<Button
-					variant={statusFilter === 'deactivated' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('deactivated')}
-				>
-					Deactivated
-				</Button>
-			</div>
-		</SectionCard>
-
 		<SectionCard title="Registered System Services">
+			{#snippet filterBar()}
+				<FilterBar>
+					{#snippet filters()}
+						<Select
+							id="system-services-status-filter"
+							width="auto"
+							aria-label="Filter by status"
+							value={statusParam.value}
+							options={[
+								{ value: 'all', label: 'All' },
+								{ value: 'pending', label: 'Pending' },
+								{ value: 'approved', label: 'Approved' },
+								{ value: 'rejected', label: 'Rejected' },
+								{ value: 'deactivated', label: 'Deactivated' }
+							]}
+							onchange={(e) => {
+								statusParam.set((e.currentTarget as HTMLSelectElement).value as StatusFilter);
+							}}
+						/>
+					{/snippet}
+				</FilterBar>
+			{/snippet}
 			<DataTable
 				columns={[]}
 				rows={services as unknown as Record<string, unknown>[]}
