@@ -4,7 +4,7 @@ import { buildSoftwareTabsParityFixture } from '$lib/test-fixtures/ui-parity';
 
 vi.mock('$app/state', () => ({
 	page: {
-		url: new URL('http://localhost/software?tab=plugin.software-category')
+		url: new URL('http://localhost/software')
 	}
 }));
 
@@ -59,12 +59,12 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 
 import SoftwarePage from './+page.svelte';
 import { getSoftwareItems } from '$lib/api';
-import { goto } from '$app/navigation';
 import { page } from '$app/state';
 
 describe('/software shared-surface tabs', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		page.url = new URL('http://localhost/software') as typeof page.url;
 		vi.mocked(getSoftwareItems).mockResolvedValue({
 			items: [],
 			page: 1,
@@ -88,7 +88,6 @@ describe('/software shared-surface tabs', () => {
 	});
 
 	it('shows a direct retry action when foreground software loading fails', async () => {
-		page.url = new URL('http://localhost/software?tab=featured') as typeof page.url;
 		vi.mocked(getSoftwareItems).mockRejectedValueOnce(new Error('Foreground load failed')).mockResolvedValueOnce({
 			items: [],
 			page: 1,
@@ -107,44 +106,5 @@ describe('/software shared-surface tabs', () => {
 		await waitFor(() => {
 			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledTimes(2);
 		});
-	});
-
-	it('defaults a missing tab query to Featured and persists All explicitly in the URL', async () => {
-		page.url = new URL('http://localhost/software') as typeof page.url;
-
-		render(SoftwarePage);
-
-		await waitFor(() => {
-			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalled();
-		});
-
-		expect(screen.getByRole('tab', { name: 'Featured' })).toHaveAttribute('aria-selected', 'true');
-		expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'false');
-		expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledWith(
-			1,
-			undefined,
-			true,
-			undefined,
-			undefined,
-			undefined,
-			undefined
-		);
-		expect(vi.mocked(goto).mock.calls[0]?.[0]).toContain('tab=featured');
-
-		await fireEvent.click(screen.getByRole('tab', { name: 'All' }));
-
-		await waitFor(() => {
-			expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
-		});
-		expect(vi.mocked(getSoftwareItems)).toHaveBeenLastCalledWith(
-			1,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined
-		);
-		expect(vi.mocked(goto).mock.calls.at(-1)?.[0]).toContain('tab=all');
 	});
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -63,23 +63,24 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		EmptyState,
+		ExpandableSearch,
+		FilterBar,
 		ModalShell,
 		PageShell,
 		ReleaseNotes,
 		SectionCard,
 		SoftwareGroupList,
 		StatusBadge,
-		TabStrip,
-		type TabStripItem
+		TabStrip
 	} from '$lib/components/ui';
 	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import { Search, X } from 'lucide-svelte';
+	import { createUrlParam } from '$lib/url-params.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
-	let currentPage: number = $state(parseUrlPage(page.url));
+	const currentPage = $derived(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
 	let loading: boolean = $state(false);
@@ -90,14 +91,18 @@
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
-	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
-	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
-	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
-	let nameFilter: string = $state(page.url.searchParams.get('query') ?? '');
-	let nameFilterDebounce: ReturnType<typeof setTimeout> | undefined;
-	let nameFilterOpen = $state((page.url.searchParams.get('query') ?? '') !== '');
-	let nameFilterWrapperEl: HTMLDivElement | undefined = $state(undefined);
+	const featured = createUrlParam<'all' | 'featured' | 'unfeatured'>('featured', {
+		parse: (r): 'all' | 'featured' | 'unfeatured' => (r === 'all' || r === 'unfeatured' ? r : 'featured'),
+		serialize: (v) => (v === 'featured' ? null : v)
+	});
+	const updatable = createUrlParam('updatable', {
+		parse: (r) => r === 'true',
+		serialize: (v) => (v ? 'true' : null)
+	});
+	const pluginType = createUrlParam('plugin_type');
+	const queryParam = createUrlParam('query');
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
+	let activeSurfaceTab: string = $state('');
 
 	const slotTabSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('software.tabs'), (requiredPermission) =>
@@ -115,21 +120,6 @@
 		return result;
 	});
 	const showSurfaceSoftwareTabs = $derived(slotTabSurfaces.length > 0);
-	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
-	const tabItems = $derived.by<TabStripItem[]>(() => {
-		const items: TabStripItem[] = [
-			{ id: 'all', label: 'All' },
-			{ id: 'featured', label: 'Featured' },
-			{ id: 'unfeatured', label: 'Unfeatured' },
-			{ id: 'ignores', label: 'Ignore Rules' }
-		];
-		if (showSurfaceSoftwareTabs) {
-			for (const surface of slotTabSurfaces) {
-				items.push({ id: surface.surface_id, label: surface.label });
-			}
-		}
-		return items;
-	});
 	let editItem: { id: string; name: string; featured: boolean; icon_url?: string | null } | null = $state(null);
 	let editForm = $state({ name: '', featured: true, icon_url: '' });
 	let editSubmitting: boolean = $state(false);
@@ -153,6 +143,7 @@
 	let mergeSeedItemId: string | null = $state(null);
 	let mergeInitialSearchQuery = $state('');
 	let pendingMergeSuccessToast = $state(page.url.searchParams.get('merge_success') === '1');
+	let ignoreRulesOpen = $state(false);
 
 	// Single-host update modal (confirmation + live terminal)
 	let singleHostUpdateModal: {
@@ -172,7 +163,7 @@
 	const allBatchPageSelected = $derived(items.length > 0 && items.every((i) => batchSelectedIds.has(i.id)));
 
 	const selectAllPagesInfo = $derived(
-		isItemsTab && allBatchPageSelected && totalItems > items.length && batchSelectedIds.size < totalItems
+		allBatchPageSelected && totalItems > items.length && batchSelectedIds.size < totalItems
 			? { total: totalItems, loading: selectingAllPages, onSelect: selectAllSoftwarePages }
 			: undefined
 	);
@@ -195,19 +186,19 @@
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
 	);
 	const itemsEmptyState = $derived.by(() => {
-		if (showUpdatableOnly) {
+		if (updatable.value) {
 			return { title: 'No updates available', description: 'All software in this view is up to date.' };
 		}
-		if (pluginTypeFilter) {
+		if (pluginType.value) {
 			return { title: 'No matching software', description: 'No items are tracked using the selected plugin.' };
 		}
-		if (activeTab === 'featured') {
+		if (featured.value === 'featured') {
 			return {
 				title: 'No featured software',
 				description: 'Feature software items to highlight them on the dashboard.'
 			};
 		}
-		if (activeTab === 'unfeatured') {
+		if (featured.value === 'unfeatured') {
 			return {
 				title: 'No unfeatured software',
 				description: 'All software items are currently featured.'
@@ -241,20 +232,16 @@
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
 
+	// Single reactive data-load: fires on initial mount and whenever any filter or page changes.
+	// untrack the loadAll call so its internal reads (items, batchSelectedIds, etc.) don't add
+	// dependencies — only the explicit filter/page reads above drive re-runs.
 	$effect(() => {
-		const parts: string[] = [];
-		if (pendingMergeSuccessToast) parts.push('merge_success=1');
-		parts.push(`tab=${activeTab}`);
-		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
-		if (isItemsTab && pluginTypeFilter) parts.push(`plugin_type=${encodeURIComponent(pluginTypeFilter)}`);
-		if (isItemsTab && nameFilter) parts.push(`query=${encodeURIComponent(nameFilter)}`);
-		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
-		const search = parts.join('&');
-		goto(search ? `${location.pathname}?${search}` : location.pathname, {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true
-		});
+		void featured.value;
+		void updatable.value;
+		void pluginType.value;
+		void queryParam.value;
+		const pg = currentPage;
+		if (canView) untrack(() => loadAll(pg));
 	});
 
 	$effect(() => {
@@ -270,26 +257,26 @@
 		void loadSurfaceReadModels(slotTabSurfaces.map((surface) => surface.surface_id));
 	});
 
+	// Auto-select first available surface tab when surfaces appear but none is active.
 	$effect(() => {
-		if (isItemsTab || activeTab === 'ignores') {
-			return;
-		}
-		const isSurfaceTab = showSurfaceSoftwareTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
-		const isPendingSurfaceTab = isSurfaceTabPending({
-			activeTab,
-			slotSurfaces: slotTabSurfaces,
-			readBySurface: slotTabReads,
-			isReadRequested: getSurfaceReadRequested(activeTab),
-			isReadLoading: getSurfaceReadLoading(activeTab)
-		});
-		if (!isSurfaceTab && !isPendingSurfaceTab) {
-			activeTab = 'featured';
+		if (slotTabSurfaces.length === 0) return;
+		const stillValid = slotTabSurfaces.some((s) => s.surface_id === activeSurfaceTab);
+		if (!stillValid) {
+			const isPending = isSurfaceTabPending({
+				activeTab: activeSurfaceTab,
+				slotSurfaces: slotTabSurfaces,
+				readBySurface: slotTabReads,
+				isReadRequested: getSurfaceReadRequested(activeSurfaceTab),
+				isReadLoading: getSurfaceReadLoading(activeSurfaceTab)
+			});
+			if (!isPending) {
+				activeSurfaceTab = slotTabSurfaces[0].surface_id;
+			}
 		}
 	});
 
 	onMount(() => {
 		if (canView) {
-			loadAll(currentPage);
 			unsubscribers.push(
 				subscribeToEvent(AdminEventType.SoftwareItemUpdated, () => loadAll(currentPage, true)),
 				subscribeToEvent(AdminEventType.SoftwareItemCreated, () => loadAll(currentPage, true)),
@@ -358,16 +345,31 @@
 	});
 
 	onDestroy(() => {
-		clearTimeout(nameFilterDebounce);
 		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 		liveWsHandle?.disconnect();
 	});
 
 	function featuredFilter(): boolean | undefined {
-		if (activeTab === 'featured') return true;
-		if (activeTab === 'unfeatured') return false;
+		if (featured.value === 'featured') return true;
+		if (featured.value === 'unfeatured') return false;
 		return undefined;
+	}
+
+	function resetToPage1() {
+		const next = new URL(page.url.href);
+		next.searchParams.delete('page');
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function setPage(p: number) {
+		const next = new URL(page.url.href);
+		if (p <= 1) {
+			next.searchParams.delete('page');
+		} else {
+			next.searchParams.set('page', String(p));
+		}
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	function softwareItemDetailIsStale(previous: SoftwareItemResponse | undefined, next: SoftwareItemResponse): boolean {
@@ -394,9 +396,9 @@
 				undefined,
 				featuredFilter(),
 				undefined,
-				showUpdatableOnly ? true : undefined,
-				pluginTypeFilter || undefined,
-				nameFilter || undefined
+				updatable.value ? true : undefined,
+				pluginType.value || undefined,
+				queryParam.value || undefined
 			);
 			items = result.items;
 			const visibleIds = new Set(result.items.map((item) => item.id));
@@ -415,7 +417,6 @@
 			for (const item of result.items) {
 				if (batchSelectedIds.has(item.id)) batchSelectedItemsMap.set(item.id, item);
 			}
-			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
 			const detailLoad = primeVisibleItemDetails(result.items, staleDetailIds);
@@ -431,24 +432,6 @@
 			}
 		} finally {
 			if (!background) loading = false;
-		}
-	}
-
-	function switchTab(tab: string) {
-		if (activeTab === tab) return;
-		batchSelectedIds.clear();
-		batchSelectedItemsMap.clear();
-		currentPage = 1;
-		activeTab = tab;
-		if (tab === 'all' || tab === 'featured' || tab === 'unfeatured') {
-			loadAll(1);
-		} else {
-			clearTimeout(nameFilterDebounce);
-			nameFilterDebounce = undefined;
-			nameFilter = '';
-			nameFilterOpen = false;
-			showUpdatableOnly = false;
-			pluginTypeFilter = '';
 		}
 	}
 
@@ -948,9 +931,9 @@
 					100,
 					featuredFilter(),
 					undefined,
-					showUpdatableOnly ? true : undefined,
-					pluginTypeFilter || undefined,
-					nameFilter || undefined
+					updatable.value ? true : undefined,
+					pluginType.value || undefined,
+					queryParam.value || undefined
 				);
 				for (const item of result.items) {
 					batchSelectedIds.add(item.id);
@@ -1065,330 +1048,293 @@
 		{#if !canView}
 			<Callout tone="danger" title="Access denied" message="You do not have permission to view software items." />
 		{:else}
-			<TabStrip
-				items={tabItems}
-				activeId={activeTab}
-				ariaLabel="Software tabs"
-				idBase="software"
-				onSelect={switchTab}
-			/>
-
-			{#if isItemsTab}
-				<div
-					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
-					data-ui="software-route-groups"
-				>
-					<header
-						class="flex flex-col gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] card-padding md:flex-row md:items-center md:justify-between"
-					>
-						<div class="flex flex-wrap items-center gap-3">
-							{#if canManage}
-								<div class="flex cursor-pointer select-none items-center gap-2 text-sm">
-									<Checkbox
-										id="software-batch-select-all"
-										checked={allBatchPageSelected}
-										indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
-										onchange={toggleBatchSelectAll}
-									/>
-									<label for="software-batch-select-all" class="cursor-pointer select-none">Select all</label>
-								</div>
-								<span class="h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true"></span>
-							{/if}
-							<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
-								<Checkbox
-									id="software-filter-updatable-only"
-									bind:checked={showUpdatableOnly}
-									onchange={() => {
-										currentPage = 1;
-										loadAll(1);
-									}}
-								/>
-								Updates available
-							</label>
-							{#if pluginTypeOptions.length > 0}
-								<Select
-									id="software-plugin-filter"
-									width="auto"
-									bind:value={pluginTypeFilter}
-									aria-label="Filter by plugin"
-									options={[
-										{ value: '', label: 'All plugins' },
-										...pluginTypeOptions.map((opt) => ({
-											value: opt.plugin_type,
-											label: opt.display_name
-										}))
-									]}
-									onchange={() => {
-										currentPage = 1;
-										loadAll(1);
-									}}
-								/>
-							{/if}
-							{#if !nameFilterOpen}
-								<Button
-									variant="ghost"
-									size="sm"
-									ariaLabel="Filter by name"
-									onclick={async () => {
-										nameFilterOpen = true;
-										await tick();
-										nameFilterWrapperEl?.querySelector('input')?.focus();
-									}}
-								>
-									{#snippet leadingIcon()}<Search size={14} aria-hidden="true" />{/snippet}
-								</Button>
-							{/if}
-							<div
-								bind:this={nameFilterWrapperEl}
-								class:hidden={!nameFilterOpen}
-								class="flex w-full items-center gap-1 md:w-auto"
-							>
-								<Input
-									id="software-name-filter"
-									type="search"
-									placeholder="Filter by name"
-									aria-label="Filter by name"
-									bind:value={nameFilter}
-									class="w-full md:w-48"
-									oninput={() => {
-										clearTimeout(nameFilterDebounce);
-										nameFilterDebounce = setTimeout(() => {
-											currentPage = 1;
-											loadAll(1);
-										}, 300);
-									}}
-									onkeydown={(e) => {
-										if (e.key === 'Escape') {
-											clearTimeout(nameFilterDebounce);
-											const wasFiltering = nameFilter !== '';
-											nameFilter = '';
-											nameFilterOpen = false;
-											if (wasFiltering) {
-												currentPage = 1;
-												loadAll(1);
-											}
-										}
-									}}
-								/>
-								<Button
-									variant="ghost"
-									size="sm"
-									ariaLabel="Clear name filter"
-									onclick={() => {
-										clearTimeout(nameFilterDebounce);
-										const wasFiltering = nameFilter !== '';
-										nameFilter = '';
-										nameFilterOpen = false;
-										if (wasFiltering) {
-											currentPage = 1;
-											loadAll(1);
-										}
-									}}
-								>
-									{#snippet leadingIcon()}<X size={14} aria-hidden="true" />{/snippet}
-								</Button>
-							</div>
-						</div>
+			<div
+				class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				data-ui="software-route-groups"
+			>
+				<FilterBar>
+					{#snippet filters()}
 						{#if canManage}
-							<div class="shrink-0">
-								<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
+							<div class="flex cursor-pointer select-none items-center gap-2 text-sm">
+								<Checkbox
+									id="software-batch-select-all"
+									checked={allBatchPageSelected}
+									indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
+									onchange={toggleBatchSelectAll}
+								/>
+								<label for="software-batch-select-all" class="cursor-pointer select-none">Select all</label>
 							</div>
+							<span class="h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true"></span>
 						{/if}
-					</header>
-					{#if error}
-						<div class="content-padding">
-							<Callout tone="danger" title="Unable to load software items" message={error}>
-								<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
-							</Callout>
-						</div>
-					{:else if loading}
-						<p class="px-4 py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
-					{:else if items.length === 0}
-						<div class="px-4 py-8 text-center">
-							<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
-						</div>
-					{:else}
-						<SoftwareGroupList
-							{items}
-							{itemDetailsById}
-							{itemDetailLoadingIds}
-							{collapsedGroupIds}
-							{expandedOverflowGroupIds}
-							{batchSelectedIds}
-							{canManage}
-							{canTriggerUpdates}
-							{pluginTypeNames}
-							{totalItems}
-							{currentPage}
-							{totalPages}
-							{showUpdatableOnly}
-							onToggleGroup={toggleGroupCollapsed}
-							onToggleOverflow={toggleGroupOverflow}
-							onToggleBatch={toggleBatchSelect}
-							onOpenMenu={toggleMenu}
-							onOpenUpdateAllModal={openUpdateAllModal}
-							onOpenSingleHostUpdate={openSingleHostUpdate}
-							onOpenLiveModal={openLiveModal}
-							onPageChange={loadAll}
-							onToggleFeatured={toggleFeatured}
+						<Select
+							id="software-featured-filter"
+							width="auto"
+							value={featured.value}
+							aria-label="Filter by featured status"
+							options={[
+								{ value: 'all', label: 'All' },
+								{ value: 'featured', label: 'Featured' },
+								{ value: 'unfeatured', label: 'Unfeatured' }
+							]}
+							onchange={(e) => {
+								featured.set((e.currentTarget as HTMLSelectElement).value as 'all' | 'featured' | 'unfeatured');
+							}}
 						/>
-					{/if}
-				</div>
-
-				{#if canManage && batchSelectedIds.size > 0}
-					<BatchActionBar
-						selectedCount={batchSelectedIds.size}
-						actions={batchActions}
-						onaction={requestBatchAction}
-						oncancel={() => {
-							batchSelectedIds.clear();
-							batchSelectedItemsMap.clear();
-						}}
-						selectAllPages={selectAllPagesInfo}
+						<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
+							<Checkbox
+								id="software-filter-updatable-only"
+								checked={updatable.value}
+								onchange={(e) => {
+									updatable.set((e.currentTarget as HTMLInputElement).checked);
+								}}
+							/>
+							Updates available
+						</label>
+						{#if pluginTypeOptions.length > 0}
+							<Select
+								id="software-plugin-filter"
+								width="auto"
+								value={pluginType.value}
+								aria-label="Filter by plugin"
+								options={[
+									{ value: '', label: 'All plugins' },
+									...pluginTypeOptions.map((opt) => ({
+										value: opt.plugin_type,
+										label: opt.display_name
+									}))
+								]}
+								onchange={(e) => {
+									pluginType.set((e.currentTarget as HTMLSelectElement).value);
+								}}
+							/>
+						{/if}
+						<ExpandableSearch
+							id="software-name-filter"
+							value={queryParam.value}
+							onchange={(v) => {
+								queryParam.set(v);
+							}}
+							placeholder="Filter by name"
+						/>
+					{/snippet}
+					{#snippet actions()}
+						{#if canManage}
+							<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
+						{/if}
+					{/snippet}
+				</FilterBar>
+				{#if error}
+					<div class="content-padding">
+						<Callout tone="danger" title="Unable to load software items" message={error}>
+							<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
+						</Callout>
+					</div>
+				{:else if loading}
+					<p class="px-4 py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
+				{:else if items.length === 0}
+					<div class="px-4 py-8 text-center">
+						<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
+					</div>
+				{:else}
+					<SoftwareGroupList
+						{items}
+						{itemDetailsById}
+						{itemDetailLoadingIds}
+						{collapsedGroupIds}
+						{expandedOverflowGroupIds}
+						{batchSelectedIds}
+						{canManage}
+						{canTriggerUpdates}
+						{pluginTypeNames}
+						{totalItems}
+						{currentPage}
+						{totalPages}
+						showUpdatableOnly={updatable.value}
+						onToggleGroup={toggleGroupCollapsed}
+						onToggleOverflow={toggleGroupOverflow}
+						onToggleBatch={toggleBatchSelect}
+						onOpenMenu={toggleMenu}
+						onOpenUpdateAllModal={openUpdateAllModal}
+						onOpenSingleHostUpdate={openSingleHostUpdate}
+						onOpenLiveModal={openLiveModal}
+						onPageChange={setPage}
+						onToggleFeatured={toggleFeatured}
 					/>
 				{/if}
+			</div>
 
-				{#if batchConfirmAction}
-					<ConfirmDialog
-						title={batchConfirmAction === 'update-all' ? 'Update All' : `Batch ${batchConfirmAction}`}
-						messagePrefix={batchConfirmAction === 'update-all'
-							? 'Trigger updates for all available updates across'
-							: `Are you sure you want to ${batchConfirmAction}`}
-						entityName="{batchSelectedIds.size} software item(s)"
-						confirmLabel={submitting
-							? 'Processing...'
-							: batchConfirmAction === 'update-all'
-								? 'Update All'
-								: batchConfirmAction === 'feature'
-									? 'Feature'
-									: batchConfirmAction === 'unfeature'
-										? 'Unfeature'
-										: 'Delete'}
-						confirmVariant={batchConfirmAction === 'update-all' ||
-						batchConfirmAction === 'feature' ||
-						batchConfirmAction === 'unfeature'
-							? 'primary'
-							: 'danger'}
-						confirmDisabled={submitting}
-						onconfirm={executeBatchAction}
-						oncancel={() => (batchConfirmAction = null)}
-					/>
-				{/if}
+			{#if canManage && batchSelectedIds.size > 0}
+				<BatchActionBar
+					selectedCount={batchSelectedIds.size}
+					actions={batchActions}
+					onaction={requestBatchAction}
+					oncancel={() => {
+						batchSelectedIds.clear();
+						batchSelectedItemsMap.clear();
+					}}
+					selectAllPages={selectAllPagesInfo}
+				/>
+			{/if}
 
-				{#if batchResult}
-					<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
-				{/if}
+			{#if batchConfirmAction}
+				<ConfirmDialog
+					title={batchConfirmAction === 'update-all' ? 'Update All' : `Batch ${batchConfirmAction}`}
+					messagePrefix={batchConfirmAction === 'update-all'
+						? 'Trigger updates for all available updates across'
+						: `Are you sure you want to ${batchConfirmAction}`}
+					entityName="{batchSelectedIds.size} software item(s)"
+					confirmLabel={submitting
+						? 'Processing...'
+						: batchConfirmAction === 'update-all'
+							? 'Update All'
+							: batchConfirmAction === 'feature'
+								? 'Feature'
+								: batchConfirmAction === 'unfeature'
+									? 'Unfeature'
+									: 'Delete'}
+					confirmVariant={batchConfirmAction === 'update-all' ||
+					batchConfirmAction === 'feature' ||
+					batchConfirmAction === 'unfeature'
+						? 'primary'
+						: 'danger'}
+					confirmDisabled={submitting}
+					onconfirm={executeBatchAction}
+					oncancel={() => (batchConfirmAction = null)}
+				/>
+			{/if}
 
-				{#if openMenuId && menuAnchor}
-					{@const item = items.find((i) => i.id === openMenuId)}
-					{#if item}
-						<ContextMenuShell anchorRect={menuAnchor} onclose={closeMenu}>
+			{#if batchResult}
+				<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+			{/if}
+
+			{#if openMenuId && menuAnchor}
+				{@const item = items.find((i) => i.id === openMenuId)}
+				{#if item}
+					<ContextMenuShell anchorRect={menuAnchor} onclose={closeMenu}>
+						<li>
+							<ContextMenuItem
+								label={item.featured ? 'Unfeature' : 'Feature'}
+								onclick={() => {
+									toggleFeatured(item);
+									closeMenu();
+								}}
+							/>
+						</li>
+						<li>
+							<ContextMenuItem label="Edit" onclick={() => openEditModal(item)} />
+						</li>
+						<li>
+							<ContextMenuItem
+								label={checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
+								disabled={checkingVersionsId === item.id}
+								onclick={() => triggerVersionCheck(item)}
+							/>
+						</li>
+						<li>
+							<ContextMenuItem label="Assign to Host" onclick={() => openAssignModal(item)} />
+						</li>
+						{#if item.update_available && canTriggerUpdates}
 							<li>
-								<ContextMenuItem
-									label={item.featured ? 'Unfeature' : 'Feature'}
-									onclick={() => {
-										toggleFeatured(item);
-										closeMenu();
-									}}
-								/>
+								<ContextMenuItem label="Trigger Update" onclick={() => openUpdateAllModal(item)} />
 							</li>
+						{/if}
+						{#if canMergeSoftware}
 							<li>
-								<ContextMenuItem label="Edit" onclick={() => openEditModal(item)} />
+								<ContextMenuItem label="Merge..." onclick={() => openSingleItemMerge(item)} />
 							</li>
-							<li>
-								<ContextMenuItem
-									label={checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
-									disabled={checkingVersionsId === item.id}
-									onclick={() => triggerVersionCheck(item)}
-								/>
-							</li>
-							<li>
-								<ContextMenuItem label="Assign to Host" onclick={() => openAssignModal(item)} />
-							</li>
-							{#if item.update_available && canTriggerUpdates}
-								<li>
-									<ContextMenuItem label="Trigger Update" onclick={() => openUpdateAllModal(item)} />
-								</li>
-							{/if}
-							{#if canMergeSoftware}
-								<li>
-									<ContextMenuItem label="Merge..." onclick={() => openSingleItemMerge(item)} />
-								</li>
-							{/if}
-							<li>
-								<ContextMenuItem label="Delete" destructive onclick={() => requestDelete(item)} />
-							</li>
-						</ContextMenuShell>
-					{/if}
+						{/if}
+						<li>
+							<ContextMenuItem label="Delete" destructive onclick={() => requestDelete(item)} />
+						</li>
+					</ContextMenuShell>
 				{/if}
+			{/if}
 
-				{#if confirmDelete}
-					<ConfirmDialog
-						title="Delete Software Item"
-						messagePrefix="Are you sure you want to delete"
-						entityName={confirmDelete.name}
-						confirmLabel={submitting ? 'Deleting...' : 'Delete'}
-						confirmDisabled={submitting}
-						onconfirm={executeDelete}
-						oncancel={() => (confirmDelete = null)}
-					/>
-				{/if}
+			{#if confirmDelete}
+				<ConfirmDialog
+					title="Delete Software Item"
+					messagePrefix="Are you sure you want to delete"
+					entityName={confirmDelete.name}
+					confirmLabel={submitting ? 'Deleting...' : 'Delete'}
+					confirmDisabled={submitting}
+					onconfirm={executeDelete}
+					oncancel={() => (confirmDelete = null)}
+				/>
+			{/if}
 
-				{#if assignItem}
-					<AssignToHostModal
-						softwareItemId={assignItem.id}
-						softwareItemName={assignItem.name}
-						onclose={() => (assignItem = null)}
-						onsuccess={() => {
-							assignItem = null;
-							loadAll(currentPage);
-						}}
-					/>
-				{/if}
+			{#if assignItem}
+				<AssignToHostModal
+					softwareItemId={assignItem.id}
+					softwareItemName={assignItem.name}
+					onclose={() => (assignItem = null)}
+					onsuccess={() => {
+						assignItem = null;
+						loadAll(currentPage);
+					}}
+				/>
+			{/if}
 
-				{#if mergeModalOpen}
-					<SoftwareMergeWizard
-						candidates={mergeInitialCandidates}
-						seedItemId={mergeSeedItemId}
-						searchCandidates={searchMergeCandidates}
-						initialSearchQuery={mergeSeedItemId ? mergeInitialSearchQuery : undefined}
-						previewMerge={previewSoftwareItemMerge}
-						executeMerge={executeSoftwareItemMerge}
-						onclose={() => {
-							mergeModalOpen = false;
-							mergeInitialCandidates = [];
-							mergeSeedItemId = null;
-							mergeInitialSearchQuery = '';
-						}}
-						onsuccess={async () => {
-							mergeModalOpen = false;
-							mergeInitialCandidates = [];
-							mergeSeedItemId = null;
-							mergeInitialSearchQuery = '';
-							batchSelectedIds.clear();
-							batchSelectedItemsMap.clear();
-							showSuccess('Software items merged.');
-							await loadAll(currentPage);
-							const p = nextValidPage(currentPage, totalPages);
-							if (p !== null) await loadAll(p);
-						}}
-					/>
-				{/if}
+			{#if mergeModalOpen}
+				<SoftwareMergeWizard
+					candidates={mergeInitialCandidates}
+					seedItemId={mergeSeedItemId}
+					searchCandidates={searchMergeCandidates}
+					initialSearchQuery={mergeSeedItemId ? mergeInitialSearchQuery : undefined}
+					previewMerge={previewSoftwareItemMerge}
+					executeMerge={executeSoftwareItemMerge}
+					onclose={() => {
+						mergeModalOpen = false;
+						mergeInitialCandidates = [];
+						mergeSeedItemId = null;
+						mergeInitialSearchQuery = '';
+					}}
+					onsuccess={async () => {
+						mergeModalOpen = false;
+						mergeInitialCandidates = [];
+						mergeSeedItemId = null;
+						mergeInitialSearchQuery = '';
+						batchSelectedIds.clear();
+						batchSelectedItemsMap.clear();
+						showSuccess('Software items merged.');
+						await loadAll(currentPage);
+						const p = nextValidPage(currentPage, totalPages);
+						if (p !== null) await loadAll(p);
+					}}
+				/>
+			{/if}
 
-				{#if showAddModal}
-					<AddSoftwareModal
-						onclose={() => (showAddModal = false)}
-						onsuccess={() => {
-							showAddModal = false;
-							loadAll(1);
-						}}
-					/>
+			{#if showAddModal}
+				<AddSoftwareModal
+					onclose={() => (showAddModal = false)}
+					onsuccess={() => {
+						showAddModal = false;
+						resetToPage1();
+					}}
+				/>
+			{/if}
+
+			<details
+				class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				bind:open={ignoreRulesOpen}
+			>
+				<summary class="card-padding cursor-pointer select-none text-sm font-semibold">Ignore Rules</summary>
+				{#if ignoreRulesOpen}
+					<div class="border-t border-[var(--border-subtle)]">
+						<IgnoreRulesTab />
+					</div>
 				{/if}
-			{:else if activeTab === 'ignores'}
-				<IgnoreRulesTab />
-			{:else if showSurfaceSoftwareTabs}
+			</details>
+
+			{#if showSurfaceSoftwareTabs}
+				<TabStrip
+					items={slotTabSurfaces.map((s) => ({ id: s.surface_id, label: s.label }))}
+					activeId={activeSurfaceTab}
+					ariaLabel="Extension tabs"
+					idBase="software-surface"
+					onSelect={(id) => (activeSurfaceTab = id)}
+				/>
 				{#each slotTabSurfaces as surface (surface.surface_id)}
-					{#if activeTab === surface.surface_id}
+					{#if activeSurfaceTab === surface.surface_id}
 						<SectionCard title={surface.label}>
 							<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
 						</SectionCard>
