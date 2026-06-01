@@ -125,21 +125,6 @@ describe('Services Page', () => {
 		expect(screen.queryByText('Services')).not.toBeInTheDocument();
 	});
 
-	it('calls getServices with the software_discovery capability when the Agents filter button is clicked', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([]));
-		render(ServicesPage);
-		// Wait for the initial load triggered by $effect
-		await waitFor(() => expect(vi.mocked(api.getServices)).toHaveBeenCalledTimes(1));
-
-		fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
-
-		await waitFor(() =>
-			expect(vi.mocked(api.getServices)).toHaveBeenCalledWith(
-				expect.objectContaining({ capability: 'software_discovery' })
-			)
-		);
-	});
-
 	it('displays the Pending status badge for a pending service', async () => {
 		vi.mocked(api.getServices).mockResolvedValue(makePage([{ ...approvedAgent, status: 'pending' }]));
 		render(ServicesPage);
@@ -177,52 +162,28 @@ describe('Services Page', () => {
 		expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
 	});
 
-	describe('capability filter chips', () => {
+	describe('capability filter Select', () => {
 		beforeEach(() => {
 			vi.mocked(api.getServices).mockResolvedValue(makePage([]));
 		});
 
-		it('All Services chip is active by default — carries solid accent variant', async () => {
+		it('Select is present inside [data-ui="filter-bar"]', async () => {
 			render(ServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'All Services' })).toBeInTheDocument());
-			const allChip = screen.getByRole('button', { name: 'All Services' });
-			expect(allChip.className).toContain('bg-[var(--accent)]');
-			expect(allChip.className).toContain('text-[var(--text-inverted)]');
+			await waitFor(() => expect(screen.getByLabelText('Filter by capability')).toBeInTheDocument());
+			const select = screen.getByLabelText('Filter by capability') as HTMLSelectElement;
+			expect(select.value).toBe('all');
 		});
 
-		it('inactive chips carry no solid accent variant', async () => {
+		it('no separate "Service Filters" SectionCard', async () => {
 			render(ServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument());
-			for (const label of ['Agents', 'SSH Agents']) {
-				const chip = screen.getByRole('button', { name: label });
-				expect(chip.className).not.toContain('bg-[var(--accent)]');
-				expect(chip.className).not.toContain('text-[var(--text-inverted)]');
-			}
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Registered Services' })).toBeInTheDocument());
+			expect(screen.queryByRole('heading', { name: 'Service Filters' })).not.toBeInTheDocument();
 		});
 
-		it('clicking Agents chip makes it active and deactivates All Services', async () => {
+		it('initial load calls getServices with no capability filter', async () => {
 			render(ServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
-			await waitFor(() => {
-				const agentsChip = screen.getByRole('button', { name: 'Agents' });
-				expect(agentsChip.className).toContain('bg-[var(--accent)]');
-				expect(agentsChip.className).toContain('text-[var(--text-inverted)]');
-			});
-			expect(screen.getByRole('button', { name: 'All Services' }).className).not.toContain(
-				'text-[var(--text-inverted)]'
-			);
-		});
-
-		it('clicking SSH Agents chip makes it active', async () => {
-			render(ServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'SSH Agents' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'SSH Agents' }));
-			await waitFor(() => {
-				const sshChip = screen.getByRole('button', { name: 'SSH Agents' });
-				expect(sshChip.className).toContain('bg-[var(--accent)]');
-				expect(sshChip.className).toContain('text-[var(--text-inverted)]');
-			});
+			await waitFor(() => expect(vi.mocked(api.getServices)).toHaveBeenCalled());
+			expect(vi.mocked(api.getServices)).toHaveBeenCalledWith(expect.objectContaining({ capability: undefined }));
 		});
 	});
 
@@ -331,7 +292,7 @@ describe('Services Page', () => {
 				makePage([pendingAgent, { ...approvedAgent, id: 'svc-target', capabilities: ['software_discovery'] }])
 			);
 			await openMergeModal();
-			const select = document.querySelector('select') as HTMLSelectElement;
+			const select = document.querySelector('#merge-target') as HTMLSelectElement;
 			fireEvent.change(select, { target: { value: 'svc-target' } });
 			await waitFor(() => expect(screen.getByRole('button', { name: /^merge$/i })).not.toBeDisabled());
 			fireEvent.click(screen.getByRole('button', { name: /^merge$/i }));
