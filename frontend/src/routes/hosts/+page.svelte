@@ -27,6 +27,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FilterBar,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -335,6 +336,9 @@
 {#if getUser()}
 	<PageShell title="Hosts" description="Manage enrolled hosts and trigger host-level actions.">
 		<SectionCard title="Registered Hosts" description="Hosts appear here after approved agents enroll.">
+			{#snippet filterBar()}
+				<FilterBar />
+			{/snippet}
 			<div class="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-ui="host-stat-grid">
 				<article
 					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
