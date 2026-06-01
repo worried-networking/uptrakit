@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getHostTags,
@@ -18,6 +17,7 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
+	import { createUrlParam } from '$lib/url-params.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Checkbox, Input, Textarea } from '$lib/components/forms';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
@@ -28,6 +28,8 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		ExpandableSearch,
+		FilterBar,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -42,11 +44,16 @@
 	let menuAnchor: DOMRect | null = $state(null);
 	let confirmAction: { tagId: string; action: 'delete'; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
-	let currentPage: number = $state(parseUrlPage(page.url));
+	const currentPage = $derived(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
-	let searchQuery: string = $state('');
-	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+	const queryParam = createUrlParam('query');
+
+	$effect(() => {
+		void queryParam.value;
+		const pg = currentPage;
+		untrack(() => loadTags(pg));
+	});
 
 	function getDefaultTagColor(): string {
 		if (typeof document === 'undefined') return '#06b6d4';
@@ -79,17 +86,7 @@
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
 
-	$effect(() => {
-		const search = currentPage > 1 ? `page=${currentPage}` : '';
-		goto(search ? `${location.pathname}?${search}` : location.pathname, {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true
-		});
-	});
-
 	onMount(() => {
-		loadTags(currentPage);
 		unsubscribers.push(
 			subscribeToEvent(AdminEventType.HostTagCreated, () => loadTags(currentPage, true)),
 			subscribeToEvent(AdminEventType.HostTagUpdated, () => loadTags(currentPage, true)),
@@ -103,15 +100,13 @@
 	onDestroy(() => {
 		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
-		if (searchTimeout) clearTimeout(searchTimeout);
 	});
 
 	async function loadTags(pg: number, background = false) {
 		try {
 			if (!background) error = null;
-			const result = await getHostTags(pg, undefined, searchQuery || undefined);
+			const result = await getHostTags(pg, undefined, queryParam.value || undefined);
 			tags = result.items;
-			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
 			if (background) error = null;
@@ -120,17 +115,6 @@
 				error = e instanceof Error ? e.message : 'Failed to load tags';
 			}
 		}
-	}
-
-	function handleSearchInput(event: Event) {
-		const value = (event.target as HTMLInputElement).value;
-		searchQuery = value;
-		if (searchTimeout) clearTimeout(searchTimeout);
-		searchTimeout = setTimeout(() => {
-			selectedIds.clear();
-			currentPage = 1;
-			loadTags(1);
-		}, 300);
 	}
 
 	function toggleMenu(id: string, button: HTMLElement) {
@@ -253,7 +237,7 @@
 		try {
 			let p = 1;
 			while (true) {
-				const result = await getHostTags(p, 100, searchQuery || undefined);
+				const result = await getHostTags(p, 100, queryParam.value || undefined);
 				for (const tag of result.items) selectedIds.add(tag.id);
 				if (p >= result.total_pages) break;
 				p++;
@@ -301,23 +285,24 @@
 
 {#if getUser()}
 	<PageShell title="Host Tags" description="Organize hosts into reusable groups for targeting and discovery.">
-		{#snippet actions()}
-			{#if canManage}
-				<Button variant="primary" onclick={openCreateDialog}>Create Tag</Button>
-			{/if}
-		{/snippet}
-
-		<SectionCard title="Search">
-			<Input
-				id="search-tags"
-				type="text"
-				placeholder="Search tags..."
-				value={searchQuery}
-				oninput={handleSearchInput}
-			/>
-		</SectionCard>
-
 		<SectionCard title="Tags">
+			{#snippet filterBar()}
+				<FilterBar>
+					{#snippet filters()}
+						<ExpandableSearch
+							id="tags-name-filter"
+							value={queryParam.value}
+							onchange={(v) => queryParam.set(v)}
+							placeholder="Filter by name"
+						/>
+					{/snippet}
+					{#snippet actions()}
+						{#if canManage}
+							<Button variant="primary" onclick={openCreateDialog}>Create Tag</Button>
+						{/if}
+					{/snippet}
+				</FilterBar>
+			{/snippet}
 			<DataTable
 				columns={[]}
 				rows={tags as unknown as Record<string, unknown>[]}
