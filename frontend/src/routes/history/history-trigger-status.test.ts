@@ -192,10 +192,11 @@ describe('History Trigger Update Modal', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
 
-		const selects = screen.getAllByRole('combobox');
-		await fireEvent.change(selects[0], { target: { value: 'software-1' } });
-		await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
-		await fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'host-1' } });
+		const itemSelect = document.querySelector('#trigger-software-item') as HTMLSelectElement;
+		await fireEvent.change(itemSelect, { target: { value: 'software-1' } });
+		await waitFor(() => expect(document.querySelector('#trigger-host')).not.toBeNull());
+		const hostSelect = document.querySelector('#trigger-host') as HTMLSelectElement;
+		await fireEvent.change(hostSelect, { target: { value: 'host-1' } });
 
 		await fireEvent.input(screen.getByPlaceholderText('e.g. 1.2.3'), { target: { value: '1.1.0' } });
 		const triggerButtons = screen.getAllByRole('button', { name: 'Trigger Update' });
@@ -297,10 +298,11 @@ describe('History Trigger Update Modal', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 			await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
 
-			const selects = screen.getAllByRole('combobox');
-			await fireEvent.change(selects[0], { target: { value: 'software-1' } });
-			await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
-			await fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'host-1' } });
+			const itemSelect = document.querySelector('#trigger-software-item') as HTMLSelectElement;
+			await fireEvent.change(itemSelect, { target: { value: 'software-1' } });
+			await waitFor(() => expect(document.querySelector('#trigger-host')).not.toBeNull());
+			const hostSelect = document.querySelector('#trigger-host') as HTMLSelectElement;
+			await fireEvent.change(hostSelect, { target: { value: 'host-1' } });
 			await fireEvent.input(screen.getByPlaceholderText('e.g. 1.2.3'), { target: { value: '1.1.0' } });
 
 			const allTriggerBtns = screen.getAllByRole('button', { name: 'Trigger Update' });

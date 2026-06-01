@@ -2,12 +2,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { Permission, type UpdateHistoryResponse } from '$lib/types';
 import { page } from '$app/state';
+import { goto } from '$app/navigation';
 
 const interactiveMocks = vi.hoisted(() => ({
 	disconnect: vi.fn(),
 	sendSignal: vi.fn(),
 	sendInput: vi.fn()
 }));
+
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 vi.mock('$lib/api', () => ({
 	listUpdateHistory: vi.fn(),
@@ -170,8 +173,10 @@ describe('History Route', () => {
 	});
 
 	beforeEach(() => {
-		page.url.pathname = '/history';
-		page.url.search = '';
+		Object.defineProperty(page, 'url', {
+			value: new URL('http://localhost/history'),
+			configurable: true
+		});
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date('2026-02-01T12:00:00Z'));
 		vi.mocked(auth.getUser).mockReturnValue(user);
@@ -255,39 +260,50 @@ describe('History Route', () => {
 		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
 	});
 
-	describe('filter chips', () => {
-		it('renders inactive filter chip as ghost sm with no active class', async () => {
+	describe('status filter (FilterBar)', () => {
+		it('renders the status Select inside the FilterBar with no separate Filters SectionCard', async () => {
 			render(HistoryPage);
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			// 'Completed' chip should be inactive — statusFilter defaults to 'all'
-			const completedChip = screen.getByRole('button', { name: 'Completed' });
-			expect(completedChip).toBeInTheDocument();
-			// ghost variant: has border border-[var(--border-default)]
-			expect(completedChip.className).toContain('border-[var(--border-default)]');
-			// no active override
-			expect(completedChip.className).not.toContain('text-[var(--accent)]');
-			expect(completedChip.className).not.toContain('bg-[var(--bg-hover)]');
+			const filterBar = document.querySelector('[data-ui="filter-bar"]');
+			expect(filterBar).not.toBeNull();
+			const select = filterBar!.querySelector('#history-status-filter') as HTMLSelectElement | null;
+			expect(select).not.toBeNull();
+			// 6 options: all, in_progress, queued, pending, failed, completed
+			expect(select!.querySelectorAll('option')).toHaveLength(6);
+			// No separate Filters SectionCard heading.
+			expect(screen.queryByRole('heading', { name: 'Filters' })).not.toBeInTheDocument();
 		});
 
-		it('renders active filter chip with solid accent variant', async () => {
-			// Pre-set URL to status=completed so the chip renders active on mount
-			page.url.search = '?status=completed';
+		it('changing the status select calls goto with the new status param', async () => {
 			render(HistoryPage);
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			const completedChip = screen.getByRole('button', { name: 'Completed' });
-			expect(completedChip.className).toContain('bg-[var(--accent)]');
-			expect(completedChip.className).toContain('text-[var(--text-inverted)]');
+			vi.mocked(goto).mockClear();
+			const select = document.querySelector('#history-status-filter') as HTMLSelectElement;
+			expect(select).not.toBeNull();
+			await fireEvent.change(select, { target: { value: 'completed' } });
+			expect(vi.mocked(goto)).toHaveBeenCalled();
+			const target = vi.mocked(goto).mock.calls[0][0] as URL;
+			expect(target.searchParams.get('status')).toBe('completed');
 		});
 
-		it('renders All chip as active by default', async () => {
+		it('reads status=completed from the URL on initial render', async () => {
+			Object.defineProperty(page, 'url', {
+				value: new URL('http://localhost/history?status=completed'),
+				configurable: true
+			});
+			vi.mocked(api.listUpdateHistory).mockResolvedValue({
+				items: [completedItem],
+				total: 1,
+				page: 1,
+				per_page: 25,
+				total_pages: 1
+			});
 			render(HistoryPage);
-			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
-
-			const allChip = screen.getByRole('button', { name: 'All' });
-			expect(allChip.className).toContain('bg-[var(--accent)]');
-			expect(allChip.className).toContain('text-[var(--text-inverted)]');
+			await waitFor(() => expect(vi.mocked(api.listUpdateHistory)).toHaveBeenCalled());
+			const lastCall = vi.mocked(api.listUpdateHistory).mock.calls.at(-1);
+			expect(lastCall?.[0]).toMatchObject({ status: 'completed' });
 		});
 	});
 
@@ -323,7 +339,10 @@ describe('History Route', () => {
 	});
 
 	it('hides the summary strip for non-all filters and later pages', async () => {
-		page.url.search = '?status=completed&page=2';
+		Object.defineProperty(page, 'url', {
+			value: new URL('http://localhost/history?status=completed&page=2'),
+			configurable: true
+		});
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
 			items: [completedItem],
 			total: 5,
