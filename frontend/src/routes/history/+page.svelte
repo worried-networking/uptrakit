@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		listUpdateHistory,
@@ -11,7 +10,7 @@
 		getUpdateHistoryEntry,
 		getSoftwareItem
 	} from '$lib/api';
-	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { Input, Select } from '$lib/components/forms';
@@ -24,6 +23,7 @@
 	import {
 		Callout,
 		EmptyState,
+		FilterBar,
 		PageShell,
 		SectionCard,
 		StatusBadge,
@@ -31,6 +31,7 @@
 		ModalShell
 	} from '$lib/components/ui';
 	import { FormFieldRow } from '$lib/components/forms';
+	import { createUrlParam } from '$lib/url-params.svelte';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
 	type HistoryDateGroup = {
@@ -50,10 +51,14 @@
 	let items: UpdateHistoryResponse[] = $state([]);
 	let loading: boolean = $state(false);
 	let error: string | null = $state(null);
-	let currentPage: number = $state(parseUrlPage(page.url));
+	const currentPage = $derived(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
-	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
+	const statusParam = createUrlParam<StatusFilter>('status', {
+		parse: (r): StatusFilter =>
+			(STATUS_FILTER_VALUES as readonly string[]).includes(r ?? '') ? (r as StatusFilter) : 'all',
+		serialize: (v) => (v === 'all' ? null : v)
+	});
 	let expandedId: string | null = $state(null);
 
 	// Interactive WS state for expanded in-progress items
@@ -104,20 +109,13 @@
 	);
 
 	$effect(() => {
-		const parts: string[] = [];
-		if (statusFilter !== 'all') parts.push(`status=${statusFilter}`);
-		if (currentPage > 1) parts.push(`page=${currentPage}`);
-		const search = parts.join('&');
-		goto(search ? `${location.pathname}?${search}` : location.pathname, {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true
-		});
+		void statusParam.value;
+		const pg = currentPage;
+		if (canView) untrack(() => loadHistory(pg));
 	});
 
 	onMount(() => {
 		if (canView) {
-			loadHistory(currentPage);
 			// Subscribe to admin events for real-time list updates.
 			disconnectEventStream = connectEventStream({
 				onEvent: (eventType, data) => {
@@ -127,7 +125,7 @@
 						// include it (pending / queued / all).
 						if (
 							currentPage === 1 &&
-							(statusFilter === 'all' || statusFilter === 'pending' || statusFilter === 'queued')
+							(statusParam.value === 'all' || statusParam.value === 'pending' || statusParam.value === 'queued')
 						) {
 							loadHistory(1);
 						}
@@ -137,7 +135,7 @@
 						if (
 							!items.some((i) => i.id === historyId) &&
 							currentPage === 1 &&
-							(statusFilter === 'all' || statusFilter === 'in_progress')
+							(statusParam.value === 'all' || statusParam.value === 'in_progress')
 						) {
 							loadHistory(1);
 						}
@@ -150,7 +148,11 @@
 						items = items.map((i) => (i.id === historyId ? { ...i, status: 'in_progress' as const, interactive } : i));
 						// If the item is not visible yet, reload page 1 when the active
 						// filter would include in-progress items.
-						if (!alreadyInList && currentPage === 1 && (statusFilter === 'all' || statusFilter === 'in_progress')) {
+						if (
+							!alreadyInList &&
+							currentPage === 1 &&
+							(statusParam.value === 'all' || statusParam.value === 'in_progress')
+						) {
 							loadHistory(1);
 						}
 					} else if (eventType === AdminEventType.UpdateCompleted) {
@@ -161,7 +163,7 @@
 							reloadItem(historyId);
 						} else if (
 							currentPage === 1 &&
-							(statusFilter === 'all' || statusFilter === 'completed' || statusFilter === status)
+							(statusParam.value === 'all' || statusParam.value === 'completed' || statusParam.value === status)
 						) {
 							// Completed items move into view on these filters.
 							loadHistory(1);
@@ -178,10 +180,9 @@
 		try {
 			const res = await listUpdateHistory({
 				page,
-				status: statusFilter === 'all' ? undefined : statusFilter
+				status: statusParam.value === 'all' ? undefined : statusParam.value
 			});
 			items = res.items;
-			currentPage = res.page;
 			totalPages = res.total_pages;
 			totalItems = res.total;
 		} catch (e) {
@@ -357,7 +358,7 @@
 		tone: 'warning' | 'info' | 'danger' | 'success';
 	};
 
-	const showSummaryStrip = $derived(statusFilter === 'all' && currentPage === 1 && !loading && !error);
+	const showSummaryStrip = $derived(statusParam.value === 'all' && currentPage === 1 && !loading && !error);
 
 	const summaryBuckets = $derived.by<SummaryBucket[]>(() => {
 		const counts = {
@@ -650,32 +651,35 @@
 				</section>
 			{/if}
 
-			<SectionCard title="Filters">
-				{#snippet actions()}
-					{#if canManage}
-						<Button variant="primary" size="sm" onclick={openTriggerModal}>Trigger Update</Button>
-					{/if}
-				{/snippet}
-				<div class="flex gap-1 flex-wrap">
-					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as s (s)}
-						{@const chipLabel = s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
-						<Button
-							variant={statusFilter === s ? 'accent' : 'ghost'}
-							size="sm"
-							ariaLabel={chipLabel}
-							onclick={() => {
-								currentPage = 1;
-								statusFilter = s as StatusFilter;
-								loadHistory(1);
-							}}
-						>
-							{chipLabel}
-						</Button>
-					{/each}
-				</div>
-			</SectionCard>
-
 			<SectionCard title="History Feed">
+				{#snippet filterBar()}
+					<FilterBar>
+						{#snippet filters()}
+							<Select
+								id="history-status-filter"
+								width="auto"
+								value={statusParam.value}
+								aria-label="Filter by status"
+								options={[
+									{ value: 'all', label: 'All' },
+									{ value: 'in_progress', label: 'In Progress' },
+									{ value: 'queued', label: 'Queued' },
+									{ value: 'pending', label: 'Pending' },
+									{ value: 'failed', label: 'Failed' },
+									{ value: 'completed', label: 'Completed' }
+								]}
+								onchange={(e) => {
+									statusParam.set((e.currentTarget as HTMLSelectElement).value as StatusFilter);
+								}}
+							/>
+						{/snippet}
+						{#snippet actions()}
+							{#if canManage}
+								<Button variant="primary" size="sm" onclick={openTriggerModal}>Trigger Update</Button>
+							{/if}
+						{/snippet}
+					</FilterBar>
+				{/snippet}
 				{#if loading}
 					<p class="py-8 text-center text-sm text-[var(--text-muted)]">Loading update history…</p>
 				{:else if error}
