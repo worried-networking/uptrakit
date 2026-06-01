@@ -5,11 +5,15 @@
 		title,
 		description,
 		actions,
+		filterBar,
 		children
 	}: {
 		title?: string;
 		description?: string;
 		actions?: Snippet;
+		/** Optional snippet rendered between title and children. When present, the title
+		 *  row loses its border-b (the FilterBar inside carries the single divider). */
+		filterBar?: Snippet;
 		children: Snippet;
 	} = $props();
 </script>
@@ -20,7 +24,9 @@
 >
 	{#if title || description || actions}
 		<header
-			class="flex flex-col gap-3 border-b border-[var(--border-subtle)] card-padding md:flex-row md:items-start md:justify-between"
+			class="flex flex-col gap-3 {filterBar
+				? ''
+				: 'border-b border-[var(--border-subtle)]'} card-padding md:flex-row md:items-start md:justify-between"
 		>
 			<div class="space-y-1">
 				{#if title}
@@ -36,6 +42,10 @@
 				</div>
 			{/if}
 		</header>
+	{/if}
+
+	{#if filterBar}
+		{@render filterBar()}
 	{/if}
 
 	<div class="card-padding">
