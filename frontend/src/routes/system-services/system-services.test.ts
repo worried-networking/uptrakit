@@ -112,68 +112,30 @@ describe('System Services Route', () => {
 		expect(within(badgeStack as HTMLElement).getByText('Yielded (1)')).toBeInTheDocument();
 	});
 
-	describe('status filter chips', () => {
-		it('All chip is active by default — carries solid accent variant', async () => {
-			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument());
-			const allChip = screen.getByRole('button', { name: 'All' });
-			expect(allChip.className).toContain('bg-[var(--accent)]');
-			expect(allChip.className).toContain('text-[var(--text-inverted)]');
+	describe('status filter Select', () => {
+		beforeEach(() => {
+			vi.mocked(api.getSystemServices).mockResolvedValue(makePage([]));
 		});
 
-		it('inactive chips carry no solid accent variant', async () => {
+		it('Select is present inside [data-ui="filter-bar"]', async () => {
 			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument());
-			for (const label of ['Pending', 'Approved', 'Rejected', 'Deactivated']) {
-				const chip = screen.getByRole('button', { name: label });
-				expect(chip.className).not.toContain('bg-[var(--accent)]');
-				expect(chip.className).not.toContain('text-[var(--text-inverted)]');
-			}
+			await waitFor(() => expect(screen.getByLabelText('Filter by status')).toBeInTheDocument());
+			const select = screen.getByLabelText('Filter by status') as HTMLSelectElement;
+			expect(select.value).toBe('all');
 		});
 
-		it('clicking Pending chip makes it active and deactivates All', async () => {
+		it('no separate "Status Filters" SectionCard', async () => {
 			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'Pending' }));
-			await waitFor(() => {
-				const pendingChip = screen.getByRole('button', { name: 'Pending' });
-				expect(pendingChip.className).toContain('bg-[var(--accent)]');
-				expect(pendingChip.className).toContain('text-[var(--text-inverted)]');
-			});
-			expect(screen.getByRole('button', { name: 'All' }).className).not.toContain('text-[var(--text-inverted)]');
+			await waitFor(() =>
+				expect(screen.getByRole('heading', { name: 'Registered System Services' })).toBeInTheDocument()
+			);
+			expect(screen.queryByRole('heading', { name: 'Status Filters' })).not.toBeInTheDocument();
 		});
 
-		it('clicking Approved chip makes it active', async () => {
+		it('initial load calls getSystemServices with no status filter', async () => {
 			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Approved' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'Approved' }));
-			await waitFor(() => {
-				const chip = screen.getByRole('button', { name: 'Approved' });
-				expect(chip.className).toContain('bg-[var(--accent)]');
-				expect(chip.className).toContain('text-[var(--text-inverted)]');
-			});
-		});
-
-		it('clicking Rejected chip makes it active', async () => {
-			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Rejected' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'Rejected' }));
-			await waitFor(() => {
-				const chip = screen.getByRole('button', { name: 'Rejected' });
-				expect(chip.className).toContain('bg-[var(--accent)]');
-				expect(chip.className).toContain('text-[var(--text-inverted)]');
-			});
-		});
-
-		it('clicking Deactivated chip makes it active', async () => {
-			render(SystemServicesPage);
-			await waitFor(() => expect(screen.getByRole('button', { name: 'Deactivated' })).toBeInTheDocument());
-			fireEvent.click(screen.getByRole('button', { name: 'Deactivated' }));
-			await waitFor(() => {
-				const chip = screen.getByRole('button', { name: 'Deactivated' });
-				expect(chip.className).toContain('bg-[var(--accent)]');
-				expect(chip.className).toContain('text-[var(--text-inverted)]');
-			});
+			await waitFor(() => expect(vi.mocked(api.getSystemServices)).toHaveBeenCalled());
+			expect(vi.mocked(api.getSystemServices)).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }));
 		});
 	});
 
