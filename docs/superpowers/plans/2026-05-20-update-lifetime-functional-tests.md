@@ -405,9 +405,10 @@ impl TestFixtures {
             id: Set(tenant_id),
             name: Set("test-tenant".to_string()),
             slug: Set("test-tenant".to_string()),
+            is_default: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
-            ..Default::default()
+            deactivated_at: Set(None),
         }
         .insert(db)
         .await
@@ -419,10 +420,16 @@ impl TestFixtures {
             tenant_id: Set(tenant_id),
             machine_id: Set("test-machine".to_string()),
             hostname: Set("test-host".to_string()),
-            active: Set(true),
+            friendly_name: Set("test-host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
-            ..Default::default()
+            deactivated_at: Set(None),
         }
         .insert(db)
         .await
@@ -432,23 +439,32 @@ impl TestFixtures {
         service::ActiveModel {
             id: Set(service_id),
             tenant_id: Set(tenant_id),
-            name: Set("test-agent".to_string()),
-            service_type: Set(uptrakit_shared_types::ServiceType::Agent),
+            capabilities: Set(String::new()),
+            hostname: Set("test-agent-host".to_string()),
+            friendly_name: Set("test-agent".to_string()),
+            ip_address: Set(None),
             status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("test-hash-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
-            ..Default::default()
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         }
         .insert(db)
         .await
         .expect("insert service");
 
         service_host::ActiveModel {
-            id: Set(Uuid::now_v7()),
             service_id: Set(service_id),
             host_id: Set(host_id),
-            created_at: Set(now),
-            ..Default::default()
+            linked_at: Set(now),
         }
         .insert(db)
         .await
@@ -459,10 +475,13 @@ impl TestFixtures {
             id: Set(software_item_id),
             tenant_id: Set(tenant_id),
             name: Set("test-software".to_string()),
-            active: Set(true),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
-            ..Default::default()
+            deactivated_at: Set(None),
+            awaiting_restart_timeout: Set(None),
         }
         .insert(db)
         .await
@@ -473,11 +492,19 @@ impl TestFixtures {
             id: Set(host_software_item_id),
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
-            tenant_id: Set(tenant_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
         }
         .insert(db)
         .await
@@ -568,14 +595,27 @@ impl TestFixtures {
             tenant_id: Set(tenant_id),
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
-            host_software_item_id: Set(host_software_item_id),
+            host_software_item_id: Set(Some(host_software_item_id)),
             from_version: Set(Some("1.0.0".to_string())),
-            to_version: Set("2.0.0".to_string()),
+            to_version: Set(Some("2.0.0".to_string())),
             status: Set(update_history::UpdateStatus::Pending),
-            interactive: Set(false),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("test".to_string()),
+            actor_id: Set("functional-tests".to_string()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(None),
+            completed_at: Set(None),
+            awaiting_restart_since: Set(None),
             created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+            update_category: Set("unknown".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -597,7 +637,7 @@ impl TestFixtures {
 }
 ```
 
-> **Implementer note:** the exact `ActiveModel` field set for each entity is what the SeaORM `DeriveEntityModel` generates from the schema in `crates/shared/db/src/entity/`. The block above lists every column referenced by spec assertions; any column with `..Default::default()` is a column not relied on. If a NOT-NULL column without a default trips the insert, set it explicitly to the entity's documented default (do not chase the error by adding `Default` derives upstream — that is scope creep).
+> **Implementer note:** every `ActiveModel { ... }` block above enumerates every field of the entity per the schema in `crates/shared/db/src/entity/`, so it does not rely on SeaORM's auto-derived `Default`. If a future schema migration adds a column, the test build breaks at this site (which is what you want — silent `..Default::default()` would mask schema drift).
 
 - [ ] **Step 5: Run the test, observe pass**
 
@@ -665,9 +705,8 @@ Expected: FAIL — `no method named pending_work`.
 Append to `crates/core/functional-tests/tests/support/fixtures.rs`:
 
 ```rust
-use uptrakit_web_api_queries::queries::update_dispatch::{
-    PendingProtectionWork, ValidatedUpdateTarget,
-};
+use uptrakit_web_api_queries::queries::update_dispatch::ValidatedUpdateTarget;
+use uptrakit_web_api_queries::queries::update_triggers::PendingProtectionWork;
 
 impl TestFixtures {
     pub async fn pending_work(
@@ -777,7 +816,7 @@ Append to `crates/core/functional-tests/tests/proxmox_update_lifecycle.rs`:
 #[tokio::test]
 async fn build_plugin_ops_with_proxmox_returns_protection_and_hook() {
     let plugin_ops = support::stubs::build_plugin_ops(true);
-    use uptrakit_plugin_infrastructure_core::roles::{
+    use uptrakit_plugin_infrastructure_core::plugin_ops::{
         ControllerUpdateHookOps, ControllerUpdateProtectionOps,
     };
     assert!(plugin_ops.controller_update_protection().is_some());
@@ -787,7 +826,7 @@ async fn build_plugin_ops_with_proxmox_returns_protection_and_hook() {
 #[tokio::test]
 async fn build_plugin_ops_without_proxmox_returns_none() {
     let plugin_ops = support::stubs::build_plugin_ops(false);
-    use uptrakit_plugin_infrastructure_core::roles::{
+    use uptrakit_plugin_infrastructure_core::plugin_ops::{
         ControllerUpdateHookOps, ControllerUpdateProtectionOps,
     };
     assert!(plugin_ops.controller_update_protection().is_none());
@@ -795,7 +834,7 @@ async fn build_plugin_ops_without_proxmox_returns_none() {
 }
 ```
 
-> **Implementer note:** the precise import path for the `ControllerUpdate{Protection,Hook}Ops` traits varies by feature set. If the import above fails to resolve, run `rg "pub trait ControllerUpdateProtectionOps" crates/plugins/infrastructure/core/src` to find the actual path; do not reach beyond `crates/plugins/infrastructure/core/` to discover it.
+> **Implementer note:** `ControllerUpdate{Protection,Hook}Ops` are defined in `crates/plugins/infrastructure/core/src/plugin_ops.rs:362,372` (verified at plan-write time). The full traits hierarchy that `PluginCatalog: PluginOps` provides is documented above the `pub trait PluginOps` declaration in that file.
 
 - [ ] **Step 2: Run, observe failure**
 
@@ -820,16 +859,19 @@ Write `crates/core/functional-tests/tests/support/stubs.rs`:
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use uptrakit_controller_core::{
+use uptrakit_controller_core::connections::ServiceConnectionRegistry;
+use uptrakit_controller_core::notification::{
     EventBroadcaster, NotificationDispatcher, NotificationService, NotificationState,
 };
-use uptrakit_plugin_infrastructure_core::{
-    plugin_ops::PluginOps, CatalogConfig, InstancePluginStates, PluginCatalog,
-};
+use uptrakit_controller_core::update::UpdateOutputStream;
+use uptrakit_plugin_infrastructure_core::plugin_ops::PluginOps;
+use uptrakit_plugin_infrastructure_core::{CatalogConfig, InstancePluginStates, PluginCatalog};
 use uptrakit_plugin_infrastructure_proxmox::DESCRIPTOR as PROXMOX_DESCRIPTOR;
+use uptrakit_shared_types::OutputStreamType;
 use uptrakit_wire::ControllerMessage;
 
 /// Build a real `PluginCatalog` over `Arc<dyn PluginOps>`.
@@ -872,8 +914,6 @@ pub struct TestNotificationSetup {
 
 impl TestNotificationSetup {
     pub async fn new(agent_service_id: Uuid) -> Self {
-        use uptrakit_controller_core::ServiceConnectionRegistry;
-
         let registry = ServiceConnectionRegistry::new();
         let (message_rx, _handle) = registry
             .register(agent_service_id, BTreeSet::new(), None, None, None)
@@ -901,20 +941,40 @@ impl TestNotificationSetup {
     }
 }
 
-/// No-op `UpdateOutputStream`. All methods have empty bodies.
+/// No-op `UpdateOutputStream`. All three trait methods drop their inputs.
 pub struct NoopOutputStream;
 
 #[async_trait::async_trait]
-impl uptrakit_controller_core::UpdateOutputStream for NoopOutputStream {
-    // Implement every required method with an empty body returning the
-    // appropriate typed Ok / unit value. Verify the full method list against
-    // the trait definition at `crates/ui/controller-core/src/<update_output_stream module>`
-    // — if a method returns Result<()>, return Ok(()); if it returns a stream,
-    // return an empty stream.
+impl UpdateOutputStream for NoopOutputStream {
+    async fn create_channel(&self, _update_id: Uuid) {}
+
+    async fn send_line(
+        &self,
+        _update_id: Uuid,
+        _line_id: Uuid,
+        _text: String,
+        _stream: OutputStreamType,
+        _ts: OffsetDateTime,
+    ) {
+    }
+
+    async fn send_completed(
+        &self,
+        _update_id: Uuid,
+        _outcome: uptrakit_controller_core::update::DispatchOutcome,
+        _error: Option<String>,
+    ) {
+    }
 }
 ```
 
-> **Implementer note on imports:** `EventBroadcaster`, `NotificationDispatcher::test_channel`, `NotificationService`, `NotificationState`, `ServiceConnectionRegistry`, `UpdateOutputStream` — each is re-exported somewhere in `crates/ui/controller-core/src/lib.rs` (some behind feature gates). If a given import path resolves to a different module, follow the actual re-export — do not duplicate or add intermediate `pub use` lines unless the existing surface genuinely omits the symbol. If a symbol is missing from the public surface, surface that as a blocker, not as an opportunity to widen the API.
+> **Implementer note:** `UpdateOutputStream` is declared `#[async_trait]` at
+> `crates/ui/controller-core/src/update/mod.rs:120`, so the impl block must also
+> carry `#[async_trait::async_trait]` — bare `async fn` in the impl produces a
+> different (non-boxed-future) signature and the trait method mismatch is
+> rejected at compile time. If `DispatchOutcome` lives at a different path than
+> `uptrakit_controller_core::update::DispatchOutcome`, follow the actual path;
+> do not invent a stub type.
 
 - [ ] **Step 5: Run, observe pass**
 
@@ -942,7 +1002,320 @@ EOF
 
 ---
 
-## Task 7: Per-test helper rows (proxmox mapping / protection / scaling / backup cache)
+## Task 7a: Add `testing` feature + `pub mod testing` to proxmox crate
+
+**Files:**
+
+- Modify: `crates/plugins/infrastructure/proxmox/Cargo.toml` (add `testing` feature)
+- Create: `crates/plugins/infrastructure/proxmox/src/testing.rs`
+- Modify: `crates/plugins/infrastructure/proxmox/src/lib.rs` (declare `pub mod testing` behind feature)
+
+Rationale: proxmox crate's `entity` module is `pub(crate)` by design and `proxmox_scaling_default.scaling_mode` is `pub(crate)`. The external test crate cannot build `ActiveModel` literals for proxmox rows. Mirroring the controller-core `pub mod testing` pattern, this task adds a feature-gated `testing` module inside the proxmox crate that exposes typed insertion helpers — keeping the entity surface crate-internal while letting the test crate seed scenario-specific rows. Same non-semver contract.
+
+- [ ] **Step 1: Add the `testing` feature**
+
+In `crates/plugins/infrastructure/proxmox/Cargo.toml`, add to `[features]`:
+
+```toml
+testing = []
+```
+
+- [ ] **Step 2: Declare the module**
+
+In `crates/plugins/infrastructure/proxmox/src/lib.rs`, after the existing `pub mod ...` declarations and before the `pub use ...` block:
+
+```rust
+/// Test-only helpers for in-tree functional tests.
+///
+/// Gated on `feature = "testing"`. Exposes typed insertion helpers for
+/// proxmox-specific tables whose entities live in the crate-internal
+/// `entity` module. Not part of the stable public API; signatures and
+/// contracts may change without semver impact, and out-of-tree callers
+/// are unsupported.
+#[cfg(feature = "testing")]
+pub mod testing;
+```
+
+- [ ] **Step 3: Implement the helpers**
+
+Write `crates/plugins/infrastructure/proxmox/src/testing.rs`:
+
+```rust
+//! Test-only insertion + assertion helpers. See `lib.rs` doc comment.
+
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+use time::OffsetDateTime;
+use uuid::Uuid;
+
+use crate::entity::{
+    proxmox_backup_target_cache, proxmox_host_mapping, proxmox_protection_audit,
+    proxmox_protection_default, proxmox_resource_scaling_record, proxmox_scaling_default,
+};
+use crate::scaling_mode::ScalingMode;
+
+pub async fn insert_host_mapping(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    host_id: Uuid,
+    node: &str,
+    vmid: i32,
+    vm_type: &str,
+) -> Uuid {
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+    proxmox_host_mapping::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        plugin_config_id: Set(plugin_config_id),
+        host_id: Set(Some(host_id)),
+        proxmox_node: Set(node.to_string()),
+        proxmox_vmid: Set(vmid),
+        proxmox_type: Set(vm_type.to_string()),
+        proxmox_name: Set(None),
+        proxmox_status: Set("running".to_string()),
+        hostname: Set(None),
+        ip_addresses: Set(None),
+        machine_id: Set(None),
+        match_method: Set(Some("manual".to_string())),
+        discovered_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert proxmox_host_mapping");
+    id
+}
+
+pub async fn insert_protection_default(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    mode: &str,
+    backup_target_key: Option<&str>,
+) {
+    let now = OffsetDateTime::now_utc();
+    proxmox_protection_default::ActiveModel {
+        tenant_id: Set(tenant_id),
+        plugin_config_id: Set(plugin_config_id),
+        mode: Set(mode.to_string()),
+        backup_target_key: Set(backup_target_key.map(str::to_string)),
+        snapshot_timeout_seconds: Set(None),
+        backup_timeout_seconds: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert proxmox_protection_default");
+}
+
+pub async fn insert_scaling_default_delta(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    delta_cores: i32,
+    delta_memory_mb: i32,
+) {
+    insert_scaling_default(
+        db,
+        tenant_id,
+        plugin_config_id,
+        ScalingMode::Delta,
+        None,
+        None,
+        Some(delta_cores),
+        Some(delta_memory_mb),
+    )
+    .await;
+}
+
+pub async fn insert_scaling_default_absolute(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    absolute_cores: i32,
+    absolute_memory_mb: i32,
+) {
+    insert_scaling_default(
+        db,
+        tenant_id,
+        plugin_config_id,
+        ScalingMode::Absolute,
+        Some(absolute_cores),
+        Some(absolute_memory_mb),
+        None,
+        None,
+    )
+    .await;
+}
+
+async fn insert_scaling_default(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    scaling_mode: ScalingMode,
+    absolute_cores: Option<i32>,
+    absolute_memory_mb: Option<i32>,
+    delta_cores: Option<i32>,
+    delta_memory_mb: Option<i32>,
+) {
+    let now = OffsetDateTime::now_utc();
+    proxmox_scaling_default::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        tenant_id: Set(tenant_id),
+        plugin_config_id: Set(plugin_config_id),
+        scaling_mode: Set(scaling_mode),
+        absolute_cores: Set(absolute_cores),
+        absolute_memory_mb: Set(absolute_memory_mb),
+        delta_cores: Set(delta_cores),
+        delta_memory_mb: Set(delta_memory_mb),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert proxmox_scaling_default");
+}
+
+pub async fn insert_backup_target_cache(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    node: &str,
+    storage_id: &str,
+    storage_type: &str,
+    target_key: &str,
+) {
+    let now = OffsetDateTime::now_utc();
+    proxmox_backup_target_cache::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        tenant_id: Set(tenant_id),
+        plugin_config_id: Set(plugin_config_id),
+        proxmox_node: Set(node.to_string()),
+        storage_id: Set(storage_id.to_string()),
+        storage_type: Set(storage_type.to_string()),
+        target_key: Set(target_key.to_string()),
+        discovered_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert proxmox_backup_target_cache");
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_resource_scaling_record(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    update_history_id: Uuid,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+    mapping_id: Uuid,
+    vm_type: &str,
+    original_cores: i32,
+    original_memory_mb: i64,
+    scaled_cores: i32,
+    scaled_memory_mb: i64,
+) {
+    let now = OffsetDateTime::now_utc();
+    proxmox_resource_scaling_record::ActiveModel {
+        update_history_id: Set(update_history_id),
+        tenant_id: Set(tenant_id),
+        host_id: Set(host_id),
+        software_item_id: Set(software_item_id),
+        plugin_config_id: Set(plugin_config_id),
+        mapping_id: Set(mapping_id),
+        vm_type: Set(vm_type.to_string()),
+        original_cores: Set(original_cores),
+        original_memory_mb: Set(original_memory_mb),
+        scaled_cores: Set(scaled_cores),
+        scaled_memory_mb: Set(scaled_memory_mb),
+        scale_status: Set("scaled".to_string()),
+        restore_status: Set("pending".to_string()),
+        error_message: Set(None),
+        scaling_mode_used: Set("absolute".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert proxmox_resource_scaling_record");
+}
+
+pub async fn count_protection_audits(db: &DatabaseConnection) -> usize {
+    proxmox_protection_audit::Entity::find()
+        .all(db)
+        .await
+        .expect("query proxmox_protection_audit")
+        .len()
+}
+
+pub async fn first_scaling_record(
+    db: &DatabaseConnection,
+) -> proxmox_resource_scaling_record::Model {
+    proxmox_resource_scaling_record::Entity::find()
+        .one(db)
+        .await
+        .expect("query proxmox_resource_scaling_record")
+        .expect("scaling record present")
+}
+
+pub async fn count_scaling_records(db: &DatabaseConnection) -> usize {
+    proxmox_resource_scaling_record::Entity::find()
+        .all(db)
+        .await
+        .expect("query proxmox_resource_scaling_record")
+        .len()
+}
+```
+
+> **Implementer note:** column lists above were verified at plan-write time against `crates/plugins/infrastructure/proxmox/src/entity/*.rs`. If `ScalingMode` lives at `crate::scaling_mode::ScalingMode` (confirmed) or a different path, follow the actual path.
+
+- [ ] **Step 4: Enable the `testing` feature on the functional-tests crate**
+
+Edit `crates/core/functional-tests/Cargo.toml`, change the proxmox dep line to:
+
+```toml
+uptrakit-plugin-infrastructure-proxmox  = { workspace = true, features = ["migrations", "plugin-ops", "db-sqlite", "testing"] }
+```
+
+- [ ] **Step 5: Verify the proxmox crate compiles with the new feature**
+
+Run in parallel:
+
+```bash
+cargo check -p uptrakit-plugin-infrastructure-proxmox --features testing,plugin-ops,migrations,db-sqlite
+cargo check -p uptrakit-plugin-infrastructure-proxmox --no-default-features --features db-sqlite
+cargo check -p uptrakit-functional-tests --all-features
+```
+
+Expected: all three PASS. Second command verifies the `testing` module is properly gated.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/plugins/infrastructure/proxmox/Cargo.toml crates/plugins/infrastructure/proxmox/src/testing.rs crates/plugins/infrastructure/proxmox/src/lib.rs crates/core/functional-tests/Cargo.toml
+git commit -m "$(cat <<'EOF'
+feat(plugin-infrastructure-proxmox): expose test-only insertion helpers
+
+Adds a `testing` feature and a `pub mod testing` module exposing typed
+ActiveModel insertion helpers for proxmox-specific tables (host_mapping,
+protection_default, scaling_default, backup_target_cache,
+resource_scaling_record) plus a few read helpers. Keeps the crate-internal
+`entity` module unchanged while letting the in-tree
+`uptrakit-functional-tests` crate seed scenario-specific rows. Same
+non-semver / test-only contract documented on `controller-core::testing`.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 7b: Per-test fixture wrappers in `support/fixtures.rs`
 
 **Files:**
 
@@ -955,69 +1328,58 @@ Append to `crates/core/functional-tests/tests/proxmox_update_lifecycle.rs`:
 ```rust
 #[tokio::test]
 async fn fixtures_insert_proxmox_mapping_writes_row() {
-    use sea_orm::EntityTrait;
-
     let db = support::db::setup_test_db().await;
     let fixtures = support::fixtures::TestFixtures::insert(
         &db,
         "http://127.0.0.1:9999",
     )
     .await;
-    fixtures.insert_proxmox_mapping(&db, "pve1", 100, "qemu").await;
-
-    let count = uptrakit_plugin_infrastructure_proxmox::entity::proxmox_host_mapping::Entity::find()
-        .all(&db)
-        .await
-        .unwrap()
-        .len();
-    assert_eq!(count, 1);
+    let mapping_id = fixtures.insert_proxmox_mapping(&db, "pve1", 100, "qemu").await;
+    assert!(!mapping_id.is_nil());
 }
 ```
 
 - [ ] **Step 2: Run, observe failure**
 
 Run: `cargo test -p uptrakit-functional-tests --test proxmox_update_lifecycle fixtures_insert_proxmox_mapping_writes_row`
-Expected: FAIL — `no method named insert_proxmox_mapping` (and possibly an entity path mismatch — adjust import to the actual `pub use` published by `uptrakit-plugin-infrastructure-proxmox` after checking the crate's `lib.rs`).
+Expected: FAIL — `no method named insert_proxmox_mapping`.
 
-- [ ] **Step 3: Implement the four per-test helpers**
+- [ ] **Step 3: Implement the wrapper helpers**
 
 Append to `crates/core/functional-tests/tests/support/fixtures.rs`:
 
 ```rust
-use uptrakit_plugin_infrastructure_proxmox::entity::{
-    proxmox_backup_target_cache, proxmox_host_mapping,
-    proxmox_protection_default, proxmox_scaling_default,
-};
+use uptrakit_plugin_infrastructure_proxmox::testing as proxmox_testing;
 
 impl TestFixtures {
     pub async fn insert_proxmox_mapping(
         &self,
         db: &DatabaseConnection,
         node: &str,
-        vmid: i64,
+        vmid: i32,
         vm_type: &str,
-    ) {
-        let now = OffsetDateTime::now_utc();
-        proxmox_host_mapping::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(self.tenant_id),
-            host_id: Set(self.host_id),
-            plugin_config_id: Set(self.proxmox_config_id),
-            proxmox_node: Set(node.to_string()),
-            proxmox_vmid: Set(vmid),
-            proxmox_type: Set(vm_type.to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(db)
+    ) -> Uuid {
+        proxmox_testing::insert_host_mapping(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            self.host_id,
+            node,
+            vmid,
+            vm_type,
+        )
         .await
-        .expect("insert proxmox_host_mapping");
     }
 
     pub async fn insert_protection_default_snapshot(&self, db: &DatabaseConnection) {
-        self.insert_protection_default_raw(db, "snapshot", None)
-            .await;
+        proxmox_testing::insert_protection_default(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            "snapshot",
+            None,
+        )
+        .await;
     }
 
     pub async fn insert_protection_default_backup(
@@ -1025,112 +1387,80 @@ impl TestFixtures {
         db: &DatabaseConnection,
         backup_target_key: &str,
     ) {
-        self.insert_protection_default_raw(db, "backup", Some(backup_target_key))
-            .await;
+        proxmox_testing::insert_protection_default(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            "backup",
+            Some(backup_target_key),
+        )
+        .await;
     }
 
     pub async fn insert_protection_default_do_nothing(&self, db: &DatabaseConnection) {
-        self.insert_protection_default_raw(db, "do_nothing", None)
-            .await;
-    }
-
-    async fn insert_protection_default_raw(
-        &self,
-        db: &DatabaseConnection,
-        mode: &str,
-        backup_target_key: Option<&str>,
-    ) {
-        let now = OffsetDateTime::now_utc();
-        proxmox_protection_default::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(self.tenant_id),
-            plugin_config_id: Set(self.proxmox_config_id),
-            mode: Set(mode.to_string()),
-            backup_target_key: Set(backup_target_key.map(str::to_string)),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(db)
-        .await
-        .expect("insert proxmox_protection_default");
+        proxmox_testing::insert_protection_default(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            "do_nothing",
+            None,
+        )
+        .await;
     }
 
     pub async fn insert_scaling_default_delta(
         &self,
         db: &DatabaseConnection,
         delta_cores: i32,
-        delta_memory_mb: i64,
+        delta_memory_mb: i32,
     ) {
-        let now = OffsetDateTime::now_utc();
-        proxmox_scaling_default::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(self.tenant_id),
-            plugin_config_id: Set(self.proxmox_config_id),
-            mode: Set("delta".to_string()),
-            delta_cores: Set(Some(delta_cores)),
-            delta_memory_mb: Set(Some(delta_memory_mb)),
-            absolute_cores: Set(None),
-            absolute_memory_mb: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(db)
-        .await
-        .expect("insert proxmox_scaling_default (delta)");
+        proxmox_testing::insert_scaling_default_delta(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            delta_cores,
+            delta_memory_mb,
+        )
+        .await;
     }
 
     pub async fn insert_scaling_default_absolute(
         &self,
         db: &DatabaseConnection,
         absolute_cores: i32,
-        absolute_memory_mb: i64,
+        absolute_memory_mb: i32,
     ) {
-        let now = OffsetDateTime::now_utc();
-        proxmox_scaling_default::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(self.tenant_id),
-            plugin_config_id: Set(self.proxmox_config_id),
-            mode: Set("absolute".to_string()),
-            delta_cores: Set(None),
-            delta_memory_mb: Set(None),
-            absolute_cores: Set(Some(absolute_cores)),
-            absolute_memory_mb: Set(Some(absolute_memory_mb)),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(db)
-        .await
-        .expect("insert proxmox_scaling_default (absolute)");
+        proxmox_testing::insert_scaling_default_absolute(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            absolute_cores,
+            absolute_memory_mb,
+        )
+        .await;
     }
 
     pub async fn insert_backup_target_cache(
         &self,
         db: &DatabaseConnection,
-        target_key: &str,
+        node: &str,
         storage_id: &str,
+        storage_type: &str,
+        target_key: &str,
     ) {
-        let now = OffsetDateTime::now_utc();
-        proxmox_backup_target_cache::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(self.tenant_id),
-            plugin_config_id: Set(self.proxmox_config_id),
-            target_key: Set(target_key.to_string()),
-            storage_id: Set(storage_id.to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(db)
-        .await
-        .expect("insert proxmox_backup_target_cache");
+        proxmox_testing::insert_backup_target_cache(
+            db,
+            self.tenant_id,
+            self.proxmox_config_id,
+            node,
+            storage_id,
+            storage_type,
+            target_key,
+        )
+        .await;
     }
 }
 ```
-
-> **Implementer note:** column lists and types for each proxmox entity above are the spec's best understanding of the schema; cross-check against `crates/plugins/infrastructure/proxmox/src/entity/*.rs` and the controller migrations for the actual column set. Add missing NOT NULL columns with the schema's default; do not silently widen types.
 
 - [ ] **Step 4: Run, observe pass**
 
@@ -1261,15 +1591,15 @@ Append to `crates/core/functional-tests/tests/proxmox_update_lifecycle.rs`:
 async fn snapshot_protection_and_scaling_before_dispatch() {
     use httpmock::prelude::*;
     use uptrakit_controller_core::testing::run_protection_and_dispatch;
-    use uptrakit_plugin_infrastructure_proxmox::entity::proxmox_resource_scaling_record;
+    use uptrakit_plugin_infrastructure_proxmox::testing as proxmox_testing;
     use uptrakit_shared_db::entity::update_history;
     use uptrakit_wire::ControllerMessage;
 
     let server = MockServer::start_async().await;
     let task_status_mock = server.mock_async(|when, then| {
         when.method(GET)
-            .path_contains("/tasks/")
-            .path_contains("/status");
+            .path_includes("/tasks/")
+            .path_includes("/status");
         then.status(200)
             .json_body(serde_json::json!({
                 "data": {"status": "stopped", "exitstatus": "OK"}
@@ -1343,13 +1673,9 @@ async fn snapshot_protection_and_scaling_before_dispatch() {
         Some("protected".to_string()),
     );
 
-    use sea_orm::EntityTrait;
-    let scaling_rows = proxmox_resource_scaling_record::Entity::find()
-        .all(&db)
-        .await
-        .unwrap();
-    assert_eq!(scaling_rows.len(), 1);
-    assert_eq!(scaling_rows[0].restore_status, "pending");
+    assert_eq!(proxmox_testing::count_scaling_records(&db).await, 1);
+    let record = proxmox_testing::first_scaling_record(&db).await;
+    assert_eq!(record.restore_status, "pending");
 }
 ```
 
@@ -1397,8 +1723,8 @@ async fn backup_protection_before_dispatch() {
     let server = MockServer::start_async().await;
     let task_status_mock = server.mock_async(|when, then| {
         when.method(GET)
-            .path_contains("/tasks/")
-            .path_contains("/status");
+            .path_includes("/tasks/")
+            .path_includes("/status");
         then.status(200)
             .json_body(serde_json::json!({
                 "data": {"status": "stopped", "exitstatus": "OK"}
@@ -1408,8 +1734,8 @@ async fn backup_protection_before_dispatch() {
     let vzdump_mock = server.mock_async(|when, then| {
         when.method(POST)
             .path("/api2/json/nodes/pve1/vzdump")
-            .body_contains("vmid=100")
-            .body_contains("storage=storage1");
+            .body_includes("vmid=100")
+            .body_includes("storage=storage1");
         then.status(200)
             .json_body(serde_json::json!({"data": "UPID:pve1:002:backup"}));
     })
@@ -1422,7 +1748,7 @@ async fn backup_protection_before_dispatch() {
         .insert_protection_default_backup(&db, "pve1:storage1:dir")
         .await;
     fixtures
-        .insert_backup_target_cache(&db, "pve1:storage1:dir", "storage1")
+        .insert_backup_target_cache(&db, "pve1", "storage1", "dir", "pve1:storage1:dir")
         .await;
 
     let mut notif = support::stubs::TestNotificationSetup::new(fixtures.service_id).await;
@@ -1455,8 +1781,6 @@ async fn backup_protection_before_dispatch() {
         hist.pre_update_protection_status,
         Some("protected".to_string()),
     );
-
-    use sea_orm::EntityTrait;
 }
 ```
 
@@ -1496,10 +1820,20 @@ EOF
 async fn no_proxmox_mapping_dispatch_proceeds() {
     use httpmock::prelude::*;
     use uptrakit_controller_core::testing::run_protection_and_dispatch;
-    use uptrakit_plugin_infrastructure_proxmox::entity::proxmox_protection_audit;
+    use uptrakit_plugin_infrastructure_proxmox::testing as proxmox_testing;
     use uptrakit_wire::ControllerMessage;
 
     let server = MockServer::start_async().await;
+
+    // Catch-all mock that matches every request. Assert it received zero
+    // hits at end-of-test (httpmock 0.8's `MockServer` exposes no global
+    // hit counter — assert on the catch-all mock instead).
+    let catch_all = server
+        .mock_async(|when, then| {
+            when.path_includes("/");
+            then.status(500);
+        })
+        .await;
 
     let db = support::db::setup_test_db().await;
     let fixtures = support::fixtures::TestFixtures::insert(&db, &server.base_url()).await;
@@ -1521,24 +1855,16 @@ async fn no_proxmox_mapping_dispatch_proceeds() {
     .await;
 
     assert_cas_sentinel(&db, fixtures.update_history_id).await;
-    assert_eq!(
-        server.hits_async().await,
-        0,
-        "no HTTP requests when no proxmox mapping",
-    );
+    catch_all.assert_calls_async(0).await;
 
     let msgs = notif.captured_messages();
     assert_eq!(msgs.len(), 1);
     assert!(matches!(msgs[0], ControllerMessage::ExecuteUpdate(_)));
 
     // Durable contract: no protection plugin ran, so no audit row.
-    use sea_orm::EntityTrait;
-    let audits = proxmox_protection_audit::Entity::find()
-        .all(&db)
-        .await
-        .unwrap();
-    assert!(
-        audits.is_empty(),
+    assert_eq!(
+        proxmox_testing::count_protection_audits(&db).await,
+        0,
         "no proxmox_protection_audit rows when no plugin runs",
     );
     // Do NOT assert a specific pre_update_protection_status value here —
@@ -1585,7 +1911,7 @@ EOF
 async fn do_nothing_protection_scaling_still_runs() {
     use httpmock::prelude::*;
     use uptrakit_controller_core::testing::run_protection_and_dispatch;
-    use uptrakit_plugin_infrastructure_proxmox::entity::proxmox_resource_scaling_record;
+    use uptrakit_plugin_infrastructure_proxmox::testing as proxmox_testing;
     use uptrakit_shared_db::entity::update_history;
     use uptrakit_wire::ControllerMessage;
 
@@ -1610,7 +1936,7 @@ async fn do_nothing_protection_scaling_still_runs() {
     let fixtures = support::fixtures::TestFixtures::insert(&db, &server.base_url()).await;
     fixtures.insert_proxmox_mapping(&db, "pve1", 100, "qemu").await;
     fixtures.insert_protection_default_do_nothing(&db).await;
-    fixtures.insert_scaling_default_absolute(&db, 4, 4096).await;
+    fixtures.insert_scaling_default_absolute(&db, 4, 4096).await; // (i32, i32)
 
     let mut notif = support::stubs::TestNotificationSetup::new(fixtures.service_id).await;
     let plugin_ops = support::stubs::build_plugin_ops(true);
@@ -1643,12 +1969,7 @@ async fn do_nothing_protection_scaling_still_runs() {
         Some("skipped".to_string()),
     );
 
-    use sea_orm::EntityTrait;
-    let scaling_rows = proxmox_resource_scaling_record::Entity::find()
-        .all(&db)
-        .await
-        .unwrap();
-    assert_eq!(scaling_rows.len(), 1);
+    assert_eq!(proxmox_testing::count_scaling_records(&db).await, 1);
 }
 ```
 
@@ -1776,9 +2097,9 @@ EOF
 #[tokio::test]
 async fn post_update_resource_restore() {
     use httpmock::prelude::*;
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-    use uptrakit_plugin_infrastructure_core::roles::ControllerUpdateHookOps;
-    use uptrakit_plugin_infrastructure_proxmox::entity::proxmox_resource_scaling_record;
+    use sea_orm::EntityTrait;
+    use uptrakit_plugin_infrastructure_core::plugin_ops::ControllerUpdateHookOps;
+    use uptrakit_plugin_infrastructure_proxmox::testing as proxmox_testing;
     use uptrakit_shared_db::entity::update_history;
     use uptrakit_web_api_queries::queries::update_dispatch::finalize_post_update_hook;
 
@@ -1786,38 +2107,34 @@ async fn post_update_resource_restore() {
     let restore_mock = server.mock_async(|when, then| {
         when.method(PUT)
             .path("/api2/json/nodes/pve1/qemu/100/config")
-            .body_contains("cores=2")
-            .body_contains("memory=2048");
+            .body_includes("cores=2")
+            .body_includes("memory=2048");
         then.status(200).json_body(serde_json::json!({"data": null}));
     })
     .await;
 
     let db = support::db::setup_test_db().await;
     let fixtures = support::fixtures::TestFixtures::insert(&db, &server.base_url()).await;
-    fixtures.insert_proxmox_mapping(&db, "pve1", 100, "qemu").await;
+    let mapping_id = fixtures
+        .insert_proxmox_mapping(&db, "pve1", 100, "qemu")
+        .await;
 
     // Seed a scaling record that the hook is expected to restore.
-    let now = time::OffsetDateTime::now_utc();
-    proxmox_resource_scaling_record::ActiveModel {
-        id: Set(uuid::Uuid::now_v7()),
-        tenant_id: Set(fixtures.tenant_id),
-        update_history_id: Set(fixtures.update_history_id),
-        plugin_config_id: Set(fixtures.proxmox_config_id),
-        proxmox_node: Set("pve1".to_string()),
-        proxmox_vmid: Set(100),
-        proxmox_type: Set("qemu".to_string()),
-        original_cores: Set(Some(2)),
-        original_memory_mb: Set(Some(2048)),
-        scaled_cores: Set(Some(4)),
-        scaled_memory_mb: Set(Some(4096)),
-        restore_status: Set("pending".to_string()),
-        created_at: Set(now),
-        updated_at: Set(now),
-        ..Default::default()
-    }
-    .insert(&db)
-    .await
-    .expect("insert proxmox_resource_scaling_record");
+    proxmox_testing::insert_resource_scaling_record(
+        &db,
+        fixtures.tenant_id,
+        fixtures.update_history_id,
+        fixtures.host_id,
+        fixtures.software_item_id,
+        fixtures.proxmox_config_id,
+        mapping_id,
+        "qemu",
+        2,
+        2048,
+        4,
+        4096,
+    )
+    .await;
 
     let plugin_ops = support::stubs::build_plugin_ops(true);
     let hook = plugin_ops
@@ -1836,12 +2153,9 @@ async fn post_update_resource_restore() {
 
     restore_mock.assert_calls_async(1).await;
 
-    let scaling = proxmox_resource_scaling_record::Entity::find()
-        .all(&db)
-        .await
-        .unwrap();
-    assert_eq!(scaling.len(), 1);
-    assert_eq!(scaling[0].restore_status, "restored");
+    assert_eq!(proxmox_testing::count_scaling_records(&db).await, 1);
+    let restored = proxmox_testing::first_scaling_record(&db).await;
+    assert_eq!(restored.restore_status, "restored");
 }
 ```
 
