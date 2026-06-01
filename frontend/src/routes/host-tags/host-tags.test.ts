@@ -3,6 +3,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { Permission, type HostTagResponse, type PaginatedResponse } from '$lib/types';
 
+vi.mock('$app/state', () => ({
+	page: {
+		url: new URL('http://localhost/host-tags')
+	}
+}));
+
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+
 vi.mock('$lib/api', () => ({
 	getHostTags: vi.fn(),
 	createHostTag: vi.fn(),
@@ -28,6 +36,7 @@ vi.mock('$lib/notifications.svelte', () => ({
 import HostTagsPage from './+page.svelte';
 import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
+import { page } from '$app/state';
 
 const user = {
 	id: '00000000-0000-0000-0000-000000000104',
@@ -44,6 +53,10 @@ function makePage(items: HostTagResponse[]): PaginatedResponse<HostTagResponse> 
 
 describe('Host Tags Route', () => {
 	beforeEach(() => {
+		Object.defineProperty(page, 'url', {
+			value: new URL('http://localhost/host-tags'),
+			configurable: true
+		});
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([
@@ -73,13 +86,42 @@ describe('Host Tags Route', () => {
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
 		expect(screen.getByText('1 total')).toBeInTheDocument();
+		// SectionCard title="Search" must be gone.
+		expect(screen.queryByRole('heading', { name: 'Search' })).not.toBeInTheDocument();
+		// FilterBar must be inside the Tags section.
+		expect(document.querySelector('[data-ui="filter-bar"]')).toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: /actions for production/i }));
 		expect(document.querySelector('[data-ui="context-menu-item"]')).toBeInTheDocument();
+	});
+
+	it('ExpandableSearch is inside the table card header, not a separate SectionCard', async () => {
+		render(HostTagsPage);
+		await waitFor(() => expect(screen.getByText('Host Tags')).toBeInTheDocument());
+		const filterBar = document.querySelector('[data-ui="filter-bar"]');
+		expect(filterBar).not.toBeNull();
+		// The collapsed search trigger button is inside the filter bar.
+		expect(filterBar?.querySelector('button')).toBeInTheDocument();
+		// No separate "Search" SectionCard.
+		expect(screen.queryByRole('heading', { name: 'Search' })).not.toBeInTheDocument();
+	});
+
+	it('query param is read from URL and passed to getHostTags', async () => {
+		vi.mocked(api.getHostTags).mockResolvedValue(makePage([]));
+		Object.defineProperty(page, 'url', {
+			value: new URL('http://localhost/host-tags?query=prod'),
+			configurable: true
+		});
+		render(HostTagsPage);
+		await waitFor(() => expect(vi.mocked(api.getHostTags)).toHaveBeenCalledWith(expect.anything(), undefined, 'prod'));
 	});
 });
 
 describe('Button Migrations', () => {
 	beforeEach(() => {
+		Object.defineProperty(page, 'url', {
+			value: new URL('http://localhost/host-tags'),
+			configurable: true
+		});
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(makePage([]));
 	});
