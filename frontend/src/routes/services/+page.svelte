@@ -2,7 +2,6 @@
 	import { untrack } from 'svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getServices,
@@ -16,7 +15,7 @@
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
+	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
@@ -29,6 +28,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FilterBar,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -36,6 +36,7 @@
 		TableFooterBar
 	} from '$lib/components/ui';
 	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
+	import { createUrlParam } from '$lib/url-params.svelte';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
@@ -55,12 +56,14 @@
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let isRetrying: boolean = $state(false);
-	let currentPage: number = $state(parseUrlPage(page.url));
+	const currentPage = $derived(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
-	let capabilityFilter: CapabilityFilter = $state(
-		parseUrlParam(page.url, 'capability', CAPABILITY_FILTER_VALUES, 'all')
-	);
+	const capabilityParam = createUrlParam<CapabilityFilter>('capability', {
+		parse: (r): CapabilityFilter =>
+			CAPABILITY_FILTER_VALUES.includes(r as CapabilityFilter) ? (r as CapabilityFilter) : 'all',
+		serialize: (v) => (v === 'all' ? null : v)
+	});
 
 	let selectedIds = new SvelteSet<string>();
 	const selectedItemsMap = new SvelteMap<string, ServiceResponse>();
@@ -126,27 +129,14 @@
 	);
 
 	$effect(() => {
-		const parts: string[] = [];
-		if (capabilityFilter !== 'all') parts.push(`capability=${capabilityFilter}`);
-		if (currentPage > 1) parts.push(`page=${currentPage}`);
-		const search = parts.join('&');
-		goto(search ? `${location.pathname}?${search}` : location.pathname, {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true
-		});
-	});
-
-	$effect(() => {
-		const _filter = capabilityFilter; // explicit dependency tracking
-		loadServices(untrack(() => currentPage));
+		void capabilityParam.value;
+		const pg = currentPage;
+		untrack(() => loadServices(pg));
 
 		const interval = setInterval(() => {
-			if (document.visibilityState === 'visible') loadServices(currentPage, true);
+			if (document.visibilityState === 'visible') loadServices(pg, true);
 		}, 300_000);
-		const unsubStatusChanged = subscribeToEvent(AdminEventType.ServiceStatusChanged, () =>
-			loadServices(currentPage, true)
-		);
+		const unsubStatusChanged = subscribeToEvent(AdminEventType.ServiceStatusChanged, () => loadServices(pg, true));
 
 		return () => {
 			clearInterval(interval);
@@ -158,14 +148,13 @@
 		try {
 			if (!background && !retry) error = null;
 			const result = await getServices({
-				capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
+				capability: capabilityParam.value === 'all' ? undefined : capabilityParam.value,
 				page
 			});
 			services = result.items;
 			for (const service of result.items) {
 				if (selectedIds.has(service.id)) selectedItemsMap.set(service.id, service);
 			}
-			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
 			error = null;
@@ -187,14 +176,6 @@
 
 	function closeMenu() {
 		openMenuId = null;
-	}
-
-	function setFilter(filter: CapabilityFilter) {
-		selectedIds.clear();
-		selectedItemsMap.clear();
-		currentPage = 1;
-		capabilityFilter = filter;
-		closeMenu();
 	}
 
 	function requestConfirm(
@@ -359,7 +340,7 @@
 			let p = 1;
 			while (true) {
 				const result = await getServices({
-					capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
+					capability: capabilityParam.value === 'all' ? undefined : capabilityParam.value,
 					page: p,
 					perPage: 100
 				});
@@ -419,29 +400,27 @@
 
 {#if getUser()}
 	<PageShell title="Services" description="Review enrolled runtime services and manage approvals.">
-		<SectionCard title="Service Filters">
-			<div class="flex flex-wrap gap-2">
-				<Button variant={capabilityFilter === 'all' ? 'accent' : 'ghost'} size="sm" onclick={() => setFilter('all')}>
-					All Services
-				</Button>
-				<Button
-					variant={capabilityFilter === 'software_discovery' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('software_discovery')}
-				>
-					Agents
-				</Button>
-				<Button
-					variant={capabilityFilter === 'ssh_remote' ? 'accent' : 'ghost'}
-					size="sm"
-					onclick={() => setFilter('ssh_remote')}
-				>
-					SSH Agents
-				</Button>
-			</div>
-		</SectionCard>
-
 		<SectionCard title="Registered Services">
+			{#snippet filterBar()}
+				<FilterBar>
+					{#snippet filters()}
+						<Select
+							id="services-capability-filter"
+							width="auto"
+							aria-label="Filter by capability"
+							value={capabilityParam.value}
+							options={[
+								{ value: 'all', label: 'All' },
+								{ value: 'software_discovery', label: 'Software Discovery' },
+								{ value: 'ssh_remote', label: 'SSH Remote' }
+							]}
+							onchange={(e) => {
+								capabilityParam.set((e.currentTarget as HTMLSelectElement).value as CapabilityFilter);
+							}}
+						/>
+					{/snippet}
+				</FilterBar>
+			{/snippet}
 			<DataTable
 				columns={[]}
 				rows={services as unknown as Record<string, unknown>[]}
