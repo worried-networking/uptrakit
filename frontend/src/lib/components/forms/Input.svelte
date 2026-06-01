@@ -25,6 +25,8 @@
 		'aria-describedby'?: string;
 		'aria-label'?: string;
 		class?: string;
+		/** Ref to the underlying <input> element. Use bind:el={myRef} from the parent. */
+		el?: HTMLInputElement;
 	};
 </script>
 
@@ -63,7 +65,8 @@
 		maxlength,
 		'aria-describedby': ariaDescribedby,
 		'aria-label': ariaLabel,
-		class: className = ''
+		class: className = '',
+		el = $bindable(undefined)
 	}: InputProps = $props();
 
 	const rowCtx = getContext<{ id: string | undefined } | undefined>('form-field-row:aria-describedby');
@@ -73,6 +76,7 @@
 </script>
 
 <input
+	bind:this={el}
 	{id}
 	{type}
 	bind:value
