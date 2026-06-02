@@ -1,0 +1,32 @@
+[package]
+name = "uptrakit-functional-tests"
+description = "Uptrakit functional tests for controller orchestration"
+edition.workspace = true
+version = "0.0.1"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dev-dependencies]
+uptrakit-controller-core                = { workspace = true, features = ["testing", "plugin-ops"] }
+uptrakit-web-api-queries                = { workspace = true, features = ["plugin-ops"] }
+uptrakit-plugin-infrastructure-proxmox  = { workspace = true, features = ["migrations", "plugin-ops", "db-sqlite"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["plugin-ops"] }
+uptrakit-plugin-infrastructure-core     = { workspace = true, features = ["plugin-ops", "migrations", "catalog"] }
+uptrakit-shared-db                      = { workspace = true, features = ["migration"] }
+uptrakit-shared-types                   = { workspace = true }
+uptrakit-wire                           = { workspace = true }
+uptrakit-tenant-db                      = { workspace = true }
+uptrakit-crypto                         = { workspace = true, features = ["testing"] }
+sea-orm                                 = { workspace = true, features = ["sqlx-sqlite"] }
+sea-orm-migration                       = { workspace = true }
+httpmock                                = { workspace = true }
+async-trait                             = { workspace = true }
+rootcause                               = { workspace = true }
+serde_json                              = { workspace = true }
+time                                    = { workspace = true }
+tokio                                   = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+uuid                                    = { workspace = true, features = ["v7"] }
+
+[lints]
+workspace = true
