@@ -369,7 +369,6 @@ skip = [
     { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh 0.60 crypto" },
     { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh 0.60 crypto" },
     { crate = "primeorder@0.13.6", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.14-rc used by russh 0.61" },
-    { crate = "redox_syscall@0.5.18", reason = "pulled by older platform crates; newer 0.7.x used by parking_lot/other crates" },
     { crate = "rfc6979@0.4.0", reason = "pulled by ecdsa 0.16 (openidconnect); newer 0.5-rc used by russh 0.60" },
     { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh 0.60 crypto" },
 { crate = "rustls-webpki@0.102.8", reason = "pulled by rumqttc 0.25.1 TLS stack; newer 0.103.x used by rustls 0.23" },
