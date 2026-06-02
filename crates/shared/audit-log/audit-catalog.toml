@@ -43,6 +43,10 @@ site = "uptrakit_web_api::router::notification_callback"
 action = "notification.callback"
 
 [[entries]]
+site = "uptrakit_web_api::router::oauth_auto_approve_consent"
+skip = "test-utils endpoint (#[cfg(feature = \"test-utils\")]); UPTRAKIT_TEST_UTILS_ENABLED-gated; no production audit"
+
+[[entries]]
 site = "uptrakit_web_api::router::ocsp_post"
 skip = "OCSP certificate status responder; no user-driven state change"
 
@@ -504,11 +508,11 @@ site = "uptrakit_web_api::routes::settings_agent_certs::update_agent_certificate
 action = "tenant_setting.update"
 
 # ---------------------------------------------------------------------------
-# Settings — authentication
+# Settings — access (registration + authentication, consolidated)
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::routes::settings_auth::update_authentication_settings"
+site = "uptrakit_web_api::routes::settings_access::update_access_settings"
 action = "tenant_setting.update"
 
 # ---------------------------------------------------------------------------
@@ -560,12 +564,12 @@ site = "uptrakit_web_api::routes::settings_zeroconf::update_zeroconf_settings"
 action = "global_setting.update"
 
 # ---------------------------------------------------------------------------
-# Settings — registration
+# Settings — OAuth (global)
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::routes::settings::update_registration_settings"
-action = "tenant_setting.update"
+site = "uptrakit_web_api::routes::settings_oauth::update_oauth_settings"
+action = "global_setting.update"
 
 # ---------------------------------------------------------------------------
 # Software items
