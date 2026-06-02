@@ -90,11 +90,20 @@ impl ControllerContainer {
         let container_name = format!("controller-{}", uuid::Uuid::now_v7());
 
         let mut config_file = NamedTempFile::new().expect("create temp config file");
+        // SANs must cover both code paths the cert is presented for:
+        //   - 127.0.0.1: test client connects via mapped host port (rmcp host check).
+        //   - <container_name>: agent/scheduler/mqtt service containers connect via
+        //     the network alias (testcontainers DNS), which is the controller's
+        //     container hostname. Without it, the agent fails TLS validation with
+        //     "certificate not valid for name <container_name>".
+        // An explicit [tls].sans list bypasses auto-detection (see
+        // controller-runtime/src/startup/settings.rs:191), so we must enumerate
+        // every name the cert needs to cover.
         let tls_section = match trust_domain.filter(|d| !d.is_empty()) {
-            Some(d) => format!("\n[tls]\ntrust_domain = \"{d}\"\nsans = [\"127.0.0.1\"]\n"),
-            // Always include 127.0.0.1 so Host: 127.0.0.1:<port> passes rmcp
-            // host validation when the test client connects via the mapped port.
-            None => "\n[tls]\nsans = [\"127.0.0.1\"]\n".to_string(),
+            Some(d) => format!(
+                "\n[tls]\ntrust_domain = \"{d}\"\nsans = [\"127.0.0.1\", \"{container_name}\"]\n"
+            ),
+            None => format!("\n[tls]\nsans = [\"127.0.0.1\", \"{container_name}\"]\n"),
         };
         write!(
             config_file,
