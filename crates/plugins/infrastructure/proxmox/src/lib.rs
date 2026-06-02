@@ -36,6 +36,15 @@ pub(crate) mod resource_scaling;
 pub(crate) mod scaling_mode;
 pub mod scaling_store;
 pub mod surfaces;
+/// Test-only helpers for in-tree functional tests.
+///
+/// Gated on `feature = "testing"`. Exposes typed insertion helpers for
+/// proxmox-specific tables whose entities live in the crate-internal
+/// `entity` module. Not part of the stable public API; signatures and
+/// contracts may change without semver impact, and out-of-tree callers
+/// are unsupported.
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod update_protection;
 
 pub use config::ProxmoxConfig;

@@ -17,6 +17,7 @@ agent-infra = [
 ]
 db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration?/sqlx-sqlite"]
 plugin-ops = ["uptrakit-plugin-infrastructure-core/plugin-ops"]
+testing = []
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
