@@ -235,7 +235,7 @@ impl ControllerUpdateDispatcher {
 // ---------------------------------------------------------------------------
 
 #[tracing::instrument(skip_all, fields(update_id = %work.update_history_id))]
-async fn run_protection_and_dispatch(
+pub async fn run_protection_and_dispatch(
     db: sea_orm::DatabaseConnection,
     notification: NotificationState,
     output_stream: Arc<dyn UpdateOutputStream>,
