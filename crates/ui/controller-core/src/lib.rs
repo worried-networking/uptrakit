@@ -13,3 +13,15 @@ pub mod notification;
 pub mod settings;
 pub mod update;
 pub mod workload_claims;
+
+/// Test-only re-exports for in-tree functional tests.
+///
+/// Items exposed here are gated on `feature = "testing"` and exist solely so
+/// the in-tree `uptrakit-functional-tests` crate can drive controller
+/// orchestration end-to-end. They are **not** part of the stable public API:
+/// signatures, naming, and contract may change without semver impact, and
+/// out-of-tree callers are unsupported.
+#[cfg(feature = "testing")]
+pub mod testing {
+    pub use crate::update::controller::run_protection_and_dispatch;
+}
