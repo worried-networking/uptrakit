@@ -18,7 +18,7 @@ impl UptrakitClient {
         self.get(crate::paths::global_settings::COMBINED).await
     }
 
-    /// Get combined settings (registration, authentication, certificates, enrollment tokens).
+    /// Get combined settings (access, certificates, enrollment tokens).
     pub async fn get_combined_settings(&self) -> Result<CombinedSettingsResponse> {
         self.get(crate::paths::settings::COMBINED).await
     }

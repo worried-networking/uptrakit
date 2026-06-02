@@ -12,16 +12,15 @@ Settings are stored in the database and reconciled with CLI flags during startup
 
 ## Settings Categories
 
-| Category             | Key Prefix               | API                              | Runtime Change                                                                |
-| -------------------- | ------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |
-| Network              | `network.*`              | `/settings/network`              | Mostly runtime-changeable (some bind addresses need restart).                 |
-| MQTT                 | `mqtt_*` table           | `/settings/mqtt`                 | Runtime-changeable; controller pushes via WebSocket.                          |
-| Registration         | `registration.*`         | `/settings/registration`         | Runtime-changeable.                                                           |
-| Authentication       | `authentication.*`       | `/settings/authentication`       | Runtime-changeable.                                                           |
-| Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable.                                                           |
-| SMTP (per-tenant)    | `smtp.*`                 | Shared surface action            | Runtime-changeable; per-tenant overrides of global defaults.                  |
-| SMTP (global)        | `global_smtp.*`          | Shared surface action            | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
-| NATS                 | `nats.url`               | `/settings/nats`                 | Stored in DB; **requires restart** to change the live connection.             |
+| Category                     | Key Prefix                           | API                              | Runtime Change                                                                |
+| ---------------------------- | ------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |
+| Network                      | `network.*`                          | `/settings/network`              | Mostly runtime-changeable (some bind addresses need restart).                 |
+| MQTT                         | `mqtt_*` table                       | `/settings/mqtt`                 | Runtime-changeable; controller pushes via WebSocket.                          |
+| Access (registration + auth) | `registration.*`, `authentication.*` | `/settings/access`               | Runtime-changeable. Combined endpoint as of `1e515ec0d`.                      |
+| Service Certificates         | `service_certificates.*`             | `/settings/service-certificates` | Runtime-changeable.                                                           |
+| SMTP (per-tenant)            | `smtp.*`                             | Shared surface action            | Runtime-changeable; per-tenant overrides of global defaults.                  |
+| SMTP (global)                | `global_smtp.*`                      | Shared surface action            | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
+| NATS                         | `nats.url`                           | `/settings/nats`                 | Stored in DB; **requires restart** to change the live connection.             |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
 
