@@ -7264,7 +7264,7 @@ dependencies = [
 name = "uptrakit-backoff"
 version = "0.0.1"
 dependencies = [
- "rand 0.9.4",
+ "rand 0.10.1",
  "tracing",
 ]
 
@@ -7473,7 +7473,7 @@ version = "0.0.1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rcgen",
  "rootcause",
  "sea-orm",
@@ -8326,7 +8326,7 @@ dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rootcause",
  "sea-orm",
  "serde_json",
@@ -8358,7 +8358,7 @@ version = "0.0.1"
 dependencies = [
  "futures-util",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "time",
  "tokio",
  "tokio-util",
@@ -8399,7 +8399,7 @@ dependencies = [
  "mdns-sd",
  "nix 0.31.3",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rcgen",
  "reqwest",
  "rootcause",
@@ -8486,7 +8486,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rootcause",
  "sea-orm",
  "serde",
@@ -8566,7 +8566,7 @@ dependencies = [
  "openidconnect",
  "parking_lot",
  "percent-encoding",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rcgen",
  "reqwest",
  "rootcause",
@@ -8631,7 +8631,7 @@ dependencies = [
  "jsonwebtoken",
  "openidconnect",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rootcause",
  "sea-orm",
  "serde",
@@ -8660,7 +8660,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "rootcause",
  "sea-orm",
  "serde",
