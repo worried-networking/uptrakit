@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSystemServices,
@@ -161,6 +162,16 @@
 				error = e instanceof Error ? e.message : 'Failed to load system services';
 			}
 		}
+	}
+
+	function setPage(p: number) {
+		const next = new URL(page.url.href);
+		if (p <= 1) {
+			next.searchParams.delete('page');
+		} else {
+			next.searchParams.set('page', String(p));
+		}
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	function toggleMenu(id: string, button: HTMLElement) {
@@ -529,7 +540,7 @@
 				{/snippet}
 				{#snippet footer()}
 					{#if !error}
-						<TableFooterBar {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
+						<TableFooterBar {currentPage} {totalPages} total={totalItems} onPageChange={setPage} />
 					{/if}
 				{/snippet}
 			</DataTable>
