@@ -2,8 +2,7 @@ use std::{
     collections::BTreeSet,
     future::Future,
     pin::Pin,
-    sync::Arc,
-    task::{Context, Poll, Wake, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use uptrakit_service_platform::{
@@ -75,14 +74,7 @@ fn no_capabilities() -> BTreeSet<Capability> {
 fn assert_runtime_definition<R: ServiceRuntime>(_: &ServiceDefinition<R>) {}
 
 fn block_on<F: Future>(future: F) -> F::Output {
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    let waker = Waker::from(Arc::new(NoopWake));
-    let mut context = Context::from_waker(&waker);
+    let mut context = Context::from_waker(Waker::noop());
     let mut future = Pin::from(Box::new(future));
 
     loop {
