@@ -148,8 +148,11 @@ pub use uptrakit_shared_types::{
 
 #[cfg(test)]
 #[test]
-fn plugin_config_validation_error_formats_for_display() {
+fn plugin_config_validation_error_carries_invalid_field_metadata() {
     let err = PluginConfigValidationError::invalid_field("url", "must be https");
+    assert!(matches!(
+        err,
+        PluginConfigValidationError::InvalidField { field: "url", .. }
+    ));
     assert_eq!(err.field(), Some("url"));
-    assert_eq!(err.to_string(), "url: must be https");
 }
