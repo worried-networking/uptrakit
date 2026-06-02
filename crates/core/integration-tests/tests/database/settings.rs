@@ -7,12 +7,12 @@ use crate::database_helpers::fixtures::{get_settings_etag, register_and_get_toke
 use crate::database_helpers::harness::TestHarness;
 use crate::database_helpers::macros::db_test;
 
-async fn test_get_registration_settings(harness: &TestHarness) {
+async fn test_get_access_settings(harness: &TestHarness) {
     let client = harness.client();
     let token = register_and_get_token(&client).await;
 
     let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send_json()
         .await;
@@ -21,16 +21,16 @@ async fn test_get_registration_settings(harness: &TestHarness) {
     assert!(body["mode"].as_str().is_some());
 }
 
-db_test!(get_registration_settings, test_get_registration_settings);
+db_test!(get_access_settings, test_get_access_settings);
 
-async fn test_update_registration_settings_persists(harness: &TestHarness) {
+async fn test_update_access_settings_persists(harness: &TestHarness) {
     let client = harness.client();
     let token = register_and_get_token(&client).await;
 
     let etag = get_settings_etag(&client, &token).await;
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&token)
@@ -43,7 +43,7 @@ async fn test_update_registration_settings_persists(harness: &TestHarness) {
 
     // Verify persistence by reading again.
     let (s2, body2): (_, serde_json::Value) = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(&token)
         .send_json()
         .await;
@@ -52,6 +52,6 @@ async fn test_update_registration_settings_persists(harness: &TestHarness) {
 }
 
 db_test!(
-    update_registration_settings_persists,
-    test_update_registration_settings_persists
+    update_access_settings_persists,
+    test_update_access_settings_persists
 );
