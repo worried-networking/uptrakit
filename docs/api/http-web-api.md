@@ -86,8 +86,7 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 
 - GET/PUT `/api/v1/settings/network`
 - GET/PUT `/api/v1/settings/mqtt`, `/api/v1/settings/mqtt/{id}`
-- GET/PUT `/api/v1/settings/registration`
-- GET/PUT `/api/v1/settings/authentication`
+- GET/PUT `/api/v1/settings/access` — combined registration + authentication settings (as of `1e515ec0d`).
 - GET/PUT `/api/v1/settings/service-certificates`
 - _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_
 - GET/PUT `/api/v1/settings/nats` _(feature: `nats`)_ — NATS server URL (requires `CanManageGlobalSettings`).

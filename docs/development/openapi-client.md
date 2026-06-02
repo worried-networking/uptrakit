@@ -544,10 +544,8 @@ provides `on_*` helpers for every endpoint, so tests never hard-code paths.
 | Method                           | HTTP | Path                                        |
 | -------------------------------- | ---- | ------------------------------------------- |
 | `on_get_combined()`              | GET  | `/api/v1/settings`                          |
-| `on_get_registration()`          | GET  | `/api/v1/settings/registration`             |
-| `on_update_registration()`       | PUT  | `/api/v1/settings/registration`             |
-| `on_get_authentication()`        | GET  | `/api/v1/settings/authentication`           |
-| `on_update_authentication()`     | PUT  | `/api/v1/settings/authentication`           |
+| `on_get_access()`                | GET  | `/api/v1/settings/access`                   |
+| `on_update_access()`             | PUT  | `/api/v1/settings/access`                   |
 | `on_get_agent_certificates()`    | GET  | `/api/v1/settings/agent-certificates`       |
 | `on_update_agent_certificates()` | PUT  | `/api/v1/settings/agent-certificates`       |
 | `on_get_network()`               | GET  | `/api/v1/settings/network`                  |
