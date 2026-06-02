@@ -541,9 +541,9 @@ fn email_surface_actions() -> Vec<SurfaceActionDescriptor> {
 
 /// Surface action handler wrapper for the `declare_plugin!` macro.
 ///
-/// Matches the `SurfaceActionHandler` type signature which receives
-/// `SurfaceActionContext` (with `db: &dyn Any`). Downcasts
-/// the database connection and delegates to `surfaces::handle_surface_action`.
+/// Matches the `SurfaceActionHandler` type signature, which receives a typed
+/// `SurfaceActionContext` exposing the controller through
+/// `SurfaceActionController`, and delegates to `surfaces::handle_surface_action`.
 fn email_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
     surface_id: &'a str,
