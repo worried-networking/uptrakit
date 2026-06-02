@@ -99,7 +99,7 @@ rejected at admission time rather than silently degrading runtime behavior.
 | `crates/shared/surfaces/src/`                            | Shared surface contract and validation policy types           |
 | `crates/shared/wire/src/wire_validate_impls.rs`          | Wire-level payload validation                                 |
 | `crates/ui/web-api/src/surface_registry.rs`              | Registration admission and tenant/provider indexing           |
-| `crates/ui/web-api/src/surface_proxy.rs`                 | Invocation correlation, idempotency, timeout, and routing     |
+| `crates/ui/surface-proxy/src/proxy.rs`                   | Invocation correlation, idempotency, timeout, and routing     |
 | `crates/ui/web-api/src/routes/surfaces.rs`               | Authz enforcement and API error mapping                       |
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Service message handling for surface registration and actions |
 
