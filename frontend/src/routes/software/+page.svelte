@@ -248,6 +248,11 @@
 		if (!pendingMergeSuccessToast) return;
 		showSuccess('Software items merged.');
 		pendingMergeSuccessToast = false;
+		const next = new URL(page.url.href);
+		if (next.searchParams.has('merge_success')) {
+			next.searchParams.delete('merge_success');
+			void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
+		}
 	});
 
 	$effect(() => {

@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		listUpdateHistory,
@@ -174,12 +175,12 @@
 		}
 	});
 
-	async function loadHistory(page: number) {
+	async function loadHistory(pg: number) {
 		loading = true;
 		error = null;
 		try {
 			const res = await listUpdateHistory({
-				page,
+				page: pg,
 				status: statusParam.value === 'all' ? undefined : statusParam.value
 			});
 			items = res.items;
@@ -190,6 +191,16 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	function setPage(p: number) {
+		const next = new URL(page.url.href);
+		if (p <= 1) {
+			next.searchParams.delete('page');
+		} else {
+			next.searchParams.set('page', String(p));
+		}
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	onDestroy(() => {
@@ -751,7 +762,7 @@
 
 				{#if !error}
 					<div class="mt-4">
-						<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={loadHistory} />
+						<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={setPage} />
 					</div>
 				{/if}
 			</SectionCard>
