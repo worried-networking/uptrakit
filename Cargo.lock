@@ -7505,6 +7505,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-functional-tests"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "httpmock",
+ "rootcause",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "time",
+ "tokio",
+ "uptrakit-controller-core",
+ "uptrakit-crypto",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-infrastructure-proxmox",
+ "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-shared-db",
+ "uptrakit-shared-types",
+ "uptrakit-tenant-db",
+ "uptrakit-web-api-queries",
+ "uptrakit-wire",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-github-client"
 version = "0.0.1"
 dependencies = [
