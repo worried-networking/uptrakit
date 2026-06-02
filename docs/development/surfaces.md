@@ -11,7 +11,7 @@ controller `SurfaceRegistry` and shared frontend renderer.
 - Contract types: `crates/shared/surfaces/`
 - Wire barrel: `crates/shared/wire/src/surfaces.rs`
 - Controller registry and admission: `crates/ui/web-api/src/surface_registry.rs`
-- Controller dispatch/correlation: `crates/ui/web-api/src/surface_proxy.rs`
+- Controller dispatch/correlation: `crates/ui/surface-proxy/src/proxy.rs` (crate `uptrakit-surface-proxy`)
 - REST endpoints: `crates/ui/web-api/src/routes/surfaces.rs`
 - Frontend runtime store: `frontend/src/lib/surfaces/registry.svelte.ts`
 - Frontend shared renderer: `frontend/src/lib/components/surfaces/`

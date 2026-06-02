@@ -43,8 +43,8 @@ The controller runtime is composed of:
 
 - `crates/ui/web-api/src/surface_registry.rs` — source-of-truth provider/surface catalog and
   admission policy enforcement
-- `crates/ui/web-api/src/surface_proxy.rs` — interaction dispatch, request correlation,
-  idempotency, cancellation, and timeout handling
+- `crates/ui/surface-proxy/src/proxy.rs` (crate `uptrakit-surface-proxy`) — interaction
+  dispatch, request correlation, idempotency, cancellation, and timeout handling
 - `crates/ui/web-api/src/routes/surfaces.rs` — REST endpoints for list/providers/read/invoke
 
 `SurfaceRegistry` tracks provider registrations from three sources:

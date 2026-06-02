@@ -828,7 +828,7 @@ action.
 | `crates/ui/web-api-queries/src/queries/notifications.rs`  | DB query helpers, `ChannelQueryError`, `RuleQueryError`                                              |
 | `crates/ui/web-api/src/routes/notifications.rs`           | REST route handlers, generic notification callback                                                   |
 | `crates/ui/web-api-auth/src/settings_store.rs`            | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.)             |
-| `crates/ui/web-api/src/surface_proxy.rs`                  | Shared-surface interaction dispatch to plugin `handle_surface_action()`                              |
+| `crates/ui/surface-proxy/src/proxy.rs`                    | Shared-surface interaction dispatch to plugin `handle_surface_action()`                              |
 
 ## Shared surface integration
 
