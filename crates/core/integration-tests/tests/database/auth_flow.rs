@@ -34,7 +34,7 @@ async fn test_register_second_user_gets_viewer(harness: &TestHarness) {
     let etag = get_settings_etag(&client, first.access_token.expose_secret()).await;
     let reopen_status = client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())
@@ -65,7 +65,7 @@ async fn test_register_duplicate_email_returns_409(harness: &TestHarness) {
     let etag = get_settings_etag(&client, first.access_token.expose_secret()).await;
     client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(first.access_token.expose_secret())

@@ -39,19 +39,19 @@ pub(crate) async fn register_and_get_token(client: &TestClient) -> String {
     auth.access_token.expose_secret().to_string()
 }
 
-/// GET `/api/v1/settings/registration` and return the `ETag` response header.
+/// GET `/api/v1/settings/access` and return the `ETag` response header.
 ///
 /// Used by tests that need to call mutation endpoints protected by
 /// `IfMatch<SettingsVersion>`.
 pub(crate) async fn get_settings_etag(client: &TestClient, token: &str) -> String {
     let resp = client
-        .get("/api/v1/settings/registration")
+        .get("/api/v1/settings/access")
         .bearer(token)
         .send()
         .await;
     resp.headers()
         .get("etag")
-        .expect("ETag header must be present on GET /api/v1/settings/registration")
+        .expect("ETag header must be present on GET /api/v1/settings/access")
         .to_str()
         .expect("ETag is ASCII")
         .to_string()

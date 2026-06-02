@@ -34,7 +34,7 @@ async fn test_update_user_roles(harness: &TestHarness) {
     let etag = get_settings_etag(&client, owner_token).await;
     client
         .put_json(
-            "/api/v1/settings/registration",
+            "/api/v1/settings/access",
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(owner_token)
