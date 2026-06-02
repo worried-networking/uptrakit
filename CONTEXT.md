@@ -212,6 +212,26 @@ watchdog, commits or reverts. Exactly one per Controller process. _Avoid_: "conf
 Per-subsystem time budget within which a newly-applied configuration must pass `health_check()`.
 Default values are constants in `uptrakit-config-reload::defaults`.
 
+**Surface Action Controller**:
+Workflow-scoped trait (`SurfaceActionController`) given to surface-action handlers via `SurfaceActionContext`;
+exposes `tenant_id()`, `user_id()`, and `tenant_db()`.
+
+**Update Protection Controller**:
+Workflow-scoped trait (`UpdateProtectionController`) given to update-protection plugins;
+exposes `tenant_db()` for the protection workflow only.
+
+**Surface Action Context**:
+Struct wrapping `&dyn SurfaceActionController` passed to every surface-action handler;
+delegates `tenant_id()`, `caller_user_id()`, and `tenant_db()`.
+
+**Surface Action Error**:
+Typed error enum (`SurfaceActionError`) returned by surface-action handlers;
+variants: `InvalidInput`, `ControllerIntegration`, `PluginInternal`.
+
+**Plugin Config Validation Error**:
+Typed error enum (`PluginConfigValidationError`) returned by config validation;
+variants: `InvalidField { field, message }`, `InvalidIdentifier`, `Contract`.
+
 ## Relationships
 
 - A **Tenant** owns **Hosts**, **Software Items**, **Updates**, and all configuration
