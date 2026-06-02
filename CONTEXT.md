@@ -214,7 +214,7 @@ Default values are constants in `uptrakit-config-reload::defaults`.
 
 **Surface Action Controller**:
 Workflow-scoped trait (`SurfaceActionController`) given to surface-action handlers via `SurfaceActionContext`;
-exposes `tenant_id()`, `user_id()`, and `tenant_db()`.
+exposes `tenant_id()`, `user_id()` (re-exposed to handlers as `caller_user_id()`), and `tenant_db()`.
 
 **Update Protection Controller**:
 Workflow-scoped trait (`UpdateProtectionController`) given to update-protection plugins;
