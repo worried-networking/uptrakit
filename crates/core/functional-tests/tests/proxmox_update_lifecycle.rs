@@ -1,8 +1,7 @@
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::panic,
-    reason = "functional test infrastructure: panics acceptable in test helpers and assertions"
+    reason = "functional test infrastructure: unwrap/expect acceptable in test helpers and assertions"
 )]
 
 mod support;
