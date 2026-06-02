@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.3...uptrakit-cli-v0.0.4) - 2026-06-02
+
+### Added
+
+- *(cli)* add settings access subcommand with ETag-aware GET-then-PUT; remove registration+authentication
+- *(api)* add GET/PUT /api/v1/settings/access; remove registration+auth endpoints
+
+### Other
+
+- *(surfaces)* migrate all InteractionDescriptor struct literals to new() constructor
+- *(surfaces)* migrate SurfaceNode::Section literals to constructors; R1+R4-Rust fixes
+- *(cli)* delete superseded registration and authentication settings modules
+
 ## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.2...uptrakit-cli-v0.0.3) - 2026-05-18
 
 ### Added
