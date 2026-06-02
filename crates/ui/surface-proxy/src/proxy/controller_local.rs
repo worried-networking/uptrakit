@@ -34,6 +34,13 @@ pub(crate) use proxmox_update_protection::{
     emit_proxmox_update_protection_audit_event,
 };
 
+// TODO(adr-0018): The collapse of ControllerIntegration/PluginInternal → SendFailed is only
+// acceptable because the tracing::error! call below preserves controller-side failure detail in
+// logs. A subscriber-capture test asserting that error event would lock in this guarantee, but no
+// exported tracing-capture helper exists in the workspace without adding a new dev-dependency
+// (tracing-subscriber or tracing-test). Task 5 ADR should either export a capture helper from
+// uptrakit-tracing-init or approve tracing-subscriber as a surface-proxy dev-dependency so this
+// can be promoted to an assertion.
 pub fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {
