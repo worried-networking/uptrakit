@@ -1,5 +1,10 @@
 //! Test-only insertion + assertion helpers. See `lib.rs` doc comment.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test-only helpers: panics are how callers learn about DB setup bugs"
+)]
+
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -107,6 +112,10 @@ pub async fn insert_scaling_default_absolute(
     .await;
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test fixture explicitly enumerates every column to avoid masking schema drift"
+)]
 async fn insert_scaling_default(
     db: &DatabaseConnection,
     tenant_id: Uuid,
