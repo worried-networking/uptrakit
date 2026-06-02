@@ -220,6 +220,10 @@ exposes `tenant_id()`, `user_id()` (re-exposed to handlers as `caller_user_id()`
 Workflow-scoped trait (`UpdateProtectionController`) given to update-protection plugins;
 exposes `tenant_db()` for the protection workflow only.
 
+**Update Hook Controller**:
+Workflow-scoped trait (`UpdateHookController`) given to pre/post update-hook plugins;
+exposes `tenant_db()` for the update-hook workflow only.
+
 **Surface Action Context**:
 Struct wrapping `&dyn SurfaceActionController` passed to every surface-action handler;
 delegates `tenant_id()`, `caller_user_id()`, and `tenant_db()`.
