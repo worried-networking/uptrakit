@@ -11,6 +11,7 @@ fn default_execution_site() -> String {
     "auto".to_string()
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
@@ -20,13 +21,7 @@ impl TryFrom<serde_json::Value> for JsonObjectMap {
     type Error = ValidationError;
 
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        match value {
-            serde_json::Value::Object(map) => Ok(Self(map)),
-            _ => Err(ValidationError {
-                field: "config_override",
-                message: "must be a JSON object".to_string(),
-            }),
-        }
+        crate::json_object::parse_json_object(value, "config_override").map(Self)
     }
 }
 

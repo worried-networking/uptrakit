@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
@@ -13,13 +14,7 @@ impl TryFrom<serde_json::Value> for JsonObjectMap {
     type Error = ValidationError;
 
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        match value {
-            serde_json::Value::Object(map) => Ok(Self(map)),
-            _ => Err(ValidationError {
-                field: "config",
-                message: "must be a JSON object".to_string(),
-            }),
-        }
+        crate::json_object::parse_json_object(value, "config").map(Self)
     }
 }
 
@@ -39,6 +34,7 @@ impl From<JsonObjectMap> for serde_json::Value {
     }
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
@@ -46,14 +42,7 @@ pub struct JsonObjectInput(serde_json::Value);
 
 impl JsonObjectInput {
     pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.0.is_object() {
-            Ok(())
-        } else {
-            Err(ValidationError {
-                field: "config",
-                message: "must be a JSON object".to_string(),
-            })
-        }
+        crate::json_object::validate_json_object(&self.0, "config")
     }
 
     pub fn as_value(&self) -> &serde_json::Value {
