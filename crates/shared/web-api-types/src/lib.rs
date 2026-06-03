@@ -23,6 +23,7 @@ pub mod host_tags;
 pub mod hosts;
 pub mod instance_config_state;
 pub mod instance_plugins;
+pub(crate) mod json_object;
 pub mod masked_url;
 pub mod mfa;
 pub mod notifications;
