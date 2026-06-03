@@ -304,8 +304,10 @@ where
     Ok(opt.filter(|s| !s.is_empty()))
 }
 
-/// Accepts a JSON number, a JSON string-encoded number, or null/missing —
-/// mirroring the legacy `get_u16` helper semantics.
+/// Accepts a JSON number, a JSON string-encoded number, or null/missing.
+/// Invalid values (out-of-range integers, unparsable strings, wrong types) become
+/// `Ok(None)`, matching the legacy `get_u16` / `n.try_into().ok()` / `s.parse().ok()`
+/// semantics directly.
 fn deserialize_port_lenient<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -345,26 +347,15 @@ where
         }
 
         fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-            u16::try_from(v).map(Some).map_err(serde::de::Error::custom)
+            Ok(u16::try_from(v).ok())
         }
 
         fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-            u16::try_from(v).map(Some).map_err(serde::de::Error::custom)
+            Ok(u16::try_from(v).ok())
         }
 
         fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            if v.is_empty() {
-                return Ok(None);
-            }
-            v.parse::<u16>().map(Some).map_err(serde::de::Error::custom)
-        }
-
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
+            Ok(v.parse::<u16>().ok())
         }
     }
 
@@ -708,63 +699,85 @@ async fn db_load_user_email(
 mod tests {
     use super::{SmtpPatchActionParams, normalize_tls_mode, parse_action_params};
 
+    fn make_raw(
+        pairs: &[(&str, serde_json::Value)],
+    ) -> std::collections::HashMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
     #[test]
-    fn smtp_snapshot_from_raw_preserves_legacy_get_str_get_u16_semantics() {
-        uptrakit_crypto::enable_plaintext_mode();
-
-        let plaintext_password = "s3cr3t";
-        let aad = super::SMTP_PASSWORD_AAD;
-        let encrypted_password =
-            uptrakit_crypto::encrypt_str(plaintext_password, aad).expect("encrypt");
-
-        let mut raw = std::collections::HashMap::new();
-        // empty string → None (get_str semantics)
-        raw.insert("smtp.host".to_string(), serde_json::json!(""));
-        // port stored as JSON string → Some(587) (get_u16 lenient semantics)
-        raw.insert("smtp.port".to_string(), serde_json::json!("587"));
-        // username set normally
-        raw.insert(
-            "smtp.username".to_string(),
-            serde_json::json!("user@example.com"),
-        );
-        // encrypted password ciphertext
-        raw.insert(
-            "smtp.password".to_string(),
-            serde_json::json!(encrypted_password),
-        );
-        // unknown tls_mode → "starttls"
-        raw.insert(
-            "smtp.tls_mode".to_string(),
-            serde_json::json!("legacy_mode"),
-        );
-
+    fn smtp_snapshot_from_raw_collapses_empty_string_to_none() {
+        let raw = make_raw(&[("smtp.host", serde_json::json!(""))]);
         let snapshot =
-            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", aad, "tenant", None);
-
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", "aad", "tenant", None);
         assert!(
             snapshot.host.is_none(),
-            "empty string host should collapse to None"
+            "empty string host should become None"
         );
+    }
+
+    #[test]
+    fn smtp_snapshot_from_raw_accepts_port_as_json_string() {
+        let raw = make_raw(&[("smtp.port", serde_json::json!("587"))]);
+        let snapshot =
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", "aad", "tenant", None);
         assert_eq!(
             snapshot.port,
             Some(587),
             "port stored as JSON string should parse to 587"
         );
-        assert_eq!(
-            snapshot.username.as_deref(),
-            Some("user@example.com"),
-            "username should round-trip"
-        );
+    }
+
+    #[test]
+    fn smtp_snapshot_from_raw_normalizes_unknown_tls_mode_to_starttls() {
+        let raw = make_raw(&[("smtp.tls_mode", serde_json::json!("legacy_mode"))]);
+        let snapshot =
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", "aad", "tenant", None);
         assert_eq!(
             snapshot.tls_mode, "starttls",
             "unknown tls_mode should normalize to starttls"
         );
+    }
+
+    #[test]
+    fn smtp_snapshot_from_raw_decrypts_encrypted_password() {
+        uptrakit_crypto::enable_plaintext_mode();
+        let plaintext_password = "s3cr3t";
+        let aad = super::SMTP_PASSWORD_AAD;
+        let encrypted_password =
+            uptrakit_crypto::encrypt_str(plaintext_password, aad).expect("encrypt");
+        let raw = make_raw(&[("smtp.password", serde_json::json!(encrypted_password))]);
+        let snapshot =
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", aad, "tenant", None);
         let password = snapshot.password.expect("password should be present");
         assert_eq!(
             password.expose_secret(),
             plaintext_password,
             "encrypted password should decrypt back to plaintext"
         );
+    }
+
+    #[test]
+    fn smtp_snapshot_from_raw_passes_through_all_string_fields() {
+        let raw = make_raw(&[
+            ("smtp.host", serde_json::json!("smtp.example.com")),
+            ("smtp.username", serde_json::json!("user@example.com")),
+            ("smtp.from_address", serde_json::json!("alerts@example.com")),
+            ("smtp.from_name", serde_json::json!("Uptrakit Alerts")),
+            ("smtp.helo_host", serde_json::json!("relay.example.com")),
+            ("smtp.tls_mode", serde_json::json!("tls")),
+        ]);
+        let snapshot =
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", "aad", "tenant", None);
+        assert_eq!(snapshot.host.as_deref(), Some("smtp.example.com"));
+        assert_eq!(snapshot.username.as_deref(), Some("user@example.com"));
+        assert_eq!(snapshot.from_address.as_deref(), Some("alerts@example.com"));
+        assert_eq!(snapshot.from_name.as_deref(), Some("Uptrakit Alerts"));
+        assert_eq!(snapshot.helo_host.as_deref(), Some("relay.example.com"));
+        assert_eq!(snapshot.tls_mode, "tls");
     }
 
     #[test]
