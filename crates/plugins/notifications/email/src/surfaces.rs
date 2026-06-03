@@ -293,6 +293,168 @@ fn normalize_tls_mode(tls_mode: Option<String>) -> String {
     }
 }
 
+// ── Serde helpers for SmtpNonSecretSnapshot ───────────────────────────────────
+
+/// Filters empty strings to `None`, mirroring the legacy `get_str` helper.
+fn deserialize_non_empty_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.filter(|s| !s.is_empty()))
+}
+
+/// Accepts a JSON number, a JSON string-encoded number, or null/missing —
+/// mirroring the legacy `get_u16` helper semantics.
+fn deserialize_port_lenient<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct PortVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for PortVisitor {
+        type Value = Option<u16>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a port number as integer, string, or null")
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D2: serde::Deserializer<'de>>(
+            self,
+            de: D2,
+        ) -> Result<Self::Value, D2::Error> {
+            de.deserialize_any(InnerPortVisitor)
+        }
+    }
+
+    struct InnerPortVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for InnerPortVisitor {
+        type Value = Option<u16>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a port number as integer or string")
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            u16::try_from(v).map(Some).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            u16::try_from(v).map(Some).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            if v.is_empty() {
+                return Ok(None);
+            }
+            v.parse::<u16>().map(Some).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_option(PortVisitor)
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct SmtpNonSecretSnapshot {
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    host: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_port_lenient")]
+    port: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    username: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    from_address: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    from_name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    tls_mode: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_empty_string")]
+    helo_host: Option<String>,
+}
+
+/// Two-phase SMTP snapshot decoder.
+///
+/// Phase 1: decode all non-secret SMTP fields via
+/// [`uptrakit_shared_db::raw_settings::decode_prefixed_settings`] into
+/// [`SmtpNonSecretSnapshot`].
+///
+/// Phase 2: decrypt the password field directly from the raw map (it is
+/// stored as an `uptrakit_crypto`-encrypted ciphertext).
+fn smtp_snapshot_from_raw(
+    raw: &std::collections::HashMap<String, serde_json::Value>,
+    prefix: &str,
+    password_key: &str,
+    password_aad: &str,
+    scope: &'static str,
+    tenant_id: Option<uuid::Uuid>,
+) -> SmtpSettingsSnapshot {
+    let non_secret: SmtpNonSecretSnapshot =
+        match uptrakit_shared_db::raw_settings::decode_prefixed_settings(prefix, raw) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    scope,
+                    prefix,
+                    "smtp non-secret settings failed typed decode; falling back to defaults",
+                );
+                SmtpNonSecretSnapshot::default()
+            }
+        };
+
+    let password = raw
+        .get(password_key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .and_then(|raw_str| {
+            if uptrakit_crypto::is_encrypted(raw_str) {
+                match uptrakit_crypto::decrypt_str(raw_str, password_aad) {
+                    Ok(v) if !v.is_empty() => Some(v),
+                    Ok(_) => None,
+                    Err(e) => {
+                        if let Some(tid) = tenant_id {
+                            tracing::warn!(error = ?e, %tid, scope, "failed to decrypt SMTP password");
+                        } else {
+                            tracing::warn!(error = ?e, scope, "failed to decrypt SMTP password");
+                        }
+                        None
+                    }
+                }
+            } else {
+                Some(raw_str.to_string())
+            }
+        })
+        .map(SecretString::new);
+
+    SmtpSettingsSnapshot {
+        host: non_secret.host,
+        port: non_secret.port,
+        username: non_secret.username,
+        password,
+        from_address: non_secret.from_address,
+        from_name: non_secret.from_name,
+        tls_mode: normalize_tls_mode(non_secret.tls_mode),
+        helo_host: non_secret.helo_host,
+    }
+}
+
 fn smtp_json(smtp: &SmtpSettingsSnapshot) -> serde_json::Value {
     serde_json::json!({
         "host": smtp.host.as_deref().unwrap_or(""),
@@ -330,16 +492,10 @@ async fn db_load_tenant_smtp(
     let raw = uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, SMTP_PREFIX)
         .await
         .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
-    Ok(settings_map_to_snapshot(
+    Ok(smtp_snapshot_from_raw(
         &raw,
-        KEY_SMTP_HOST,
-        KEY_SMTP_PORT,
-        KEY_SMTP_USERNAME,
+        SMTP_PREFIX,
         KEY_SMTP_PASSWORD,
-        KEY_SMTP_FROM_ADDRESS,
-        KEY_SMTP_FROM_NAME,
-        KEY_SMTP_TLS_MODE,
-        KEY_SMTP_HELO_HOST,
         SMTP_PASSWORD_AAD,
         "tenant",
         Some(tenant_id),
@@ -353,82 +509,14 @@ async fn db_load_global_smtp(
         uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
             .await
             .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
-    Ok(settings_map_to_snapshot(
+    Ok(smtp_snapshot_from_raw(
         &raw,
-        KEY_GLOBAL_SMTP_HOST,
-        KEY_GLOBAL_SMTP_PORT,
-        KEY_GLOBAL_SMTP_USERNAME,
+        GLOBAL_SMTP_PREFIX,
         KEY_GLOBAL_SMTP_PASSWORD,
-        KEY_GLOBAL_SMTP_FROM_ADDRESS,
-        KEY_GLOBAL_SMTP_FROM_NAME,
-        KEY_GLOBAL_SMTP_TLS_MODE,
-        KEY_GLOBAL_SMTP_HELO_HOST,
         GLOBAL_SMTP_PASSWORD_AAD,
         "global",
         None,
     ))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each SMTP field has a distinct key name; a builder or struct would add more indirection without clarity gain"
-)]
-fn settings_map_to_snapshot(
-    raw: &std::collections::HashMap<String, serde_json::Value>,
-    host_key: &str,
-    port_key: &str,
-    username_key: &str,
-    password_key: &str,
-    from_address_key: &str,
-    from_name_key: &str,
-    tls_mode_key: &str,
-    helo_host_key: &str,
-    password_aad: &str,
-    scope: &'static str,
-    tenant_id: Option<uuid::Uuid>,
-) -> SmtpSettingsSnapshot {
-    let get_str = |key: &str| -> Option<String> {
-        raw.get(key)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    };
-    let get_u16 = |key: &str| -> Option<u16> {
-        raw.get(key).and_then(|v| {
-            v.as_u64()
-                .and_then(|n| u16::try_from(n).ok())
-                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-        })
-    };
-    let password = get_str(password_key).and_then(|raw_str| {
-        if uptrakit_crypto::is_encrypted(&raw_str) {
-            match uptrakit_crypto::decrypt_str(&raw_str, password_aad) {
-                Ok(v) if !v.is_empty() => Some(v),
-                Ok(_) => None,
-                Err(e) => {
-                    if let Some(tid) = tenant_id {
-                        tracing::warn!(error = ?e, %tid, scope, "failed to decrypt SMTP password");
-                    } else {
-                        tracing::warn!(error = ?e, scope, "failed to decrypt SMTP password");
-                    }
-                    None
-                }
-            }
-        } else {
-            Some(raw_str)
-        }
-    }).map(SecretString::new);
-
-    SmtpSettingsSnapshot {
-        host: get_str(host_key),
-        port: get_u16(port_key),
-        username: get_str(username_key),
-        password,
-        from_address: get_str(from_address_key),
-        from_name: get_str(from_name_key),
-        tls_mode: normalize_tls_mode(get_str(tls_mode_key)),
-        helo_host: get_str(helo_host_key),
-    }
 }
 
 async fn db_save_tenant_smtp(
@@ -618,32 +706,65 @@ async fn db_load_user_email(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SmtpPatchActionParams, normalize_tls_mode, parse_action_params, settings_map_to_snapshot,
-    };
+    use super::{SmtpPatchActionParams, normalize_tls_mode, parse_action_params};
 
     #[test]
-    fn settings_map_to_snapshot_normalizes_unknown_tls_mode_to_starttls() {
+    fn smtp_snapshot_from_raw_preserves_legacy_get_str_get_u16_semantics() {
+        uptrakit_crypto::enable_plaintext_mode();
+
+        let plaintext_password = "s3cr3t";
+        let aad = super::SMTP_PASSWORD_AAD;
+        let encrypted_password =
+            uptrakit_crypto::encrypt_str(plaintext_password, aad).expect("encrypt");
+
         let mut raw = std::collections::HashMap::new();
+        // empty string → None (get_str semantics)
+        raw.insert("smtp.host".to_string(), serde_json::json!(""));
+        // port stored as JSON string → Some(587) (get_u16 lenient semantics)
+        raw.insert("smtp.port".to_string(), serde_json::json!("587"));
+        // username set normally
+        raw.insert(
+            "smtp.username".to_string(),
+            serde_json::json!("user@example.com"),
+        );
+        // encrypted password ciphertext
+        raw.insert(
+            "smtp.password".to_string(),
+            serde_json::json!(encrypted_password),
+        );
+        // unknown tls_mode → "starttls"
         raw.insert(
             "smtp.tls_mode".to_string(),
-            serde_json::Value::String("legacy".to_string()),
+            serde_json::json!("legacy_mode"),
         );
-        let snapshot = settings_map_to_snapshot(
-            &raw,
-            "smtp.host",
-            "smtp.port",
-            "smtp.username",
-            "smtp.password",
-            "smtp.from_address",
-            "smtp.from_name",
-            "smtp.tls_mode",
-            "smtp.helo_host",
-            "unused_aad",
-            "tenant",
-            None,
+
+        let snapshot =
+            super::smtp_snapshot_from_raw(&raw, "smtp.", "smtp.password", aad, "tenant", None);
+
+        assert!(
+            snapshot.host.is_none(),
+            "empty string host should collapse to None"
         );
-        assert_eq!(snapshot.tls_mode, "starttls");
+        assert_eq!(
+            snapshot.port,
+            Some(587),
+            "port stored as JSON string should parse to 587"
+        );
+        assert_eq!(
+            snapshot.username.as_deref(),
+            Some("user@example.com"),
+            "username should round-trip"
+        );
+        assert_eq!(
+            snapshot.tls_mode, "starttls",
+            "unknown tls_mode should normalize to starttls"
+        );
+        let password = snapshot.password.expect("password should be present");
+        assert_eq!(
+            password.expose_secret(),
+            plaintext_password,
+            "encrypted password should decrypt back to plaintext"
+        );
     }
 
     #[test]
