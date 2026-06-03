@@ -307,69 +307,11 @@ where
     Ok(opt.filter(|s| !s.is_empty()))
 }
 
-/// Accepts a JSON number, a JSON string-encoded number, or null/missing.
-/// Invalid values (out-of-range integers, unparsable strings, wrong types) become
-/// `Ok(None)`, matching the legacy `get_u16` / `n.try_into().ok()` / `s.parse().ok()`
-/// semantics directly.
-fn deserialize_port_lenient<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    struct PortVisitor;
-
-    impl<'de> serde::de::Visitor<'de> for PortVisitor {
-        type Value = Option<u16>;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a port number as integer, string, or null")
-        }
-
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_some<D2: serde::Deserializer<'de>>(
-            self,
-            de: D2,
-        ) -> Result<Self::Value, D2::Error> {
-            de.deserialize_any(InnerPortVisitor)
-        }
-    }
-
-    struct InnerPortVisitor;
-
-    impl<'de> serde::de::Visitor<'de> for InnerPortVisitor {
-        type Value = Option<u16>;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a port number as integer or string")
-        }
-
-        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-            Ok(u16::try_from(v).ok())
-        }
-
-        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-            Ok(u16::try_from(v).ok())
-        }
-
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            Ok(v.parse::<u16>().ok())
-        }
-    }
-
-    deserializer.deserialize_option(PortVisitor)
-}
-
 #[derive(Debug, Default, serde::Deserialize)]
 struct SmtpNonSecretSnapshot {
     #[serde(default, deserialize_with = "deserialize_non_empty_string")]
     host: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_port_lenient")]
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_port")]
     port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_non_empty_string")]
     username: Option<String>,
