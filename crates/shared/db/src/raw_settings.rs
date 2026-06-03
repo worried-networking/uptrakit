@@ -215,6 +215,12 @@ pub async fn load_global_settings_by_prefix(
 }
 
 /// Decode a prefixed flat settings map into a typed settings snapshot.
+///
+/// Recovery path: if a full-map decode fails, fields are inserted one at a time
+/// and any field that breaks decode is dropped. That is O(n²) in the number of
+/// prefix-scoped keys; it is acceptable here because real settings prefixes hold
+/// at most a few tens of keys (e.g. ~8 for SMTP). Do not reuse this function
+/// for prefix bags with hundreds of keys without revisiting the recovery loop.
 pub fn decode_prefixed_settings<T>(
     prefix: &str,
     values: &HashMap<String, serde_json::Value>,
