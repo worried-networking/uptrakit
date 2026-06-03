@@ -1,3 +1,15 @@
+//! Query helpers for notification plugin settings.
+//!
+//! The flat `smtp.*` / `global_smtp.*` / `global_telegram.*` keyed JSON bag
+//! returned by `build_settings_bag` is a runtime wire contract consumed by the
+//! notification plugins' `smtp_from_settings_map` and Telegram prefix lookups
+//! (each plugin reads its keys via `format!("{prefix}{suffix}")`). The Telegram
+//! prefix pass-through is intentionally untyped because Telegram plugin config
+//! is plugin-defined. The SMTP portion stays flat-keyed in this bag (NOT a
+//! typed snapshot) on purpose: stripping prefixes would break the plugin
+//! contract. The typed `SmtpSettingsSnapshot` lives inside the email plugin,
+//! not at this layer.
+
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
