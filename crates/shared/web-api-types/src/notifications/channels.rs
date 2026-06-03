@@ -19,6 +19,10 @@ impl TryFrom<serde_json::Value> for JsonObjectMap {
 }
 
 impl JsonObjectMap {
+    pub fn new(value: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self(value)
+    }
+
     pub fn is_object(&self) -> bool {
         true
     }
@@ -41,6 +45,10 @@ impl From<JsonObjectMap> for serde_json::Value {
 pub struct JsonObjectInput(serde_json::Value);
 
 impl JsonObjectInput {
+    pub fn new(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         crate::json_object::validate_json_object(&self.0, "config")
     }

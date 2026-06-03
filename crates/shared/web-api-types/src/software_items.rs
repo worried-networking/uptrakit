@@ -26,6 +26,10 @@ impl TryFrom<serde_json::Value> for JsonObjectMap {
 }
 
 impl JsonObjectMap {
+    pub fn new(value: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self(value)
+    }
+
     pub fn is_object(&self) -> bool {
         true
     }
