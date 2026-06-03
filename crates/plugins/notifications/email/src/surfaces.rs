@@ -1,7 +1,10 @@
 //! Surface action handlers for the email notification plugin.
 //!
 //! Handles SMTP settings management (per-tenant and global) and channel
-//! listing.
+//! listing. SMTP `password` is excluded from the serde-driven
+//! `SmtpNonSecretSnapshot` decode and is decrypted separately via
+//! `uptrakit_crypto::decrypt_str` because it is stored as `SecretString`
+//! ciphertext at rest.
 
 use serde::Deserialize;
 use uptrakit_notification_plugin_core::DeliveryMessage;

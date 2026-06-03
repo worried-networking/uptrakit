@@ -8,6 +8,14 @@
 //! By living in `shared-db`, notification plugins can use these functions
 //! directly instead of depending on the `web-api-auth` crate, breaking the
 //! cross-layer dependency cycle.
+//!
+//! `decode_prefixed_settings` is the canonical way to convert a prefix-scoped
+//! settings map into a typed Rust snapshot. Plugin crates should use this
+//! function rather than hand-rolling field-by-field getters.
+//!
+//! Fields requiring runtime decryption (e.g. `password` stored as
+//! `SecretString`) must be extracted separately after the serde decode step;
+//! serde alone cannot handle the encryption boundary.
 
 use std::collections::HashMap;
 
