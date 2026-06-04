@@ -512,6 +512,25 @@ When validating reverse proxy setups locally, confirm `/api/v1/services` shows e
 `last_seen_at` movement for both Agent and MQTT services. Cross-check the security model in
 [docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md).
 
+#### Reproducing CI-only flakes locally
+
+A handful of the reverse-proxy tests (notably the nginx OCSP suite) depend on the timing of an asynchronous
+nginx-to-OCSP-responder roundtrip. Docker Desktop on macOS handles this roundtrip fast enough that the race
+never opens; slower runners (GitHub Actions Ubuntu, Colima, throttled containers) can expose it. The test
+infrastructure ships four env-gated knobs that recreate slow-CI conditions on a fast developer machine. They
+are no-ops when unset, cost nothing in CI runs, and are documented inline next to the code that reads them.
+
+| Variable                              | Effect                                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `UPTRAKIT_TEST_OCSP_DELAY_MS`         | Sleeps the OCSP responder by N ms before counting the request and emitting the response.       |
+| `UPTRAKIT_TEST_NGINX_AMD64`           | Set to `1` to force `linux/amd64` on the nginx container (Rosetta emulation on Apple Silicon). |
+| `UPTRAKIT_TEST_NGINX_NANO_CPUS`       | Applies a Docker `--cpus`-equivalent throttle to the nginx container (in nano-CPUs).           |
+| `UPTRAKIT_TEST_PROXY_READY_TIMEOUT_S` | Overrides the 10-second deadline in `wait_for_proxy_ready`, useful on slow VM backends.        |
+
+For the deepest reproduction, run the reverse-proxy suite under a Colima VM (`colima start --arch aarch64 --cpu 2 --memory 4 --vm-type vz`)
+with `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` and `TMPDIR=$HOME/.uptrakit-test-tmp` (Colima only
+mounts `$HOME` via virtiofs, so `TempDir::new()` must land under it for nginx to see the generated configs).
+
 ### System integration tests
 
 End-to-end tests in `crates/core/integration-tests/` verify that the actual compiled binaries

@@ -701,8 +701,16 @@ fn build_client(
 /// The container still maps `host.docker.internal` to Docker's host gateway
 /// for consistency with other reverse-proxy tests, but OCSP configs in this
 /// file use the resolved gateway IP directly to avoid DNS-dependent failures.
+///
+/// Two env-gated knobs help reproduce slow-CI conditions locally
+/// (see docs/development/testing.md for the full recipe):
+///   - `UPTRAKIT_TEST_NGINX_AMD64=1` forces `linux/amd64`, triggering Rosetta
+///     emulation on Apple Silicon so nginx OCSP processing slows ~5–10×.
+///   - `UPTRAKIT_TEST_NGINX_NANO_CPUS=<n>` applies a Docker `--cpus`-equivalent
+///     throttle to the nginx container (in nano-CPUs; e.g. `50000000` = 0.05
+///     cores). Stretches the nginx event loop and widens the OCSP race window.
 async fn start_nginx_ocsp_container(tmp: &TempDir) -> testcontainers::ContainerAsync<GenericImage> {
-    GenericImage::new("nginx", "latest")
+    let mut req = GenericImage::new("nginx", "latest")
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr("start worker")))
         .with_mount(
@@ -712,10 +720,22 @@ async fn start_nginx_ocsp_container(tmp: &TempDir) -> testcontainers::ContainerA
             )
             .with_access_mode(AccessMode::ReadOnly),
         )
-        .with_host("host.docker.internal", Host::HostGateway)
-        .start()
-        .await
-        .expect("start nginx OCSP container")
+        .with_host("host.docker.internal", Host::HostGateway);
+
+    if std::env::var("UPTRAKIT_TEST_NGINX_AMD64").as_deref() == Ok("1") {
+        req = req.with_platform("linux/amd64");
+    }
+
+    if let Ok(s) = std::env::var("UPTRAKIT_TEST_NGINX_NANO_CPUS")
+        && let Ok(nano) = s.parse::<i64>()
+        && nano > 0
+    {
+        req = req.with_host_config_modifier(move |hc| {
+            hc.nano_cpus = Some(nano);
+        });
+    }
+
+    req.start().await.expect("start nginx OCSP container")
 }
 
 /// Resolve Docker's host-gateway IP as seen from containers.
