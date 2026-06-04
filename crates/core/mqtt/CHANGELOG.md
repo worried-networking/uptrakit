@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.3...uptrakit-mqtt-v0.0.4) - 2026-06-04
+
+### Added
+
+- *(service-sdk)* call on_connected in run_embedded_service with ephemeral identity
+- *(wire)* add ServiceSettingsPayload.trust_domain + #[non_exhaustive]
+- *(mqtt-runtime)* add MqttHandler::new_embedded() for embedded controller use
+- *(mqtt-runtime)* re-export MqttHandler from crate root and move base64 to regular dependencies
+- *(mqtt-runtime)* add MqttHandler ServiceHandler impl
+- *(surfaces)* add icon field to InteractionDescriptor and validate it
+- *(mqtt)* drop release_summary from HA discovery payload
+- *(surfaces)* add entity-link cell type, SurfaceEntityType, SurfaceEntityRef
+- *(surfaces)* add #[non_exhaustive] to public surface enums + wildcard arms
+- port service providers and cli to surface runtime
+- unify mqtt runtime for standalone and embedded hosting
+
+### Fixed
+
+- *(verify)* address standards violations found in /verify pass
+- *(mqtt-runtime)* use drop() for must_use sender results in test transport
+- *(mqtt-runtime)* collapse nested if-let into if-let chain for clippy
+- *(release-plz)* pin explicit versions, drop workspace.package.version, silence debug logs
+- *(mqtt)* clear stale collision state on disconnect to fix post-hibernation reconnect storm
+- *(controller)* fix embedded service shutdown deadlocks and MQTT reconnect freeze
+- *(clippy)* remediate new lint violations (panic, silent-failure, unsafe)
+- quality gate fixes for service-sdk and openapi-client publish
+- migrate SurfaceDescriptor struct literals to builder across all external crates
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- revert try_publish to async publish to fix channel overflow
+- *(mqtt-runtime)* prevent double-publish channel overflow on initial connect
+- *(mqtt)* replace blocking publish/subscribe with non-blocking try_* variants
+- *(mqtt-runtime)* complete surface config mutations asynchronously
+- *(services)* make surface registration best effort
+- address task 8 follow-up verification blockers
+- release embedded mqtt claims on yield
+
+### Other
+
+- update Cargo.lock dependencies
+- *(surfaces)* migrate all InteractionDescriptor struct literals to new() constructor
+- *(surfaces)* migrate SurfaceNode::Section literals to constructors; R1+R4-Rust fixes
+- release
+- *(mqtt)* remove embedded_identity workaround; SDK supplies identity
+- *(mqtt-runtime)* port embedded integration tests from controller-runtime
+- release
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(workspace)* rename uptrakit-internal-wire to uptrakit-wire
+- *(release)* per-binary releases and publish hygiene
+- require labels for surface interactions
+- *(surfaces)* remove extension-era runtime leftovers
+- rename surface runtime capability internals
+- isolate plugin boundaries in track a
+
 ## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.2...uptrakit-mqtt-v0.0.3) - 2026-05-18
 
 ### Added
