@@ -85,59 +85,87 @@ async fn nginx_ocsp_rejects_revoked_cert() {
 
     // Revoked cert → should be rejected by Nginx OCSP check.
     //
-    // Nginx's ssl_ocsp performs the OCSP fetch asynchronously on first encounter
-    // per cert serial: before the fetch completes and the result is cached, nginx
-    // may fail-open and return 200. Retry to give nginx time to complete the
-    // fetch, cache "revoked", and enforce it on the next request. We additionally
-    // require ocsp.request_count() > 0 before treating a rejection as success —
-    // a 400 without any OCSP query means nginx rejected the cert for a structural
-    // reason rather than revocation, which would be a test infrastructure bug.
-    const MAX_RETRIES: usize = 5;
-    let mut revoked_rejected = false;
-    for attempt in 0..MAX_RETRIES {
-        let result = client_revoked_cert
+    // Nginx's `ssl_ocsp` fires the OCSP query during the TLS handshake. The
+    // fetch is asynchronous: under low latency (e.g. Docker Desktop on macOS)
+    // the response usually lands before the handshake completes and the
+    // connection is rejected immediately; under higher latency (CI runners,
+    // emulated VMs) the handshake "fail-opens" — the connection succeeds with
+    // 200 and the response is written into `ssl_ocsp_cache` only after the
+    // fact, so only the *next* handshake observes "revoked".
+    //
+    // The protocol below relies on three guarantees from the nginx config and
+    // `build_client` to make verification deterministic:
+    //   - HTTP keep-alive disabled (`keepalive_timeout 0`)
+    //   - TLS session resumption disabled (`ssl_session_tickets off`,
+    //     `ssl_session_cache off`)
+    //   - The client connection pool disabled (`pool_max_idle_per_host(0)`)
+    // Together these force a full TLS handshake on every `.send()`, so the
+    // OCSP cache is re-consulted on every request.
+    //
+    // The verification then has three steps:
+    //   1. Send a warm-up request, ignoring its status. This fires the OCSP
+    //      query and may (correctly) return 200 if the handshake completes
+    //      before the OCSP response.
+    //   2. Poll until the OCSP responder records the query, proving nginx
+    //      reached the responder.
+    //   3. Poll the actual assertion: nginx writes the OCSP result into the
+    //      shared cache asynchronously after the responder reply, and on
+    //      small CI runners that write can lag by hundreds of milliseconds.
+    //      Each poll iteration is a full handshake (no pool, no resumption)
+    //      that re-queries the cache — once the entry is in, the very next
+    //      attempt is rejected. The 5 s budget is well above any observed
+    //      cache lag and fails fast when something is actually broken.
+    let _warm_up = client_revoked_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
+        .send()
+        .await;
+
+    let ocsp_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    while ocsp.request_count() == 0 && tokio::time::Instant::now() < ocsp_deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        ocsp.request_count() > 0,
+        "nginx never queried the OCSP responder within 15s"
+    );
+
+    let final_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let result = loop {
+        let r = client_revoked_cert
             .get(format!("https://localhost:{proxy_port}/healthz"))
             .send()
             .await;
-
-        match result {
+        match &r {
             Ok(resp)
-                if (resp.status() == reqwest::StatusCode::BAD_REQUEST
-                    || resp.status() == reqwest::StatusCode::FORBIDDEN)
-                    && ocsp.request_count() > 0 =>
+                if resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN =>
             {
-                revoked_rejected = true;
-                break;
+                break r;
             }
-            Err(e) if (e.is_connect() || e.is_request()) && ocsp.request_count() > 0 => {
-                revoked_rejected = true;
-                break;
-            }
-            Ok(resp) if attempt + 1 < MAX_RETRIES => {
-                tracing::debug!(
-                    attempt,
-                    status = %resp.status(),
-                    ocsp_requests = ocsp.request_count(),
-                    "revoked cert not yet rejected via OCSP; retrying after 1s"
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            Ok(resp) => {
-                let logs = get_nginx_logs(&container);
-                panic!(
-                    "revoked cert should be rejected, got status {} after {MAX_RETRIES} attempts \
-                     (OCSP requests: {})\nNginx logs:\n{logs}",
-                    resp.status(),
-                    ocsp.request_count()
-                );
-            }
-            Err(e) => panic!("unexpected error for revoked cert: {e}"),
+            Err(e) if e.is_connect() || e.is_request() => break r,
+            _ => {}
         }
+        if tokio::time::Instant::now() >= final_deadline {
+            break r;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    match result {
+        Ok(resp)
+            if resp.status() == reqwest::StatusCode::BAD_REQUEST
+                || resp.status() == reqwest::StatusCode::FORBIDDEN => {}
+        Err(e) if e.is_connect() || e.is_request() => {}
+        Ok(resp) => {
+            let logs = get_nginx_logs(&container);
+            panic!(
+                "revoked cert should be rejected after OCSP cache populated, got status {} \
+                 (OCSP requests: {})\nNginx logs:\n{logs}",
+                resp.status(),
+                ocsp.request_count()
+            );
+        }
+        Err(e) => panic!("unexpected error for revoked cert: {e}"),
     }
-    assert!(
-        revoked_rejected,
-        "revoked cert not rejected after {MAX_RETRIES} retries"
-    );
 
     server.shutdown();
     ocsp.shutdown();
@@ -228,60 +256,60 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     .await;
 
     // Revoked cert → should be rejected (Nginx reads AIA, queries HTTP OCSP).
-    //
-    // Nginx's ssl_ocsp performs the OCSP fetch asynchronously on first encounter
-    // per cert serial: before the fetch completes and the result is cached, nginx
-    // may fail-open and return 200. Retry to give nginx time to complete the
-    // fetch, cache "revoked", and enforce it on the next request. We additionally
-    // require ocsp.request_count() > 0 before treating a rejection as success —
-    // a 400 without any OCSP query means nginx rejected the cert for a structural
-    // reason rather than revocation, which would be a test infrastructure bug.
-    const MAX_RETRIES: usize = 5;
-    let mut revoked_rejected = false;
-    for attempt in 0..MAX_RETRIES {
-        let result = client_revoked_cert
+    // Same warm-up + poll-OCSP-fetch + poll-cache pattern as
+    // `nginx_ocsp_rejects_revoked_cert` — see that function for the full
+    // rationale.
+    let _warm_up = client_revoked_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
+        .send()
+        .await;
+
+    let ocsp_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    while ocsp.request_count() == 0 && tokio::time::Instant::now() < ocsp_deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        ocsp.request_count() > 0,
+        "nginx never queried the AIA HTTP OCSP responder within 15s"
+    );
+
+    let final_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let result = loop {
+        let r = client_revoked_cert
             .get(format!("https://localhost:{proxy_port}/healthz"))
             .send()
             .await;
-
-        match result {
+        match &r {
             Ok(resp)
-                if (resp.status() == reqwest::StatusCode::BAD_REQUEST
-                    || resp.status() == reqwest::StatusCode::FORBIDDEN)
-                    && ocsp.request_count() > 0 =>
+                if resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN =>
             {
-                revoked_rejected = true;
-                break;
+                break r;
             }
-            Err(e) if (e.is_connect() || e.is_request()) && ocsp.request_count() > 0 => {
-                revoked_rejected = true;
-                break;
-            }
-            Ok(resp) if attempt + 1 < MAX_RETRIES => {
-                tracing::debug!(
-                    attempt,
-                    status = %resp.status(),
-                    ocsp_requests = ocsp.request_count(),
-                    "revoked cert not yet rejected via AIA HTTP OCSP; retrying after 1s"
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            Ok(resp) => {
-                let logs = get_nginx_logs(&container);
-                panic!(
-                    "revoked cert should be rejected via AIA HTTP OCSP, got status {} after \
-                     {MAX_RETRIES} attempts (OCSP requests: {})\nNginx logs:\n{logs}",
-                    resp.status(),
-                    ocsp.request_count()
-                );
-            }
-            Err(e) => panic!("unexpected error for revoked cert: {e}"),
+            Err(e) if e.is_connect() || e.is_request() => break r,
+            _ => {}
         }
+        if tokio::time::Instant::now() >= final_deadline {
+            break r;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    match result {
+        Ok(resp)
+            if resp.status() == reqwest::StatusCode::BAD_REQUEST
+                || resp.status() == reqwest::StatusCode::FORBIDDEN => {}
+        Err(e) if e.is_connect() || e.is_request() => {}
+        Ok(resp) => {
+            let logs = get_nginx_logs(&container);
+            panic!(
+                "revoked cert should be rejected via AIA HTTP OCSP after OCSP cache populated, \
+                 got status {} (OCSP requests: {})\nNginx logs:\n{logs}",
+                resp.status(),
+                ocsp.request_count()
+            );
+        }
+        Err(e) => panic!("unexpected error for revoked cert: {e}"),
     }
-    assert!(
-        revoked_rejected,
-        "revoked cert not rejected after {MAX_RETRIES} retries"
-    );
 
     server.shutdown();
     ocsp.shutdown();
@@ -504,6 +532,15 @@ server {{
     ssl_client_certificate /etc/nginx/conf.d/ca.crt;
     ssl_verify_client optional;
 
+    # Force a full TLS handshake on every request so the OCSP cache is
+    # consulted each time. Without these directives nginx 1.5.9+ issues
+    # session tickets by default, and HTTP keep-alive reuses the underlying
+    # TCP connection — together they let the client bypass the OCSP check
+    # after the first (potentially fail-open) handshake.
+    keepalive_timeout 0;
+    ssl_session_tickets off;
+    ssl_session_cache off;
+
     # OCSP checking for client certificates
     ssl_ocsp leaf;
     ssl_ocsp_cache shared:OCSP:10m;
@@ -544,6 +581,13 @@ server {{
 
     ssl_client_certificate /etc/nginx/conf.d/ca.crt;
     ssl_verify_client optional;
+
+    # Force a full TLS handshake on every request — see the explicit-responder
+    # config for the rationale (session resumption and HTTP keep-alive both
+    # bypass OCSP re-evaluation).
+    keepalive_timeout 0;
+    ssl_session_tickets off;
+    ssl_session_cache off;
 
     # OCSP checking — no explicit responder; Nginx reads AIA from client cert
     ssl_ocsp leaf;
@@ -625,7 +669,22 @@ fn build_client(
 ) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
-    let mut builder = reqwest::Client::builder().tls_certs_merge([ca_cert]);
+    // Force `localhost` → 127.0.0.1 so the client never tries `::1` first.
+    // Some Docker backends (notably Colima with VZ) publish the mapped port
+    // on `[::]:N` but only forward IPv4 traffic, leaving connect attempts on
+    // `::1` hanging until the global timeout. Pinning to v4 makes the test
+    // work on any Docker daemon, with no behaviour change on Docker Desktop.
+    let resolved = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0));
+
+    // Disable the connection pool so every `.send()` opens a fresh TCP
+    // socket and triggers a full TLS handshake. Required for the OCSP
+    // tests: nginx only runs `ssl_ocsp` validation during a handshake, so a
+    // reused connection would never re-consult the OCSP cache, and the test
+    // would race against nginx's asynchronous cache write.
+    let mut builder = reqwest::Client::builder()
+        .tls_certs_merge([ca_cert])
+        .resolve("localhost", resolved)
+        .pool_max_idle_per_host(0);
 
     if let (Some(cert), Some(key)) = (cert_pem, key_pem) {
         let mut id_pem = cert.as_bytes().to_vec();
