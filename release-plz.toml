@@ -23,15 +23,15 @@ changelog_update = false
 # .github/workflows/release-plz.yml) reads the full CHANGELOG.md off
 # disk and rewrites a human-readable summary afterwards, so the
 # truncated body is only ever the first-pass placeholder.
-git_release_body = """{% if changes | length > 100000 -%}
-{{ changes | truncate(length=100000, end="") }}
+git_release_body = """{% if changelog | length > 100000 -%}
+{{ changelog | truncate(length=100000, end="") }}
 
 > _Changelog truncated to 100 KB to keep the initial release-page body
 > under GitHub's 125 KB API limit. The full version history is in this
 > package's `CHANGELOG.md`; `enhance-release-notes` rewrites this body
 > after the release is created._
 {%- else -%}
-{{ changes }}
+{{ changelog }}
 {%- endif %}"""
 
 # ===== Excluded from analysis (release = false) =====
