@@ -511,12 +511,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Collect release bodies
+      # Needed so the next step can read the full per-package CHANGELOG.md
+      # files instead of the (already-truncated) release-page body.
+      - uses: actions/checkout@v6
+
+      - name: Collect release changelogs
         id: collect
         env:
           RELEASES: ${{ needs.release-plz.outputs.releases }}
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
+          set -euo pipefail
           prompt_path="$RUNNER_TEMP/release-prompt-$GITHUB_RUN_ID.txt"
 
           cat > "$prompt_path" <<'PROMPT_HEADER'
@@ -534,18 +539,51 @@ jobs:
           - Plain language; keep technical accuracy.
           - Preserve every URL and commit-hash link exactly as written.
           - Do not invent details not present in the changelog.
+          - The final notes section MUST stay under 100 000 characters so
+            it fits GitHub's 125 KB release-body limit with headroom.
 
           ---
           PROMPT_HEADER
+
+          # Map package_name → CHANGELOG.md path. Only binary packages have
+          # per-crate changelogs; library/runtime commits flow into the
+          # binaries' changelogs via release-plz `changelog_include`.
+          changelog_path_for() {
+            case "$1" in
+              uptrakit-controller)            printf 'crates/core/controller/CHANGELOG.md' ;;
+              uptrakit-controller-standalone) printf 'crates/core/controller-standalone/CHANGELOG.md' ;;
+              uptrakit-agent)                 printf 'crates/core/agent/CHANGELOG.md' ;;
+              uptrakit-agent-ssh)             printf 'crates/core/agent-ssh/CHANGELOG.md' ;;
+              uptrakit-mqtt)                  printf 'crates/core/mqtt/CHANGELOG.md' ;;
+              uptrakit-scheduler)             printf 'crates/core/scheduler/CHANGELOG.md' ;;
+              uptrakit-cli)                   printf 'crates/ui/cli/CHANGELOG.md' ;;
+            esac
+          }
 
           found=false
           while IFS= read -r release; do
             tag=$(echo "$release" | jq -r '.tag')
             pkg=$(echo "$release" | jq -r '.package_name')
-            body=$(gh release view "$tag" --json body -q .body 2>/dev/null | head -c 12000 || true)
-            if [ -n "$body" ]; then
+            ver=$(echo "$release" | jq -r '.version')
+            path=$(changelog_path_for "$pkg")
+            [ -z "$path" ] && continue       # not a binary; skip
+            [ -f "$path" ] || continue       # changelog missing; skip
+
+            # Extract the version section: from `## [VERSION]` to the next
+            # `## [` (any version header) or EOF, exclusive of the next
+            # header. Cap to 12 000 chars per release so the combined prompt
+            # stays well under typical LLM context limits.
+            section=$(awk -v v="## [$ver]" '
+              $0 ~ "^## \\[" {
+                if (in_sec) { exit }
+                if (index($0, v) == 1) { in_sec = 1; print; next }
+              }
+              in_sec { print }
+            ' "$path" | head -c 12000)
+
+            if [ -n "$section" ]; then
               found=true
-              printf '\n### Release: %s (package: %s)\n%s\n' "$tag" "$pkg" "$body" >> "$prompt_path"
+              printf '\n### Release: %s (package: %s)\n%s\n' "$tag" "$pkg" "$section" >> "$prompt_path"
             fi
           done < <(echo "$RELEASES" | jq -c '.[]')
 
@@ -597,10 +635,21 @@ jobs:
             echo "::warning::Copilot response was not valid JSON — keeping original release notes"
             exit 0
           }
+          # GitHub's Release body API caps `body` at 125 000 characters; the
+          # prompt above asks Copilot to stay under 100 000, but we enforce a
+          # 124 000-char ceiling here as defence-in-depth so a runaway
+          # generation can never reproduce the original HTTP 422.
+          readonly RELEASE_BODY_MAX=124000
+
           while IFS= read -r entry; do
             tag=$(echo "$entry"   | jq -r '.tag   // empty')
             notes=$(echo "$entry" | jq -r '.notes // empty')
             [ -z "$tag" ] || [ -z "$notes" ] && continue
+            notes_len=${#notes}
+            if [ "$notes_len" -gt "$RELEASE_BODY_MAX" ]; then
+              echo "::warning::$tag: Copilot notes are ${notes_len} chars; truncating to ${RELEASE_BODY_MAX}"
+              notes="${notes:0:$RELEASE_BODY_MAX}"
+            fi
             gh release edit "$tag" --notes "$notes" \
               && echo "Updated: $tag" \
               || echo "::warning::Failed to update $tag"
