@@ -1,5 +1,6 @@
 #![expect(
     clippy::expect_used,
+    clippy::panic,
     reason = "integration test infrastructure: panics are acceptable in test server helper"
 )]
 
@@ -308,7 +309,22 @@ fn build_rustls_config(pki: &TestPki) -> axum_server::tls_rustls::RustlsConfig {
 /// mapping being fully usable from the host. All reverse-proxy tests call this
 /// after getting the mapped port and before making any assertions.
 pub(crate) async fn wait_for_proxy_ready(client: &reqwest::Client, port: u16) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    // `UPTRAKIT_TEST_PROXY_READY_TIMEOUT_S` (default 10) tunes the readiness
+    // budget for slow Docker backends — e.g. Colima + VZ cold-starts a
+    // container much slower than Docker Desktop. The panic message echoes
+    // the last error or status code so a stuck proxy doesn't look like a
+    // silent timeout. See docs/development/testing.md for the CI-flake
+    // repro guide that uses this knob.
+    let timeout_secs: u64 = std::env::var("UPTRAKIT_TEST_PROXY_READY_TIMEOUT_S")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    #[expect(
+        unused_assignments,
+        reason = "last_err is only read in the panic branch; intermediate writes are intentional"
+    )]
+    let mut last_err: Option<String> = None;
     loop {
         match client
             .get(format!("https://localhost:{port}/healthz"))
@@ -316,12 +332,15 @@ pub(crate) async fn wait_for_proxy_ready(client: &reqwest::Client, port: u16) {
             .await
         {
             Ok(resp) if resp.status().is_success() => return,
-            _ => {}
+            Ok(resp) => last_err = Some(format!("HTTP {}", resp.status())),
+            Err(e) => last_err = Some(format!("{e}")),
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "proxy on port {port} did not become ready within 10 s"
-        );
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "proxy on port {port} did not become ready within {timeout_secs} s — last: {}",
+                last_err.unwrap_or_else(|| "(none)".to_string())
+            );
+        }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 }

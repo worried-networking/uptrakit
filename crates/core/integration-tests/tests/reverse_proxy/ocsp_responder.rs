@@ -222,6 +222,7 @@ fn build_rustls_config(
 }
 
 async fn handle_ocsp(State(state): State<Arc<OcspState>>, body: Bytes) -> impl IntoResponse {
+    apply_test_delay().await;
     state.request_count.fetch_add(1, Ordering::Relaxed);
 
     let response_der = build_response(&body, &state);
@@ -231,6 +232,22 @@ async fn handle_ocsp(State(state): State<Arc<OcspState>>, body: Bytes) -> impl I
         [("content-type", "application/ocsp-response")],
         response_der,
     )
+}
+
+/// Sleep for the duration in `UPTRAKIT_TEST_OCSP_DELAY_MS`, if set.
+///
+/// Used to reproduce slow-CI conditions locally: artificially widens the
+/// OCSP fail-open window in the nginx_ocsp tests so the
+/// async-fetch-vs-cache-populate race can be exercised on a fast developer
+/// machine. Off by default; see docs/development/testing.md for the
+/// reproduction recipe.
+async fn apply_test_delay() {
+    if let Ok(ms_str) = std::env::var("UPTRAKIT_TEST_OCSP_DELAY_MS")
+        && let Ok(ms) = ms_str.parse::<u64>()
+        && ms > 0
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
 }
 
 /// Handle GET-based OCSP requests (RFC 6960 Appendix A.1).
@@ -267,6 +284,7 @@ async fn handle_ocsp_get(
 
     match der {
         Ok(der_bytes) => {
+            apply_test_delay().await;
             state.request_count.fetch_add(1, Ordering::Relaxed);
             let response_der = build_response(&der_bytes, &state);
             (
