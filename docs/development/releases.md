@@ -116,6 +116,50 @@ the frontend from a separate directory via `--static-dir`.
 | `.github/workflows/docker.yml`      | Docker image builds (triggered by `v*` tags)                |
 | `Cross.toml`                        | Cross-compilation settings for cross-compiled Linux targets |
 
+## Backfilling release assets
+
+Use this when a release page on GitHub has missing or partial assets — for example after a
+`release-plz` `Release` job hit HTTP 422 mid-loop and left some tags assetless, or after a
+release was created via the GitHub UI rather than the workflow.
+
+Trigger the `release-plz` workflow via `workflow_dispatch`, passing a comma-separated list of
+tags:
+
+```sh
+gh workflow run release-plz.yml \
+  -f backfill_tags=uptrakit-controller-v0.0.3,uptrakit-controller-standalone-v0.0.3
+```
+
+Each tag must match
+`^uptrakit-(controller-standalone|controller|agent-ssh|agent|mqtt|scheduler|cli)-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`.
+The longer prefixes (`controller-standalone`, `agent-ssh`) come first so they parse correctly;
+the optional suffix allows SemVer pre-release tags such as `v0.1.0-rc.1`.
+
+For each tag the workflow:
+
+1. Validates the tag against the regex above and confirms the release already exists on
+   GitHub. Tags that don't match or don't exist fail the run; backfill never synthesises a
+   release page.
+2. Builds the binary for all 4 targets (`x86_64-unknown-linux-gnu`,
+   `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`).
+3. Packages each binary into `${pkg}-${version}-${target}.tar.gz` and computes a local
+   sha256.
+4. Compares the local sha256 against the GitHub asset's stored `digest`. If they match, the
+   asset is already correct and the workflow skips attest + upload for that archive (logged
+   as `::notice::`).
+5. Otherwise runs `actions/attest@v4` to register SLSA build provenance for the changed
+   archives — **before** publishing — and then `gh release upload --clobber` to write the
+   archive and its `.sha256` sidecar to the release.
+
+Re-running the workflow against the same tags is safe: digest-equal archives no-op,
+digest-different archives are replaced. Sigstore's attestation log is append-only, so
+backfilled releases can accumulate multiple attestations over time;
+`gh attestation verify` always picks the matching one for the currently-published bytes.
+
+The `docker.yml` workflow is **not** retriggered by backfill — `gh release upload --clobber`
+only touches release-asset rows, not git tags. Docker images that were already built for the
+tag remain unchanged.
+
 ## Related documentation
 
 - [Commit Messages](commit-messages.md) — Conventional Commits format required by release-plz

@@ -4,6 +4,18 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      backfill_tags:
+        description: >
+          Comma-separated release tags to backfill (build, attest, and
+          upload assets to existing releases). Leave empty to run the
+          normal release-plz path. Example:
+          "uptrakit-controller-v0.0.3,uptrakit-agent-v0.0.3". Tags must
+          point at releases that already exist; backfill never
+          synthesises a release page. See
+          docs/development/releases.md#backfilling-release-assets.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -14,6 +26,10 @@ permissions:
 jobs:
   release-plz:
     name: Release
+    # Skip on backfill dispatches — `release-plz release` would attempt
+    # to cut a new release on top of the requested backfill, which the
+    # operator did not ask for.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.backfill_tags == '' }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-plz-${{ github.ref }}
@@ -94,6 +110,8 @@ jobs:
 
   release-pr:
     name: Release PR
+    # Backfill dispatches must not open or churn a release PR.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.backfill_tags == '' }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-pr-${{ github.ref }}
@@ -587,3 +605,313 @@ jobs:
               && echo "Updated: $tag" \
               || echo "::warning::Failed to update $tag"
           done < <(echo "$parsed" | jq -c '.[]')
+
+  # ---------------------------------------------------------------------------
+  # Manual backfill path. Triggered only by `workflow_dispatch` with a
+  # non-empty `backfill_tags` input. Builds, attests, and uploads release
+  # assets for tags whose release page is missing them — for example after
+  # a `release-plz release` run partially failed and left the upstream
+  # tag+release in place but without binaries, or after a release was
+  # created via the GitHub UI.
+  # ---------------------------------------------------------------------------
+  backfill-plan:
+    name: Backfill plan
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_tags != '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.parse.outputs.plan }}
+      tags_csv: ${{ steps.parse.outputs.tags_csv }}
+      needs_frontend: ${{ steps.parse.outputs.needs_frontend }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Parse and validate backfill tags
+        id: parse
+        env:
+          BACKFILL_TAGS: ${{ inputs.backfill_tags }}
+          GH_TOKEN: ${{ github.token }}
+        run: ci/release-plz/parse-backfill-tags.sh
+
+  backfill-build-frontend:
+    name: Build frontend (backfill)
+    needs: backfill-plan
+    if: ${{ always() && needs.backfill-plan.result == 'success' && needs.backfill-plan.outputs.needs_frontend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 1
+
+  backfill-build-artifacts:
+    name: Build, attest, upload (backfill)
+    needs: [backfill-plan, backfill-build-frontend]
+    if: >-
+      ${{
+        always() &&
+        needs.backfill-plan.result == 'success' &&
+        (needs.backfill-build-frontend.result == 'success' ||
+         needs.backfill-build-frontend.result == 'skipped')
+      }}
+    # Scope concurrency per (run, target) so two operators triggering
+    # backfill for different tag sets do not block each other. The
+    # digest pre-check + `--clobber` make overlapping writes safe.
+    concurrency:
+      group: backfill-build-${{ github.run_id }}-${{ matrix.target }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            cross: false
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            cross: true
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+    runs-on: ${{ matrix.runner }}
+    env:
+      PLAN: ${{ needs.backfill-plan.outputs.plan }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute per-target build set
+        id: build_set
+        run: |
+          set -euo pipefail
+          pkgs=$(jq -c '[ .[] | .package_name ]' <<< "$PLAN")
+          echo "packages=$pkgs" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cross binary
+        if: matrix.cross
+        id: cache-cross
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cross
+          key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install cross
+        if: matrix.cross && steps.cache-cross.outputs.cache-hit != 'true'
+        run: cargo install cross --version 0.2.5 --locked
+
+      - uses: actions/download-artifact@v8
+        if: >-
+          ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller')
+           || contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller-standalone') }}
+        with:
+          name: frontend-build
+          path: frontend/build
+
+      - name: Set cargo command
+        id: cargo-cmd
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            echo "cmd=cross" >> "$GITHUB_OUTPUT"
+          else
+            echo "cmd=cargo" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Disable LTO on macOS
+        if: runner.os == 'macOS'
+        run: echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
+
+      # --- per-binary build steps, each gated on its package being in the plan ---
+      - name: Build controller
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller') }}
+        env:
+          UPTRAKIT_RELEASE_NAME: uptrakit-controller
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+            --target ${{ matrix.target }} \
+            -p uptrakit-controller \
+            --features db-all,nats
+          cp target/${{ matrix.target }}/release/uptrakit-controller \
+            uptrakit-controller-${{ matrix.target }}
+
+      - name: Build controller-standalone
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller-standalone') }}
+        env:
+          UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+            --target ${{ matrix.target }} \
+            -p uptrakit-controller-standalone \
+            --features db-all,nats
+          cp target/${{ matrix.target }}/release/uptrakit-controller-standalone \
+            uptrakit-controller-standalone-${{ matrix.target }}
+
+      - name: Build agent
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-agent') }}
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-agent
+          cp target/${{ matrix.target }}/release/uptrakit-agent uptrakit-agent-${{ matrix.target }}
+
+      - name: Build agent-ssh
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-agent-ssh') }}
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-agent-ssh
+          cp target/${{ matrix.target }}/release/uptrakit-agent-ssh uptrakit-agent-ssh-${{ matrix.target }}
+
+      - name: Build mqtt
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-mqtt') }}
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-mqtt
+          cp target/${{ matrix.target }}/release/uptrakit-mqtt uptrakit-mqtt-${{ matrix.target }}
+
+      - name: Build scheduler
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-scheduler') }}
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-scheduler --no-default-features \
+            --features db-all,oidc
+          cp target/${{ matrix.target }}/release/uptrakit-scheduler uptrakit-scheduler-${{ matrix.target }}
+
+      - name: Build cli
+        if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-cli') }}
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-cli
+          cp target/${{ matrix.target }}/release/uptrakit uptrakit-cli-${{ matrix.target }}
+
+      # --- package every plan entry (tarball + sha256) ---
+      - name: Package archives
+        run: |
+          set -euo pipefail
+
+          inner_name_for() {
+            # The cli package compiles to a binary literally named
+            # "uptrakit"; every other package's binary matches the
+            # package name. Adding new exceptions belongs here.
+            case "$1" in
+              uptrakit-cli) printf 'uptrakit' ;;
+              *)            printf '%s' "$1" ;;
+            esac
+          }
+
+          while IFS=$'\t' read -r pkg ver; do
+            [ -z "$pkg" ] && continue
+            src="${pkg}-${TARGET}"
+            if [ ! -f "$src" ]; then
+              echo "::error::missing source binary $src for $pkg" >&2
+              exit 1
+            fi
+
+            archive="${pkg}-${ver}-${TARGET}.tar.gz"
+            inner=$(inner_name_for "$pkg")
+            tmpdir=$(mktemp -d)
+            cp "$src" "${tmpdir}/${inner}"
+            tar czf "$archive" -C "$tmpdir" "$inner"
+            rm -rf "$tmpdir"
+
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$archive" > "${archive}.sha256"
+            else
+              shasum -a 256 "$archive" > "${archive}.sha256"
+            fi
+            echo "packaged $archive"
+          done < <(jq -r '.[] | [.package_name, .version] | @tsv' <<< "$PLAN")
+
+      # --- decide which archives need upload (digest mismatch or absent) ---
+      - name: Compute upload set (digest pre-check)
+        id: upload_set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # For each plan entry we already have <archive>.sha256 on disk
+          # from the Package archives step. Read local sha, fetch the
+          # existing asset's GitHub-stored digest (the API field is
+          # `digest`, prefixed `sha256:`). If they match — already-good
+          # asset, skip. Otherwise the archive needs (re-)upload, and we
+          # accumulate its path for the attest step.
+          to_upload=()
+          while IFS=$'\t' read -r pkg tag ver; do
+            [ -z "$pkg" ] && continue
+            archive="${pkg}-${ver}-${TARGET}.tar.gz"
+            local_sha=$(awk '{print $1}' "${archive}.sha256")
+
+            remote_digest=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              --jq ".assets[] | select(.name==\"$archive\") | .digest // empty" \
+              2>/dev/null || true)
+            remote_digest="${remote_digest#sha256:}"
+
+            if [ -n "$remote_digest" ] && [ "$remote_digest" = "$local_sha" ]; then
+              echo "::notice::$archive on $tag already at sha256 $local_sha — skipping attest+upload"
+              continue
+            fi
+            to_upload+=("$archive")
+            echo "queued $archive for upload (local=$local_sha remote=${remote_digest:-<absent>})"
+          done < <(jq -r '.[] | [.package_name, .tag, .version] | @tsv' <<< "$PLAN")
+
+          # Emit two outputs:
+          #   any_upload — boolean string used by the attest+upload steps
+          #   upload_archives — newline-joined archive list for attest
+          if [ "${#to_upload[@]}" -eq 0 ]; then
+            echo "any_upload=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any_upload=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "upload_archives<<EOF"
+              printf '%s\n' "${to_upload[@]}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Attest BEFORE upload: if the attestation step fails (e.g. Sigstore
+      # outage) we do not publish unattested bytes.
+      - name: Attest build provenance
+        if: ${{ steps.upload_set.outputs.any_upload == 'true' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.upload_set.outputs.upload_archives }}
+
+      - name: Upload archives + sha256 sidecars
+        if: ${{ steps.upload_set.outputs.any_upload == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Reconstruct the per-archive (tag, archive) pairing from PLAN
+          # so the upload knows which release to write to. --clobber
+          # handles the "existing asset of the same name" case (e.g. when
+          # one architecture of a release had a partial upload).
+          while IFS=$'\t' read -r pkg tag ver; do
+            [ -z "$pkg" ] && continue
+            archive="${pkg}-${ver}-${TARGET}.tar.gz"
+            # Only upload archives the digest check queued.
+            if ! grep -qxF "$archive" <<< "${{ steps.upload_set.outputs.upload_archives }}"; then
+              continue
+            fi
+            gh release upload "$tag" "$archive" "${archive}.sha256" --clobber
+            echo "uploaded $archive → $tag"
+          done < <(jq -r '.[] | [.package_name, .tag, .version] | @tsv' <<< "$PLAN")
