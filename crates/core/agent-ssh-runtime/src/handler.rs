@@ -52,6 +52,14 @@ impl AgentSshHandler {
         ));
         Self { runtime }
     }
+
+    pub fn column_aad_entries() -> &'static [uptrakit_crypto::ColumnAadEntry] {
+        &[uptrakit_crypto::ColumnAadEntry {
+            table: "ssh_hosts",
+            column: "private_key",
+            aad: crate::AAD_SSH_PRIVATE_KEY,
+        }]
+    }
 }
 
 #[async_trait::async_trait]

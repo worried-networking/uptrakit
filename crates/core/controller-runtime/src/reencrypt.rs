@@ -54,7 +54,14 @@ pub(crate) fn register_column_aad_mappings() {
         return;
     }
 
-    let entries: &[ColumnAadEntry] = &[
+    #[cfg_attr(
+        not(feature = "embedded-ssh-agent"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when embedded-ssh-agent extends the entries list"
+        )
+    )]
+    let mut entries: Vec<ColumnAadEntry> = vec![
         ColumnAadEntry {
             table: "ca_certificates",
             column: "key_pem",
@@ -77,7 +84,10 @@ pub(crate) fn register_column_aad_mappings() {
         },
     ];
 
-    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
+    #[cfg(feature = "embedded-ssh-agent")]
+    entries.extend_from_slice(uptrakit_agent_ssh_runtime::AgentSshHandler::column_aad_entries());
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(&entries) {
         tracing::warn!(error = %e, "column AAD registry already initialized (harmless in tests)");
     }
 }

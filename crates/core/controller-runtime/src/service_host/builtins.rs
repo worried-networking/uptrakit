@@ -319,6 +319,25 @@ pub(crate) async fn register_agent_ssh(
     controller_installation_id: Uuid,
     state_dir: std::path::PathBuf,
 ) -> rootcause::Result<()> {
+    // Warn about legacy standalone DB file — no longer used in embedded mode.
+    let ssh_db_path = state_dir.join("agent-ssh.db");
+    if let Ok(meta) = tokio::fs::metadata(&ssh_db_path).await
+        && meta.len() > 0
+    {
+        tracing::warn!(
+            path = %ssh_db_path.display(),
+            "legacy agent-ssh.db found in state directory; \
+             this file is no longer used in embedded mode — \
+             SSH host data must be migrated manually if needed \
+             (see agent-ssh-runtime/src/db/entity/ for table schemas)"
+        );
+    }
+
+    // Column AAD for ssh_hosts.private_key is registered during Phase 4b via
+    // register_column_aad_mappings() + AgentSshHandler::column_aad_entries().
+    uptrakit_agent_ssh_runtime::init_ssh_data_key_ring(app_state.db()).await;
+    uptrakit_agent_ssh_runtime::reencrypt_ssh_to_v3(app_state.db()).await;
+
     let ssh_caps = crate::ssh_agent::ssh_agent_capabilities();
     let default_tenant_id = app_state.default_tenant_id;
     let db_for_ssh = app_state.db().clone();

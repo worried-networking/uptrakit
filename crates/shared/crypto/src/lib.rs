@@ -271,6 +271,7 @@ static COLUMN_AAD_REGISTRY: OnceLock<std::collections::HashMap<String, String>> 
 /// names MUST be unique across all encrypted columns; registration
 /// fails with [`CryptoError::DuplicateColumnAad`] if a collision is
 /// detected.
+#[derive(Clone, Copy)]
 pub struct ColumnAadEntry {
     /// Table name (e.g., `"ca_certificates"`).
     pub table: &'static str,
