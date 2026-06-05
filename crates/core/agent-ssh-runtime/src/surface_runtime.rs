@@ -1028,10 +1028,6 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
 ///
 /// Iterates all registered infra plugins; the first one to return `Some`
 /// wins. If no plugin handles the action, an error response is sent.
-#[expect(
-    clippy::let_underscore_must_use,
-    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
-)]
 fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
@@ -1395,10 +1391,6 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
 }
 
 /// Spawn the sync-execute step as a background task.
-#[expect(
-    clippy::let_underscore_must_use,
-    reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
-)]
 fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let db = ctx.db.clone();
     let bg_tx = ctx.bg_tx.clone();
