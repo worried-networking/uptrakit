@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
   reconnect via their existing retry loops.
 - All settings mutation endpoints now require `If-Match` (428 on missing, 409 on stale).
 
+### Changed
+
+- Embedded Agent-SSH now shares the controller's database connection. The
+  `agent-ssh.db` file in the controller state directory is no longer created or
+  used. SSH host data stored there (rare — this path was previously broken) must
+  be migrated manually using the entity schemas in
+  `crates/core/agent-ssh-runtime/src/db/entity/`.
+
 ### Added
 
 - `GET /api/v1/instance/config-state` (requires `view_instance_config_state`).
