@@ -619,15 +619,25 @@ jobs:
 
             # Extract the version section: from `## [VERSION]` to the next
             # `## [` (any version header) or EOF, exclusive of the next
-            # header. Cap to 12 000 chars per release so the combined prompt
-            # stays well under typical LLM context limits.
-            section=$(awk -v v="## [$ver]" '
-              $0 ~ "^## \\[" {
-                if (in_sec) { exit }
-                if (index($0, v) == 1) { in_sec = 1; print; next }
+            # header. Cap to 12 000 chars per release inside awk so the
+            # script doesn't trigger SIGPIPE/exit-141 by piping into
+            # `head -c 12000` against a >12K version section (controller's
+            # changelog is routinely >100KB) under `set -o pipefail`.
+            section=$(awk -v v="## [$ver]" -v MAX=12000 '
+              function emit() {
+                if (length(buf) > MAX) buf = substr(buf, 1, MAX)
+                print buf
+                # awk runs END even after `exit`; clear the flag so the
+                # END block does not emit a second time.
+                in_sec = 0
               }
-              in_sec { print }
-            ' "$path" | head -c 12000)
+              $0 ~ "^## \\[" {
+                if (in_sec) { emit(); exit }
+                if (index($0, v) == 1) { in_sec = 1; buf = $0; next }
+              }
+              in_sec { buf = buf "\n" $0 }
+              END { if (in_sec) emit() }
+            ' "$path")
 
             if [ -n "$section" ]; then
               found=true
