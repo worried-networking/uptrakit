@@ -1055,6 +1055,13 @@ pub(crate) fn register_column_aad_mappings() {
         return;
     }
 
+    #[cfg_attr(
+        not(feature = "embedded-ssh-agent"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when embedded-ssh-agent extends the entries list"
+        )
+    )]
     let mut entries: Vec<ColumnAadEntry> = vec![
         ColumnAadEntry { table: "ca_certificates",       column: "key_pem",       aad: AAD_CA_KEY_PEM },
         ColumnAadEntry { table: "oidc_providers",        column: "client_secret", aad: AAD_OIDC_CLIENT_SECRET },
@@ -1073,8 +1080,10 @@ pub(crate) fn register_column_aad_mappings() {
 }
 ```
 
-The `#[cfg(feature = "embedded-ssh-agent")]` block is additive (no `#[cfg(not(...))]`),
-consistent with the workspace feature-flag rules.
+The `#[cfg_attr(not(feature = "embedded-ssh-agent"), expect(unused_mut, ...))]` annotation
+prevents the `unused_mut` deny-warning when the feature is absent — same pattern as
+`controller-runtime/src/migration/mod.rs`. The `#[cfg(feature = "embedded-ssh-agent")]`
+extend block is additive (no `#[cfg(not(...))]`), consistent with workspace feature-flag rules.
 
 - [ ] **Step 4: Update `register_agent_ssh` in `builtins.rs`**
 
