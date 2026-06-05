@@ -147,6 +147,13 @@ pub(crate) fn register_column_aad_mappings() {
     if !uptrakit_crypto::master_key_available() {
         return;
     }
+    #[cfg_attr(
+        not(feature = "embedded-ssh-agent"),
+        expect(
+            unused_mut,
+            reason = "mut only needed when embedded-ssh-agent extends the entries list"
+        )
+    )]
     let mut entries: Vec<ColumnAadEntry> = vec![
         // ... four existing controller entries unchanged ...
     ];
@@ -160,9 +167,13 @@ pub(crate) fn register_column_aad_mappings() {
 }
 ```
 
-`extend_from_slice` requires `ColumnAadEntry: Copy`. Add `#[derive(Clone, Copy)]` to
-`ColumnAadEntry` in `uptrakit-crypto/src/lib.rs` (all fields are `&'static str`; this is a
-non-breaking additive derive).
+`extend_from_slice` requires `ColumnAadEntry: Clone` (and `Copy` implies `Clone`). Add
+`#[derive(Clone, Copy)]` to `ColumnAadEntry` in `uptrakit-crypto/src/lib.rs` — all fields
+are `&'static str` which are themselves `Copy`, making both derives natural and non-breaking.
+The `#[cfg_attr(not(feature = "embedded-ssh-agent"), expect(unused_mut, ...))]` annotation
+follows the established pattern in `controller-runtime/src/migration/mod.rs` (line 10–16).
+This wraps a lint suppression attribute, not executable code — it does not violate the
+"feature flags additive only" rule, which targets code paths, not `#[expect]` metadata.
 
 The existing `register_ssh_column_aad()` free function in `agent-ssh-runtime/src/lib.rs` is
 retained unchanged — still called by the standalone binary (`agent-ssh/src/main.rs`).
@@ -176,6 +187,9 @@ Two calls remain in `register_agent_ssh` in `controller-runtime/src/service_host
   included for parity with the standalone path.
 - `reencrypt_ssh_to_v3(app_state.db()).await` — re-encrypts SSH private keys to `ENC:v3:`;
   runs after Phase 4b has registered the correct `private_key` AAD, so reads are correct.
+  No double-reencryption risk: Phase 4d (`reencrypt_to_v3` in `controller-runtime/src/reencrypt.rs`)
+  is table-specific — it calls hard-coded per-table functions for `ca_certificates`,
+  `oidc_providers`, `notification_channels`, etc. `ssh_hosts` is never referenced there.
 
 ```rust
 #[cfg(feature = "embedded-ssh-agent")]
@@ -191,7 +205,9 @@ pub(crate) async fn register_agent_ssh(
             tracing::warn!(
                 path = %ssh_db_path.display(),
                 "legacy agent-ssh.db found in state directory; \
-                 this file is no longer used in embedded mode"
+                 this file is no longer used in embedded mode — \
+                 SSH host data must be migrated manually if needed \
+                 (see agent-ssh-runtime/src/db/entity/ for table schemas)"
             );
         }
     }
@@ -232,13 +248,17 @@ is safe when encryption is not configured.
 **`controller-runtime`** (two functions updated):
 
 - `src/reencrypt.rs` — extend `register_column_aad_mappings()` with SSH entries
-- `src/service_host/builtins.rs` — remove `register_ssh_column_aad()` call, add stale-db
-  warn and two remaining crypto init calls
+- `src/service_host/builtins.rs` — add stale-db warn, `init_ssh_data_key_ring`, and
+  `reencrypt_ssh_to_v3`; do not add `register_ssh_column_aad()` (column AAD handled in
+  Phase 4b via `register_column_aad_mappings()`)
 
 ## Quality Gates
 
-Standard gates apply (`cargo fmt`, `cargo check`, `cargo clippy`, `cargo test --all-features`).
-No Docker tests triggered (no enrollment/wire/service-lifecycle changes).
+Standard gates apply: `cargo fmt --all`, `cargo check --no-default-features --features db-sqlite`,
+`cargo check --all-features`, `cargo clippy --all-targets --no-default-features --features db-sqlite`,
+`cargo clippy --all-targets --all-features`, `cargo test --all-features`, `cargo deny check`.
+No Docker tests triggered: no enrollment/wire/service-lifecycle changes (reverse-proxy gate),
+and no migration additions or REST API surface changes (database gate).
 
 ## Documentation
 
