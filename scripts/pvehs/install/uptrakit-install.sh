@@ -13,7 +13,7 @@ network_check
 update_os
 
 msg_info "Installing Dependencies"
-$STD apt-get install -y tar openssl
+$STD apt-get install -y tar openssl sudo
 msg_ok "Installed Dependencies"
 
 msg_info "Downloading uptrakit"
@@ -51,6 +51,37 @@ openssl rand -hex 32 >/opt/uptrakit/master.key
 chmod 600 /opt/uptrakit/master.key
 chown uptrakit:uptrakit /opt/uptrakit/master.key
 msg_ok "Generated master key"
+
+msg_info "Installing sudoers drop-in for uptrakit user"
+cat >/etc/sudoers.d/uptrakit-uptrakit.tmp <<'SUDOERS'
+# Managed by Uptrakit - DO NOT EDIT MANUALLY
+# Regenerate: uptrakit-agent-ssh host sync <host>
+# /bin/install: Install downloaded GitHub release assets to the target path
+uptrakit ALL=(root) NOPASSWD: /bin/install
+# /bin/systemctl stop *: Stop services before GitHub release asset installation
+uptrakit ALL=(root) NOPASSWD: /bin/systemctl stop *
+# /bin/systemctl start *: Start services after GitHub release asset installation
+uptrakit ALL=(root) NOPASSWD: /bin/systemctl start *
+# /usr/local/bin/uptrakit-phs-version: Reads /root/.<slug> for PHS version detection; the helper script validates the slug argument to prevent path traversal
+uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-version
+# /usr/bin/update: Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for PHS container updates over a PTY; SETENV: is required so the agent can pass the env vars inline in the sudo call
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/update
+# /bin/apt-get update *: Package index refresh requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /bin/apt-get update *
+# /bin/apt-get install *: Package installation requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /bin/apt-get install *
+# /bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *: Batch package upgrade (pinned versions) requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /bin/apt-get -o Dir\:\:Etc\:\:Preferences\=/tmp/uptrakit-apt-batch.pref upgrade *
+SUDOERS
+chmod 0440 /etc/sudoers.d/uptrakit-uptrakit.tmp
+if visudo -cf /etc/sudoers.d/uptrakit-uptrakit.tmp >/dev/null; then
+  mv /etc/sudoers.d/uptrakit-uptrakit.tmp /etc/sudoers.d/uptrakit-uptrakit
+  msg_ok "Installed sudoers drop-in for uptrakit user"
+else
+  rm -f /etc/sudoers.d/uptrakit-uptrakit.tmp
+  msg_error "sudoers drop-in failed visudo validation"
+  exit 1
+fi
 
 msg_info "Creating systemd service"
 cat <<'EOF' >/etc/systemd/system/uptrakit.service
@@ -103,6 +134,15 @@ msg_ok "Fetched registration token"
 
 motd_ssh
 customize
+
+# Override /usr/bin/update written by upstream customize() — its hardcoded
+# URL points at community-scripts/ProxmoxVE which doesn't host our script.
+cat >/usr/bin/update <<'UPDATEEOF'
+#!/usr/bin/env bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/worried-networking/uptrakit/main/scripts/pvehs/ct/uptrakit.sh)"
+UPDATEEOF
+chmod +x /usr/bin/update
+
 cleanup_lxc
 
 msg_ok "Completed Successfully!\n"
