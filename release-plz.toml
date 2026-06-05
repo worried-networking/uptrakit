@@ -1,7 +1,17 @@
 [workspace]
 publish = false
 git_release_enable = false
-git_tag_enable = false
+# Workspace-default ON so every analyzed [[package]] gets a baseline
+# git tag. release-plz uses each git_only package's last matching tag as
+# the `published_at_sha1` anchor when walking commits for changelog
+# generation. Without per-package tags, included library/runtime/plugin
+# crates have no anchor (their `publish = false` means no crates.io
+# tarball equality check either) and release-plz walks unbounded
+# history, re-dumping into binary CHANGELOGs every cycle (see PRs
+# #131/#132). `release = false` packages stay un-tagged since
+# release-plz excludes them from analysis entirely. Binary packages
+# already set their own `git_tag_name`, so behavior is preserved.
+git_tag_enable = true
 # All crates have publish = false (path deps only). cargo-semver-checks
 # would spawn cargo doc/build on baseline+current per library crate,
 # duplicating the disk pressure the CI cargo wrapper aims to eliminate.
@@ -101,9 +111,17 @@ release = false
 name = "uptrakit-config-merge"
 release = false
 
+# controller-core is listed in both controller binaries' changelog_include
+# arrays. release-plz cannot auto-tag a `release = false` crate, which
+# would re-bloat the binary CHANGELOGs every cycle. Use the same
+# git_only shape as controller-runtime so release-plz silently version-
+# bumps and tags it without creating a GitHub release page or publishing
+# to crates.io.
 [[package]]
 name = "uptrakit-controller-core"
-release = false
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-nats"
@@ -113,9 +131,13 @@ release = false
 name = "uptrakit-service-platform"
 release = false
 
+# service-connections is in both controller binaries' changelog_include
+# arrays — same rationale as controller-core above.
 [[package]]
 name = "uptrakit-service-connections"
-release = false
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-tenant-db"
@@ -129,33 +151,63 @@ release = false
 # no tag/release; commits flow into binary changelogs via include) =====
 [[package]]
 name = "uptrakit-shared-types"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-surfaces"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-wire"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-web-api-types"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-agent-core"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-web-api"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-web-api-auth"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-web-api-queries"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-mcp"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-surface-proxy"
+git_only = true
+git_release_enable = false
+publish = false
 
 # ===== Plugin crates =====
 # Analyzed for commits. Per user direction, plugin commits roll up only
@@ -164,93 +216,183 @@ name = "uptrakit-surface-proxy"
 # transitively link a subset of plugins.
 [[package]]
 name = "uptrakit-notification-plugin-core"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-notification-delivery"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-notification-plugin-email"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-notification-plugin-telegram"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-notification-plugin-webhook"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-discovery-uptrakit-self-update"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-generic-shell"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-hook-shell"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-hook-systemd"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-core"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-proxmox"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-registry"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apk"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apt"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-cargo"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-dnf"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-homebrew"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-mas"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-npm"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pacman"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pkg"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-skills"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-package-manager-routeros"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-package-manager-snap"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-releases-docker"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-releases-forgejo"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-releases-github"
+git_only = true
+git_release_enable = false
+publish = false
 
 [[package]]
 name = "uptrakit-plugin-releases-gitlab"
+git_only = true
+git_release_enable = false
+publish = false
 
 # ===== Runtime crates: version-bumped with commits; no own changelog
 # (rolled into the binaries that depend on them); no git tags =====
