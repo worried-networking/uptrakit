@@ -39,7 +39,6 @@
 			form.isFieldDirty('twoFactorRequired')
 	);
 
-	let etag: string | null = $state(null);
 	let loading = $state(true);
 	let saving = $state(false);
 
@@ -51,8 +50,7 @@
 
 	onMount(async () => {
 		try {
-			const { data, etag: e } = await getAccessSettings();
-			etag = e;
+			const data = await getAccessSettings();
 			form.load({
 				mode: data.mode,
 				token: '',
@@ -79,8 +77,7 @@
 				if (form.draft.token) body.token = form.draft.token;
 				body.require_token_for_oidc = form.draft.requireTokenForOidc;
 			}
-			const { data, etag: newEtag } = await updateAccessSettings(body, etag);
-			etag = newEtag;
+			const data = await updateAccessSettings(body);
 			form.commit({
 				mode: data.mode,
 				token: '',

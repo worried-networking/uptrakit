@@ -7,6 +7,7 @@ import type { RefreshResponse, User } from './types';
 vi.mock('./token-store.svelte', () => ({
 	getAccessToken: vi.fn().mockReturnValue(null),
 	setAccessToken: vi.fn(),
+	onTokenChange: vi.fn(() => () => {}),
 	getSessionExpired: vi.fn().mockReturnValue(false),
 	setSessionExpired: vi.fn()
 }));
@@ -128,8 +129,8 @@ describe('authenticatedFetch', () => {
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
 		const callOptions = mockFetch.mock.calls[0][1] as RequestInit;
-		const headers = callOptions.headers as Record<string, string>;
-		expect(headers['Authorization']).toBe('Bearer my-token');
+		const headers = callOptions.headers as Headers;
+		expect(headers.get('Authorization')).toBe('Bearer my-token');
 	});
 
 	it('does not include Authorization header when no token is set', async () => {
@@ -141,8 +142,8 @@ describe('authenticatedFetch', () => {
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
 		const callOptions = mockFetch.mock.calls[0][1] as RequestInit;
-		const headers = callOptions.headers as Record<string, string>;
-		expect(headers['Authorization']).toBeUndefined();
+		const headers = callOptions.headers as Headers;
+		expect(headers.get('Authorization')).toBeNull();
 	});
 
 	it('retries with new token after a 401 (3 fetch calls total)', async () => {
@@ -160,8 +161,8 @@ describe('authenticatedFetch', () => {
 		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith('new-token');
 		// Retry uses the new token in Authorization header
 		const retryOptions = mockFetch.mock.calls[2][1] as RequestInit;
-		const retryHeaders = retryOptions.headers as Record<string, string>;
-		expect(retryHeaders['Authorization']).toBe('Bearer new-token');
+		const retryHeaders = retryOptions.headers as Headers;
+		expect(retryHeaders.get('Authorization')).toBe('Bearer new-token');
 		expect(result).toEqual(sampleUser);
 	});
 

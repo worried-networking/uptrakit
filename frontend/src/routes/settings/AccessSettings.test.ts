@@ -3,12 +3,16 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api/settings', () => ({
 	getAccessSettings: vi.fn(async () => ({
-		data: { mode: 'open', require_token_for_oidc: false, password_auth_enabled: true, two_factor_required: false },
-		etag: 'W/"settings-v0"'
+		mode: 'open',
+		require_token_for_oidc: false,
+		password_auth_enabled: true,
+		two_factor_required: false
 	})),
 	updateAccessSettings: vi.fn(async () => ({
-		data: { mode: 'open', require_token_for_oidc: false, password_auth_enabled: true, two_factor_required: false },
-		etag: 'W/"settings-v1"'
+		mode: 'open',
+		require_token_for_oidc: false,
+		password_auth_enabled: true,
+		two_factor_required: false
 	}))
 }));
 vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));

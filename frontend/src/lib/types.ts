@@ -163,11 +163,6 @@ export interface UpdateAccessSettingsRequest {
 	two_factor_required?: boolean;
 }
 
-export interface AccessSettingsWithEtag {
-	data: AccessSettingsData;
-	etag: string | null;
-}
-
 export type MfaMethod = 'totp' | 'email' | 'recovery_code';
 
 export interface MfaChallengeResponse {

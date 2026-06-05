@@ -39,7 +39,6 @@
 
 	// OAuth settings state
 	let oauthSettings = $state<OAuthSettingsResponse | null>(null);
-	let oauthSettingsEtag = $state<string | null>(null);
 	let settingsLoading = $state(false);
 	let settingsError = $state<string | null>(null);
 	let savingSettings = $state(false);
@@ -147,9 +146,8 @@
 		settingsError = null;
 		try {
 			const result = await getOAuthSettings();
-			oauthSettings = result.data;
-			oauthSettingsEtag = result.etag;
-			oauthDraft.load(settingsToOAuthDraft(result.data));
+			oauthSettings = result;
+			oauthDraft.load(settingsToOAuthDraft(result));
 			settingsLoaded = true;
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to load OAuth settings';
@@ -163,13 +161,9 @@
 		settingsError = null;
 		try {
 			const patch = oauthDraft.draft;
-			const result = await updateOAuthSettings(
-				{ ...patch, canonical_host: patch.canonical_host ?? '' },
-				oauthSettingsEtag
-			);
-			oauthSettings = result.data;
-			oauthSettingsEtag = result.etag;
-			oauthDraft.commit(settingsToOAuthDraft(result.data));
+			const result = await updateOAuthSettings({ ...patch, canonical_host: patch.canonical_host ?? '' });
+			oauthSettings = result;
+			oauthDraft.commit(settingsToOAuthDraft(result));
 		} catch (e) {
 			settingsError = e instanceof Error ? e.message : 'Failed to save OAuth settings';
 		} finally {

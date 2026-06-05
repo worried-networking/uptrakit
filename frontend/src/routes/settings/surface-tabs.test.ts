@@ -39,13 +39,10 @@ vi.mock('$lib/api', () => ({
 
 vi.mock('$lib/api/settings', () => ({
 	getAccessSettings: vi.fn(async () => ({
-		data: {
-			mode: 'open',
-			require_token_for_oidc: false,
-			password_auth_enabled: true,
-			two_factor_required: false
-		},
-		etag: null
+		mode: 'open',
+		require_token_for_oidc: false,
+		password_auth_enabled: true,
+		two_factor_required: false
 	})),
 	updateAccessSettings: vi.fn()
 }));

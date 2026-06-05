@@ -14,8 +14,25 @@ export function getAccessToken(): string | null {
 	return accessToken;
 }
 
+import { SvelteSet } from 'svelte/reactivity';
+
+type TokenChangeListener = (prev: string | null, next: string | null) => void;
+const tokenChangeListeners: SvelteSet<TokenChangeListener> = new SvelteSet();
+
+/** Register a listener invoked synchronously after every `setAccessToken` call.
+ *  Returns an unsubscribe handle. Safe under HMR — duplicate registration of the
+ *  same callback identity is deduplicated by the underlying `Set`. */
+export function onTokenChange(cb: TokenChangeListener): () => void {
+	tokenChangeListeners.add(cb);
+	return () => {
+		tokenChangeListeners.delete(cb);
+	};
+}
+
 export function setAccessToken(token: string | null): void {
+	const prev = accessToken;
 	accessToken = token;
+	for (const cb of tokenChangeListeners) cb(prev, token);
 }
 
 /** Reactive flag set when a token refresh fails with a 4xx (session truly expired). */
