@@ -1350,7 +1350,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
 )]
 fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
-    let db_state_dir = ctx.state_dir.to_path_buf();
+    let db = ctx.db.clone();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
@@ -1374,20 +1374,6 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
         };
 
         let allow_all = param_bool(&params, "allow_all");
-
-        let db = match crate::db::init_db(&db_state_dir).await {
-            Ok(db) => db,
-            Err(e) => {
-                let resp = make_surface_error_response(
-                    request_id,
-                    &format!("failed to initialize database: {e}"),
-                );
-                let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(resp))
-                    .await;
-                return;
-            }
-        };
 
         let response =
             match sync::sync_connect(&host_id, &db, tenant_id, auth_override.as_ref(), allow_all)
@@ -1414,7 +1400,7 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
     reason = "best-effort surface response sends: receiver disconnect is harmless and recovery is impossible from this background task"
 )]
 fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
-    let db_state_dir = ctx.state_dir.to_path_buf();
+    let db = ctx.db.clone();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
@@ -1439,20 +1425,6 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
 
         let allow_all = param_bool(&params, "allow_all");
         let skip_actions = parse_skip_actions(&params);
-
-        let db = match crate::db::init_db(&db_state_dir).await {
-            Ok(db) => db,
-            Err(e) => {
-                let resp = make_surface_error_response(
-                    request_id,
-                    &format!("failed to initialize database: {e}"),
-                );
-                let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(resp))
-                    .await;
-                return;
-            }
-        };
 
         let response = match sync::sync_execute(
             &host_id,
