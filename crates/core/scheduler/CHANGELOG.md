@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.4...uptrakit-scheduler-v0.0.5) - 2026-06-05
+
+### Added
+
+- *(scheduler)* wire global_provider_lookup to FetchReleasesExecutor via ReleaseFetchContext
+- *(audit-v2)* thread correlation_id through batch dispatch / scheduler
+- *(2fa)* settings_auth two_factor_required + MFA challenge cleanup
+- *(scheduler-runtime)* declare engine modules in lib.rs
+- *(scheduler-runtime)* copy engine source files (pre-integration)
+- *(audit)* emit semantic mutation audit events
+
+### Fixed
+
+- *(infra)* address verify-pass findings in agent-skills-a-infra
+- *(audit-v2)* add correlation_id: None to existing AuditEventPayload literals
+- *(audit-v2)* quality gate fixes
+- *(scheduler-runtime)* add new entity fields to auth_cleanup ActiveModel literals
+- *(scheduler-runtime)* fix standards violations in engine-sourced files
+- *(scheduler-runtime)* switch engine imports to crate-local paths
+- *(release-plz)* pin explicit versions, drop workspace.package.version, silence debug logs
+- *(clippy)* remediate new lint violations (panic, silent-failure, unsafe)
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- *(audit)* type runtime audit emitter actions
+
+### Other
+
+- release
+- *(pki,ocsp,identity)* migrate x509-parser introspection to x509-cert
+- *(scheduler-runtime)* rename StandaloneSchedulerHandler to SchedulerHandler
+- *(scheduler-runtime)* absorb engine deps ahead of merge
+- *(scheduler)* migrate StandaloneSchedulerHandler to dyn ServiceTransport
+- release
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(workspace)* rename uptrakit-internal-wire to uptrakit-wire
+- *(release)* per-binary releases and publish hygiene
+- isolate plugin boundaries in track a
+- Gate scheduler runtime standalone surface
+- extract scheduler runtime
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.3...uptrakit-scheduler-v0.0.4) - 2026-06-04
 
 ### Added
