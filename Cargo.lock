@@ -7161,7 +7161,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "clap",
  "rootcause",
@@ -7185,7 +7185,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7354,7 +7354,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "uptrakit-controller-runtime",
 ]
@@ -7391,7 +7391,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-runtime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "async-nats",
@@ -7462,7 +7462,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-standalone"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "uptrakit-controller-runtime",
 ]
@@ -7499,7 +7499,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-frontend"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "rust-embed",
 ]

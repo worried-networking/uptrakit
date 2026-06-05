@@ -99,7 +99,7 @@ rustix = { version = "1", default-features = false }
 libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
-uptrakit-frontend = { path = "frontend", version = "0.0.3" }
+uptrakit-frontend = { path = "frontend", version = "0.0.4" }
 uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
 uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.2" }
@@ -113,11 +113,11 @@ uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructur
 # Internal crates (all must be referenced via workspace = true in member Cargo.toml files)
 uptrakit-agent-core = { path = "crates/shared/agent-core", version = "0.0.1" }
 uptrakit-agent-runtime = { path = "crates/core/agent-runtime", version = "0.0.3", default-features = false }
-uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.4", default-features = false }
-uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", version = "0.0.3", default-features = false }
+uptrakit-agent-ssh = { path = "crates/core/agent-ssh", version = "0.0.5", default-features = false }
+uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", version = "0.0.4", default-features = false }
 uptrakit-mqtt-runtime = { path = "crates/core/mqtt-runtime", version = "0.0.3", default-features = false }
 uptrakit-controller-core = { path = "crates/ui/controller-core", version = "0.0.1" }
-uptrakit-controller-runtime = { path = "crates/core/controller-runtime", version = "0.0.1", default-features = false }
+uptrakit-controller-runtime = { path = "crates/core/controller-runtime", version = "0.0.2", default-features = false }
 uptrakit-crypto = { path = "crates/shared/crypto", version = "0.0.1" }
 uptrakit-shared-db = { path = "crates/shared/db", version = "0.0.1", default-features = false }
 uptrakit-directories = { path = "crates/shared/directories", version = "0.0.1" }

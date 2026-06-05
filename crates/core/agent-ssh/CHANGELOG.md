@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.4...uptrakit-agent-ssh-v0.0.5) - 2026-06-05
+
+### Fixed
+
+- *(controller-runtime)* register SSH column AAD in Phase 4b, add crypto init to register_agent_ssh
+
+### Other
+
+- *(agent-ssh-runtime)* replace init_db in sync spawn closures with ctx.db.clone()
+- *(agent-ssh-runtime)* thread db through bootstrap operations, add BootstrapConnectArgs
+- *(agent-ssh-runtime)* thread db through Proxmox bootstrap chain, drop init_db
+- *(agent-ssh-runtime)* delete unreachable surface_runtime/ dead-code directory
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.3...uptrakit-agent-ssh-v0.0.4) - 2026-06-04
 
 ### Added
