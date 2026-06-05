@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.4...uptrakit-controller-v0.0.5) - 2026-06-05
+
+### Fixed
+
+- *(controller-runtime)* register SSH column AAD in Phase 4b, add crypto init to register_agent_ssh
+- *(frontend)* auto-attach If-Match on settings updates
+
+### Other
+
+- *(frontend)* hoist SvelteSet import in token-store
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.3...uptrakit-controller-v0.0.4) - 2026-06-04
 
 ### Added
