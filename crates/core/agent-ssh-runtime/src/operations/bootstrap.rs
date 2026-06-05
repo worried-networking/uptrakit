@@ -200,6 +200,7 @@ pub(crate) struct BootstrapPlan {
 /// This phase is non-destructive: it connects via SSH, gathers host
 /// information, determines which actions are applicable, then disconnects.
 pub(crate) async fn bootstrap_connect(
+    db: &sea_orm::DatabaseConnection,
     state_dir: &Path,
     params: &BootstrapParams,
 ) -> Result<BootstrapPlan> {
@@ -207,12 +208,7 @@ pub(crate) async fn bootstrap_connect(
     validate_bootstrap_inputs(params)?;
 
     // Fail fast: check host name is not in DB.
-    let db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(sea_orm::DbErr::Custom(format!(
-            "failed to initialize local database: {e}"
-        ))))
-    })?;
-    let existing = host_ops::find_host(&db, &params.name).await?;
+    let existing = host_ops::find_host(db, &params.name).await?;
     if existing.is_some() {
         bail!(Error::HostNameConflict(params.name.clone()));
     }
@@ -265,7 +261,7 @@ pub(crate) async fn bootstrap_connect(
 
     // 4. GATHER HOST INFORMATION
     let remote_info =
-        gather_remote_host_info(&session, &executor, params, use_sudo, state_dir, &db).await?;
+        gather_remote_host_info(&session, &executor, params, use_sudo, state_dir, db).await?;
 
     // Collect plugin sudo commands to build a preview for the review step.
     let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)))
@@ -532,6 +528,7 @@ fn build_bootstrap_actions(
 /// Reconnects via SSH, performs the requested modifications, verifies
 /// connectivity with the target key, and saves the host to the database.
 pub(crate) async fn bootstrap_execute(
+    db: &sea_orm::DatabaseConnection,
     state_dir: &Path,
     params: BootstrapParams,
     skip_actions: &HashSet<String>,
@@ -554,12 +551,6 @@ pub(crate) async fn bootstrap_execute(
         };
 
     let key_type = ssh_key::detect_key_type(&target_private_pem)?;
-
-    let db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(sea_orm::DbErr::Custom(format!(
-            "failed to initialize local database: {e}"
-        ))))
-    })?;
 
     // Connect via SSH.
     #[expect(
@@ -586,7 +577,7 @@ pub(crate) async fn bootstrap_execute(
     if matches!(host_os, HostOs::RouterOs) {
         drop(executor);
         let ros_params = routeros_params_from_bootstrap_with_fp(&params, observed_fp);
-        execute_bootstrap_routeros(&ros_params, session, &db).await?;
+        execute_bootstrap_routeros(&ros_params, session, db).await?;
         return Ok(BootstrapResult {
             infra_results: Vec::new(),
         });
@@ -657,7 +648,7 @@ pub(crate) async fn bootstrap_execute(
         (None, Vec::new())
     } else {
         let (sc, ir) =
-            setup_sudoers_and_plugins(&session, &executor, &params, &db, state_dir, use_sudo)
+            setup_sudoers_and_plugins(&session, &executor, &params, db, state_dir, use_sudo)
                 .await?;
         if skip_sudoers { (None, ir) } else { (sc, ir) }
     };
@@ -701,7 +692,7 @@ pub(crate) async fn bootstrap_execute(
 
     // Save to database.
     save_host(
-        &db,
+        db,
         &params,
         &target_private_pem,
         key_type,
