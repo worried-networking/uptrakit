@@ -1,4 +1,4 @@
-import { authenticatedFetch, extractErrorMessage } from '$lib/api';
+import { authenticatedFetch, extractErrorMessage, request } from '$lib/api';
 
 // Internal helper — OAuth paths are NOT under /api/v1/, so we use authenticatedFetch
 // directly with absolute paths instead of the BASE-prefixed request() helper.
@@ -153,56 +153,13 @@ export interface UpdateOAuthSettingsRequest {
 	canonical_host?: string;
 }
 
-export interface OAuthSettingsWithEtag {
-	data: OAuthSettingsResponse;
-	etag: string | null;
+export function getOAuthSettings(): Promise<OAuthSettingsResponse> {
+	return request('/global-settings/oauth');
 }
 
-export async function getOAuthSettings(): Promise<OAuthSettingsWithEtag> {
-	let res: Response;
-	try {
-		res = await authenticatedFetch('/api/v1/global-settings/oauth');
-	} catch (err) {
-		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-			throw new Error('Request timed out. Please try again.');
-		} else if (err instanceof TypeError) {
-			throw new Error('Network error: Unable to connect to the server. Check your network connection.');
-		}
-		throw err;
-	}
-	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
-	}
-	const data: OAuthSettingsResponse = await res.json();
-	return { data, etag: res.headers.get('etag') };
-}
-
-export async function updateOAuthSettings(
-	body: UpdateOAuthSettingsRequest,
-	etag: string | null
-): Promise<OAuthSettingsWithEtag> {
-	const headers: Record<string, string> = {};
-	if (etag !== null) headers['if-match'] = etag;
-	let res: Response;
-	try {
-		res = await authenticatedFetch('/api/v1/global-settings/oauth', {
-			method: 'PUT',
-			body: JSON.stringify(body),
-			headers
-		});
-	} catch (err) {
-		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-			throw new Error('Request timed out. Please try again.');
-		} else if (err instanceof TypeError) {
-			throw new Error('Network error: Unable to connect to the server. Check your network connection.');
-		}
-		throw err;
-	}
-	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
-	}
-	const data: OAuthSettingsResponse = await res.json();
-	return { data, etag: res.headers.get('etag') };
+export function updateOAuthSettings(body: UpdateOAuthSettingsRequest): Promise<OAuthSettingsResponse> {
+	return request('/global-settings/oauth', {
+		method: 'PUT',
+		body: JSON.stringify(body)
+	});
 }

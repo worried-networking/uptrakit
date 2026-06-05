@@ -1,4 +1,4 @@
-import { getAccessToken, setAccessToken, setSessionExpired } from './token-store.svelte';
+import { getAccessToken, onTokenChange, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type {
 	BatchActionResponse,
 	AgentCertificateSettings,
@@ -107,6 +107,60 @@ const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 const MAX_ERROR_LENGTH = 500;
+
+// ── Settings ETag auto-cache ──────────────────────────────────────────
+// The backend `etag_middleware` requires `If-Match` on every PUT/PATCH for
+// `/global-settings/*` and `/settings/*`. We cache the most recently observed
+// `ETag` per scope and auto-attach it to the next mutating request so callers
+// don't have to plumb the value by hand. The cache is wiped when the
+// authenticated subject (`sub` JWT claim) changes — silent token refreshes
+// preserve the cache; cross-user sessions do not.
+
+type SettingsScope = 'global' | 'tenant';
+
+const settingsEtagCache: Record<SettingsScope, string | null> = {
+	global: null,
+	tenant: null
+};
+
+function settingsScope(path: string): SettingsScope | null {
+	if (path.startsWith('/global-settings/')) return 'global';
+	if (path.startsWith('/settings/')) return 'tenant';
+	return null;
+}
+
+function subClaim(token: string | null): string | null {
+	if (!token) return null;
+	const parts = token.split('.');
+	if (parts.length < 2) return null;
+	try {
+		let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+		b64 += '='.repeat((4 - (b64.length % 4)) % 4);
+		const payload = JSON.parse(atob(b64));
+		return typeof payload.sub === 'string' ? payload.sub : null;
+	} catch {
+		return null;
+	}
+}
+
+function withHeader(init: HeadersInit | undefined, name: string, value: string): Headers {
+	const h = new Headers(init);
+	h.set(name, value);
+	return h;
+}
+
+/** Test-only: clears the scope ETag cache. Do not call from production code. */
+export function _resetSettingsEtagCacheForTests(): void {
+	settingsEtagCache.global = null;
+	settingsEtagCache.tenant = null;
+}
+
+onTokenChange((prev, next) => {
+	if (subClaim(prev) !== subClaim(next)) {
+		settingsEtagCache.global = null;
+		settingsEtagCache.tenant = null;
+	}
+});
 
 function truncateError(msg: string): string {
 	return msg.length > MAX_ERROR_LENGTH ? msg.slice(0, MAX_ERROR_LENGTH) + '\u2026' : msg;
@@ -218,14 +272,17 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 	const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
 	const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
 
+	const headers = new Headers({ 'Content-Type': 'application/json' });
+	const auth = authHeaders();
+	for (const [k, v] of Object.entries(auth)) headers.set(k, v);
+	if (options.headers !== undefined) {
+		for (const [k, v] of new Headers(options.headers).entries()) headers.set(k, v);
+	}
+
 	const res = await fetch(url, {
 		credentials: 'same-origin',
 		...options,
-		headers: {
-			'Content-Type': 'application/json',
-			...authHeaders(),
-			...(options.headers as Record<string, string> | undefined)
-		},
+		headers,
 		signal: combinedSignal
 	});
 
@@ -263,14 +320,17 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 			// to request(), which maps them to the correct user-facing messages.
 			// The .finally() clears the banner after the retry settles regardless
 			// of whether it succeeds or fails.
+			const retryHeaders = new Headers({
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${refreshed.access_token}`
+			});
+			if (options.headers !== undefined) {
+				for (const [k, v] of new Headers(options.headers).entries()) retryHeaders.set(k, v);
+			}
 			return fetch(url, {
 				credentials: 'same-origin',
 				...options,
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${refreshed.access_token}`,
-					...(options.headers as Record<string, string> | undefined)
-				},
+				headers: retryHeaders,
 				signal: retryCombinedSignal
 			}).finally(() => {
 				setSessionExpired(false);
@@ -320,7 +380,21 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 }
 
 /** Performs an authenticated request and parses the JSON response body. */
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+	const scope = settingsScope(path);
+	const method = (options.method ?? 'GET').toUpperCase();
+
+	if (scope !== null && (method === 'PUT' || method === 'PATCH')) {
+		const callerHas = new Headers(options.headers ?? {}).has('if-match');
+		const cached = settingsEtagCache[scope];
+		if (!callerHas && cached !== null) {
+			options = {
+				...options,
+				headers: withHeader(options.headers, 'if-match', cached)
+			};
+		}
+	}
+
 	let res: Response;
 	try {
 		res = await authenticatedFetch(`${BASE}${path}`, options);
@@ -332,6 +406,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		}
 		throw err;
 	}
+
+	if (scope !== null && res.ok) {
+		const etag = res.headers.get('etag');
+		if (etag !== null) settingsEtagCache[scope] = etag;
+	}
+
 	if (!res.ok) {
 		throw await extractApiError(res);
 	}
