@@ -90,6 +90,8 @@ same release, it must be added to the INSERT list before the release cuts.
 
 - Each embedded service's `ServiceHandler` must be constructible with controller-provided deps
   (DB connection, state dir, ECIES keypair). Handler constructors must not hardcode internal
-  paths or open their own DB connections.
+  paths or open their own DB connections. This invariant extends to all tasks spawned by the
+  handler at runtime — background tasks and surface-action handlers must thread the injected
+  connection rather than calling `init_db` or equivalent.
 - The frozen-list constraint on the repair migration requires coordination when new agent-ssh
   migrations land during the same release as the refactor.

@@ -56,7 +56,8 @@ _Avoid_: SSH agent
 **Embedded Mode**:
 A deployment configuration (built via the `controller-standalone` crate) where some or all
 Services run inside the Controller binary. Embedded Services are still displayed as separate
-Services but marked "embedded."
+Services but marked "embedded." Embedded Services share the controller's `DatabaseConnection`
+rather than opening their own — no per-service DB files are created in embedded mode.
 _Avoid_: standalone (ambiguous), monolith
 
 **Plugin**:
