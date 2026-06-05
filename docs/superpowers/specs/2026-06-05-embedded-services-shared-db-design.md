@@ -116,13 +116,66 @@ it is unaffected.
 
 ### Part 2 — Embedded SSH agent startup initialisation
 
-Two SSH-specific startup steps that the standalone binary performs but the embedded path
-skips must be added. A third call (`init_ssh_data_key_ring`) is included for symmetry but is
-a no-op in embedded mode — the controller's Phase 4c already initializes the same key ring and
-the call will emit a harmless `warn!` "data key ring already initialized":
+Three SSH-specific startup steps are missing in the embedded path. One of them —
+`register_ssh_column_aad` — requires special handling because `COLUMN_AAD_REGISTRY` is a
+process-wide `OnceLock<HashMap>` (in `uptrakit-crypto`): it can be set exactly once.
+Controller Phase 4b sets it via `register_column_aad_mappings()` with four controller
+columns. A second `register_column_aad()` call (from `register_agent_ssh` — called much
+later) would return `AlreadyInitialized` and the SSH column would never be registered,
+silently breaking all SSH private-key reads with a wrong AAD.
 
-They are called at the top of `register_agent_ssh` in
-`controller-runtime/src/service_host/builtins.rs`, before `AgentSshHandler::new`:
+**Column AAD registration (`register_ssh_column_aad` replacement)**
+
+Add `AgentSshHandler::column_aad_entries()` — mirroring the existing `service_migrations()`
+pattern — and call it from `register_column_aad_mappings()` during Phase 4b so all columns
+are registered in a single `OnceLock::set()`:
+
+```rust
+// agent-ssh-runtime/src/handler.rs — new method on AgentSshHandler
+pub fn column_aad_entries() -> &'static [uptrakit_crypto::ColumnAadEntry] {
+    &[uptrakit_crypto::ColumnAadEntry {
+        table: "ssh_hosts",
+        column: "private_key",
+        aad: crate::AAD_SSH_PRIVATE_KEY,
+    }]
+}
+```
+
+```rust
+// controller-runtime/src/reencrypt.rs — extend the existing assembly
+pub(crate) fn register_column_aad_mappings() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+    let mut entries: Vec<ColumnAadEntry> = vec![
+        // ... four existing controller entries unchanged ...
+    ];
+    #[cfg(feature = "embedded-ssh-agent")]
+    entries.extend_from_slice(
+        uptrakit_agent_ssh_runtime::AgentSshHandler::column_aad_entries(),
+    );
+    if let Err(e) = uptrakit_crypto::register_column_aad(&entries) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless in tests)");
+    }
+}
+```
+
+`extend_from_slice` requires `ColumnAadEntry: Copy`. Add `#[derive(Clone, Copy)]` to
+`ColumnAadEntry` in `uptrakit-crypto/src/lib.rs` (all fields are `&'static str`; this is a
+non-breaking additive derive).
+
+The existing `register_ssh_column_aad()` free function in `agent-ssh-runtime/src/lib.rs` is
+retained unchanged — still called by the standalone binary (`agent-ssh/src/main.rs`).
+
+**Remaining startup calls in `register_agent_ssh`**
+
+Two calls remain in `register_agent_ssh` in `controller-runtime/src/service_host/builtins.rs`:
+
+- `init_ssh_data_key_ring(app_state.db()).await` — a no-op in embedded mode (Phase 4c already
+  initialized the same key ring; the call emits a harmless `warn!` "already initialized") but
+  included for parity with the standalone path.
+- `reencrypt_ssh_to_v3(app_state.db()).await` — re-encrypts SSH private keys to `ENC:v3:`;
+  runs after Phase 4b has registered the correct `private_key` AAD, so reads are correct.
 
 ```rust
 #[cfg(feature = "embedded-ssh-agent")]
@@ -131,7 +184,19 @@ pub(crate) async fn register_agent_ssh(
     app_state: &Arc<uptrakit_web_api::AppState>,
     ...
 ) -> rootcause::Result<()> {
-    uptrakit_agent_ssh_runtime::register_ssh_column_aad();
+    // Warn about legacy standalone DB — no longer used in embedded mode.
+    let ssh_db_path = state_dir.join("agent-ssh.db");
+    if let Ok(meta) = tokio::fs::metadata(&ssh_db_path).await {
+        if meta.len() > 0 {
+            tracing::warn!(
+                path = %ssh_db_path.display(),
+                "legacy agent-ssh.db found in state directory; \
+                 this file is no longer used in embedded mode"
+            );
+        }
+    }
+    // Column AAD for ssh_hosts.private_key is registered in Phase 4b via
+    // register_column_aad_mappings() + AgentSshHandler::column_aad_entries().
     uptrakit_agent_ssh_runtime::init_ssh_data_key_ring(app_state.db()).await;
     uptrakit_agent_ssh_runtime::reencrypt_ssh_to_v3(app_state.db()).await;
 
@@ -141,21 +206,20 @@ pub(crate) async fn register_agent_ssh(
 }
 ```
 
-No new `#[cfg]` blocks in `lib.rs`. The single existing `#[cfg(feature = "embedded-ssh-agent")]`
-gate on `register_agent_ssh` covers all three calls. All SSH-specific knowledge stays in
-the `builtins.rs` integration seam — consistent with how `register_scheduler`,
-`register_agent`, and `register_mqtt` each own their service's registration details.
-
-The three functions are already `pub` in `agent-ssh-runtime/src/lib.rs` and each guards
-itself with `if !uptrakit_crypto::master_key_available() { return; }`, so calling them in
-embedded mode is safe even when encryption is not configured. `init_ssh_data_key_ring` is
-idempotent: it reads existing DEK rows before inserting and catches `AlreadyInitialized` from
-`uptrakit_crypto` with `tracing::warn!`, so the expected "already initialized" warn is benign.
+`init_ssh_data_key_ring` and `reencrypt_ssh_to_v3` are already `pub` in
+`agent-ssh-runtime/src/lib.rs` and each guards itself with
+`if !uptrakit_crypto::master_key_available() { return; }`, so calling them in embedded mode
+is safe when encryption is not configured.
 
 ## Affected Files
 
-**`agent-ssh-runtime`** (internal refactoring, no public API break):
+**`uptrakit-crypto`** (non-breaking additive derive):
 
+- `src/lib.rs` — add `#[derive(Clone, Copy)]` to `ColumnAadEntry`
+
+**`agent-ssh-runtime`** (internal refactoring + new public method):
+
+- `src/handler.rs` — add `AgentSshHandler::column_aad_entries()` method
 - `src/surface_runtime.rs`
 - `src/operations/bootstrap.rs`
 - `src/operations/bootstrap_proxmox.rs`
@@ -165,9 +229,11 @@ idempotent: it reads existing DEK rows before inserting and catches `AlreadyInit
   `infra_plugin_orchestration.rs` and `sync.rs` which have their own `init_db` calls.
   Delete the **entire directory** as part of this change.
 
-**`controller-runtime`** (one function, additive):
+**`controller-runtime`** (two functions updated):
 
-- `src/service_host/builtins.rs`
+- `src/reencrypt.rs` — extend `register_column_aad_mappings()` with SSH entries
+- `src/service_host/builtins.rs` — remove `register_ssh_column_aad()` call, add stale-db
+  warn and two remaining crypto init calls
 
 ## Quality Gates
 

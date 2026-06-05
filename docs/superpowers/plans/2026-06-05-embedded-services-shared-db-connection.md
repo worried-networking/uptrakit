@@ -10,7 +10,9 @@
 clones it (`ctx.db.clone()`) before entering the closure, then passes it into operations functions as
 `db: &DatabaseConnection`. `load_and_validate_pve_host` and the Proxmox chain drop their `state_dir` parameter
 (used only for DB init). The standard bootstrap and sync chains keep `state_dir` (needed for SSH key files and
-sudoers). The embedded registration path gains three SSH crypto init calls.
+sudoers). The embedded registration path adds SSH column AAD entries to Phase 4b's `register_column_aad_mappings()`
+via `AgentSshHandler::column_aad_entries()`, then calls `init_ssh_data_key_ring` and `reencrypt_ssh_to_v3` in
+`register_agent_ssh`.
 
 **Tech Stack:** Rust / SeaORM / `sea_orm::DatabaseConnection` (cheap `Arc<Pool>` clone) / `tokio::spawn` / `controller-runtime` `builtins.rs`
 
@@ -20,11 +22,14 @@ sudoers). The embedded registration path gains three SSH crypto init calls.
 
 | File                                                                | Change                                                                                                                                                                                                             |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `crates/shared/crypto/src/lib.rs`                                   | Add `#[derive(Clone, Copy)]` to `ColumnAadEntry`                                                                                                                                                                   |
+| `crates/core/agent-ssh-runtime/src/handler.rs`                      | Add `AgentSshHandler::column_aad_entries()` (mirrors `service_migrations()` pattern)                                                                                                                               |
 | `crates/core/agent-ssh-runtime/src/surface_runtime/` (directory)    | **Delete entirely** — dead code, no `mod.rs`                                                                                                                                                                       |
 | `crates/core/agent-ssh-runtime/src/operations/bootstrap_proxmox.rs` | Remove `init_db`; thread `db` through Proxmox chain; change `AgentGuestBootstrapExecutor`                                                                                                                          |
 | `crates/core/agent-ssh-runtime/src/operations/bootstrap.rs`         | Add `db` param to `bootstrap_connect` and `bootstrap_execute`; remove `init_db`                                                                                                                                    |
 | `crates/core/agent-ssh-runtime/src/surface_runtime.rs`              | Add `BootstrapConnectArgs`; refactor `run_bootstrap_connect`; add `db` to `BootstrapExecuteArgs`; update bootstrap spawn sites (Task 3) + sync spawn sites (Task 4); `spawn_infra_plugin_action` updated in Task 2 |
-| `crates/core/controller-runtime/src/service_host/builtins.rs`       | Add stale-file warn + three SSH crypto init calls in `register_agent_ssh`                                                                                                                                          |
+| `crates/core/controller-runtime/src/reencrypt.rs`                   | Extend `register_column_aad_mappings()` with SSH entries via `column_aad_entries()` (Phase 4b)                                                                                                                     |
+| `crates/core/controller-runtime/src/service_host/builtins.rs`       | Add stale-file warn + `init_ssh_data_key_ring` + `reencrypt_ssh_to_v3` in `register_agent_ssh`; no `register_ssh_column_aad` call                                                                                  |
 | `CHANGELOG.md`                                                      | Note `agent-ssh.db` no longer used in embedded mode                                                                                                                                                                |
 | `CONTEXT.md`                                                        | Amend **Embedded Mode** entry                                                                                                                                                                                      |
 | `docs/adr/0005-service-binary-runtime-boundary.md`                  | Amend Consequences to cover spawned tasks                                                                                                                                                                          |
@@ -38,7 +43,7 @@ the `surface_runtime/` directory is unreachable dead code.
 
 **Files:**
 
-- Delete: `crates/core/agent-ssh-runtime/src/surface_runtime/` (entire directory, 13 files)
+- Delete: `crates/core/agent-ssh-runtime/src/surface_runtime/` (entire directory, 12 files)
 
 - [ ] **Step 1: Verify directory is unreachable**
 
@@ -58,10 +63,10 @@ rm -rf crates/core/agent-ssh-runtime/src/surface_runtime/
 - [ ] **Step 3: Verify build still passes**
 
 ```bash
-cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | head -20
+cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error"
 ```
 
-Expected: zero errors (directory was dead code).
+Expected: no output (directory was dead code).
 
 - [ ] **Step 4: Format and commit**
 
@@ -347,21 +352,24 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
         let tenant_id_str = tenant_id.map(|t| t.to_string());
         let action_invoker = InfraActionInvokerImpl::new(&proxy, &bg_tx, tenant_id);
         let guest_bootstrap = AgentGuestBootstrapExecutor {
-            db: db.clone(),
+            db,
             service_id,
         };
 ```
 
-`state_dir` stays — it is still used in `InfraPluginContext { ..., state_dir: &state_dir, ... }`
-later in the closure. The `InfraPluginContext { db: &db, ... }` line stays unchanged.
+Pass the owned `db` directly into `AgentGuestBootstrapExecutor` (no second clone). Where
+`InfraPluginContext` needs a `&DatabaseConnection`, borrow from the executor:
+`InfraPluginContext { db: &guest_bootstrap.db, ... }`.
+
+`state_dir` stays — still used in `InfraPluginContext { ..., state_dir: &state_dir, ... }`.
 
 - [ ] **Step 7: Verify compilation is clean**
 
 ```bash
-cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error" | head -20
+cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error"
 ```
 
-Expected: zero errors. `bootstrap_proxmox.rs` and `surface_runtime.rs` are both updated
+Expected: no output. `bootstrap_proxmox.rs` and `surface_runtime.rs` are both updated
 in this task, so the workspace is compile-clean at commit time.
 
 - [ ] **Step 8: Format and commit**
@@ -475,20 +483,25 @@ pub(crate) async fn bootstrap_execute(
 ) -> Result<BootstrapResult> {
 ```
 
-Remove the `let db = crate::db::init_db(...)` block. All subsequent uses of `db` in the
-function body (`execute_bootstrap_routeros(&ros_params, session, &db)` and others) now
-refer to the parameter. Change `&db` → `db` for those call sites (since `db` is already `&`).
-
-Specifically, find every call site in `bootstrap_execute` that passes `&db` and change to `db`:
+Remove the `let db = crate::db::init_db(...)` block. All `&db` call sites in `bootstrap_execute`
+now change to `db` (since `db` is already `&`). Three sites require this substitution:
 
 ```rust
-// Before:
+// Line ~589 — Before:
 execute_bootstrap_routeros(&ros_params, session, &db).await?;
 // After:
 execute_bootstrap_routeros(&ros_params, session, db).await?;
-```
 
-And any other `&db` → `db` references inside `bootstrap_execute`.
+// Line ~660 — Before:
+setup_sudoers_and_plugins(&session, &executor, &params, &db, state_dir, use_sudo).await?;
+// After:
+setup_sudoers_and_plugins(&session, &executor, &params, db, state_dir, use_sudo).await?;
+
+// Line ~703 — Before:
+save_host(&db, ...).await?;
+// After:
+save_host(db, ...).await?;
+```
 
 - [ ] **Step 3: Add `BootstrapConnectArgs` struct in `surface_runtime.rs`**
 
@@ -766,10 +779,10 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
 - [ ] **Step 9: Verify compilation**
 
 ```bash
-cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error" | head -20
+cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error"
 ```
 
-Expected: zero errors. `spawn_infra_plugin_action` was already updated in Task 2 Step 6
+Expected: no output. `spawn_infra_plugin_action` was already updated in Task 2 Step 6
 to use the new `AgentGuestBootstrapExecutor.db` field, so no residual breakage remains.
 
 - [ ] **Step 10: Format and commit**
@@ -956,22 +969,116 @@ git commit -m "refactor(agent-ssh-runtime): replace init_db in sync spawn closur
 
 ---
 
-### Task 5: Add SSH crypto init in embedded registration
+### Task 5: Register SSH column AAD in Phase 4b + remaining crypto init
 
-`register_agent_ssh` in `builtins.rs` is the embedded entry point for Agent-SSH. Two SSH
-crypto steps (`register_ssh_column_aad`, `reencrypt_ssh_to_v3`) are genuinely missing in the
-embedded path and must run before `AgentSshHandler::new`. `init_ssh_data_key_ring` is
-idempotent (Phase 4c already ran it; it will emit a harmless `warn!` for "already
-initialized") — included for symmetry. A stale-file warning for legacy `agent-ssh.db` is
-added before the crypto calls.
+`COLUMN_AAD_REGISTRY` is a process-wide `OnceLock` set exactly once during Phase 4b.
+The original spec called `register_ssh_column_aad()` in `register_agent_ssh` — but by that
+point Phase 4b has already sealed the registry. The SSH `private_key` column would never
+be registered, causing all SSH private-key reads to use the wrong AAD.
+
+Fix: add `AgentSshHandler::column_aad_entries()` (same pattern as `service_migrations()`),
+extend Phase 4b's `register_column_aad_mappings()` with SSH entries, and call the two
+remaining crypto init functions (`init_ssh_data_key_ring`, `reencrypt_ssh_to_v3`) in
+`register_agent_ssh` as before.
 
 **Files:**
 
+- Modify: `crates/shared/crypto/src/lib.rs`
+- Modify: `crates/core/agent-ssh-runtime/src/handler.rs`
+- Modify: `crates/core/controller-runtime/src/reencrypt.rs`
 - Modify: `crates/core/controller-runtime/src/service_host/builtins.rs`
 
-- [ ] **Step 1: Add stale-file warning and three crypto init calls**
+- [ ] **Step 1: Add `#[derive(Clone, Copy)]` to `ColumnAadEntry`**
 
-Current `register_agent_ssh` body (line 321):
+In `crates/shared/crypto/src/lib.rs`, find the `ColumnAadEntry` struct (around line 274) and
+add the derive:
+
+```rust
+#[derive(Clone, Copy)]
+pub struct ColumnAadEntry {
+    pub table: &'static str,
+    pub column: &'static str,
+    pub aad: &'static str,
+}
+```
+
+All fields are `&'static str`; `Copy` is a natural fit. This is non-breaking — no existing
+code loses functionality.
+
+- [ ] **Step 2: Add `AgentSshHandler::column_aad_entries()`**
+
+In `crates/core/agent-ssh-runtime/src/handler.rs`, after the `service_migrations()` method
+(around line 169), add:
+
+```rust
+pub fn column_aad_entries() -> &'static [uptrakit_crypto::ColumnAadEntry] {
+    &[uptrakit_crypto::ColumnAadEntry {
+        table: "ssh_hosts",
+        column: "private_key",
+        aad: crate::AAD_SSH_PRIVATE_KEY,
+    }]
+}
+```
+
+No `#[cfg]` gate — this method is used by both the embedded path (via `reencrypt.rs`) and
+is available to the standalone path. The existing `register_ssh_column_aad()` free function
+in `lib.rs` is left untouched (standalone binary still uses it).
+
+- [ ] **Step 3: Extend `register_column_aad_mappings()` in `reencrypt.rs`**
+
+Current function (around line 52 of `crates/core/controller-runtime/src/reencrypt.rs`):
+
+```rust
+pub(crate) fn register_column_aad_mappings() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    let entries: &[ColumnAadEntry] = &[
+        ColumnAadEntry { table: "ca_certificates",    column: "key_pem",          aad: AAD_CA_KEY_PEM },
+        ColumnAadEntry { table: "oidc_providers",     column: "client_secret",    aad: AAD_OIDC_CLIENT_SECRET },
+        ColumnAadEntry { table: "pending_oidc_flows", column: "pkce_verifier",    aad: AAD_PKCE_VERIFIER },
+        ColumnAadEntry { table: "notification_channels", column: "config",        aad: AAD_NOTIFICATION_CONFIG },
+    ];
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless in tests)");
+    }
+}
+```
+
+New (switch static slice to `Vec`; extend with SSH entries when feature is on):
+
+```rust
+pub(crate) fn register_column_aad_mappings() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    let mut entries: Vec<ColumnAadEntry> = vec![
+        ColumnAadEntry { table: "ca_certificates",       column: "key_pem",       aad: AAD_CA_KEY_PEM },
+        ColumnAadEntry { table: "oidc_providers",        column: "client_secret", aad: AAD_OIDC_CLIENT_SECRET },
+        ColumnAadEntry { table: "pending_oidc_flows",    column: "pkce_verifier", aad: AAD_PKCE_VERIFIER },
+        ColumnAadEntry { table: "notification_channels", column: "config",        aad: AAD_NOTIFICATION_CONFIG },
+    ];
+
+    #[cfg(feature = "embedded-ssh-agent")]
+    entries.extend_from_slice(
+        uptrakit_agent_ssh_runtime::AgentSshHandler::column_aad_entries(),
+    );
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(&entries) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless in tests)");
+    }
+}
+```
+
+The `#[cfg(feature = "embedded-ssh-agent")]` block is additive (no `#[cfg(not(...))]`),
+consistent with the workspace feature-flag rules.
+
+- [ ] **Step 4: Update `register_agent_ssh` in `builtins.rs`**
+
+Current body (line 321):
 
 ```rust
     let ssh_caps = crate::ssh_agent::ssh_agent_capabilities();
@@ -981,7 +1088,8 @@ Current `register_agent_ssh` body (line 321):
     let handler = uptrakit_agent_ssh_runtime::AgentSshHandler::new(db_for_ssh, state_dir);
 ```
 
-New:
+New (stale-db warn + two remaining crypto init calls; column AAD is now registered in
+Phase 4b so `register_ssh_column_aad()` is NOT called here):
 
 ```rust
     // Warn about legacy standalone DB file — no longer used in embedded mode.
@@ -999,7 +1107,8 @@ New:
         }
     }
 
-    uptrakit_agent_ssh_runtime::register_ssh_column_aad();
+    // Column AAD for ssh_hosts.private_key is registered during Phase 4b via
+    // register_column_aad_mappings() + AgentSshHandler::column_aad_entries().
     uptrakit_agent_ssh_runtime::init_ssh_data_key_ring(app_state.db()).await;
     uptrakit_agent_ssh_runtime::reencrypt_ssh_to_v3(app_state.db()).await;
 
@@ -1010,16 +1119,17 @@ New:
     let handler = uptrakit_agent_ssh_runtime::AgentSshHandler::new(db_for_ssh, state_dir);
 ```
 
-- [ ] **Step 2: Verify compilation**
+- [ ] **Step 5: Verify compilation**
 
 ```bash
+cargo check -p uptrakit-crypto --all-features 2>&1 | grep -E "^error"
+cargo check -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "^error"
 cargo check -p uptrakit-controller-runtime --all-features 2>&1 | grep -E "^error"
 ```
 
-Expected: zero errors. `register_ssh_column_aad`, `init_ssh_data_key_ring`, and
-`reencrypt_ssh_to_v3` are already `pub` in `agent-ssh-runtime/src/lib.rs`.
+Expected: no output on each. All three crates updated; workspace is compile-clean.
 
-- [ ] **Step 3: Run full quality gates**
+- [ ] **Step 6: Run full quality gates**
 
 ```bash
 cargo fmt --all
@@ -1028,15 +1138,19 @@ cargo check --all-features
 cargo clippy --all-targets --no-default-features --features db-sqlite
 cargo clippy --all-targets --all-features
 cargo test --all-features
+cargo deny check
 ```
 
 All must pass. Fix any warnings before continuing.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add crates/core/controller-runtime/src/service_host/builtins.rs
-git commit -m "fix(controller-runtime): add SSH crypto init + stale-db warn in register_agent_ssh"
+git add crates/shared/crypto/src/lib.rs \
+        crates/core/agent-ssh-runtime/src/handler.rs \
+        crates/core/controller-runtime/src/reencrypt.rs \
+        crates/core/controller-runtime/src/service_host/builtins.rs
+git commit -m "fix(controller-runtime): register SSH column AAD in Phase 4b, add crypto init to register_agent_ssh"
 ```
 
 ---
@@ -1144,7 +1258,9 @@ git commit -m "docs: update CONTEXT.md, ADR-0005, CHANGELOG for embedded shared-
 | `spawn_bootstrap_connect/execute` clone `ctx.db`                                                         | Task 3                                    |
 | `spawn_infra_plugin_action` remove `init_db`, use `ctx.db`                                               | Task 2 (Step 6, for compile-clean commit) |
 | `spawn_sync_connect/execute` remove `init_db`, use `ctx.db`                                              | Task 4                                    |
-| `register_ssh_column_aad()` call in `register_agent_ssh`                                                 | Task 5                                    |
+| `#[derive(Clone, Copy)]` on `ColumnAadEntry` in `uptrakit-crypto`                                        | Task 5                                    |
+| `AgentSshHandler::column_aad_entries()` in `handler.rs`                                                  | Task 5                                    |
+| `register_column_aad_mappings()` extended with SSH entries in `reencrypt.rs` (Phase 4b)                  | Task 5                                    |
 | `init_ssh_data_key_ring()` call in `register_agent_ssh`                                                  | Task 5                                    |
 | `reencrypt_ssh_to_v3()` call in `register_agent_ssh`                                                     | Task 5                                    |
 | Stale `agent-ssh.db` file `tracing::warn!`                                                               | Task 5                                    |
