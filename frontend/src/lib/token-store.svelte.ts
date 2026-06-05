@@ -7,17 +7,20 @@
  *   token-store.svelte.ts  <--  auth.svelte.ts  -->  api.ts
  */
 
+import { SvelteSet } from 'svelte/reactivity';
+
+type TokenChangeListener = (prev: string | null, next: string | null) => void;
+
 /** In-memory access token — never persisted to localStorage. */
 let accessToken: string | null = null;
+
+// Project lint rule `svelte/prefer-svelte-reactivity` forbids `new Set()` in
+// `.svelte.ts` files; `SvelteSet` is the sanctioned imperative replacement here.
+const tokenChangeListeners: SvelteSet<TokenChangeListener> = new SvelteSet();
 
 export function getAccessToken(): string | null {
 	return accessToken;
 }
-
-import { SvelteSet } from 'svelte/reactivity';
-
-type TokenChangeListener = (prev: string | null, next: string | null) => void;
-const tokenChangeListeners: SvelteSet<TokenChangeListener> = new SvelteSet();
 
 /** Register a listener invoked synchronously after every `setAccessToken` call.
  *  Returns an unsubscribe handle. Safe under HMR — duplicate registration of the
