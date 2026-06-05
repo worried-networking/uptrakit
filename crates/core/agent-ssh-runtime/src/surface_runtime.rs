@@ -1275,6 +1275,7 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
+    let db = ctx.db.clone();
     let request_id = request.request_id;
     let params = serde_json::Value::Object(request.params);
     let sensitive_params_sealed = request
@@ -1282,15 +1283,16 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
         .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let response = run_bootstrap_connect(
+        let response = run_bootstrap_connect(BootstrapConnectArgs {
             request_id,
-            &params,
-            sensitive_params_sealed.as_deref(),
-            private_key_der.as_deref(),
+            params: &params,
+            sensitive_params_sealed: sensitive_params_sealed.as_deref(),
+            private_key_der: private_key_der.as_deref(),
             service_id,
             tenant_id,
-            &state_dir,
-        )
+            state_dir: &state_dir,
+            db,
+        })
         .await;
         let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
@@ -1306,6 +1308,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
+    let db = ctx.db.clone();
     let request_id = request.request_id;
     let params = serde_json::Value::Object(request.params);
     let sensitive_params_sealed = request
@@ -1322,6 +1325,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
             tenant_id,
             state_dir: &state_dir,
             bg_tx: &bg_tx,
+            db,
         })
         .await;
         emit_surface_mutation_audit(
@@ -1660,32 +1664,29 @@ fn parse_bootstrap_params(
 }
 
 /// The bootstrap-connect handler: probe the host and return a plan.
-#[tracing::instrument(skip_all, fields(request_id = %request_id))]
-async fn run_bootstrap_connect(
-    request_id: uuid::Uuid,
-    params: &serde_json::Value,
-    sensitive_params_sealed: Option<&str>,
-    private_key_der: Option<&[u8]>,
-    service_id: Option<uuid::Uuid>,
-    tenant_id: Option<uuid::Uuid>,
-    state_dir: &Path,
-) -> SurfaceActionResponse {
+#[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
+async fn run_bootstrap_connect(args: BootstrapConnectArgs<'_>) -> SurfaceActionResponse {
+    let request_id = args.request_id;
     let sensitive: Option<SensitiveAuthParams> =
         match uptrakit_service_sdk::decrypt_sensitive_params(
-            sensitive_params_sealed,
-            private_key_der,
+            args.sensitive_params_sealed,
+            args.private_key_der,
         ) {
             Ok(s) => s,
             Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
-    let bootstrap_params =
-        match parse_bootstrap_params(params, sensitive.as_ref(), service_id, tenant_id) {
-            Ok(p) => p,
-            Err(msg) => return make_surface_error_response(request_id, &msg),
-        };
+    let bootstrap_params = match parse_bootstrap_params(
+        args.params,
+        sensitive.as_ref(),
+        args.service_id,
+        args.tenant_id,
+    ) {
+        Ok(p) => p,
+        Err(msg) => return make_surface_error_response(request_id, &msg),
+    };
 
-    match bootstrap::bootstrap_connect(state_dir, &bootstrap_params).await {
+    match bootstrap::bootstrap_connect(&args.db, args.state_dir, &bootstrap_params).await {
         Ok(plan) => match serde_json::to_value(&plan) {
             Ok(data) => make_surface_success_response(request_id, data),
             Err(e) => {
@@ -1699,6 +1700,18 @@ async fn run_bootstrap_connect(
     }
 }
 
+/// Arguments for the bootstrap-connect handler, bundled to stay within the 7-arg clippy limit.
+struct BootstrapConnectArgs<'a> {
+    request_id: uuid::Uuid,
+    params: &'a serde_json::Value,
+    sensitive_params_sealed: Option<&'a str>,
+    private_key_der: Option<&'a [u8]>,
+    service_id: Option<uuid::Uuid>,
+    tenant_id: Option<uuid::Uuid>,
+    state_dir: &'a Path,
+    db: sea_orm::DatabaseConnection,
+}
+
 /// Arguments for the bootstrap-execute handler, bundled to stay within the 7-arg clippy limit.
 struct BootstrapExecuteArgs<'a> {
     request_id: uuid::Uuid,
@@ -1709,6 +1722,7 @@ struct BootstrapExecuteArgs<'a> {
     tenant_id: Option<uuid::Uuid>,
     state_dir: &'a Path,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+    db: sea_orm::DatabaseConnection,
 }
 
 /// The bootstrap-execute handler: execute the bootstrap with optional skip set.
@@ -1738,7 +1752,9 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionR
     let host_id = bootstrap_params.host_id;
     let skip_actions = parse_skip_actions(args.params);
 
-    match bootstrap::bootstrap_execute(args.state_dir, bootstrap_params, &skip_actions).await {
+    match bootstrap::bootstrap_execute(&args.db, args.state_dir, bootstrap_params, &skip_actions)
+        .await
+    {
         Ok(result) => {
             tracing::info!(%host_id, "bootstrap completed successfully");
 
