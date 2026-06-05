@@ -954,7 +954,7 @@ Expected: zero errors.
 - [ ] **Step 4: Run unit tests**
 
 ```bash
-cargo test -p uptrakit-agent-ssh-runtime --all-features 2>&1 | tail -20
+cargo test -p uptrakit-agent-ssh-runtime --all-features 2>&1 | grep -E "FAILED|^error\["
 ```
 
 Expected: all tests pass.
@@ -1007,8 +1007,10 @@ code loses functionality.
 
 - [ ] **Step 2: Add `AgentSshHandler::column_aad_entries()`**
 
-In `crates/core/agent-ssh-runtime/src/handler.rs`, after the `service_migrations()` method
-(around line 169), add:
+In `crates/core/agent-ssh-runtime/src/handler.rs`, add to the **inherent** `impl AgentSshHandler`
+block (lines 26–55, before the closing `}` at line 55). Do NOT place this in the
+`impl ServiceHandler for AgentSshHandler` block that follows (line 58+) — that is a trait
+impl and `column_aad_entries` is not a `ServiceHandler` method:
 
 ```rust
 pub fn column_aad_entries() -> &'static [uptrakit_crypto::ColumnAadEntry] {
