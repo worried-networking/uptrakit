@@ -43,7 +43,9 @@ $STD addgroup --system uptrakit
 $STD adduser --system --home /opt/uptrakit --shell /usr/sbin/nologin \
   --no-create-home --ingroup uptrakit --disabled-login --disabled-password uptrakit
 $STD mkdir -p /opt/uptrakit/{config,state}
-$STD chown uptrakit:uptrakit /opt/uptrakit/{config,state}
+# Controller creates XDG dirs (.config, .local/state) under $HOME on first run,
+# so the whole home tree must be uptrakit-owned, not just the explicit subdirs.
+$STD chown -R uptrakit:uptrakit /opt/uptrakit
 msg_ok "Created service user"
 
 msg_info "Generating master key"
@@ -83,6 +85,27 @@ else
   exit 1
 fi
 
+msg_info "Writing controller config"
+# Resolve container's primary IPv4 for the PKI advertise URL. Operators on
+# DHCP setups should switch this to a stable hostname after install.
+CTRL_IP="$(hostname -I | awk '{print $1}')"
+cat >/opt/uptrakit/config/controller.toml <<EOF
+master_key = "file:/opt/uptrakit/master.key"
+
+[db]
+url = "sqlite:///opt/uptrakit/state/controller.db?mode=rwc"
+
+[network]
+addr = "[::]:8443"
+# PKI HTTP listener for certificate issuance. \`http://\` form is required —
+# bare host:port advertises but does not bind. Edit this to use a stable
+# DNS name once DNS is configured for the controller.
+pki_addr = "http://${CTRL_IP}:8080"
+EOF
+chown uptrakit:uptrakit /opt/uptrakit/config/controller.toml
+chmod 640 /opt/uptrakit/config/controller.toml
+msg_ok "Wrote controller config"
+
 msg_info "Creating systemd service"
 cat <<'EOF' >/etc/systemd/system/uptrakit.service
 [Unit]
@@ -93,11 +116,7 @@ After=network.target
 Type=simple
 User=uptrakit
 Group=uptrakit
-ExecStart=/usr/local/bin/uptrakit-controller-standalone \
-  --config-dir /opt/uptrakit/config \
-  --state-dir /opt/uptrakit/state \
-  --master-key-file /opt/uptrakit/master.key \
-  --https-addr [::]:8443
+ExecStart=/usr/local/bin/uptrakit-controller-standalone --config /opt/uptrakit/config/controller.toml
 Restart=on-failure
 RestartSec=5
 
@@ -147,5 +166,6 @@ cleanup_lxc
 
 msg_ok "Completed Successfully!\n"
 echo -e "${GN}${APP} is running at https://${IP}:8443${CL}"
+echo -e "${GN}PKI HTTP endpoint: http://${IP}:8080${CL}"
 echo -e "${YW}Registration token:${CL} ${REGISTRATION_TOKEN}"
 echo -e "${YW}Master key:${CL} /opt/uptrakit/master.key — back this up!"
