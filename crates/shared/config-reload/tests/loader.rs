@@ -271,6 +271,63 @@ fn runtime_config_captures_unknown_keys() {
     assert!(warnings.iter().any(|w| w.contains("poool_size")));
 }
 
+fn minimal_toml_without_nats() -> String {
+    r#"
+master_key = "file:/etc/uptrakit/master.key"
+
+[db]
+url = "sqlite://var/lib/uptrakit/controller.db"
+pool_size = 16
+acquire_timeout_ms = 5000
+
+[network]
+addr = "0.0.0.0:8443"
+pki_addr = "0.0.0.0:8444"
+trusted_proxies = []
+real_ip_header = "x-forwarded-for"
+forwarded_client_cert_info_header = "x-fcc"
+forwarded_client_cert_pem_header  = "x-fcc-pem"
+
+[tls]
+cert_path = "/etc/uptrakit/tls/cert.pem"
+key_path  = "/etc/uptrakit/tls/key.pem"
+sans      = []
+
+[audit]
+filter = "all"
+retention_days = 90
+
+[log]
+path  = "/var/log/uptrakit/controller.log"
+level = "info"
+
+[zeroconf]
+enabled = true
+url      = "https://controller.local:8443"
+pki_addr = "controller.local:8444"
+
+[embedded_services]
+agent = false
+agent_ssh = false
+mqtt = false
+scheduler = true
+"#
+    .to_string()
+}
+
+#[test]
+fn runtime_validate_skips_nats_when_url_empty() {
+    // NatsConfig::validate() errors on empty URL (unchanged behaviour).
+    assert!(NatsConfig::default().validate().is_err());
+    // RuntimeConfig::validate() must NOT propagate that error when nats.url is empty:
+    // the [nats] section is optional; an absent/empty section means NATS disabled.
+    let cfg: RuntimeConfig =
+        toml::from_str(&minimal_toml_without_nats()).expect("parse must succeed without [nats]");
+    assert!(cfg.nats.url.is_empty());
+    cfg.validate()
+        .expect("RuntimeConfig with no [nats] section must validate successfully");
+}
+
 // ── TomlConfigLoader tests ──────────────────────────────────────────────────
 
 use std::io::Write;

@@ -50,6 +50,7 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub tls: TlsConfig,
     /// NATS messaging server settings.
+    #[serde(default)]
     pub nats: NatsConfig,
     /// Audit log settings.
     #[serde(default)]
@@ -76,7 +77,9 @@ impl RuntimeConfig {
         validate_master_key(self.master_key.expose_secret())?;
         self.network.validate()?;
         self.tls.validate()?;
-        self.nats.validate()?;
+        if !self.nats.url.is_empty() {
+            self.nats.validate()?;
+        }
         self.audit.validate()?;
         self.log.validate()?;
         self.zeroconf.validate()?;
