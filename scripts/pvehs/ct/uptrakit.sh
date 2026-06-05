@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 # shellcheck source=/dev/null
 # shellcheck disable=SC2034
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+
+# Upstream build.func hardcodes the application install script URL to
+# `community-scripts/ProxmoxVE/main/install/<app>-install.sh`. Our install
+# script lives in this fork at `scripts/pvehs/install/`, so we patch the
+# URL prefix in build.func before sourcing it. Two occurrences (initial
+# install + APT-repair retry) are replaced.
+UPTRAKIT_UPSTREAM_INSTALL_PATH='community-scripts/ProxmoxVE/main/install/'
+UPTRAKIT_FORK_INSTALL_PATH='worried-networking/uptrakit/main/scripts/pvehs/install/'
+UPTRAKIT_BUILD_FUNC="$(curl -fsSL \
+  https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)"
+UPTRAKIT_BUILD_FUNC="${UPTRAKIT_BUILD_FUNC//${UPTRAKIT_UPSTREAM_INSTALL_PATH}/${UPTRAKIT_FORK_INSTALL_PATH}}"
+source <(printf '%s' "$UPTRAKIT_BUILD_FUNC")
+unset UPTRAKIT_BUILD_FUNC UPTRAKIT_UPSTREAM_INSTALL_PATH UPTRAKIT_FORK_INSTALL_PATH
 
 # Default Settings
 APP="uptrakit"
@@ -36,10 +48,13 @@ function update_script() {
   esac
   tmp_dir=$(mktemp -d) || { msg_error "Failed to create temp dir"; exit 1; }
   trap 'rm -rf "$tmp_dir"' EXIT
+  RELEASE_TAG=$(get_latest_gh_tag "worried-networking/uptrakit" \
+    "uptrakit-controller-standalone-v")
+  [ -z "$RELEASE_TAG" ] && { msg_error "No uptrakit release found"; exit 1; }
   fetch_and_deploy_gh_release \
     "uptrakit-controller-standalone" \
     "worried-networking/uptrakit" \
-    "prebuild" "latest" "$tmp_dir" \
+    "prebuild" "$RELEASE_TAG" "$tmp_dir" \
     "uptrakit-controller-standalone-*-${rust_target}.tar.gz"
   install -m 755 "$tmp_dir/uptrakit-controller-standalone" /usr/local/bin/
   # Note: update_script runs inside the CT — start() detects no pveversion, skips install path.
