@@ -19,17 +19,17 @@ changelog_update = false
 # 160 KB during the run-up to v0.0.4, which caused `release-plz release`
 # to hit HTTP 422 mid-loop and leave the surrounding binaries assetless.
 # Truncating at the body-template level keeps the initial release page
-# creation under the limit. `enhance-release-notes` (see
-# .github/workflows/release-plz.yml) reads the full CHANGELOG.md off
-# disk and rewrites a human-readable summary afterwards, so the
-# truncated body is only ever the first-pass placeholder.
+# creation under the limit. For larger changelogs the release body is
+# the first 100 KB plus a pointer to the in-repo `CHANGELOG.md` — the
+# repo no longer post-processes release notes through an external
+# summariser, so operators are expected to edit the body manually
+# after the release if a fuller narrative is wanted.
 git_release_body = """{% if changelog | length > 100000 -%}
 {{ changelog | truncate(length=100000, end="") }}
 
-> _Changelog truncated to 100 KB to keep the initial release-page body
-> under GitHub's 125 KB API limit. The full version history is in this
-> package's `CHANGELOG.md`; `enhance-release-notes` rewrites this body
-> after the release is created._
+> _Changelog truncated to 100 KB to keep this release page under
+> GitHub's 125 KB body limit. The full version history is in this
+> package's `CHANGELOG.md` in the repo._
 {%- else -%}
 {{ changelog }}
 {%- endif %}"""
