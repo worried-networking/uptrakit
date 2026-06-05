@@ -1040,30 +1040,14 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+    let db = ctx.db.clone();
 
     tokio::spawn(async move {
-        let db = match crate::db::init_db(&state_dir).await {
-            Ok(db) => db,
-            Err(e) => {
-                let resp = make_surface_error_response(
-                    request.request_id,
-                    &format!("failed to initialize database: {e}"),
-                );
-                let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(resp))
-                    .await;
-                return;
-            }
-        };
-
         let tenant_id_str = tenant_id.map(|t| t.to_string());
         let action_invoker = InfraActionInvokerImpl::new(&proxy, &bg_tx, tenant_id);
-        let guest_bootstrap = AgentGuestBootstrapExecutor {
-            state_dir: state_dir.clone(),
-            service_id,
-        };
+        let guest_bootstrap = AgentGuestBootstrapExecutor { db, service_id };
         let plugin_ctx = InfraPluginContext {
-            db: &db,
+            db: &guest_bootstrap.db,
             tenant_id: tenant_id_str.as_deref(),
             service_id,
             state_dir: &state_dir,

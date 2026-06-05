@@ -27,7 +27,6 @@ use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
-use std::path::Path;
 use std::time::Duration;
 
 /// Default SSH connect timeout for PVE host.
@@ -101,7 +100,7 @@ impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
 /// Translates generic `GuestBootstrapParams` from the infra plugin into
 /// `ProxmoxBootstrapParams` and calls `run_proxmox_bootstrap`.
 pub(crate) struct AgentGuestBootstrapExecutor {
-    pub state_dir: std::path::PathBuf,
+    pub db: sea_orm::DatabaseConnection,
     pub service_id: Option<uuid::Uuid>,
 }
 
@@ -126,7 +125,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
             service_id: params.service_id.or(self.service_id),
         };
 
-        run_proxmox_bootstrap(&self.state_dir, proxmox_params)
+        run_proxmox_bootstrap(&self.db, proxmox_params)
             .await
             .map(|r| {
                 uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult::new(
@@ -150,11 +149,11 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
 /// This is a convenience wrapper that calls [`proxmox_bootstrap_connect`]
 /// followed by [`proxmox_bootstrap_execute`] with an empty skip set.
 pub(crate) async fn run_proxmox_bootstrap(
-    state_dir: &Path,
+    db: &sea_orm::DatabaseConnection,
     params: ProxmoxBootstrapParams,
 ) -> Result<ProxmoxBootstrapResult> {
-    let _plan = proxmox_bootstrap_connect(state_dir, &params).await?;
-    proxmox_bootstrap_execute(state_dir, params, &HashSet::new()).await
+    let _plan = proxmox_bootstrap_connect(db, &params).await?;
+    proxmox_bootstrap_execute(db, params, &HashSet::new()).await
 }
 
 // ---------------------------------------------------------------------------
@@ -163,19 +162,10 @@ pub(crate) async fn run_proxmox_bootstrap(
 
 /// Load the PVE host from the local DB and validate name uniqueness.
 async fn load_and_validate_pve_host(
-    state_dir: &Path,
+    db: &sea_orm::DatabaseConnection,
     params: &ProxmoxBootstrapParams,
-) -> Result<(
-    sea_orm::DatabaseConnection,
-    crate::db::entity::ssh_host::Model,
-)> {
-    let db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(sea_orm::DbErr::Custom(format!(
-            "failed to initialize local database: {e}"
-        ))))
-    })?;
-
-    let pve_host = host_ops::find_host(&db, &params.pve_host_id)
+) -> Result<crate::db::entity::ssh_host::Model> {
+    let pve_host = host_ops::find_host(db, &params.pve_host_id)
         .await?
         .ok_or_else(|| {
             report!(Error::HostNotFound(format!(
@@ -185,12 +175,12 @@ async fn load_and_validate_pve_host(
         })?;
 
     // Check name uniqueness.
-    let existing = host_ops::find_host(&db, &params.name).await?;
+    let existing = host_ops::find_host(db, &params.name).await?;
     if existing.is_some() {
         bail!(Error::HostNameConflict(params.name.clone()));
     }
 
-    Ok((db, pve_host))
+    Ok(pve_host)
 }
 
 /// Connect to a PVE node via SSH and create the guest executors.
@@ -289,10 +279,10 @@ async fn connect_and_create_executors(
 /// state (user, docker group, stale keys) and returns a plan describing the
 /// actions that the execute phase will carry out.
 pub(crate) async fn proxmox_bootstrap_connect(
-    state_dir: &Path,
+    db: &sea_orm::DatabaseConnection,
     params: &ProxmoxBootstrapParams,
 ) -> Result<ProxmoxBootstrapPlan> {
-    let (_db, pve_host) = load_and_validate_pve_host(state_dir, params).await?;
+    let pve_host = load_and_validate_pve_host(db, params).await?;
     let pve_host_name = pve_host.name.clone();
 
     let (session, pve_executor, guest_executor, guest_cmd_executor) =
@@ -425,12 +415,12 @@ pub(crate) async fn proxmox_bootstrap_connect(
 /// Reconnects to the PVE node, executes all actions whose IDs are **not** in
 /// `skip_actions`, then verifies connectivity and saves the host to the DB.
 pub(crate) async fn proxmox_bootstrap_execute(
-    state_dir: &Path,
+    db: &sea_orm::DatabaseConnection,
     params: ProxmoxBootstrapParams,
     skip_actions: &HashSet<String>,
 ) -> Result<ProxmoxBootstrapResult> {
     // 1. LOAD PVE HOST
-    let (db, pve_host) = load_and_validate_pve_host(state_dir, &params).await?;
+    let pve_host = load_and_validate_pve_host(db, &params).await?;
 
     // 2. CONNECT TO PVE NODE
     let (session, pve_executor, guest_executor, guest_cmd_executor) =
@@ -760,7 +750,7 @@ pub(crate) async fn proxmox_bootstrap_execute(
             .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
 
     host_ops::add_host(
-        &db,
+        db,
         AddHostParams {
             host_id: params.host_id,
             name: params.name.clone(),
