@@ -23,6 +23,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-agent-ssh-runtime = { workspace = true }
+uptrakit-build-info = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-directories = { workspace = true }

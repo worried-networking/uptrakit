@@ -119,6 +119,7 @@ pub async fn report_enrolled_hosts(
     local_db: &sea_orm::DatabaseConnection,
     conn: &mut dyn ServiceTransport,
     pool: &SshConnectionPool,
+    agent_version: &str,
 ) {
     let hosts = match list_hosts(local_db).await {
         Ok(h) => h,
@@ -151,10 +152,9 @@ pub async fn report_enrolled_hosts(
         }
     }
 
-    let agent_version = env!("CARGO_PKG_VERSION").to_string();
     let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
         hosts: host_infos,
-        agent_version,
+        agent_version: agent_version.to_string(),
         capabilities: ssh_agent_capabilities(),
     });
 
@@ -414,12 +414,12 @@ pub async fn report_hosts_after_config_change(
     current_hosts: &[Model],
     changed_ids: &HashSet<uuid::Uuid>,
     pool: &SshConnectionPool,
+    agent_version: &str,
 ) {
     let host_infos = build_reload_host_infos(db, current_hosts, changed_ids, pool).await;
-    let agent_version = env!("CARGO_PKG_VERSION").to_string();
     let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
         hosts: host_infos,
-        agent_version,
+        agent_version: agent_version.to_string(),
         capabilities: ssh_agent_capabilities(),
     });
 

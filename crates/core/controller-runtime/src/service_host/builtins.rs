@@ -266,10 +266,13 @@ pub(crate) async fn register_agent(
     controller_installation_id: Uuid,
     state_dir: std::path::PathBuf,
     pid_file: Option<std::path::PathBuf>,
+    info: &uptrakit_build_info::BuildInfo,
 ) -> rootcause::Result<()> {
     let agent_caps = crate::agent::agent_capabilities();
     let default_tenant_id = app_state.default_tenant_id;
     let local_machine_id = uptrakit_agent_core::host_info::read_machine_id();
+    let app_name = info.binary.clone();
+    let app_version = info.version.clone();
 
     let add_result = host
         .add(
@@ -282,6 +285,8 @@ pub(crate) async fn register_agent(
             move |service_id, transport, tokens| {
                 let _ = service_id;
                 Box::pin(crate::agent::run_embedded_agent(
+                    app_name,
+                    app_version,
                     transport,
                     tokens.abort,
                     state_dir,
@@ -318,6 +323,7 @@ pub(crate) async fn register_agent_ssh(
     bg: &mut BackgroundTasks,
     controller_installation_id: Uuid,
     state_dir: std::path::PathBuf,
+    info: &uptrakit_build_info::BuildInfo,
 ) -> rootcause::Result<()> {
     // Warn about legacy standalone DB file — no longer used in embedded mode.
     let ssh_db_path = state_dir.join("agent-ssh.db");
@@ -342,7 +348,11 @@ pub(crate) async fn register_agent_ssh(
     let default_tenant_id = app_state.default_tenant_id;
     let db_for_ssh = app_state.db().clone();
 
-    let handler = uptrakit_agent_ssh_runtime::AgentSshHandler::new(db_for_ssh, state_dir);
+    let handler = uptrakit_agent_ssh_runtime::AgentSshHandler::new(
+        db_for_ssh,
+        state_dir,
+        info.version.clone(),
+    );
 
     let add_result = host
         .add(

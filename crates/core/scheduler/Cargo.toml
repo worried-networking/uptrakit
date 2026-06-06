@@ -26,6 +26,7 @@ tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uptrakit-build-info = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-wire = { workspace = true }
 uptrakit-nats = { workspace = true }

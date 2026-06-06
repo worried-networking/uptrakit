@@ -24,7 +24,7 @@ pub struct AgentSshHandler {
 }
 
 impl AgentSshHandler {
-    pub fn new(db: DatabaseConnection, state_dir: PathBuf) -> Self {
+    pub fn new(db: DatabaseConnection, state_dir: PathBuf, agent_version: String) -> Self {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
         #[expect(
             clippy::expect_used,
@@ -44,6 +44,7 @@ impl AgentSshHandler {
             SshConnectionPool::new(),
             surface_proxy,
             infra_bundles,
+            agent_version,
         );
         let runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::with_audit_emitter(
             support,

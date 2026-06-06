@@ -24,6 +24,7 @@ pub struct AgentSshRuntimeSupport {
     pool: ssh_pool::SshConnectionPool,
     surface_proxy: Arc<ServiceSurfaceProxy>,
     infra_bundles: Arc<Vec<InfraBundle>>,
+    agent_version: String,
 }
 
 impl AgentSshRuntimeSupport {
@@ -33,6 +34,7 @@ impl AgentSshRuntimeSupport {
         pool: ssh_pool::SshConnectionPool,
         surface_proxy: Arc<ServiceSurfaceProxy>,
         infra_bundles: Arc<Vec<InfraBundle>>,
+        agent_version: String,
     ) -> Self {
         Self {
             db,
@@ -40,6 +42,7 @@ impl AgentSshRuntimeSupport {
             pool,
             surface_proxy,
             infra_bundles,
+            agent_version,
         }
     }
 
@@ -149,7 +152,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         &self,
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
-        client::report_enrolled_hosts(&self.db, transport, &self.pool).await;
+        client::report_enrolled_hosts(&self.db, transport, &self.pool, &self.agent_version).await;
         Ok(())
     }
 
@@ -209,6 +212,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
             &hosts,
             changed_ids,
             &self.pool,
+            &self.agent_version,
         )
         .await;
         Ok(())
@@ -431,6 +435,7 @@ mod tests {
             crate::ssh_pool::SshConnectionPool::new(),
             Arc::new(crate::ServiceSurfaceProxy::new()),
             Arc::new(Vec::new()),
+            "0.0.0-test".to_string(),
         );
         let session_state = RuntimeSessionState {
             service_id: Some(uuid::Uuid::now_v7()),

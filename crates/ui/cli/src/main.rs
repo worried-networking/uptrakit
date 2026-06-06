@@ -1,7 +1,6 @@
 use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
-use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
 
 // Re-import subcommand enums from lib-crate modules so clap can derive on `Commands`.
@@ -204,11 +203,7 @@ enum Commands {
 
 async fn run(cli: Cli) -> error::Result<()> {
     if cli.version {
-        let build_info = BuildInfo::current(
-            "uptrakit",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-        );
+        let build_info = uptrakit_build_info::build_info!("uptrakit");
         output::print_output(cli.output, &build_info)?;
         return Ok(());
     }

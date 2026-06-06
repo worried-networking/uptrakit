@@ -161,11 +161,11 @@ impl ReexecHook for ControllerReexecHook {
     }
 }
 
-async fn async_main() -> std::process::ExitCode {
+async fn async_main(info: BuildInfo) -> std::process::ExitCode {
     let args = cli::Args::parse();
 
     if args.version {
-        print_build_info();
+        print!("{}", info.render_human());
         return std::process::ExitCode::SUCCESS;
     }
 
@@ -195,7 +195,7 @@ async fn async_main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    if let Err(report) = Box::pin(run_server(args)).await {
+    if let Err(report) = Box::pin(run_server(args, info)).await {
         eprintln!("Error:\n{report}");
         std::process::ExitCode::FAILURE
     } else {
@@ -203,7 +203,9 @@ async fn async_main() -> std::process::ExitCode {
     }
 }
 
-async fn run_server(args: cli::Args) -> Result<()> {
+async fn run_server(args: cli::Args, info: BuildInfo) -> Result<()> {
+    tracing::info!(binary = %info.binary, version = %info.version, "starting controller");
+
     // Phase 0: Load TOML config — must happen before all other phases so that
     // all configuration comes from the file rather than CLI flags.
     let config_path = args.find_config_path().map_err(|e| {
@@ -1202,6 +1204,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         controller_installation_id,
         app_dirs.state_dir().to_path_buf(),
         None,
+        &info,
     )
     .await
     .map_err(|e| {
@@ -1217,6 +1220,7 @@ async fn run_server(args: cli::Args) -> Result<()> {
         &mut bg,
         controller_installation_id,
         app_dirs.state_dir().to_path_buf(),
+        &info,
     )
     .await
     .map_err(|e| {
@@ -1678,24 +1682,14 @@ fn spawn_pki_http(
     bg.track_abort("pki-http", pki_http_handle);
 }
 
-#[doc(hidden)]
-fn print_build_info() {
-    let build_info = BuildInfo::current(
-        env!("UPTRAKIT_RELEASE_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-    );
-    print!("{}", build_info.render_human());
-}
-
 #[expect(
     clippy::expect_used,
     reason = "infallible at startup: tokio runtime construction failures are unrecoverable and must abort process initialization"
 )]
-pub fn run() -> std::process::ExitCode {
+pub fn run(info: BuildInfo) -> std::process::ExitCode {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to build tokio runtime")
-        .block_on(async_main())
+        .block_on(async_main(info))
 }
