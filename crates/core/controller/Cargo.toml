@@ -23,6 +23,7 @@ notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
 notifications-email = ["uptrakit-controller-runtime/notifications-email"]
 
 [dependencies]
+uptrakit-build-info = { workspace = true }
 uptrakit-controller-runtime = { workspace = true, features = [
   "embedded-frontend",
   "db-sqlite",
@@ -35,6 +36,9 @@ uptrakit-controller-runtime = { workspace = true, features = [
   "mcp",
   "plugin-ops",
 ] }
+
+[build-dependencies]
+uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true

@@ -347,8 +347,6 @@ jobs:
       # --- controller (lean: no embedded services, with frontend) ---
       - name: Build controller
         if: ${{ needs.release-plz.outputs.released == 'true' }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \
@@ -360,8 +358,6 @@ jobs:
       # --- controller-standalone (all-in-one: embedded scheduler + mqtt + frontend) ---
       - name: Build controller-standalone
         if: ${{ needs.release-plz.outputs.released == 'true' }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \
@@ -635,8 +631,6 @@ jobs:
       # --- per-binary build steps, each gated on its package being in the plan ---
       - name: Build controller
         if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller') }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \
@@ -647,8 +641,6 @@ jobs:
 
       - name: Build controller-standalone
         if: ${{ contains(fromJSON(steps.build_set.outputs.packages), 'uptrakit-controller-standalone') }}
-        env:
-          UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \

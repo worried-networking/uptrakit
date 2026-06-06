@@ -10,11 +10,8 @@ use handler::SchedulerHandler;
 async fn main() {
     let args = Args::parse();
     if args.common.version {
-        uptrakit_service_sdk::print_build_info(
-            "uptrakit-scheduler",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-        );
+        let info = uptrakit_build_info::build_info!();
+        print!("{}", info.render_human());
         return;
     }
 

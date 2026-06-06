@@ -25,21 +25,23 @@ pub(crate) fn agent_capabilities() -> BTreeSet<Capability> {
 
 /// Run the embedded agent event loop.
 pub(crate) async fn run_embedded_agent(
+    app_name: String,
+    app_version: String,
     mut transport: EmbeddedTransport,
     cancel: CancellationToken,
     state_dir: PathBuf,
     pid_file: Option<PathBuf>,
 ) {
     let metadata_provider = Arc::new(ControllerMetadataProvider::new(
-        "uptrakit-controller-standalone".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
+        app_name,
+        app_version.clone(),
         pid_file,
     ));
     let mut runtime = AgentRuntime::new(
         AgentRuntimeConfig::with_audit_emitter(
             make_local_executor(),
             state_dir.join("embedded-agent").join("update-freeze"),
-            env!("CARGO_PKG_VERSION").to_string(),
+            app_version,
             RuntimeAuditEmitter::new(),
         )
         .with_metadata_provider(metadata_provider),

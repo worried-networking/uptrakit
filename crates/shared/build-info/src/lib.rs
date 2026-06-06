@@ -91,6 +91,31 @@ pub fn parse_enabled_features(raw_features: Option<&str>) -> Vec<String> {
     normalize_feature_list(raw_features.unwrap_or_default().split(','))
 }
 
+/// Construct a [`BuildInfo`] populated from the **calling** crate's
+/// compile-time environment. `env!()` and `option_env!()` expand at the
+/// macro invocation site, so `binary`, `version`, and `features` always
+/// reflect the binary crate that called the macro — never `build-info`'s
+/// own.
+///
+/// Two forms:
+/// - `build_info!()` — uses `env!("CARGO_PKG_NAME")` as the binary name.
+/// - `build_info!($binary)` — overrides with an explicit binary name (used
+///   by `crates/ui/cli` where `[[bin]] name = "uptrakit"` differs from the
+///   package name `uptrakit-cli`).
+#[macro_export]
+macro_rules! build_info {
+    () => {
+        $crate::build_info!(env!("CARGO_PKG_NAME"))
+    };
+    ($binary:expr) => {
+        $crate::BuildInfo::current(
+            $binary,
+            env!("CARGO_PKG_VERSION"),
+            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+        )
+    };
+}
+
 pub fn emit_enabled_features_env() {
     let raw_features = std::env::var("CARGO_CFG_FEATURE").ok();
     let normalized = parse_enabled_features(raw_features.as_deref());

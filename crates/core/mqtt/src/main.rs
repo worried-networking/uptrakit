@@ -9,11 +9,8 @@ async fn main() {
     let _ = args.max_tenants;
 
     if args.common.version {
-        uptrakit_service_sdk::print_build_info(
-            MQTT_SERVICE_APP_NAME,
-            env!("CARGO_PKG_VERSION"),
-            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-        );
+        let info = uptrakit_build_info::build_info!();
+        print!("{}", info.render_human());
         return;
     }
 

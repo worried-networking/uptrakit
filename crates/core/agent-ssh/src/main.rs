@@ -29,12 +29,9 @@ type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    let info = uptrakit_build_info::build_info!();
     if args.common.version {
-        uptrakit_service_sdk::print_build_info(
-            "uptrakit-agent-ssh",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-        );
+        print!("{}", info.render_human());
         return;
     }
 
@@ -117,7 +114,7 @@ async fn main() {
         rotate_ssh_master_key(&local_db, new_key_path).await;
     }
 
-    let mut handler = AgentSshHandler::new(local_db, state_dir);
+    let mut handler = AgentSshHandler::new(local_db, state_dir, info.version.clone());
 
     run_lifecycle_and_handle_errors("uptrakit-agent-ssh", &args.common, &mut handler).await;
 }

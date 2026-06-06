@@ -91,12 +91,9 @@ impl ServiceHandler for AgentHandler {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    let info = uptrakit_build_info::build_info!();
     if args.common.version {
-        uptrakit_service_sdk::print_build_info(
-            "uptrakit-agent",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-        );
+        print!("{}", info.render_human());
         return;
     }
 
@@ -115,7 +112,7 @@ async fn main() {
         runtime: AgentRuntime::new(AgentRuntimeConfig::with_audit_emitter(
             make_local_executor(),
             freeze_file_path,
-            env!("CARGO_PKG_VERSION").to_string(),
+            info.version.clone(),
             RuntimeAuditEmitter::new(),
         )),
     };

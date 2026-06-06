@@ -60,6 +60,7 @@ aws-lc-rs = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
 tempfile = { workspace = true }
+uptrakit-build-info = { workspace = true }
 uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 

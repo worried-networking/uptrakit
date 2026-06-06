@@ -7356,6 +7356,7 @@ dependencies = [
 name = "uptrakit-controller"
 version = "0.0.5"
 dependencies = [
+ "uptrakit-build-info",
  "uptrakit-controller-runtime",
 ]
 
@@ -7464,6 +7465,7 @@ dependencies = [
 name = "uptrakit-controller-standalone"
 version = "0.0.5"
 dependencies = [
+ "uptrakit-build-info",
  "uptrakit-controller-runtime",
 ]
 
@@ -8445,6 +8447,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-build-info",
  "uptrakit-shared-types",
  "uptrakit-wire",
  "url",
