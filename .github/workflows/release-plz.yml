@@ -192,17 +192,40 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           set +e
-          release-plz release-pr \
-            --git-token "$GITHUB_TOKEN" \
-            --repo-url "https://github.com/$GITHUB_REPOSITORY" \
-            --forge github \
-            -o json > /tmp/rp.stdout 2> /tmp/rp.stderr
-          code=$?
-          echo "===== release-plz stderr ====="
-          cat /tmp/rp.stderr >&2 || true
-          echo "===== release-plz stdout ====="
-          cat /tmp/rp.stdout || true
-          echo "===== exit code: $code ====="
+          # release-plz iterates `cargo package --workspace` once per analyzed
+          # crate (~47 packages × ~25s each). A single transient crates.io
+          # registry-index fetch failure aborts the whole 20-minute run.
+          # Observed in run 27157776822: curl error 35 (SSL connect error)
+          # while updating the crates.io index. Retry the full invocation on
+          # known transient cargo/network error patterns before giving up.
+          transient_pattern='SSL connect error|Connection reset by peer|Recv failure|spurious network error|early eof|Operation timed out|Could not resolve host|failed to send request|download of config.json failed|curl error \([0-9]+\)|failed to download from'
+          attempts=3
+          code=1
+          for attempt in $(seq 1 $attempts); do
+            echo "::group::release-plz attempt $attempt/$attempts"
+            release-plz release-pr \
+              --git-token "$GITHUB_TOKEN" \
+              --repo-url "https://github.com/$GITHUB_REPOSITORY" \
+              --forge github \
+              -o json > /tmp/rp.stdout 2> /tmp/rp.stderr
+            code=$?
+            echo "===== release-plz stderr (attempt $attempt) ====="
+            cat /tmp/rp.stderr >&2 || true
+            echo "===== release-plz stdout (attempt $attempt) ====="
+            cat /tmp/rp.stdout || true
+            echo "===== exit code: $code ====="
+            echo "::endgroup::"
+            if [ "$code" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt "$attempts" ] && grep -qE "$transient_pattern" /tmp/rp.stdout /tmp/rp.stderr; then
+              backoff=$((30 * attempt))
+              echo "::notice::Transient cargo network error on attempt $attempt; retrying after ${backoff}s"
+              sleep "$backoff"
+              continue
+            fi
+            break
+          done
           if [ "$code" -ne 0 ]; then
             exit "$code"
           fi
