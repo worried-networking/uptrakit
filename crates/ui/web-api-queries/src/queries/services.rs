@@ -7,7 +7,9 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
-use uptrakit_shared_db::entity::{host, service, service_certificate, service_host};
+use uptrakit_shared_db::entity::{
+    host, service, service_certificate, service_host, service_merge_redirect,
+};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
@@ -690,6 +692,10 @@ pub async fn merge_service(
         .context_to()?
         .ok_or_else(|| report!(ServiceQueryError::NotFound))?;
 
+    if target.is_embedded {
+        bail!(ServiceQueryError::TargetEmbedded);
+    }
+
     let target_caps = parse_capabilities(&target.capabilities);
     if !target_caps.contains(&Capability::SoftwareDiscovery) {
         bail!(ServiceQueryError::NotMergeable);
@@ -707,6 +713,10 @@ pub async fn merge_service(
         .await
         .context_to()?
         .ok_or_else(|| report!(ServiceQueryError::SourceNotFound))?;
+
+    if source.is_embedded {
+        bail!(ServiceQueryError::SourceEmbedded);
+    }
 
     let source_caps = parse_capabilities(&source.capabilities);
     if !source_caps.contains(&Capability::SoftwareDiscovery) {
@@ -803,6 +813,40 @@ pub async fn merge_service(
             bail!(ServiceQueryError::Db(e));
         }
     }
+
+    // Chain-invariant: existing redirects must never point at our source_id.
+    // Chains cannot pre-exist (source must be Pending; deactivated rows cannot
+    // become future sources or targets), so a non-zero count here means the
+    // table has been corrupted out-of-band.
+    let dangling = service_merge_redirect::Entity::find()
+        .filter(service_merge_redirect::Column::TargetId.eq(source_uuid))
+        .count(&txn)
+        .await
+        .context_to()?;
+    if dangling != 0 {
+        bail!(ServiceQueryError::RedirectChainInvariantViolated);
+    }
+
+    // Upsert the redirect row: source_id is unique; on conflict we refresh
+    // the target_id + redirected_at columns (covers the extremely rare case
+    // of re-merging a previously-deactivated source).
+    let redirect_model = service_merge_redirect::ActiveModel {
+        source_id: Set(source_uuid),
+        target_id: Set(target_uuid),
+        redirected_at: Set(now),
+    };
+    service_merge_redirect::Entity::insert(redirect_model)
+        .on_conflict(
+            OnConflict::column(service_merge_redirect::Column::SourceId)
+                .update_columns([
+                    service_merge_redirect::Column::TargetId,
+                    service_merge_redirect::Column::RedirectedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&txn)
+        .await
+        .context_to()?;
 
     txn.commit().await.context_to()?;
 
@@ -934,6 +978,40 @@ mod tests {
         .unwrap();
     }
 
+    async fn insert_service_embedded(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+        status: service::ServiceStatus,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        let caps = serialize_capabilities(&[Capability::SoftwareDiscovery].into_iter().collect());
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(caps),
+            hostname: Set(format!("svc-{service_id}")),
+            friendly_name: Set(format!("Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(true),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
     async fn insert_host(
         db: &DatabaseConnection,
         tenant_id: Uuid,
@@ -1009,6 +1087,148 @@ mod tests {
 
         assert_eq!(target_links.len(), 1);
         assert_eq!(target_links[0].host_id, active_host_id);
+    }
+
+    #[tokio::test]
+    async fn merge_service_rejects_embedded_target() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        insert_service(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_service_embedded(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+
+        let err = merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err.current_context(),
+            ServiceQueryError::TargetEmbedded
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_service_rejects_embedded_source() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        insert_service_embedded(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_service(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+
+        let err = merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err.current_context(),
+            ServiceQueryError::SourceEmbedded
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_service_inserts_redirect_row() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        insert_service(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_service(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+
+        merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .expect("merge succeeds");
+
+        let redirect = service_merge_redirect::Entity::find_by_id(source_id)
+            .one(tenant_db.db())
+            .await
+            .expect("query ok");
+
+        let redirect = redirect.expect("redirect row exists");
+        assert_eq!(redirect.target_id, target_id);
+    }
+
+    #[tokio::test]
+    async fn merge_service_redirect_cascades_on_target_delete() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        insert_service(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_service(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+
+        merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .expect("merge succeeds");
+
+        // Hard-delete the target row (bypasses the deactivate path on purpose).
+        service::Entity::delete_by_id(target_id)
+            .exec(tenant_db.db())
+            .await
+            .expect("delete ok");
+
+        let redirect = service_merge_redirect::Entity::find_by_id(source_id)
+            .one(tenant_db.db())
+            .await
+            .expect("query ok");
+
+        assert!(
+            redirect.is_none(),
+            "FK ON DELETE CASCADE must remove redirect row"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_service_rejects_when_redirect_chain_invariant_violated() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        let phantom_source = Uuid::now_v7();
+        insert_service(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_service(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+
+        // Plant a corrupted redirect row pointing AT our source_id; merge_service
+        // must refuse rather than silently overwrite state.
+        service_merge_redirect::ActiveModel {
+            source_id: Set(phantom_source),
+            target_id: Set(source_id),
+            redirected_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(tenant_db.db())
+        .await
+        .expect("seed redirect ok");
+
+        let err = merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err.current_context(),
+            ServiceQueryError::RedirectChainInvariantViolated
+        ));
     }
 }
 
