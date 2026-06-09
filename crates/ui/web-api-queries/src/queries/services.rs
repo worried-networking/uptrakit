@@ -43,6 +43,18 @@ pub enum ServiceQueryError {
     /// Embedded services cannot be deactivated through the API.
     #[error("embedded services cannot be deactivated")]
     EmbeddedService,
+    /// Embedded services cannot be merged (target side).
+    #[error("target service is embedded and cannot be merged")]
+    TargetEmbedded,
+    /// Embedded services cannot be merged (source side).
+    #[error("source service is embedded and cannot be merged")]
+    SourceEmbedded,
+    /// Pre-condition for merge violated: existing redirect row points at the
+    /// service being merged in as `source`. This must not occur by construction
+    /// (deactivated services cannot become merge sources). Surfaces only on
+    /// data corruption.
+    #[error("redirect chain invariant violated")]
+    RedirectChainInvariantViolated,
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -82,6 +94,18 @@ impl ServiceQueryError {
             Self::EmbeddedService => (
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,
                 "service.embedded_service",
+            ),
+            Self::TargetEmbedded => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.embedded_target",
+            ),
+            Self::SourceEmbedded => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.embedded_source",
+            ),
+            Self::RedirectChainInvariantViolated => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "service.merge_invariant",
             ),
             Self::Db(_) => (
                 uptrakit_audit_log::AuditOutcome::Failed,

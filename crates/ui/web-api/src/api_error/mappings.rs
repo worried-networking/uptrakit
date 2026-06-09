@@ -115,6 +115,24 @@ impl From<Report<ServiceQueryError>> for ApiError {
                 "service.embedded_service",
                 None,
             ),
+            TargetEmbedded => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Cannot merge into an embedded service.",
+                "service.embedded_target",
+                None,
+            ),
+            SourceEmbedded => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Cannot merge from an embedded service.",
+                "service.embedded_source",
+                None,
+            ),
+            RedirectChainInvariantViolated => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Service merge state is inconsistent — contact an administrator.",
+                "service.merge_invariant",
+                Some(format_report_summary(&report)),
+            ),
             Db(_) => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred.",
