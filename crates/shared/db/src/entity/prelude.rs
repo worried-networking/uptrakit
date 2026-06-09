@@ -80,6 +80,9 @@ pub use super::service_certificate::{
     Entity as ServiceCertificate, Model as ServiceCertificateModel, RevocationReason,
 };
 pub use super::service_host::{Entity as ServiceHost, Model as ServiceHostModel};
+pub use super::service_merge_redirect::{
+    Entity as ServiceMergeRedirect, Model as ServiceMergeRedirectModel,
+};
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
 pub use super::settings_version::{Entity as SettingsVersion, Model as SettingsVersionModel};
