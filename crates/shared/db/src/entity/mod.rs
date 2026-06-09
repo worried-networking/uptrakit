@@ -43,6 +43,7 @@ pub mod scheduled_task;
 pub mod service;
 pub mod service_certificate;
 pub mod service_host;
+pub mod service_merge_redirect;
 pub mod session;
 pub mod setting;
 pub mod settings_version;
