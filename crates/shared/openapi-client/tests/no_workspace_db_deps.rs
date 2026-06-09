@@ -5,6 +5,7 @@
 //! and docs/superpowers/specs/2026-06-09-publishable-crate-squat-chain-break-design.md.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
 use cargo_metadata::{CargoOpt, Metadata, MetadataCommand, PackageId};
 
@@ -16,6 +17,33 @@ const BANNED: &[&str] = &[
     "uptrakit-crypto",
 ];
 
+/// Typed error surfaced by `find_banned_dep` when a banned crate is reachable
+/// from the host package's resolve closure, or when the metadata is malformed.
+/// Carries the chain string and is rendered by the test body's `panic!`.
+enum FindBannedError {
+    NoResolveGraph,
+    HostNotInPackages,
+    BannedReachable { name: String, chain: String },
+}
+
+impl fmt::Display for FindBannedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoResolveGraph => f.write_str("cargo metadata returned no resolve graph"),
+            Self::HostNotInPackages => write!(
+                f,
+                "host crate `{}` not found in metadata.packages",
+                env!("CARGO_PKG_NAME"),
+            ),
+            Self::BannedReachable { name, chain } => write!(
+                f,
+                "banned crate `{name}` reachable from `{host}`:\n  chain: {chain}",
+                host = env!("CARGO_PKG_NAME"),
+            ),
+        }
+    }
+}
+
 fn load_metadata(all_features: bool) -> Result<Metadata, cargo_metadata::Error> {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let mut cmd = MetadataCommand::new();
@@ -26,9 +54,10 @@ fn load_metadata(all_features: bool) -> Result<Metadata, cargo_metadata::Error> 
     cmd.exec()
 }
 
-/// Returns `Ok(())` when no banned crate is reachable, or `Err` with the
-/// chain description when one is found.
-fn find_banned_dep(metadata: &Metadata) -> Result<(), String> {
+/// Returns `Ok(())` when no banned crate is reachable from the host package's
+/// resolve closure. Returns `Err(FindBannedError)` when a banned crate is hit
+/// or the metadata cannot be walked.
+fn find_banned_dep(metadata: &Metadata) -> Result<(), FindBannedError> {
     let host_pkg_name = env!("CARGO_PKG_NAME");
 
     let id_to_name: HashMap<&PackageId, &str> = metadata
@@ -37,10 +66,10 @@ fn find_banned_dep(metadata: &Metadata) -> Result<(), String> {
         .map(|p| (&p.id, p.name.as_ref()))
         .collect();
 
-    let resolve = match metadata.resolve.as_ref() {
-        Some(r) => r,
-        None => return Err("cargo metadata returned no resolve graph".to_string()),
-    };
+    let resolve = metadata
+        .resolve
+        .as_ref()
+        .ok_or(FindBannedError::NoResolveGraph)?;
 
     let root: &PackageId = match resolve.root.as_ref() {
         Some(root) => root,
@@ -50,11 +79,7 @@ fn find_banned_dep(metadata: &Metadata) -> Result<(), String> {
             .find(|p| p.name.as_ref() == host_pkg_name)
         {
             Some(p) => &p.id,
-            None => {
-                return Err(format!(
-                    "host crate `{host_pkg_name}` not found in metadata.packages"
-                ));
-            }
+            None => return Err(FindBannedError::HostNotInPackages),
         },
     };
 
@@ -93,10 +118,10 @@ fn find_banned_dep(metadata: &Metadata) -> Result<(), String> {
                 .iter()
                 .map(|c| id_to_name.get(c).copied().unwrap_or("<unknown>"))
                 .collect();
-            return Err(format!(
-                "banned crate `{name}` reachable from `{host_pkg_name}`:\n  chain: {}",
-                chain_names.join(" -> ")
-            ));
+            return Err(FindBannedError::BannedReachable {
+                name: name.to_string(),
+                chain: chain_names.join(" -> "),
+            });
         }
     }
 
@@ -106,12 +131,12 @@ fn find_banned_dep(metadata: &Metadata) -> Result<(), String> {
 #[test]
 fn no_workspace_db_deps() {
     let meta_default = load_metadata(false).expect("cargo metadata invocation failed");
-    if let Err(msg) = find_banned_dep(&meta_default) {
-        panic!("[default-features] {msg}");
+    if let Err(err) = find_banned_dep(&meta_default) {
+        panic!("[default-features] {err}");
     }
 
     let meta_all = load_metadata(true).expect("cargo metadata invocation failed");
-    if let Err(msg) = find_banned_dep(&meta_all) {
-        panic!("[all-features] {msg}");
+    if let Err(err) = find_banned_dep(&meta_all) {
+        panic!("[all-features] {err}");
     }
 }
