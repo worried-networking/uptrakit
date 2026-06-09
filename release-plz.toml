@@ -59,10 +59,12 @@ release = false
 # (retry math, exec wrappers, encryption helpers, build-time metadata,
 # tracing init, etc.) and don't merit user-visible changelog entries.
 # Skipping analysis avoids per-crate version bumps on every commit.
-[[package]]
-name = "uptrakit-shared-macros"
-release = false
-
+#
+# uptrakit-shared-macros and uptrakit-build-info were moved out of this
+# group into the "Public-API library crates (ship to crates.io)" section
+# below — they're transitive deps of uptrakit-service-sdk /
+# uptrakit-openapi-client and so must be release-plz–managed + published.
+#
 # Proc-macro for audit-log. Declared as a direct path dep (not workspace) in
 # audit-log/Cargo.toml. With release = false, release-plz leaves the dep
 # declaration untouched; audit-log/Cargo.toml carries version = "0.0.1"
@@ -101,10 +103,6 @@ release = false
 
 [[package]]
 name = "uptrakit-audit-log"
-release = false
-
-[[package]]
-name = "uptrakit-build-info"
 release = false
 
 [[package]]
@@ -147,31 +145,52 @@ release = false
 name = "uptrakit-tracing-init"
 release = false
 
-# ===== Public-API library crates (analyzed for commits, no own changelog,
-# no tag/release; commits flow into binary changelogs via include) =====
+# ===== Public-API library crates (ship to crates.io) =====
+# Transitive deps of uptrakit-service-sdk and uptrakit-openapi-client
+# (post wire dev-dep cut; see
+# docs/superpowers/specs/2026-06-09-publishable-crate-squat-chain-break-design.md).
+# `publish = true` overrides workspace `publish = false` so release-plz runs
+# `cargo publish` per cycle; the crates.io tarball-equality check then acts as
+# the `published_at_sha1` anchor for the commit walk that builds binary
+# CHANGELOGs (PRs #131/#132 root-caused the unbounded walk to a missing anchor
+# — git-tag and crates.io-tarball both qualify; this one was just unavailable
+# before we started publishing).
+# Each lib stays `git_release_enable = false`: no separate GitHub release page,
+# only the auto-tag from the workspace default. No own CHANGELOG.md either —
+# commits flow into binary changelogs via changelog_include.
+# Adding a new uptrakit-* dep to service-sdk or openapi-client requires
+# adding it to this section. Phase 4 Rust test enforces this. Adding a banned
+# dep (audit-log et al.) is prevented by the squat-chain spec's tests in
+# crates/shared/{service-sdk,openapi-client}/tests/no_workspace_db_deps.rs.
 [[package]]
 name = "uptrakit-shared-types"
-git_only = true
 git_release_enable = false
-publish = false
+publish = true
 
 [[package]]
 name = "uptrakit-surfaces"
-git_only = true
 git_release_enable = false
-publish = false
+publish = true
 
 [[package]]
 name = "uptrakit-wire"
-git_only = true
 git_release_enable = false
-publish = false
+publish = true
 
 [[package]]
 name = "uptrakit-web-api-types"
-git_only = true
 git_release_enable = false
-publish = false
+publish = true
+
+[[package]]
+name = "uptrakit-shared-macros"
+git_release_enable = false
+publish = true
+
+[[package]]
+name = "uptrakit-build-info"
+git_release_enable = false
+publish = true
 
 [[package]]
 name = "uptrakit-agent-core"
@@ -606,12 +625,22 @@ git_release_name = "uptrakit v{{ version }} (CLI)"
 changelog_update = true
 
 # ===== Standalone consumable libraries: keep own tag/release/changelog =====
-# These two crates are the public-facing API surface for external code.
-# Public-API library commits (wire, shared-types, web-api-types, surfaces)
-# roll up into them so downstream consumers see protocol/type changes
-# without having to track multiple crates.
+# These two crates are the public-facing API surface for external code and
+# are the only members shipped to crates.io. Public-API library commits
+# (wire, shared-types, web-api-types, surfaces) roll up into them so
+# downstream consumers see protocol/type changes without having to track
+# multiple crates.
+#
+# `publish = true` overrides the workspace `publish = false` so release-plz
+# actually runs `cargo publish` for these two. Without it, release-plz
+# treats their git tag as the "already published" marker, skips the
+# crates.io upload, and then — on the next cycle — sees local Cargo.toml
+# ahead of the (stale) crates.io version and refuses to bump further
+# ("local version > registry version. Only changelog will be updated"),
+# wedging both crates forever. Keep this here.
 [[package]]
 name = "uptrakit-openapi-client"
+publish = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-openapi-client-v{{ version }}"
@@ -625,6 +654,7 @@ changelog_include = [
 
 [[package]]
 name = "uptrakit-service-sdk"
+publish = true
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-service-sdk-v{{ version }}"
