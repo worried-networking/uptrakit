@@ -2143,3 +2143,63 @@ run_embedded_service(handler, transport, tokens.drain, tokens.abort).await;
 ```
 
 The standalone binary does the same with `AgentSshMode::Binary` and `None` for the keypair.
+
+## Publishable Crate Dependency Hygiene
+
+Two crates in this workspace are published to crates.io:
+
+- `uptrakit-service-sdk`
+- `uptrakit-openapi-client`
+
+Their transitive dep trees (including `[dev-dependencies]` of any crate they
+reach) must NOT contain any of:
+
+- `uptrakit-audit-log`
+- `uptrakit-audit-log-derive`
+- `uptrakit-shared-db`
+- `uptrakit-tenant-db`
+- `uptrakit-crypto`
+
+These five crates are workspace-internal database and encryption plumbing. They
+have no external consumers and must not be republished to crates.io.
+
+### Why this matters
+
+`cargo publish` (and crates.io's manifest validator) check every named dep entry
+in the published manifest — including `[dev-dependencies]` that carry a `version`
+field, and optional deps — against the registry. A dev-dep on `uptrakit-audit-log`
+from any crate that the publishable crates transitively reach is enough to force
+`audit-log` onto crates.io, and `audit-log` in turn forces `shared-db`, which
+forces `crypto` and `tenant-db`. The chain is load-bearing on every edge: cutting
+any link breaks all of it.
+
+### Enforcement
+
+Two integration tests guard this rule:
+
+- `crates/shared/service-sdk/tests/no_workspace_db_deps.rs`
+- `crates/shared/openapi-client/tests/no_workspace_db_deps.rs`
+
+Each test walks the resolved cargo metadata graph (default features and
+`--all-features`) and panics if any banned name appears, naming the dep chain
+back to the publishable crate.
+
+### Why these five and not other internal crates?
+
+Most workspace-internal crates (`uptrakit-build-info`, every plugin, every
+runtime, etc.) inherit `publish = true` from Cargo's defaults but are kept off
+crates.io by `release-plz.toml` declaring `release = false`. That is sufficient
+because release-plz is the only mechanism that publishes from this workspace.
+These five crates additionally carry the belt-and-suspenders `publish = false`
+in their own `Cargo.toml` because they are the unique failure case where the
+squat chain demonstrably reformed once before; locking them in their manifests
+defends against a contributor running `cargo publish -p uptrakit-shared-db`
+directly (bypassing release-plz) and resurrecting the chain.
+
+If you find yourself wanting to add one of these crates to anything in the
+service-sdk or openapi-client subtree (including dev-deps), stop and think about
+what you're actually testing. The wire-side fix for the historical version of
+this rule replaced two `AuditActionType::*` constants with a synthetic
+`TEST_ACTION_TYPE` constant in `crates/shared/wire/src/tests.rs` — the test was
+asserting serde round-trip shape, not catalog correctness, so the constant
+binding added no coverage.
