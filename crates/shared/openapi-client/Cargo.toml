@@ -40,6 +40,7 @@ time = { workspace = true, features = ["serde"] }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+cargo_metadata = { workspace = true }
 http = { workspace = true }
 httpmock = { workspace = true }
 serde_urlencoded = { workspace = true }

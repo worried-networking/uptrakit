@@ -65,6 +65,7 @@ uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
+cargo_metadata = { workspace = true }
 nix = { workspace = true, features = ["signal", "process"] }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
