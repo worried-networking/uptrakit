@@ -7,8 +7,6 @@ use std::collections::{BTreeSet, HashSet};
 use time::UtcDateTime;
 use uuid::Uuid;
 
-use uptrakit_audit_log::AuditActionType;
-
 use crate::limits::{MAX_SHORT_STRING_LEN, WireValidate};
 
 use super::*;
@@ -22,6 +20,13 @@ const TEST_UUID_2: Uuid = Uuid::from_bytes([
 const TEST_UUID_3: Uuid = Uuid::from_bytes([
     0x66, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x01,
 ]);
+/// Synthetic action_type for `AuditEventPayload` serde tests. Not a real audit-log
+/// catalog entry — the tests here verify wire serde round-trip shape, not catalog
+/// correctness. Using a synthetic value avoids a workspace dep on `uptrakit-audit-log`
+/// (which would re-form the crates.io squat chain documented in
+/// docs/development/coding-standards.md "Publishable Crate Dependency Hygiene")
+/// and avoids silent drift if the real catalog's constant names ever change.
+const TEST_ACTION_TYPE: &str = "test.wire.synthetic_action";
 // =========================================================================
 // ServiceMessage tests
 // =========================================================================
@@ -226,7 +231,7 @@ fn renew_certificate_serialization_roundtrip() {
 #[test]
 fn audit_event_serialization_roundtrip() {
     let msg = ServiceMessage::AuditEvent(AuditEventPayload {
-        action_type: AuditActionType::SOFTWARE_UPDATE_STARTED.to_string(),
+        action_type: TEST_ACTION_TYPE.to_string(),
         tenant_id: Some(TEST_UUID_1.to_string()),
         target_type: Some("update_history".to_string()),
         target_id: Some(TEST_UUID_2.to_string()),
@@ -252,7 +257,7 @@ fn audit_event_serialization_roundtrip() {
 fn audit_event_payload_round_trips_correlation_id() {
     let id = uuid::Uuid::new_v4();
     let payload = AuditEventPayload {
-        action_type: AuditActionType::SOFTWARE_UPDATE_FINALIZED.to_string(),
+        action_type: TEST_ACTION_TYPE.to_string(),
         tenant_id: None,
         target_type: None,
         target_id: None,
