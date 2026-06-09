@@ -121,44 +121,77 @@ the frontend from a separate directory via `--static-dir`.
 Binary CHANGELOGs roll up commits from their dependency crates via
 `changelog_include = [...]` in `release-plz.toml`. For each included
 crate, release-plz walks commits backwards and stops at one of two
-anchors: a crates.io tarball equality check (for published crates) or
-the commit pointed to by the crate's last git tag (for `git_only`
-crates). Internal `publish = false` library/plugin crates have neither
-anchor by default, so release-plz walks the entire repo history and
-re-dumps it into every binary CHANGELOG cycle after cycle.
+anchors:
+
+1. **crates.io tarball equality** — for crates with `publish = true`,
+   release-plz fetches the most recent tarball from crates.io and walks
+   back until the in-repo tree matches it.
+2. **last matching git tag** — for crates with `git_only = true`, the
+   `published_at_sha1` is the commit the matching `<name>-v<version>`
+   tag points at.
+
+Plain `publish = false` library/plugin crates have neither anchor, so
+release-plz walks the entire repo history and re-dumps it into every
+binary CHANGELOG cycle after cycle.
 
 **Therefore: every crate listed in any `changelog_include` array must
-also have `git_only = true`** (with `git_release_enable = false` and
-`publish = false`). That makes the crate's git tag act as the
-`published_at_sha1` anchor so `is_commit_too_old()` fires at the right
-boundary. The workspace defaults `git_tag_enable = true` so the tag
-gets created automatically on every analyzed bump.
+have exactly one of those two anchors** — either `publish = true` or
+`git_only = true`. **Mixing both on one crate is forbidden**:
+`git_only` silently wins and disables `cargo publish`, which is the
+exact wedge that stalled releases from `v0.0.2` through `v0.0.5` (see
+PR #136 and the surrounding release-plz cycle). The
+[`release_plz_config_is_self_consistent`](../../crates/core/functional-tests/tests/release_config_invariants.rs)
+test enforces this.
 
-Practical implications:
+### When adding a new `changelog_include` member
 
-- A new library / plugin / runtime crate added to a `changelog_include`
-  list must declare `git_only = true` in its `[[package]]` block. The
-  binary's CHANGELOG will otherwise re-include the crate's full
-  history every release.
-- `git_only = true` alone is enough; `git_release_enable = false` and
-  `publish = false` match the workspace defaults but are restated for
-  clarity (the existing entries follow this pattern).
-- `release = false` crates are excluded from analysis and cannot be in
-  any `changelog_include` array — convert them to `git_only = true`
-  first (as `uptrakit-controller-core` and `uptrakit-service-connections`
-  do).
-- The standalone consumable libraries `uptrakit-openapi-client` and
-  `uptrakit-service-sdk` are tagged releases (`git_release_enable = true`)
-  and their included crates (`uptrakit-wire`, `uptrakit-shared-types`,
-  `uptrakit-surfaces`, `uptrakit-web-api-types`) are also `git_only` —
-  so their own CHANGELOGs honor the same boundary.
+Pick the anchor by asking "does this crate ship to crates.io?":
 
-Historical note: prior to this invariant being enforced, the included
-crates were plain `[[package]]` entries (no `git_only`) and binary
-CHANGELOGs were re-printing the full history on every release (~5000
-stale bullets per PR, see PRs #131 and #132). Backfill tags were created
-at commit `87bb3e85e` (the `uptrakit-controller-v0.0.4` release) to
-establish the baseline going forward.
+- **Yes — transitive dep of `uptrakit-service-sdk` or
+  `uptrakit-openapi-client`.** Set `publish = true`,
+  `git_release_enable = false`. The workspace default
+  `git_tag_enable = true` still gives the crate a per-version tag, but
+  the crates.io tarball is the authoritative anchor. Current members:
+  `uptrakit-shared-types`, `uptrakit-wire`, `uptrakit-surfaces`,
+  `uptrakit-web-api-types`, `uptrakit-shared-macros`,
+  `uptrakit-build-info`.
+- **No — binary-internal infrastructure, plugin, or runtime.** Set
+  `git_only = true`, `git_release_enable = false`, `publish = false`.
+  The git tag is the anchor. Current members:
+  `uptrakit-controller-runtime`, `uptrakit-controller-core`,
+  `uptrakit-service-connections`, every `uptrakit-plugin-*`, every
+  `uptrakit-*-runtime`.
+
+`release = false` crates are excluded from analysis and cannot be in
+any `changelog_include` array — convert them to the appropriate anchor
+shape first.
+
+### Guardrails
+
+Two test files in the workspace lock this rule in:
+
+- [`crates/core/functional-tests/tests/release_config_invariants.rs`](../../crates/core/functional-tests/tests/release_config_invariants.rs)
+  — asserts binary releasability flags (`BINARY_TARGETS` constant —
+  match this list when adding a new binary crate) and the
+  `git_only + publish = true` self-consistency rule.
+- [`crates/shared/service-sdk/tests/no_workspace_db_deps.rs`](../../crates/shared/service-sdk/tests/no_workspace_db_deps.rs)
+  and [`crates/shared/openapi-client/tests/no_workspace_db_deps.rs`](../../crates/shared/openapi-client/tests/no_workspace_db_deps.rs)
+  — assert the five workspace-internal db/crypto/audit crates
+  (`uptrakit-audit-log`, `uptrakit-audit-log-derive`,
+  `uptrakit-shared-db`, `uptrakit-tenant-db`, `uptrakit-crypto`) never
+  re-enter the publishable resolve graph. See [`docs/development/coding-standards.md`
+  § Publishable Crate Dependency Hygiene](coding-standards.md).
+
+Historical note: prior to the two-anchor model being documented, the
+public-API libs were `git_only = true` + `publish = false`, which meant
+they could never reach crates.io. `uptrakit-service-sdk` and
+`uptrakit-openapi-client` therefore wedged at the `local > registry`
+short-circuit (see PR #136). Earlier still, plain `[[package]]` entries
+(no `git_only`) caused binary CHANGELOGs to re-print the full repo
+history on every release (~5000 stale bullets per PR, see
+PRs #131 and #132). Backfill tags were created at commit `87bb3e85e` (the
+`uptrakit-controller-v0.0.4` release) to establish the baseline going
+forward.
 
 ## Backfilling release assets
 
