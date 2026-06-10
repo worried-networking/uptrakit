@@ -10,6 +10,91 @@ use crate::wire_api::{
 };
 use async_trait::async_trait;
 
+// ── WS-level test harness ─────────────────────────────────────────────────────
+
+/// Type alias for a WebSocket stream backed by an in-process duplex pipe.
+///
+/// Used by WS-level unit tests to exercise enrollment protocol logic without
+/// a TLS connection.
+pub type MockWsStream = tokio_tungstenite::WebSocketStream<tokio::io::DuplexStream>;
+
+/// Start an in-process mock controller that writes `messages` in order and
+/// then closes.
+///
+/// The server task sends all queued messages and then drains any messages the
+/// client sends (e.g. `RequestCertificate`) before closing. This prevents
+/// the client from receiving a `BrokenPipe` when it attempts to write
+/// mid-session.
+///
+/// Returns the client-side [`MockWsStream`] already past the WebSocket
+/// handshake. The server half runs in a detached Tokio task.
+///
+/// # Panics
+///
+/// Panics if the in-process handshake fails (indicates a bug in the harness).
+#[expect(
+    clippy::expect_used,
+    reason = "test harness: panicking on setup failure is intentional; the in-process handshake cannot reasonably fail"
+)]
+pub async fn serve_mock_controller(
+    messages: Vec<tokio_tungstenite::tungstenite::Message>,
+) -> MockWsStream {
+    use futures_util::{SinkExt as _, StreamExt as _};
+
+    let (server_half, client_half) = tokio::io::duplex(8 * 1024);
+
+    tokio::spawn(async move {
+        let mut server_ws = tokio_tungstenite::accept_async(server_half)
+            .await
+            .expect("server WS handshake");
+        for msg in messages {
+            server_ws.send(msg).await.expect("server send");
+        }
+        // Drain remaining inbound messages from the client (e.g. RequestCertificate)
+        // so the send buffer can flush before the connection closes. Without this
+        // drain, dropping `server_ws` while the client is mid-send causes BrokenPipe.
+        while let Some(Ok(_)) = server_ws.next().await {}
+        // Dropping `server_ws` sends a WS Close frame, signalling EOF to the client.
+    });
+
+    let (client_ws, _) = tokio_tungstenite::client_async("ws://mock/", client_half)
+        .await
+        .expect("client WS handshake");
+
+    client_ws
+}
+
+/// Build a JSON-serialised `ControllerEnvelope` carrying a `Certificate`
+/// message, suitable for feeding to [`resume_enrollment_inner`] after an
+/// `Approved` message.
+///
+/// The envelope uses sequence number `seq` and the current protocol version.
+/// Wire format: `ControllerEnvelope` flattens the message fields at the top
+/// level, and `ControllerMessage` is tagged as `"type": "certificate"`.
+/// `not_after` is serialised as an i64 millisecond timestamp.
+///
+/// The cert fields are minimal stubs; they are stored by the identity but
+/// not verified against a real CA in unit tests.
+pub fn mock_certificate_envelope(seq: u64) -> serde_json::Value {
+    use crate::wire_api::CURRENT_PROTOCOL_VERSION;
+
+    // Minimal PEM stub — just enough to be stored by `save_certificate`,
+    // which only writes the raw string to disk without validation.
+    let stub_pem = "-----BEGIN CERTIFICATE-----\nMIIBstub\n-----END CERTIFICATE-----\n";
+
+    // `not_after` uses `utc_datetime_millis`: i64 milliseconds since epoch.
+    // Use a far-future timestamp (year 2099) so identity checks don't fail.
+    let not_after_ms: i64 = 4_070_908_800_000;
+
+    serde_json::json!({
+        "protocol_version": CURRENT_PROTOCOL_VERSION,
+        "seq": seq,
+        "type": "certificate",
+        "cert_pem": stub_pem,
+        "not_after": not_after_ms,
+    })
+}
+
 /// In-memory transport test double for event-loop and client-path tests.
 pub struct MockTransport {
     inbound: VecDeque<Result<Option<ControllerMessage>, TransportError>>,

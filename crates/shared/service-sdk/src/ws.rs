@@ -13,7 +13,9 @@ use http::Uri;
 use rootcause::prelude::*;
 use rustls::pki_types::ServerName;
 use std::collections::BTreeSet;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsConnector;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
@@ -244,17 +246,28 @@ pub(crate) async fn send_enroll(
 
 /// Wait for Approved/Rejected push from controller.
 ///
-/// Returns `Ok(())` on `Approved`, errors on `Rejected`.
+/// Returns the approved `Uuid` on `Approved`, errors on `Rejected`.
 /// Times out after [`APPROVAL_TIMEOUT`] (30 minutes).
+///
+/// Generic over the underlying I/O stream so tests can drive it over an
+/// in-process duplex pair instead of a TLS-backed TCP socket.
+///
+/// # Errors
+///
+/// Returns an error if the connection is closed, the controller rejects the
+/// enrollment, a protocol error occurs, or the approval timeout elapses.
 #[expect(
     clippy::map_err_ignore,
     reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
 )]
-pub(crate) async fn wait_for_approval(
-    ws: &mut WsStream,
+pub(crate) async fn wait_for_approval<S>(
+    ws: &mut WebSocketStream<S>,
     in_seq: &mut IncomingSeq,
     signals: &mut SignalWatcher,
-) -> Result<()> {
+) -> Result<Uuid>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     tracing::info!("waiting for approval...");
 
     tokio::time::timeout(APPROVAL_TIMEOUT, async {
@@ -298,7 +311,7 @@ pub(crate) async fn wait_for_approval(
                     match envelope.message {
                         ControllerMessage::Approved(payload) => {
                             tracing::info!(service_id = %payload.service_id, "enrollment approved");
-                            return Ok(());
+                            return Ok(payload.service_id);
                         }
                         ControllerMessage::Rejected(payload) => {
                             tracing::error!(service_id = %payload.service_id, "enrollment rejected");
@@ -336,17 +349,29 @@ pub(crate) async fn wait_for_approval(
 /// Send `RequestCertificate` with a CSR and read `Certificate` response.
 ///
 /// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
+///
+/// Generic over the underlying I/O stream so tests can drive it over an
+/// in-process duplex pair instead of a TLS-backed TCP socket.
+///
+/// # Errors
+///
+/// Returns an error if the connection is closed, the controller sends an
+/// error or rejection, a protocol error occurs, or the response timeout
+/// elapses.
 #[expect(
     clippy::map_err_ignore,
     reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
 )]
-pub(crate) async fn request_certificate_ws(
-    ws: &mut WsStream,
+pub(crate) async fn request_certificate_ws<S>(
+    ws: &mut WebSocketStream<S>,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
     csr_pem: &str,
     signals: &mut SignalWatcher,
-) -> Result<CertificatePayload> {
+) -> Result<CertificatePayload>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     tracing::debug!("sending certificate request");
     let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
         csr_pem: csr_pem.to_string(),
@@ -550,7 +575,12 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         .await?;
     tracing::info!("enrollment state persisted");
 
-    // Wait for approval (may come immediately if auto-approved via token)
+    // Wait for approval (may come immediately if auto-approved via token).
+    // The returned Uuid is the same service_id we enrolled with — no rebind
+    // needed on the fresh-enrollment path. Consumed via plain `?` with no
+    // binding: `Cargo.toml` pins `let_underscore_must_use = "deny"` so
+    // `let _approved_id = …` would be rejected, and `Uuid` is not
+    // `#[must_use]` so the `?` expression discarding it is lint-clean.
     if enrolled.status != EnrollmentStatus::Approved {
         wait_for_approval(&mut ws, &mut in_seq, signals).await?;
     }
@@ -573,6 +603,8 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
 /// Resume enrollment for a service that already has a service_id and enrollment secret.
 ///
 /// Reconnects with Bearer auth, waits for approval, generates CSR, and requests certificate.
+/// If the controller approves with a different `service_id` (merge redirect), the stored
+/// identity is rebound to the new id before the CSR is generated.
 pub(crate) async fn resume_enrollment(
     identity: &mut crate::identity::ServiceIdentityState,
     host: &str,
@@ -602,15 +634,54 @@ pub(crate) async fn resume_enrollment(
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
 
-    // Wait for approval (controller pushes immediately if already approved)
-    wait_for_approval(&mut ws, &mut in_seq, signals).await?;
+    resume_enrollment_inner(identity, &mut ws, &mut out_seq, &mut in_seq, signals).await
+}
+
+/// Inner enrollment-resume logic operating on an already-handshaken WebSocket stream.
+///
+/// Extracted to allow unit tests to drive the approval + rebind + cert-request flow
+/// over an in-process duplex pair without needing a TLS connection.
+///
+/// # Errors
+///
+/// Returns an error if the controller sends a nil `service_id`, if the connection
+/// closes unexpectedly, or if any downstream I/O or protocol error occurs.
+pub(crate) async fn resume_enrollment_inner<S>(
+    identity: &mut crate::identity::ServiceIdentityState,
+    ws: &mut WebSocketStream<S>,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    signals: &mut SignalWatcher,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // Wait for approval (controller pushes immediately if already approved).
+    let approved_id = wait_for_approval(ws, in_seq, signals).await?;
+    if approved_id.is_nil() {
+        bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+            "controller sent nil service_id in Approved".to_string()
+        )));
+    }
+    if Some(approved_id) != identity.service_id() {
+        let old_id = identity.service_id();
+        let secret = identity
+            .enrollment_secret()
+            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?
+            .to_string();
+        identity.save_enrollment(approved_id, &secret).await?;
+        tracing::info!(
+            ?old_id,
+            new_id = %approved_id,
+            "service identity rebound via merge redirect"
+        );
+    }
 
     // Generate keypair + CSR, request certificate
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
-    let cert =
-        request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem, signals).await?;
+    let cert = request_certificate_ws(ws, out_seq, in_seq, &csr_pem, signals).await?;
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;
@@ -625,6 +696,195 @@ mod tests {
     use std::io::ErrorKind;
     use tokio_tungstenite::tungstenite::Error as WsErr;
     use tokio_tungstenite::tungstenite::error::ProtocolError;
+
+    // ── WS-level enrollment tests ─────────────────────────────────────────────
+
+    /// Verify that `wait_for_approval` returns the `service_id` from the
+    /// controller's `Approved` payload.
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_approval_returns_payload_service_id() {
+        use crate::test_support::serve_mock_controller;
+        use tokio_tungstenite::tungstenite::Message;
+        use uuid::Uuid;
+
+        let target_id = Uuid::now_v7();
+        // Wire format: ControllerEnvelope flattens ControllerMessage fields.
+        // ControllerMessage uses serde(tag = "type", rename_all = "snake_case"),
+        // so Approved serialises as `"type": "approved"` at the top level.
+        let envelope = serde_json::json!({
+            "protocol_version": crate::wire_api::CURRENT_PROTOCOL_VERSION,
+            "seq": 1,
+            "type": "approved",
+            "service_id": target_id,
+        });
+
+        let mut ws = serve_mock_controller(vec![Message::Text(envelope.to_string().into())]).await;
+        let mut in_seq = IncomingSeq::new();
+        let mut signals = crate::signal::SignalWatcher::new().expect("signal watcher");
+
+        let approved = wait_for_approval(&mut ws, &mut in_seq, &mut signals)
+            .await
+            .expect("approval received");
+
+        assert_eq!(approved, target_id);
+    }
+
+    /// When the controller's `Approved.service_id` differs from the stored
+    /// identity, `resume_enrollment_inner` must rebind and persist the new id.
+    #[tokio::test(start_paused = true)]
+    async fn resume_enrollment_rebinds_identity_on_id_mismatch() {
+        use crate::identity::ServiceIdentityState;
+        use crate::test_support::{mock_certificate_envelope, serve_mock_controller};
+        use tokio_tungstenite::tungstenite::Message;
+        use uuid::Uuid;
+
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        identity
+            .save_enrollment(source_id, "stored-secret")
+            .await
+            .expect("save");
+
+        let approved_envelope = serde_json::json!({
+            "protocol_version": crate::wire_api::CURRENT_PROTOCOL_VERSION,
+            "seq": 1,
+            "type": "approved",
+            "service_id": target_id,
+        });
+        let cert_envelope = mock_certificate_envelope(2);
+
+        let mut ws = serve_mock_controller(vec![
+            Message::Text(approved_envelope.to_string().into()),
+            Message::Text(cert_envelope.to_string().into()),
+        ])
+        .await;
+        let mut out_seq = OutgoingSeq::new();
+        let mut in_seq = IncomingSeq::new();
+        let mut signals = crate::signal::SignalWatcher::new().expect("signal watcher");
+
+        resume_enrollment_inner(
+            &mut identity,
+            &mut ws,
+            &mut out_seq,
+            &mut in_seq,
+            &mut signals,
+        )
+        .await
+        .expect("resume_enrollment_inner succeeds");
+
+        // Reload from disk and confirm identity is now bound to target_id.
+        let mut reloaded = ServiceIdentityState::new_single_dir(tmp.path());
+        reloaded.load().await.expect("reload");
+        assert_eq!(
+            reloaded.service_id(),
+            Some(target_id),
+            "service_id must be rebound to the controller-approved target_id"
+        );
+    }
+
+    /// When `Approved.service_id` matches the stored id, no rebind occurs and
+    /// the in-memory id is preserved after the call.
+    #[tokio::test(start_paused = true)]
+    async fn resume_enrollment_noop_when_ids_match() {
+        use crate::identity::ServiceIdentityState;
+        use crate::test_support::{mock_certificate_envelope, serve_mock_controller};
+        use tokio_tungstenite::tungstenite::Message;
+        use uuid::Uuid;
+
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let service_id = Uuid::now_v7();
+        identity
+            .save_enrollment(service_id, "stored-secret")
+            .await
+            .expect("save");
+
+        let approved_envelope = serde_json::json!({
+            "protocol_version": crate::wire_api::CURRENT_PROTOCOL_VERSION,
+            "seq": 1,
+            "type": "approved",
+            "service_id": service_id,
+        });
+        let cert_envelope = mock_certificate_envelope(2);
+
+        let mut ws = serve_mock_controller(vec![
+            Message::Text(approved_envelope.to_string().into()),
+            Message::Text(cert_envelope.to_string().into()),
+        ])
+        .await;
+        let mut out_seq = OutgoingSeq::new();
+        let mut in_seq = IncomingSeq::new();
+        let mut signals = crate::signal::SignalWatcher::new().expect("signal watcher");
+
+        resume_enrollment_inner(
+            &mut identity,
+            &mut ws,
+            &mut out_seq,
+            &mut in_seq,
+            &mut signals,
+        )
+        .await
+        .expect("resume ok");
+
+        // Identity must still carry the original id — no rebind occurred.
+        assert_eq!(
+            identity.service_id(),
+            Some(service_id),
+            "service_id must not change when Approved.service_id matches the stored id"
+        );
+    }
+
+    /// A nil `service_id` in the `Approved` message must be refused with a
+    /// typed `Protocol(Enrollment(…))` error.
+    #[tokio::test(start_paused = true)]
+    async fn resume_enrollment_rejects_nil_service_id() {
+        use crate::identity::ServiceIdentityState;
+        use crate::test_support::serve_mock_controller;
+        use tokio_tungstenite::tungstenite::Message;
+        use uuid::Uuid;
+
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        identity
+            .save_enrollment(Uuid::now_v7(), "secret")
+            .await
+            .expect("save");
+
+        let approved_envelope = serde_json::json!({
+            "protocol_version": crate::wire_api::CURRENT_PROTOCOL_VERSION,
+            "seq": 1,
+            "type": "approved",
+            "service_id": Uuid::nil(),
+        });
+
+        let mut ws =
+            serve_mock_controller(vec![Message::Text(approved_envelope.to_string().into())]).await;
+        let mut out_seq = OutgoingSeq::new();
+        let mut in_seq = IncomingSeq::new();
+        let mut signals = crate::signal::SignalWatcher::new().expect("signal watcher");
+
+        let err = resume_enrollment_inner(
+            &mut identity,
+            &mut ws,
+            &mut out_seq,
+            &mut in_seq,
+            &mut signals,
+        )
+        .await
+        .unwrap_err();
+
+        match err.current_context() {
+            EnrollmentError::Protocol(crate::error::ProtocolError::Enrollment(msg)) => {
+                assert!(
+                    msg.contains("nil service_id"),
+                    "expected 'nil service_id' in error message, got: {msg:?}"
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
 
     #[test]
     fn is_peer_closed_unexpected_eof() {
