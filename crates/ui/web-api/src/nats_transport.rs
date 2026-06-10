@@ -198,11 +198,17 @@ impl NatsTransport {
                 {
                     match result {
                         Ok(m) => {
-                            backoff.reset();
+                            // reset chosen: successful fetch is the clean success signal.
+                            backoff.attempt().reset();
                             m
                         }
                         Err(e) => {
-                            let delay = backoff.next_delay();
+                            let guard = backoff.attempt();
+                            let delay = guard.sample_delay();
+                            // escalate chosen: async_nats handles internal reconnect;
+                            // a surfaced fetch-Err means it gave up. Resetting backoff
+                            // would stampede a recovering JetStream server.
+                            guard.escalate();
                             tracing::warn!(
                                 error = %e,
                                 delay_ms = delay.as_millis(),

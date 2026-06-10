@@ -7289,10 +7289,11 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-backoff"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rand 0.9.4",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -8457,7 +8458,6 @@ dependencies = [
  "mdns-sd",
  "nix 0.31.3",
  "parking_lot",
- "rand 0.9.4",
  "rcgen",
  "reqwest",
  "rootcause",
@@ -8478,6 +8478,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-backoff",
  "uptrakit-build-info",
  "uptrakit-shared-types",
  "uptrakit-wire",
