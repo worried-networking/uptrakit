@@ -87,6 +87,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("auth.jwt.authenticate", AuditActionKind::Event);
     pub const AUTH_SERVICE_AUTHENTICATE: RegisteredAuditAction =
         RegisteredAuditAction::new("auth.service.authenticate", AuditActionKind::Event);
+    pub const AUTH_SERVICE_REKEY_RESOLVED: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.service.rekey_resolved", AuditActionKind::Event);
     pub const AUTH_TOKEN_REFRESH: RegisteredAuditAction =
         RegisteredAuditAction::new("auth.token_refresh", AuditActionKind::Event);
     pub const AUTH_DEVICE_START: RegisteredAuditAction =
@@ -425,6 +427,7 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
     AuditActionType::AUTH_JWT_AUTHENTICATE,
     AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+    AuditActionType::AUTH_SERVICE_REKEY_RESOLVED,
     AuditActionType::AUTH_TOKEN_REFRESH,
     AuditActionType::AUTH_DEVICE_START,
     AuditActionType::AUTH_DEVICE_POLL,
@@ -682,6 +685,7 @@ uptrakit_audit_log_derive::audit_actions! {
     auth_api_token_authenticate => AUTH_API_TOKEN_AUTHENTICATE, Event;
     auth_jwt_authenticate => AUTH_JWT_AUTHENTICATE, Event;
     auth_service_authenticate => AUTH_SERVICE_AUTHENTICATE, Event;
+    auth_service_rekey_resolved => AUTH_SERVICE_REKEY_RESOLVED, Event;
     auth_token_refresh => AUTH_TOKEN_REFRESH, Event;
     auth_device_start => AUTH_DEVICE_START, Event;
     auth_device_poll => AUTH_DEVICE_POLL, Event;
@@ -921,6 +925,17 @@ mod tests {
         assert!(AuditActionType::is_registered(
             AuditActionType::AUTH_OIDC_LINK.as_str()
         ));
+    }
+
+    #[test]
+    fn auth_service_rekey_resolved_is_registered() {
+        assert!(
+            AuditActionType::AUTH_SERVICE_REKEY_RESOLVED
+                .as_str()
+                .starts_with("auth.service.")
+        );
+        let parsed: AuditActionType = "auth.service.rekey_resolved".parse().unwrap();
+        assert_eq!(parsed.as_str(), "auth.service.rekey_resolved");
     }
 
     #[test]
