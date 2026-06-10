@@ -79,9 +79,10 @@ x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
 const-oid = { version = "0.9", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.28", features = ["derive"] }
-syn = { version = "2", features = ["full", "extra-traits"] }
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
 quote = "1"
-proc-macro2 = "1"
+# span-locations required by uptrakit-functional-tests' syn-AST visitor (Span::start().line outside proc-macro context)
+proc-macro2 = { version = "1", features = ["span-locations"] }
 regex = "1"
 semver = "1"
 tokio-stream = "0.1"
