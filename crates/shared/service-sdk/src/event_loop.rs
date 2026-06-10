@@ -113,6 +113,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
         conn_params.port,
         conn_params.tls_connector,
         None,
+        signals,
     )
     .await
     .context_to::<LoopError>()?;

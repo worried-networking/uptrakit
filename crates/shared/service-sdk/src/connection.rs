@@ -170,9 +170,10 @@ impl ControllerConnection {
         port: u16,
         tls_connector: &TlsConnector,
         auth_header: Option<&str>,
+        signals: &mut crate::signal::SignalWatcher,
     ) -> Result<Self> {
         tracing::debug!(host, port, "connecting to controller");
-        let ws = connect_ws(host, port, tls_connector, auth_header, None).await?;
+        let ws = connect_ws(host, port, tls_connector, auth_header, None, signals).await?;
         tracing::debug!("WebSocket connection established");
 
         let (sink, read) = split_ws_stream(ws);

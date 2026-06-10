@@ -25,6 +25,7 @@ use crate::wire_api::{
 };
 
 use crate::error::{EnrollmentError, IdentityError, ProtocolError, Result};
+use crate::signal::SignalWatcher;
 
 /// Timeout for TCP connection establishment.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -68,6 +69,7 @@ pub(crate) async fn connect_ws(
     tls_connector: &TlsConnector,
     auth_header: Option<&str>,
     service_id: Option<Uuid>,
+    signals: &mut SignalWatcher,
 ) -> Result<WsStream> {
     let ws_url = match service_id {
         Some(id) => format!("wss://{host}:{port}/api/v1/ws/service?service_id={id}"),
@@ -101,10 +103,21 @@ pub(crate) async fn connect_ws(
 
     let server_name = ServerName::try_from(host.to_string()).context_to::<EnrollmentError>()?;
 
-    let tls_stream = tls_connector
-        .connect(server_name, tcp_stream)
-        .await
-        .context_to::<EnrollmentError>()?;
+    // TLS handshake: bound with CONNECT_TIMEOUT (a wedged-but-accepting peer
+    // could otherwise hang here indefinitely) and interruptible by shutdown
+    // signals so Ctrl+C exits cleanly during enrollment.
+    let tls_stream = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            tracing::info!(%signal, "received signal during TLS handshake, exiting");
+            bail!(EnrollmentError::Cancelled(signal));
+        }
+        result = tokio::time::timeout(CONNECT_TIMEOUT, tls_connector.connect(server_name, tcp_stream)) => {
+            result
+                .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::ConnectionTimeout)))?
+                .context_to::<EnrollmentError>()?
+        }
+    };
 
     let uri: Uri = ws_url.parse().context_to::<EnrollmentError>()?;
     let mut request = uri
@@ -144,6 +157,7 @@ pub(crate) async fn send_enroll(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
     payload: EnrollPayload,
+    signals: &mut SignalWatcher,
 ) -> Result<EnrolledPayload> {
     tracing::trace!("sending Enroll message");
     let msg = ServiceMessage::Enroll(payload);
@@ -158,11 +172,16 @@ pub(crate) async fn send_enroll(
 
     tokio::time::timeout(RESPONSE_TIMEOUT, async {
         loop {
-            let resp = ws
-                .next()
-                .await
-                .ok_or_else(|| report!(EnrollmentError::Protocol(ProtocolError::ReceiveClosed)))?
-                .context_to::<EnrollmentError>()?;
+            let resp = tokio::select! {
+                biased;
+                signal = signals.recv() => {
+                    tracing::info!(%signal, "received signal during enrollment, exiting");
+                    bail!(EnrollmentError::Cancelled(signal));
+                }
+                next = ws.next() => next,
+            }
+            .ok_or_else(|| report!(EnrollmentError::Protocol(ProtocolError::ReceiveClosed)))?
+            .context_to::<EnrollmentError>()?;
 
             match resp {
                 Message::Text(text) => {
@@ -219,12 +238,24 @@ pub(crate) async fn send_enroll(
     clippy::map_err_ignore,
     reason = "tokio::time::error::Elapsed carries no additional context beyond the timeout itself"
 )]
-pub(crate) async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
+pub(crate) async fn wait_for_approval(
+    ws: &mut WsStream,
+    in_seq: &mut IncomingSeq,
+    signals: &mut SignalWatcher,
+) -> Result<()> {
     tracing::info!("waiting for approval...");
 
     tokio::time::timeout(APPROVAL_TIMEOUT, async {
         loop {
-            let msg = match ws.next().await {
+            let next = tokio::select! {
+                biased;
+                signal = signals.recv() => {
+                    tracing::info!(%signal, "received signal during enrollment, exiting");
+                    bail!(EnrollmentError::Cancelled(signal));
+                }
+                next = ws.next() => next,
+            };
+            let msg = match next {
                 Some(Ok(m)) => m,
                 Some(Err(e)) if is_peer_closed(&e) => {
                     tracing::info!("connection closed by controller while waiting for approval");
@@ -302,6 +333,7 @@ pub(crate) async fn request_certificate_ws(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
     csr_pem: &str,
+    signals: &mut SignalWatcher,
 ) -> Result<CertificatePayload> {
     tracing::debug!("sending certificate request");
     let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
@@ -318,11 +350,16 @@ pub(crate) async fn request_certificate_ws(
 
     tokio::time::timeout(RESPONSE_TIMEOUT, async {
         loop {
-            let resp = ws
-                .next()
-                .await
-                .ok_or_else(|| report!(EnrollmentError::Protocol(ProtocolError::ReceiveClosed)))?
-                .context_to::<EnrollmentError>()?;
+            let resp = tokio::select! {
+                biased;
+                signal = signals.recv() => {
+                    tracing::info!(%signal, "received signal during enrollment, exiting");
+                    bail!(EnrollmentError::Cancelled(signal));
+                }
+                next = ws.next() => next,
+            }
+            .ok_or_else(|| report!(EnrollmentError::Protocol(ProtocolError::ReceiveClosed)))?
+            .context_to::<EnrollmentError>()?;
 
             match resp {
                 Message::Text(text) => {
@@ -448,6 +485,7 @@ pub(crate) struct EnrollmentParams<'a> {
     pub enrollment_token: Option<&'a str>,
     pub capabilities: BTreeSet<Capability>,
     pub service_app_name: &'a str,
+    pub signals: &'a mut SignalWatcher,
 }
 
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
@@ -464,9 +502,10 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         enrollment_token,
         capabilities,
         service_app_name,
+        signals,
     } = params;
     // Fresh enrollment: no service_id yet, so no query parameter.
-    let mut ws = connect_ws(host, port, tls_connector, None, None).await?;
+    let mut ws = connect_ws(host, port, tls_connector, None, None, signals).await?;
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
 
@@ -481,6 +520,7 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
             capabilities,
             service_app_name: service_app_name.to_string(),
         },
+        signals,
     )
     .await?;
 
@@ -500,7 +540,7 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
 
     // Wait for approval (may come immediately if auto-approved via token)
     if enrolled.status != EnrollmentStatus::Approved {
-        wait_for_approval(&mut ws, &mut in_seq).await?;
+        wait_for_approval(&mut ws, &mut in_seq, signals).await?;
     }
 
     // Generate keypair + CSR, request certificate
@@ -508,7 +548,8 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
-    let cert = request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem).await?;
+    let cert =
+        request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem, signals).await?;
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;
@@ -525,6 +566,7 @@ pub(crate) async fn resume_enrollment(
     host: &str,
     port: u16,
     tls_connector: &TlsConnector,
+    signals: &mut SignalWatcher,
 ) -> Result<()> {
     tracing::debug!("resuming enrollment with stored credentials");
     let enrollment_secret = identity
@@ -536,18 +578,27 @@ pub(crate) async fn resume_enrollment(
     // the bearer-secret lookup to this specific service (defence-in-depth).
     let service_id = identity.service_id();
     let auth_header = format!("Bearer {enrollment_secret}");
-    let mut ws = connect_ws(host, port, tls_connector, Some(&auth_header), service_id).await?;
+    let mut ws = connect_ws(
+        host,
+        port,
+        tls_connector,
+        Some(&auth_header),
+        service_id,
+        signals,
+    )
+    .await?;
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
 
     // Wait for approval (controller pushes immediately if already approved)
-    wait_for_approval(&mut ws, &mut in_seq).await?;
+    wait_for_approval(&mut ws, &mut in_seq, signals).await?;
 
     // Generate keypair + CSR, request certificate
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
-    let cert = request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem).await?;
+    let cert =
+        request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem, signals).await?;
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;
@@ -624,5 +675,104 @@ mod tests {
     fn is_peer_closed_connection_closed() {
         let err = WsErr::ConnectionClosed;
         assert!(!is_peer_closed(&err));
+    }
+
+    // ── Signal-cancellation tests ──────────────────────────────────────
+    //
+    // These tests exercise the `tokio::select! { biased; signal = signals.recv(), .. }`
+    // pattern used at every blocking `ws.next().await` site in this module
+    // (`send_enroll`, `wait_for_approval`, `request_certificate_ws`). They verify
+    // that SIGINT delivery interrupts a future that would otherwise block
+    // indefinitely and that the resulting error classifies as `Cancelled` (not
+    // transient, not receive-closed) so the lifecycle backoff loop exits
+    // cleanly via the `is_cancelled_report` short-circuit.
+    //
+    // The tests target the select arm directly rather than driving a full WS
+    // handshake because constructing a `WsStream` (TLS over TCP) in-process
+    // requires a full rustls server config. End-to-end behaviour against a
+    // real controller is verified manually per the implementation plan.
+    //
+    // `start_paused = false` is required: real OS signal delivery does not
+    // proceed under tokio's paused clock.
+    #[cfg(unix)]
+    mod signal_cancellation {
+        use crate::error::EnrollmentError;
+        use crate::signal::{Signal, SignalWatcher, UNIX_SIGNAL_TEST_SEM};
+        use nix::sys::signal::{self as nix_signal, Signal as NixSignal};
+        use nix::unistd::getpid;
+        use rootcause::prelude::*;
+        use std::time::{Duration, Instant};
+
+        /// Replica of the select-arm pattern used at every blocking
+        /// `ws.next().await` site. Returns `Cancelled(signal)` when a signal
+        /// arrives; otherwise blocks forever on the inner future.
+        async fn cancellable_pending(
+            signals: &mut SignalWatcher,
+        ) -> std::result::Result<(), Report<EnrollmentError>> {
+            tokio::select! {
+                biased;
+                signal = signals.recv() => {
+                    bail!(EnrollmentError::Cancelled(signal));
+                }
+                () = std::future::pending::<()>() => unreachable!(),
+            }
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn sigint_short_circuits_blocking_select_arm() {
+            let _permit = UNIX_SIGNAL_TEST_SEM
+                .acquire()
+                .await
+                .expect("semaphore not closed");
+            let mut signals = SignalWatcher::new().expect("signal watcher");
+
+            // Use a oneshot to synchronize: the spawned task signals it has
+            // entered the select before the test delivers SIGINT.
+            let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+
+            let task = tokio::spawn(async move {
+                ready_tx.send(()).expect("ready channel still open");
+                let start = Instant::now();
+                let result = cancellable_pending(&mut signals).await;
+                (start.elapsed(), result)
+            });
+
+            ready_rx.await.expect("task reached select arm");
+            // Yield once so the task actually polls the select before we
+            // deliver SIGINT — otherwise the signal could be coalesced into
+            // a prior `recv()` poll boundary.
+            tokio::task::yield_now().await;
+
+            nix_signal::kill(getpid(), NixSignal::SIGINT).expect("kill self with SIGINT");
+
+            let (elapsed, result) = tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .expect("task must return within 2 s")
+                .expect("task panicked");
+
+            // Latency: the new select arm must short-circuit far below any
+            // realistic wait timeout (the production `APPROVAL_TIMEOUT` is
+            // 30 min and `RESPONSE_TIMEOUT` is 60 s).
+            assert!(
+                elapsed < Duration::from_millis(500),
+                "select arm did not short-circuit: {elapsed:?}"
+            );
+
+            let err = result.expect_err("must return Cancelled");
+            assert!(
+                matches!(
+                    err.current_context(),
+                    EnrollmentError::Cancelled(Signal::Interrupt)
+                ),
+                "expected Cancelled(Interrupt), got: {:?}",
+                err.current_context()
+            );
+
+            // Lifecycle backoff guard: a cancelled report must NOT be
+            // classified as transient or receive-closed. (The full unit test
+            // for the classifier matrix lives in `error.rs`.)
+            assert!(!err.current_context().is_transient_network());
+            assert!(!err.current_context().is_receive_closed());
+        }
     }
 }
