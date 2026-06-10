@@ -159,6 +159,16 @@ These rows carry `is_embedded: true` in the response.
 - **Batch operations**: Batch deactivate/delete skip embedded services with a per-item
   error in the `failed` array. Non-embedded services in the same batch are still processed.
 
+### Merge error responses
+
+The `POST /api/v1/services/{target_id}/merge` endpoint returns the following error codes:
+
+| Status | Code                      | Description                                                                           |
+| ------ | ------------------------- | ------------------------------------------------------------------------------------- |
+| 400    | `service.embedded_target` | Target service is embedded; merging into embedded services is not permitted.          |
+| 400    | `service.embedded_source` | Source service is embedded; embedded services cannot be merged away.                  |
+| 500    | `service.merge_invariant` | Redirect-chain invariant violated; service merge state is inconsistent.               |
+
 ### Yield state
 
 An embedded service yields when an external service with the same `service_app_name`

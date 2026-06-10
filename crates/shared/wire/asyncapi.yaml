@@ -1662,7 +1662,12 @@ components:
         service_id:
           type: string
           format: uuid
-          description: The approved service's UUID
+          description: |
+            Canonical Service UUID assigned by the controller. On resume-enrollment connections
+            this MAY differ from the UUID the Agent connected with (the
+            `?service_id=<hint>` query parameter): the controller has resolved the Agent to a
+            new identity via a merge-redirect, and the Agent must persist this value to
+            `service.json` before generating its CSR.
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
 
