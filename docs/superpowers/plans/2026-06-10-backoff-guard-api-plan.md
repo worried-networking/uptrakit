@@ -21,22 +21,15 @@ capture.
 
 **Spec:** `docs/superpowers/specs/2026-06-10-backoff-guard-api-design.md` (commit `c4999a5e4`).
 
-**Commit invariant:** **every commit on the branch must `cargo check --all-features` green.** Phases 1, 3, and 4 are tightly coupled because the
-library API rewrite (Phase 1), the service-sdk dedup (Phase 3), and all 7 call-site migrations (Phase 4) break or restore the workspace's compile
-state in lockstep — landing them as separate commits leaves intermediate non-compiling commits that break `git bisect` and reviewer checkout.
-**Either** land Phases 1+3+4 as one atomic commit (recommended), **or** reorder so each commit individually keeps the workspace compiling. Phase 2
-(publishing config) and Phase 5 (docs) can be separate commits since they don't affect compile.
+**Commit shape:** single maintainer; rebase freely. Land Phases 1+3+4 as one commit (cleanest) or split however convenient — no atomicity invariant to
+police. Phase 2 (publishing) and Phase 5 (docs) trivially separable.
 
 ## Phase 1 — Rewrite `uptrakit-backoff` library
 
 ### Task 1.1 — Replace `Backoff` API with guard pattern
 
 - [ ] Open `crates/shared/backoff/src/lib.rs`.
-- [ ] Add `#![warn(missing_docs)]` at the crate root (per snapshot rule: published crate must expose rustdoc).
-- [ ] Add a `//!` module-level doc block at the crate root explaining the `reset`/`escalate` verb naming and the rename from the prior
-      `Backoff::reset()` free method. Cite the spec date (`2026-06-10-backoff-guard-api-design.md`). Six-month-out reviewers reading `grep reset`
-      results across the workspace will see the guard method and the (now-deleted) free method's history together; the module doc points them at the
-      design rationale instead of leaving them to reconstruct it.
+- [ ] Add `#![warn(missing_docs)]` at the crate root (published crate, rustdoc enforced).
 - [ ] Add `#[non_exhaustive]` to the `Backoff` struct (snapshot Binding Rule: extensible public structs in shared crates).
 - [ ] Rewrite `impl Backoff`:
   - Keep `pub fn new(base: Duration, max: Duration) -> Self`.
@@ -209,31 +202,10 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   - `is_cancelled_report(&e)` arm: `return Ok(())` — no guard constructed.
   - Catch-all `Err(e)` arm (fatal): `return Err(e)` — no guard constructed.
 - [ ] Verify with `cargo check -p uptrakit-service-sdk`.
-- [ ] **Mandatory classifier-fn extraction** (applies to all Phase 4 sites; supersedes earlier "just write a test" guidance): for every migrated site,
-      extract the error-to-verb mapping into a small named helper function. Concrete shape:
-
-  ```rust
-  /// audit decision documented here, not in inline comments
-  fn classify_enrollment_error(e: &Report<EnrollmentError>) -> EnrollmentOutcome { ... }
-
-  #[derive(Debug, PartialEq)]
-  enum EnrollmentOutcome { Ok, Healthy, Unhealthy, Cancelled, Fatal }
-  // Healthy → guard.reset() ; Unhealthy → guard.escalate()
-  ```
-
-  The migration body calls `match classify(...) { ... }` instead of inline `if … else if … else`. The audit rationale lives in `///` doc on the
-  helper, not in `//` inline comments. **Why this matters**: inline comments rot; future maintainers add new error variants and the existing
-  single-branch test still passes. With the helper extracted, the test must be **exhaustive** — every variant of the source enum must produce a
-  defined `EnrollmentOutcome`, and the test asserts the verb mapping per variant.
-
-- [ ] Add classification test for the helper:
-  - **Test location rule**: if the target file already has an inline `#[cfg(test)] mod tests { ... }` block, add the test there. Otherwise create a
-    sibling integration-test file under the crate's `tests/` directory following the existing
-    `crates/shared/service-sdk/tests/no_workspace_db_deps.rs` pattern.
-  - Construct each variant of the input error enum (or each branch case) and assert the helper returns the expected `Outcome`. Match must be
-    exhaustive — new variants force a new test case.
-  - Verify: `ReceiveClosed` → `Healthy` (mapping to `reset`); `TransientNetwork` → `Unhealthy` (mapping to `escalate`); cancellation predicate →
-    `Cancelled`; uncategorized → `Fatal`.
+- [ ] Add inline `// reset chosen: <reason>` / `// escalate chosen: <reason>` comments on each verb call site.
+- [ ] **Enrollment bug-fix regression test** (the only Phase 4 classification test required): drive the loop body with a synthetic
+      `is_receive_closed_report`-matching error, assert that the next `enrollment_backoff.attempt().sample_delay()` returns a base-range value (proves
+      the user-reported escalate-after-1008-supersede bug is fixed). Other Phase 4 sites rely on inline comments + Phase 6 smoke test.
 
 ### Task 4.2 — Migrate `lifecycle.rs:481` reconnect loop
 
@@ -255,8 +227,7 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   - **`LoopOutcome::Reconnect` and `LoopOutcome::Shutdown` and `LoopOutcome::Restart` arms:** unchanged (no backoff usage).
 
 - [ ] Verify `cargo check -p uptrakit-service-sdk`.
-- [ ] Apply the classifier-fn extraction rule (Task 4.1): extract `fn classify_loop_error(e: &LoopError) -> BackoffVerb` returning `Reset` for
-      `ReceiveClosed`, `Escalate` for `TransientNetwork`. Exhaustive unit test covers each `LoopError` variant.
+- [ ] Inline `// reset chosen` / `// escalate chosen` comments on each arm. No classification test required.
 
 ### Task 4.3 — Migrate `mqtt_client.rs:439, 478`
 
@@ -283,9 +254,7 @@ Tasks:
   ```
 
 - [ ] Verify `cargo check -p uptrakit-mqtt-runtime`.
-- [ ] Apply the classifier-fn extraction rule: extract a small `fn classify_mqtt_poll_err(e: &rumqttc::ConnectionError) -> BackoffVerb` returning
-      `Escalate` for every variant. Audit rationale (rumqttc internal-retry-already-exhausted) lives in `///` doc on the helper. Exhaustive unit test
-      covers every reachable rumqttc Err variant.
+- [ ] Inline `// escalate chosen: rumqttc internal retry exhausted by the time Err surfaces` comment. No classification test required.
 
 ### Task 4.4 — Migrate `nats_transport.rs:201, 205`
 
@@ -310,8 +279,7 @@ Tasks:
   ```
 
 - [ ] Verify `cargo check -p uptrakit-web-api`.
-- [ ] Apply the classifier-fn extraction rule: extract `fn classify_nats_fetch_err(e: &async_nats::Error) -> BackoffVerb` returning `Escalate` for
-      every variant. Audit rationale lives in `///` doc on the helper. Exhaustive test per variant.
+- [ ] Inline `// escalate chosen: async_nats internal retry exhausted by the time Err surfaces` comment. No classification test required.
 
 ### Task 4.5 — Migrate `nats/connection.rs:54`
 
@@ -351,8 +319,7 @@ Tasks:
 
 - [ ] Add a `// escalate chosen: bounded MAX_ATTEMPTS=10 retry; reset vs escalate has no behavioral difference here` comment.
 - [ ] Verify `cargo check -p uptrakit-nats`.
-- [ ] Apply the classifier-fn extraction rule: extract `fn classify_nats_connect_err(e: &async_nats::ConnectError) -> BackoffVerb` returning
-      `Escalate` for every variant. Doc on helper carries the bounded-loop rationale. Exhaustive test per variant.
+- [ ] Inline `// escalate chosen: bounded MAX_ATTEMPTS=10; partial-progress distinction academic in this window` comment. No test required.
 
 ### Task 4.6 — Migrate `npm/releases.rs:18`
 
@@ -375,8 +342,8 @@ Tasks:
   - Success path (`return Ok(...)` on parsed response and `return Ok(vec![])` on 404): no guard touched. The function exits without resolving any
     backoff state — fresh `Backoff` per call so no held state escapes.
 - [ ] Verify `cargo check -p uptrakit-plugin-package-manager-npm`.
-- [ ] Apply the classifier-fn extraction rule: extract `fn classify_npm_retry(branch: NpmRetryBranch) -> BackoffVerb` returning `Escalate` for each
-      branch (`RequestFailed`, `ServerError5xx`). Doc on helper carries the registry-overload rationale. Exhaustive test per branch.
+- [ ] Inline `// escalate chosen` comments per branch (request-failed: pre-HTTP transport error; 5xx: registry overload signal — reset would defeat
+      backoff hint). No test required.
 
 ### Task 4.7 — Migrate `version_check.rs:535`
 
@@ -397,8 +364,7 @@ Tasks:
   - Non-retryable Err path (`return Err(format!(...))`) unchanged — no guard.
 - [ ] Add `// escalate chosen: PluginError trait surface carries no partial-progress signal` comment.
 - [ ] Verify `cargo check -p uptrakit-agent-core`.
-- [ ] Apply the classifier-fn extraction rule: extract `fn classify_plugin_retry(e: &PluginError) -> BackoffVerb` returning `Escalate` for every
-      `is_retryable()` case. Doc on helper carries the "no partial-progress signal in PluginError trait" rationale. Test per variant.
+- [ ] Inline `// escalate chosen: PluginError trait carries no partial-progress signal` comment. No test required.
 
 ### Task 4.8 — Custom lint: forbid `?` between `attempt()` and resolution
 
@@ -524,29 +490,17 @@ Tasks:
 
 ### Task 6.3 — Commit conventions for release-plz
 
-- [ ] Squash or organize commits so the version-bumping change carries a Conventional-Commit subject like
-      `feat(backoff)!: rewrite API with consuming guard pattern` and a `BREAKING CHANGE:` footer in the body. The `!` bang + `BREAKING CHANGE:` footer
-      record the breaking nature in the changelog. For pre-1.0 (`0.x`) crates release-plz bumps `0.x → 0.(x+1)` on any `feat:` commit regardless of
-      the `!` — the `!` does not force a `1.0.0` jump. So this commit-message shape annotates the breaking-ness without changing the version-bump
-      math; the `0.0.1 → 0.1.0` manual edit (Task 1.4) is independent.
-- [ ] Write the PR description as a per-file walkthrough: one bullet per migrated file naming the verb chosen and linking to the classifier-fn doc
-      comment. Phase 1+3+4 lands as one atomic commit per the Commit Invariant; a 1000+ line diff in one PR will get rubber-stamped unless the
-      description gives reviewers a reading order. Pre-writing the walkthrough is free and turns the atomic commit from a review liability into a
-      navigable diff.
-- [ ] `git push` after all gates green.
+- [ ] Use Conventional-Commit subject `feat(backoff)!: rewrite API with consuming guard pattern` + `BREAKING CHANGE:` footer for release-plz
+      changelog. The `0.0.1 → 0.1.0` edit (Task 1.4) is a manual one-off; release-plz auto-bump kicks in only on subsequent commits.
+- [ ] `git push` after gates green.
 
 ## Self-review (run before declaring done)
 
 - [ ] Every `Backoff::next_delay` and `Backoff::reset` call site removed (grep `next_delay\|backoff\.reset` across the workspace — only the deleted
       `service-sdk/src/backoff.rs` and library tests should have come up before this PR).
-- [ ] Every migrated call site has at least one classification test asserting the chosen verb for at least one error variant.
-- [ ] Every audit decision is documented inline as a `//` comment at the migration site (`// <verb> chosen: <reason>`). All six non-enrollment audit
-      decisions match the pre-decided verbs in this plan (mqtt: `escalate` uniformly; nats_transport: `escalate` uniformly; nats/connection:
-      `escalate` uniformly; npm: `escalate` both branches; version_check: `escalate`; reconnect loop at lifecycle.rs:481: ReceiveClosed → `reset`,
-      TransientNetwork → `escalate`). Only the enrollment loop (lifecycle.rs:331) and the reconnect loop's ReceiveClosed arm use `reset` — those are
-      the sites with an explicit close-code-aware signal that the cycle was healthy.
-- [ ] No `had_connack` / `had_successful_fetch` style session-state flags in mqtt or nats_transport — earlier drafts proposed them; final decision is
-      `escalate()` to preserve broker/server-friendly escalation hints during outages.
+- [ ] Enrollment bug-fix regression test exists (lifecycle.rs:331 — `ReceiveClosed`-driven attempt followed by base-range `sample_delay`).
+- [ ] Every verb call has an inline `// <verb> chosen: <reason>` comment. Verbs match plan: mqtt + nats_transport + nats/connection + npm +
+      version_check = `escalate` uniformly on Err. `reset` only at enrollment + reconnect ReceiveClosed arms.
 - [ ] Task 4.8 lint test (`backoff_guard_no_question_in_attempt_scope.rs`) passes; verified by both green run on migrated tree AND a temporary
       deliberate-violation run that fails as expected.
 - [ ] Root `Cargo.toml` workspace `syn` entry has `"visit"` feature (verify line in `[workspace.dependencies]`).
