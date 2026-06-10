@@ -298,8 +298,19 @@ mod tests {
     impl std::io::Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let s = String::from_utf8_lossy(buf).into_owned();
-            // best-effort; ignore if receiver dropped
-            let _ = self.0.lock().unwrap().send(s);
+            #[expect(
+                clippy::io_other_error,
+                reason = "PoisonError doesn't implement Send+Sync for Error::other()"
+            )]
+            {
+                self.0
+                    .lock()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+                    .send(s)
+                    .map_err(|_e| {
+                        std::io::Error::new(std::io::ErrorKind::BrokenPipe, "receiver dropped")
+                    })?;
+            }
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
@@ -366,26 +377,27 @@ mod tests {
     #[test]
     fn dropping_unresolved_guard_warns_and_does_not_mutate_state() {
         let (rx, subscriber) = make_channel_subscriber();
-        let _guard = tracing::subscriber::set_default(subscriber);
-
-        let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-        // Escalate once so current != base, to prove state is not mutated.
-        b.attempt().escalate(); // current = 4s
-        let current_before = b.current;
-
         {
-            // Drop without resolving.
-            let _unresolved = b.attempt();
+            let _guard = tracing::subscriber::set_default(subscriber);
+
+            let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+            // Escalate once so current != base, to prove state is not mutated.
+            b.attempt().escalate(); // current = 4s
+            let current_before = b.current;
+
+            {
+                // Drop without resolving.
+                let _unresolved = b.attempt();
+            }
+
+            // State must be unchanged.
+            assert_eq!(
+                b.current, current_before,
+                "state must not mutate on unresolved drop"
+            );
         }
+        // _guard drops here automatically, flushing subscriber
 
-        // State must be unchanged.
-        assert_eq!(
-            b.current, current_before,
-            "state must not mutate on unresolved drop"
-        );
-
-        // Collect all written output.
-        drop(_guard); // flush subscriber
         let output: String = rx.try_iter().collect();
         assert!(
             output.contains("backoff guard dropped unresolved"),
@@ -396,17 +408,19 @@ mod tests {
     #[test]
     fn dropping_unresolved_guard_during_panic_does_not_warn() {
         let (rx, subscriber) = make_channel_subscriber();
-        let _default_guard = tracing::subscriber::set_default(subscriber);
+        {
+            let _default_guard = tracing::subscriber::set_default(subscriber);
 
-        let result = std::panic::catch_unwind(|| {
-            let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-            let _unresolved = b.attempt();
-            panic!("inner panic");
-        });
+            let result = std::panic::catch_unwind(|| {
+                let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+                let _unresolved = b.attempt();
+                panic!("inner panic");
+            });
 
-        assert!(result.is_err(), "catch_unwind must return Err");
+            assert!(result.is_err(), "catch_unwind must return Err");
+        }
+        // _default_guard drops here automatically, flushing subscriber
 
-        drop(_default_guard);
         let output: String = rx.try_iter().collect();
         assert!(
             !output.contains("backoff guard dropped unresolved"),
