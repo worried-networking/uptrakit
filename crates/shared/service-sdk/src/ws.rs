@@ -137,9 +137,21 @@ pub(crate) async fn connect_ws(
         );
     }
 
-    let (ws_stream, _response) = tokio_tungstenite::client_async(request, tls_stream)
-        .await
-        .context_to::<EnrollmentError>()?;
+    // WS upgrade: bound with CONNECT_TIMEOUT and interruptible by shutdown
+    // signals — a server that accepts TCP+TLS but never returns the HTTP 101
+    // upgrade response would otherwise hang here indefinitely.
+    let (ws_stream, _response) = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            tracing::info!(%signal, "received signal during WebSocket upgrade, exiting");
+            bail!(EnrollmentError::Cancelled(signal));
+        }
+        result = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::client_async(request, tls_stream)) => {
+            result
+                .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::ConnectionTimeout)))?
+                .context_to::<EnrollmentError>()?
+        }
+    };
 
     tracing::info!("WebSocket connected");
     Ok(ws_stream)
@@ -718,7 +730,7 @@ mod tests {
             }
         }
 
-        #[tokio::test(flavor = "current_thread")]
+        #[tokio::test(flavor = "current_thread", start_paused = false)]
         async fn sigint_short_circuits_blocking_select_arm() {
             let _permit = UNIX_SIGNAL_TEST_SEM
                 .acquire()
